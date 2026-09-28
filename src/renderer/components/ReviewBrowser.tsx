@@ -600,17 +600,7 @@ export default function ReviewBrowser({
       }
     }
 
-    if (hasUncommitted) {
-      const fileCount = uncommitted.files.length
-      const confirmed = confirm(
-        `You have ${String(fileCount)} uncommitted file${fileCount !== 1 ? 's' : ''}. ` +
-        `These changes will be auto-committed before merging. Continue?`
-      )
-      if (!confirmed) {
-        return
-      }
-    }
-
+    // Workspace is kept, so uncommitted changes stay in the worktree; only committed changes are merged.
     setIsProcessing(true)
     setProcessingAction(squash ? 'squash-keep' : 'merge-keep')
 

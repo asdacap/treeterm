@@ -1240,12 +1240,13 @@ export function createSessionStore(
     }
   }
 
-  // Shared helper: validates workspace, sets loading state, auto-commits, and performs git merge.
-  // Shared helper: validates workspace, sets loading state, auto-commits, and performs git merge.
+  // Shared helper: validates workspace, optionally auto-commits, and performs git merge.
+  // Without autoCommit, only the branch's committed changes are merged; uncommitted work stays in the worktree.
   // Returns { success, error } — caller decides post-merge behavior.
   async function mergeWorkspaceCore(
     id: string,
-    squash: boolean
+    squash: boolean,
+    autoCommit: boolean
   ): Promise<{ success: boolean; error?: string }> {
 
     const entry = store.getState().workspaces.get(id)
@@ -1274,17 +1275,19 @@ export function createSessionStore(
         return { success: false, error: 'Parent workspace has uncommitted changes. Commit or stash them before merging.' }
       }
 
-      const hasChanges = await deps.git.hasUncommittedChanges(workspace.path)
-      if (hasChanges) {
-        const commitResult = await deps.git.commitAll(
-          workspace.path,
-          `WIP: Auto-commit before merge from ${workspace.name}`
-        )
-        if (!commitResult.success) {
-          store.setState(s => ({
-            workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.OperationError, data: workspace, store: wsStore, error: `Failed to commit changes: ${commitResult.error}` })
-          }))
-          return { success: false, error: `Failed to commit changes: ${commitResult.error}` }
+      if (autoCommit) {
+        const hasChanges = await deps.git.hasUncommittedChanges(workspace.path)
+        if (hasChanges) {
+          const commitResult = await deps.git.commitAll(
+            workspace.path,
+            `WIP: Auto-commit before merge from ${workspace.name}`
+          )
+          if (!commitResult.success) {
+            store.setState(s => ({
+              workspaces: new Map(s.workspaces).set(id, { status: WorkspaceEntryStatus.OperationError, data: workspace, store: wsStore, error: `Failed to commit changes: ${commitResult.error}` })
+            }))
+            return { success: false, error: `Failed to commit changes: ${commitResult.error}` }
+          }
         }
       }
 
@@ -1786,7 +1789,7 @@ export function createSessionStore(
       }
 
       try {
-        const result = await mergeWorkspaceCore(id, squash)
+        const result = await mergeWorkspaceCore(id, squash, true)
         if (!result.success) return result
 
         const entry = get().workspaces.get(id)
@@ -1830,7 +1833,7 @@ export function createSessionStore(
       }
 
       try {
-        const result = await mergeWorkspaceCore(id, squash)
+        const result = await mergeWorkspaceCore(id, squash, false)
         if (!result.success) return result
 
         // On success, ensure workspace is back to loaded status

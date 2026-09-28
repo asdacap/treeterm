@@ -840,13 +840,15 @@ describe('createSessionStore', () => {
       expect(store.getState().workspaces.get(childId)).toBeDefined()
     })
 
-    it('mergeAndKeepWorkspace auto-commits uncommitted changes', async () => {
-      // First call is parent (clean), second call is child (dirty)
+    it('mergeAndKeepWorkspace does not auto-commit uncommitted changes', async () => {
+      // First call is parent (clean), any later call would be child (dirty)
       vi.mocked(deps.git.hasUncommittedChanges)
         .mockResolvedValueOnce(false)
-        .mockResolvedValueOnce(true)
-      await store.getState().mergeAndKeepWorkspace(childId, false)
-      expect(deps.git.commitAll).toHaveBeenCalled()
+        .mockResolvedValue(true)
+      const result = await store.getState().mergeAndKeepWorkspace(childId, false)
+      expect(result).toEqual({ success: true })
+      expect(deps.git.commitAll).not.toHaveBeenCalled()
+      expect(deps.git.merge).toHaveBeenCalled()
     })
 
     it('mergeAndKeepWorkspace fails when parent has uncommitted changes', async () => {
