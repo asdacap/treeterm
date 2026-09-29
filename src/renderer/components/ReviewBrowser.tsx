@@ -1,6 +1,6 @@
 /* eslint-disable custom/no-string-literal-comparison -- TODO: migrate existing string-literal comparisons to enums */
 import React, { useState, useEffect, useCallback, useRef } from 'react'
-import { ChevronDown, RefreshCw, Loader2, Star } from 'lucide-react'
+import { ChevronDown, RefreshCw, Loader2, Star, Check, X } from 'lucide-react'
 import { WorkerPoolContextProvider } from '@pierre/diffs/react'
 import { useStore } from 'zustand'
 import { findRunningHarness } from '../utils/findRunningHarnessPtyId'
@@ -13,6 +13,7 @@ import { StackedDiffList } from './StackedDiffList'
 import { DiffToolbar } from './DiffToolbar'
 import { createDiffsWorker } from '../pierre-diffs-config'
 import { FileViewer } from './FileViewer'
+import { AutoScrollPre } from './AutoScrollPre'
 import { favouriteFileName, resolveFavouriteFiles, type FavouriteFile } from '../utils/favouriteFiles'
 
 interface ReviewBrowserProps {
@@ -51,6 +52,18 @@ enum FavouriteSelectionStatus {
 type FavouriteSelection =
   | { status: FavouriteSelectionStatus.None }
   | { status: FavouriteSelectionStatus.Selected; file: FavouriteFile }
+
+enum MergeOutputStatus {
+  Hidden = 'hidden',
+  Running = 'running',
+  Succeeded = 'succeeded',
+  Failed = 'failed',
+}
+
+/** Live output of the `git merge` started from this page, shown terminal-style above the diff. */
+type MergeOutput =
+  | { status: MergeOutputStatus.Hidden }
+  | { status: MergeOutputStatus.Running | MergeOutputStatus.Succeeded | MergeOutputStatus.Failed; command: string; output: string[] }
 
 export default function ReviewBrowser({
   workspace,
@@ -147,6 +160,7 @@ export default function ReviewBrowser({
   const [isProcessing, setIsProcessing] = useState(false)
   const [processingAction, setProcessingAction] = useState<'merge' | 'squash' | 'merge-keep' | 'squash-keep' | null>(null)
   const [mergeDropdownOpen, setMergeDropdownOpen] = useState(false)
+  const [mergeOutput, setMergeOutput] = useState<MergeOutput>({ status: MergeOutputStatus.Hidden })
 
   // Reviews state
   const reviews = getReviewComments()
@@ -545,6 +559,20 @@ export default function ReviewBrowser({
     setCommitting(false)
   }
 
+  const startMergeOutput = (squash: boolean): ((data: string) => void) => {
+    const command = `git merge ${squash ? '--squash ' : ''}${wsData.gitBranch ?? ''}`
+    setMergeOutput({ status: MergeOutputStatus.Running, command, output: [] })
+    return (data: string) => {
+      setMergeOutput((prev) => prev.status === MergeOutputStatus.Hidden ? prev : { ...prev, output: [...prev.output, data] })
+    }
+  }
+
+  const finishMergeOutput = (status: MergeOutputStatus.Succeeded | MergeOutputStatus.Failed, error?: string) => {
+    setMergeOutput((prev) => prev.status === MergeOutputStatus.Hidden
+      ? prev
+      : { ...prev, status, output: error ? [...prev.output, `\n${error}\n`] : prev.output })
+  }
+
   const handleMerge = async (squash: boolean) => {
     // Dry-run: re-check conflicts before merging to catch stale state
     if (wsData.gitBranch && parentWorkspace?.gitBranch) {
@@ -573,13 +601,17 @@ export default function ReviewBrowser({
     setIsProcessing(true)
     setProcessingAction(squash ? 'squash' : 'merge')
 
+    const onProgress = startMergeOutput(squash)
     try {
-      const result = await mergeAndRemove(squash)
+      const result = await mergeAndRemove(squash, onProgress)
       if (!result.success) {
+        finishMergeOutput(MergeOutputStatus.Failed, `Merge failed: ${String(result.error)}`)
         alert(`Merge failed: ${String(result.error)}`)
         return
       }
+      finishMergeOutput(MergeOutputStatus.Succeeded)
     } catch (err) {
+      finishMergeOutput(MergeOutputStatus.Failed, `Merge failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
       alert(`Merge failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
     }
 
@@ -604,18 +636,22 @@ export default function ReviewBrowser({
     setIsProcessing(true)
     setProcessingAction(squash ? 'squash-keep' : 'merge-keep')
 
+    const onProgress = startMergeOutput(squash)
     try {
-      const result = await mergeAndKeep(squash)
+      const result = await mergeAndKeep(squash, onProgress)
       if (!result.success) {
+        finishMergeOutput(MergeOutputStatus.Failed, `Merge failed: ${String(result.error)}`)
         alert(`Merge failed: ${String(result.error)}`)
         setIsProcessing(false)
         setProcessingAction(null)
         return
       }
+      finishMergeOutput(MergeOutputStatus.Succeeded)
       // Workspace still alive — refresh the review view
       await Promise.all([loadDiff(), loadUncommittedChanges()])
       void refreshGit()
     } catch (err) {
+      finishMergeOutput(MergeOutputStatus.Failed, `Merge failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
       alert(`Merge failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
     }
 
@@ -996,6 +1032,8 @@ export default function ReviewBrowser({
           </div>
         </div>
       )}
+
+      {renderMergeOutput(mergeOutput, () => { setMergeOutput({ status: MergeOutputStatus.Hidden }) })}
 
       <div className="diff-tabs">
         {hasBaseBranch && (
@@ -1617,6 +1655,29 @@ export function BaseBranchSelector({
           )}
         </ClickOutsideDiv>
       )}
+    </div>
+  )
+}
+
+function renderMergeOutput(mergeOutput: MergeOutput, onDismiss: () => void): React.ReactNode {
+  if (mergeOutput.status === MergeOutputStatus.Hidden) return null
+  const icons: Record<typeof mergeOutput.status, () => React.ReactNode> = {
+    [MergeOutputStatus.Running]: () => <Loader2 size={14} className="spinning" />,
+    [MergeOutputStatus.Succeeded]: () => <Check size={14} className="review-merge-output-ok" />,
+    [MergeOutputStatus.Failed]: () => <X size={14} className="review-merge-output-fail" />,
+  }
+  return (
+    <div className="review-merge-output-panel" data-status={mergeOutput.status}>
+      <div className="review-merge-output-header">
+        {icons[mergeOutput.status]()}
+        <span className="review-merge-output-command">$ {mergeOutput.command}</span>
+        {mergeOutput.status !== MergeOutputStatus.Running && (
+          <button className="review-merge-output-close" onClick={onDismiss} title="Hide merge output">
+            <X size={14} />
+          </button>
+        )}
+      </div>
+      <AutoScrollPre className="review-merge-output">{mergeOutput.output.join('')}</AutoScrollPre>
     </div>
   )
 }

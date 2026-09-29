@@ -14,6 +14,7 @@ import TabContentPortals from './TabContentPortals'
 import CreateChildDialog from './CreateChildDialog'
 import KeybindingOverlay from './KeybindingOverlay'
 import { ErrorBoundary } from './ErrorBoundary'
+import { AutoScrollPre } from './AutoScrollPre'
 import WorkspaceErrorFallback from './WorkspaceErrorFallback'
 import type { ReviewState, Platform, WorkspaceStore } from '../types'
 import { getTabs, isAppAvailableForConnection } from '../types'
@@ -636,17 +637,6 @@ function MergeAbandonButton({ workspace, onOpenReview }: MergeAbandonButtonProps
       )}
     </div>
   )
-}
-
-/** Auto-scrolls to bottom whenever children change */
-function AutoScrollPre({ className, children }: { className?: string; children: React.ReactNode }) {
-  const ref = React.useRef<HTMLPreElement>(null)
-  React.useEffect(() => {
-    if (ref.current) {
-      ref.current.scrollTop = ref.current.scrollHeight
-    }
-  })
-  return <pre className={className} ref={ref}>{children}</pre>
 }
 
 interface GitStatusButtonProps {

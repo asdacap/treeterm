@@ -3628,6 +3628,65 @@ body,
   cursor: not-allowed;
 }
 
+.review-merge-output-panel {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-primary);
+}
+
+.review-merge-output-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 20px;
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+}
+
+.review-merge-output-command {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.review-merge-output-ok {
+  color: #4ec9b0;
+}
+
+.review-merge-output-fail {
+  color: #f14c4c;
+}
+
+.review-merge-output-close {
+  display: flex;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.review-merge-output-close:hover {
+  color: var(--text-primary);
+}
+
+.review-merge-output {
+  min-height: 48px;
+  max-height: 200px;
+  margin: 0;
+  padding: 8px 20px;
+  overflow-y: auto;
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
 .review-conflict-banner {
   display: flex;
   align-items: flex-start;

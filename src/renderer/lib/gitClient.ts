@@ -34,6 +34,9 @@ const GIT_EXEC_BACKSTOP_MARGIN_MS = 5000
 // takes over 30s on large repos.
 const WORKTREE_ADD_TIMEOUT_MS = 10 * 60_000
 
+// `git merge` updates the parent's checkout (plus LFS smudge and hooks), which takes over 30s on large repos.
+const MERGE_TIMEOUT_MS = 5 * 60_000
+
 // ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
@@ -605,7 +608,7 @@ export function createGitApi(exec: ExecApi, filesystem: FilesystemApi, connectio
           ? ['merge', '--squash', worktreeBranch]
           : ['merge', worktreeBranch]
 
-        const result = await git(targetWorktreePath, args, { onProgress })
+        const result = await git(targetWorktreePath, args, { onProgress, timeoutMs: MERGE_TIMEOUT_MS })
         if (result.exitCode !== 0) {
           return { success: false, error: interpretError(result).message }
         }

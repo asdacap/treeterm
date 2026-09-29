@@ -114,8 +114,8 @@ export interface SessionState {
   removeWorkspace: (id: string) => Promise<void>
   removeWorkspaceKeepBranch: (id: string) => Promise<void>
   removeWorkspaceKeepBoth: (id: string) => Promise<void>
-  mergeAndRemoveWorkspace: (id: string, squash: boolean) => Promise<{ success: boolean; error?: string }>
-  mergeAndKeepWorkspace: (id: string, squash: boolean) => Promise<{ success: boolean; error?: string }>
+  mergeAndRemoveWorkspace: (id: string, squash: boolean, onProgress: (data: string) => void) => Promise<{ success: boolean; error?: string }>
+  mergeAndKeepWorkspace: (id: string, squash: boolean, onProgress: (data: string) => void) => Promise<{ success: boolean; error?: string }>
   closeAndCleanWorkspace: (id: string) => Promise<{ success: boolean; error?: string }>
   setActiveWorkspace: (id: string | undefined) => void
   updateGitInfo: (id: string, gitInfo: GitInfo) => void
@@ -923,8 +923,8 @@ export function createSessionStore(
       removeWorkspace: (id) => store.getState().removeWorkspace(id),
       removeWorkspaceKeepBranch: (id) => store.getState().removeWorkspaceKeepBranch(id),
       removeWorkspaceKeepBoth: (id) => store.getState().removeWorkspaceKeepBoth(id),
-      mergeAndRemoveWorkspace: (id, squash) => store.getState().mergeAndRemoveWorkspace(id, squash),
-      mergeAndKeepWorkspace: (id, squash) => store.getState().mergeAndKeepWorkspace(id, squash),
+      mergeAndRemoveWorkspace: (id, squash, onProgress) => store.getState().mergeAndRemoveWorkspace(id, squash, onProgress),
+      mergeAndKeepWorkspace: (id, squash, onProgress) => store.getState().mergeAndKeepWorkspace(id, squash, onProgress),
       closeAndCleanWorkspace: (id) => store.getState().closeAndCleanWorkspace(id),
       quickForkWorkspace: (id) => store.getState().quickForkWorkspace(id),
       refreshGitInfo: (id) => store.getState().refreshGitInfo(id),
@@ -1246,7 +1246,8 @@ export function createSessionStore(
   async function mergeWorkspaceCore(
     id: string,
     squash: boolean,
-    autoCommit: boolean
+    autoCommit: boolean,
+    onProgress: (data: string) => void
   ): Promise<{ success: boolean; error?: string }> {
 
     const entry = store.getState().workspaces.get(id)
@@ -1294,7 +1295,8 @@ export function createSessionStore(
       const mergeResult = await deps.git.merge(
         parent.path,
         workspace.gitBranch ?? '',
-        squash
+        squash,
+        onProgress
       )
 
       if (!mergeResult.success) {
@@ -1781,7 +1783,7 @@ export function createSessionStore(
       get().updateGitInfo(id, gitInfo)
     },
 
-    mergeAndRemoveWorkspace: async (id: string, squash: boolean) => {
+    mergeAndRemoveWorkspace: async (id: string, squash: boolean, onProgress: (data: string) => void) => {
       // Acquire session lock before merge (slow IO operation)
       const lockStatus = await acquireLock()
       if (!lockStatus.acquired) {
@@ -1789,7 +1791,7 @@ export function createSessionStore(
       }
 
       try {
-        const result = await mergeWorkspaceCore(id, squash, true)
+        const result = await mergeWorkspaceCore(id, squash, true, onProgress)
         if (!result.success) return result
 
         const entry = get().workspaces.get(id)
@@ -1825,7 +1827,7 @@ export function createSessionStore(
       }
     },
 
-    mergeAndKeepWorkspace: async (id: string, squash: boolean) => {
+    mergeAndKeepWorkspace: async (id: string, squash: boolean, onProgress: (data: string) => void) => {
       // Acquire session lock before merge (slow IO operation)
       const lockStatus = await acquireLock()
       if (!lockStatus.acquired) {
@@ -1833,7 +1835,7 @@ export function createSessionStore(
       }
 
       try {
-        const result = await mergeWorkspaceCore(id, squash, false)
+        const result = await mergeWorkspaceCore(id, squash, false, onProgress)
         if (!result.success) return result
 
         // On success, ensure workspace is back to loaded status

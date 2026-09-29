@@ -91,8 +91,8 @@ export interface WorkspaceStoreDeps {
   removeWorkspace: (id: string) => Promise<void>
   removeWorkspaceKeepBranch: (id: string) => Promise<void>
   removeWorkspaceKeepBoth: (id: string) => Promise<void>
-  mergeAndRemoveWorkspace: (id: string, squash: boolean) => Promise<{ success: boolean; error?: string }>
-  mergeAndKeepWorkspace: (id: string, squash: boolean) => Promise<{ success: boolean; error?: string }>
+  mergeAndRemoveWorkspace: (id: string, squash: boolean, onProgress: (data: string) => void) => Promise<{ success: boolean; error?: string }>
+  mergeAndKeepWorkspace: (id: string, squash: boolean, onProgress: (data: string) => void) => Promise<{ success: boolean; error?: string }>
   closeAndCleanWorkspace: (id: string) => Promise<{ success: boolean; error?: string }>
   quickForkWorkspace: (id: string) => Promise<{ success: boolean; error?: string }>
   refreshGitInfo: (id: string) => Promise<void>
@@ -219,8 +219,8 @@ export interface WorkspaceStoreState {
   // Cross-cutting (delegate to session)
   refreshGitInfo: () => Promise<void>
   quickForkWorkspace: () => Promise<{ success: boolean; error?: string }>
-  mergeAndRemove: (squash: boolean) => Promise<{ success: boolean; error?: string }>
-  mergeAndKeep: (squash: boolean) => Promise<{ success: boolean; error?: string }>
+  mergeAndRemove: (squash: boolean, onProgress: (data: string) => void) => Promise<{ success: boolean; error?: string }>
+  mergeAndKeep: (squash: boolean, onProgress: (data: string) => void) => Promise<{ success: boolean; error?: string }>
   closeAndClean: () => Promise<{ success: boolean; error?: string }>
   remove: () => Promise<void>
   removeKeepBranch: () => Promise<void>
@@ -726,8 +726,8 @@ export function createWorkspaceStore(
     // Cross-cutting operations — delegate to session
     refreshGitInfo: () => deps.refreshGitInfo(id),
     quickForkWorkspace: () => deps.quickForkWorkspace(id),
-    mergeAndRemove: (squash: boolean) => deps.mergeAndRemoveWorkspace(id, squash),
-    mergeAndKeep: (squash: boolean) => deps.mergeAndKeepWorkspace(id, squash),
+    mergeAndRemove: (squash: boolean, onProgress: (data: string) => void) => deps.mergeAndRemoveWorkspace(id, squash, onProgress),
+    mergeAndKeep: (squash: boolean, onProgress: (data: string) => void) => deps.mergeAndKeepWorkspace(id, squash, onProgress),
     closeAndClean: () => deps.closeAndCleanWorkspace(id),
     remove: () => deps.removeWorkspace(id),
     removeKeepBranch: () => deps.removeWorkspaceKeepBranch(id),

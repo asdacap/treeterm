@@ -1527,6 +1527,19 @@ describe('createGitApi', () => {
       const result = await git.merge('/repo', 'feature')
       expect(result.success).toBe(false)
     })
+
+    it('allows 5 minutes for large repos and streams output to onProgress', async () => {
+      const exec = createMockExec()
+      const fs = createMockFilesystem()
+      autoComplete(exec, [{ stdout: 'Updating abc..def\nFast-forward\n' }])
+
+      const onProgress = vi.fn()
+      const git = createGitApi(exec, fs, 'conn-1')
+      await git.merge('/repo', 'feature', false, onProgress)
+
+      expect(vi.mocked(exec.start).mock.calls[0]?.[4]).toBe(5 * 60_000)
+      expect(onProgress).toHaveBeenCalledWith('Updating abc..def\nFast-forward\n')
+    })
   })
 
   describe('getUncommittedFileContentsForDiff', () => {

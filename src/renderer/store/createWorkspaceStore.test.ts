@@ -789,9 +789,10 @@ describe('createWorkspaceStore', () => {
       const ws = makeWorkspace({ id: 'ws-1' })
       const store = createWorkspaceStore(ws, deps)
 
-      await store.getState().mergeAndRemove(true)
+      const onProgress = vi.fn()
+      await store.getState().mergeAndRemove(true, onProgress)
 
-      expect(deps.mergeAndRemoveWorkspace).toHaveBeenCalledWith('ws-1', true)
+      expect(deps.mergeAndRemoveWorkspace).toHaveBeenCalledWith('ws-1', true, onProgress)
     })
 
     it('mergeAndKeep delegates to deps', async () => {
@@ -799,9 +800,10 @@ describe('createWorkspaceStore', () => {
       const ws = makeWorkspace({ id: 'ws-1' })
       const store = createWorkspaceStore(ws, deps)
 
-      await store.getState().mergeAndKeep(true)
+      const onProgress = vi.fn()
+      await store.getState().mergeAndKeep(true, onProgress)
 
-      expect(deps.mergeAndKeepWorkspace).toHaveBeenCalledWith('ws-1', true)
+      expect(deps.mergeAndKeepWorkspace).toHaveBeenCalledWith('ws-1', true, onProgress)
     })
 
     it('closeAndClean delegates to deps', async () => {

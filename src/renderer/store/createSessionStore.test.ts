@@ -793,9 +793,10 @@ describe('createSessionStore', () => {
     })
 
     it('mergeAndRemoveWorkspace merges, removes, and cleans up', async () => {
-      const result = await store.getState().mergeAndRemoveWorkspace(childId, false)
+      const onProgress = vi.fn()
+      const result = await store.getState().mergeAndRemoveWorkspace(childId, false, onProgress)
       expect(result).toEqual({ success: true })
-      expect(deps.git.merge).toHaveBeenCalled()
+      expect(deps.git.merge).toHaveBeenCalledWith(expect.any(String), expect.any(String), false, onProgress)
       expect(store.getState().workspaces.get(childId)).toBeUndefined()
     })
 
@@ -804,37 +805,37 @@ describe('createSessionStore', () => {
       vi.mocked(deps.git.hasUncommittedChanges)
         .mockResolvedValueOnce(false)
         .mockResolvedValueOnce(true)
-      await store.getState().mergeAndRemoveWorkspace(childId, false)
+      await store.getState().mergeAndRemoveWorkspace(childId, false, vi.fn())
       expect(deps.git.commitAll).toHaveBeenCalled()
     })
 
     it('mergeAndRemoveWorkspace fails when parent has uncommitted changes', async () => {
       vi.mocked(deps.git.hasUncommittedChanges).mockResolvedValueOnce(true)
-      const result = await store.getState().mergeAndRemoveWorkspace(childId, false)
+      const result = await store.getState().mergeAndRemoveWorkspace(childId, false, vi.fn())
       expect(result.success).toBe(false)
       expect(result.error).toContain('Parent workspace has uncommitted changes')
       expect(deps.git.merge).not.toHaveBeenCalled()
     })
 
     it('mergeAndRemoveWorkspace fails when workspace not found', async () => {
-      const result = await store.getState().mergeAndRemoveWorkspace('bad', false)
+      const result = await store.getState().mergeAndRemoveWorkspace('bad', false, vi.fn())
       expect(result).toEqual({ success: false, error: 'Workspace not found' })
     })
 
     it('mergeAndRemoveWorkspace fails for non-worktree', async () => {
-      const result = await store.getState().mergeAndRemoveWorkspace(parentId, false)
+      const result = await store.getState().mergeAndRemoveWorkspace(parentId, false, vi.fn())
       expect(result).toEqual({ success: false, error: 'Not a worktree workspace' })
     })
 
     it('mergeAndRemoveWorkspace fails when merge fails', async () => {
       vi.mocked(deps.git.merge).mockResolvedValue({ success: false, error: 'conflict' })
-      const result = await store.getState().mergeAndRemoveWorkspace(childId, false)
+      const result = await store.getState().mergeAndRemoveWorkspace(childId, false, vi.fn())
       expect(result.success).toBe(false)
       expect(result.error).toContain('conflict')
     })
 
     it('mergeAndKeepWorkspace merges but keeps workspace alive', async () => {
-      const result = await store.getState().mergeAndKeepWorkspace(childId, false)
+      const result = await store.getState().mergeAndKeepWorkspace(childId, false, vi.fn())
       expect(result).toEqual({ success: true })
       expect(deps.git.merge).toHaveBeenCalled()
       expect(store.getState().workspaces.get(childId)).toBeDefined()
@@ -845,7 +846,7 @@ describe('createSessionStore', () => {
       vi.mocked(deps.git.hasUncommittedChanges)
         .mockResolvedValueOnce(false)
         .mockResolvedValue(true)
-      const result = await store.getState().mergeAndKeepWorkspace(childId, false)
+      const result = await store.getState().mergeAndKeepWorkspace(childId, false, vi.fn())
       expect(result).toEqual({ success: true })
       expect(deps.git.commitAll).not.toHaveBeenCalled()
       expect(deps.git.merge).toHaveBeenCalled()
@@ -853,25 +854,25 @@ describe('createSessionStore', () => {
 
     it('mergeAndKeepWorkspace fails when parent has uncommitted changes', async () => {
       vi.mocked(deps.git.hasUncommittedChanges).mockResolvedValueOnce(true)
-      const result = await store.getState().mergeAndKeepWorkspace(childId, false)
+      const result = await store.getState().mergeAndKeepWorkspace(childId, false, vi.fn())
       expect(result.success).toBe(false)
       expect(result.error).toContain('Parent workspace has uncommitted changes')
       expect(deps.git.merge).not.toHaveBeenCalled()
     })
 
     it('mergeAndKeepWorkspace fails when workspace not found', async () => {
-      const result = await store.getState().mergeAndKeepWorkspace('bad', false)
+      const result = await store.getState().mergeAndKeepWorkspace('bad', false, vi.fn())
       expect(result).toEqual({ success: false, error: 'Workspace not found' })
     })
 
     it('mergeAndKeepWorkspace fails for non-worktree', async () => {
-      const result = await store.getState().mergeAndKeepWorkspace(parentId, false)
+      const result = await store.getState().mergeAndKeepWorkspace(parentId, false, vi.fn())
       expect(result).toEqual({ success: false, error: 'Not a worktree workspace' })
     })
 
     it('mergeAndKeepWorkspace fails when merge fails', async () => {
       vi.mocked(deps.git.merge).mockResolvedValue({ success: false, error: 'conflict' })
-      const result = await store.getState().mergeAndKeepWorkspace(childId, false)
+      const result = await store.getState().mergeAndKeepWorkspace(childId, false, vi.fn())
       expect(result.success).toBe(false)
       expect(result.error).toContain('conflict')
     })
@@ -1452,7 +1453,7 @@ describe('createSessionStore', () => {
       const id = store.getState().addWorkspace('/test')
       await flushPromises()
 
-      const result = await store.getState().mergeAndRemoveWorkspace(id, false)
+      const result = await store.getState().mergeAndRemoveWorkspace(id, false, vi.fn())
       expect(result).toEqual({ success: false, error: 'Session is locked by another window' })
     })
 
@@ -1462,7 +1463,7 @@ describe('createSessionStore', () => {
       const id = store.getState().addWorkspace('/test')
       await flushPromises()
 
-      const result = await store.getState().mergeAndRemoveWorkspace(id, false)
+      const result = await store.getState().mergeAndRemoveWorkspace(id, false, vi.fn())
       expect(result).toEqual({ success: false, error: 'gRPC connection lost' })
     })
 
@@ -1470,7 +1471,7 @@ describe('createSessionStore', () => {
       const id = store.getState().addWorkspace('/test')
       await flushPromises()
 
-      const result = await store.getState().mergeAndRemoveWorkspace(id, false)
+      const result = await store.getState().mergeAndRemoveWorkspace(id, false, vi.fn())
       expect(result.success).toBe(false)
       if (!result.success) {
         expect(result.error).toContain('Not a worktree')
@@ -1483,7 +1484,7 @@ describe('createSessionStore', () => {
       const id = store.getState().addWorkspace('/test')
       await flushPromises()
 
-      const result = await store.getState().mergeAndKeepWorkspace(id, false)
+      const result = await store.getState().mergeAndKeepWorkspace(id, false, vi.fn())
       expect(result.success).toBe(false)
     })
   })

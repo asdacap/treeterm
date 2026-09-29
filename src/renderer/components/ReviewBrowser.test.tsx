@@ -8,7 +8,7 @@ import { FileChangeStatus } from '../types'
 import type { ReviewCommentState } from '../store/createReviewCommentStore'
 import type { ReviewViewedFilesState } from '../store/createReviewViewedFilesStore'
 import type { GitControllerState } from '../store/createGitControllerStore'
-import { createStore } from 'zustand/vanilla'
+import { createStore, type StoreApi } from 'zustand/vanilla'
 import { makeWorkspace } from '../../shared/test-fixtures/workspace'
 
 const mockObservers: Array<{
@@ -586,5 +586,52 @@ describe('ReviewBrowser favourites', () => {
     const list = container.querySelector('.stacked-diff-list') as HTMLElement
     expect(list.scrollTop).toBe(TARGET_OFFSET)
     expect(screen.queryByTestId('file-viewer')).toBeNull()
+  })
+})
+
+describe('ReviewBrowser merge output', () => {
+  it('shows the merge command output in a terminal pane while merging and after it finishes', async () => {
+    const workspace = makeReviewWorkspace([], 'uncommitted')
+    const parent = makeWorkspace({ id: 'parent', path: '/parent', gitBranch: 'main' })
+    let finishMerge: (result: { success: boolean }) => void = () => undefined
+    const mergeAndKeep = vi.fn((_squash: boolean, onProgress: (data: string) => void) => {
+      onProgress('Updating abc..def\n')
+      return new Promise<{ success: boolean }>((resolve) => { finishMerge = resolve })
+    })
+    const baseGitApi = (workspace.getState() as unknown as { gitApi: WorkspaceGitApi }).gitApi
+    const gitApi = new Proxy(baseGitApi, {
+      get(target, property: string) {
+        if (property === 'checkMergeConflicts') {
+          return vi.fn().mockResolvedValue({ success: true, conflicts: { hasConflicts: false, conflictedFiles: [], messages: [] } })
+        }
+        return (target as unknown as Record<string, unknown>)[property]
+      },
+    })
+    ;(workspace as unknown as StoreApi<unknown>).setState({
+      gitApi,
+      workspace: makeWorkspace({ id: 'child', path: '/repo', parentId: 'parent', isWorktree: true, gitBranch: 'feature',
+        appStates: { review: { applicationId: 'review', title: 'Review', state: { viewMode: 'uncommitted' } } } }),
+      lookupWorkspace: (id: string) => id === 'parent' ? parent : undefined,
+      mergeAndKeep,
+    })
+
+    const { container } = render(<ReviewBrowser workspace={workspace} tabId="review" isVisible={false} parentWorkspaceId="parent" />)
+
+    fireEvent.click(await screen.findByTitle('More merge options'))
+    fireEvent.click(screen.getByText('Merge and Keep'))
+
+    await waitFor(() => {
+      expect(container.querySelector('.review-merge-output')?.textContent).toBe('Updating abc..def\n')
+    })
+    expect(container.querySelector('.review-merge-output-command')?.textContent).toBe('$ git merge feature')
+    expect(screen.queryByTitle('Hide merge output')).toBeNull()
+
+    act(() => { finishMerge({ success: true }) })
+
+    await waitFor(() => {
+      expect(container.querySelector('.review-merge-output-panel')?.getAttribute('data-status')).toBe('succeeded')
+    })
+    fireEvent.click(screen.getByTitle('Hide merge output'))
+    expect(container.querySelector('.review-merge-output-panel')).toBeNull()
   })
 })
