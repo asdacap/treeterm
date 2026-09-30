@@ -25,7 +25,7 @@ import { TitleRefreshStatus } from '../store/createAnalyzerStore'
 import type { TitleRefreshResult } from '../store/createAnalyzerStore'
 
 // Import WorkspaceIcon from TreePane
-import { WorkspaceIcon, WorkspaceAttentionFlash } from './TreePane'
+import { WorkspaceIcon, WorkspaceAttentionFlash, WorkspaceStoreAttentionFlash } from './TreePane'
 
 /** Surfaces an LLM re-label failure to the user; the context menu has already closed by then. */
 function reportRefreshOutcome(refresh: Promise<TitleRefreshResult>): void {
@@ -783,7 +783,7 @@ function TreeItemView({
         onDrop={(e) => { e.preventDefault(); e.stopPropagation(); onDrop() }}
         onDragEnd={onDragEnd}
       >
-        <WorkspaceAttentionFlash tabIds={tabIds} />
+        <WorkspaceAttentionFlash tabIds={tabIds} unread={unread} />
         {hasChildren ? (
           <span
             className="tree-item-expand"
@@ -977,7 +977,7 @@ export function CollapsedSessionPanel({ sessionId, sessionStore }: CollapsedSess
           title={displayName}
           onClick={() => { handleClick(id); }}
         >
-          <WorkspaceAttentionFlash tabIds={tabIds} />
+          {(entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError) && <WorkspaceStoreAttentionFlash workspaceStore={entry.store} />}
           <WorkspaceIcon
             tabIds={tabIds}
             loadStatus={entry.status === WorkspaceEntryStatus.Loading || entry.status === WorkspaceEntryStatus.Error ? entry.status : undefined}

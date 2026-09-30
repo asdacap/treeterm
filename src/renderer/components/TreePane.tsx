@@ -34,14 +34,36 @@ export function WorkspaceIcon({ tabIds, loadStatus, isWorktree }: {
   return isWorktree ? <GitBranch size={16} /> : <Folder size={16} />
 }
 
+interface FlashTracking {
+  activityState: ActivityState
+  unread: boolean
+  suppressed: boolean
+}
+
 // Remounts (via key) on every attention-state change so the CSS flash replays.
-export function WorkspaceAttentionFlash({ tabIds }: { tabIds: string[] }) {
+// Like the ding, it stays quiet when the unread marker was already showing: the
+// unread value from before the change is compared, because the change itself may
+// record attention in the same render.
+export function WorkspaceAttentionFlash({ tabIds, unread }: { tabIds: string[]; unread: boolean }) {
   const activityState = useActivityStateStore((state) =>
     state.getWorkspaceState(tabIds)
   )
+  const [tracking, setTracking] = useState<FlashTracking>({ activityState, unread, suppressed: unread })
+  if (tracking.activityState !== activityState) {
+    setTracking({ activityState, unread, suppressed: tracking.unread })
+  } else if (tracking.unread !== unread) {
+    setTracking({ ...tracking, unread })
+  }
 
-  if (activityState === ActivityState.Idle || activityState === ActivityState.Working) return null
+  if (tracking.suppressed || activityState === ActivityState.Idle || activityState === ActivityState.Working) return null
   return <span key={activityState} className={`tree-item-flash activity-${activityState}`} aria-hidden="true" />
+}
+
+// For callers that only hold the workspace store (e.g. the collapsed sidebar's plain render function).
+export function WorkspaceStoreAttentionFlash({ workspaceStore }: { workspaceStore: WorkspaceStore }) {
+  const appStates = useStore(workspaceStore, s => s.appStates)
+  const unread = useStore(workspaceStore, s => hasUnreadWorkspaceAttention(s.metadata))
+  return <WorkspaceAttentionFlash tabIds={Object.keys(appStates)} unread={unread} />
 }
 
 export function FavouriteWorkspaceItem({
@@ -99,7 +121,7 @@ export function FavouriteWorkspaceItem({
         onContextMenu={handleContextMenu}
         title={data.path}
       >
-        <WorkspaceAttentionFlash tabIds={Object.keys(appStates)} />
+        <WorkspaceAttentionFlash tabIds={Object.keys(appStates)} unread={unread} />
         <span className="tree-item-icon">
           <WorkspaceIcon tabIds={Object.keys(appStates)} isWorktree={data.isWorktree} />
         </span>

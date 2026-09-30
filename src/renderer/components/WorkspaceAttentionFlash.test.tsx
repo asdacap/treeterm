@@ -22,14 +22,14 @@ describe('WorkspaceAttentionFlash', () => {
   })
 
   it('renders nothing while idle or working', () => {
-    const { container } = render(<WorkspaceAttentionFlash tabIds={['t1']} />)
+    const { container } = render(<WorkspaceAttentionFlash tabIds={['t1']} unread={false} />)
     expect(container.querySelector('.tree-item-flash')).toBeNull()
     setState('t1', ActivityState.Working)
     expect(container.querySelector('.tree-item-flash')).toBeNull()
   })
 
   it('flashes with the state color and replays on each attention-state change', () => {
-    const { container } = render(<WorkspaceAttentionFlash tabIds={['t1', 't2']} />)
+    const { container } = render(<WorkspaceAttentionFlash tabIds={['t1', 't2']} unread={false} />)
     setState('t2', ActivityState.PermissionRequest)
     const first = container.querySelector('.tree-item-flash')
     expect(first?.classList.contains('activity-permission_request')).toBe(true)
@@ -41,5 +41,28 @@ describe('WorkspaceAttentionFlash', () => {
 
     setState('t2', ActivityState.Idle)
     expect(container.querySelector('.tree-item-flash')).toBeNull()
+  })
+
+  it('does not flash when the unread marker was already on before the change', () => {
+    const { container, rerender } = render(<WorkspaceAttentionFlash tabIds={['t1']} unread={true} />)
+    setState('t1', ActivityState.Completed)
+    expect(container.querySelector('.tree-item-flash')).toBeNull()
+    setState('t1', ActivityState.PermissionRequest)
+    expect(container.querySelector('.tree-item-flash')).toBeNull()
+
+    // Once acknowledged, the next attention change flashes again.
+    rerender(<WorkspaceAttentionFlash tabIds={['t1']} unread={false} />)
+    setState('t1', ActivityState.Completed)
+    expect(container.querySelector('.tree-item-flash.activity-completed')).not.toBeNull()
+  })
+
+  it('still flashes when the change itself marks the workspace unread', () => {
+    const { container, rerender } = render(<WorkspaceAttentionFlash tabIds={['t1']} unread={false} />)
+    setState('t1', ActivityState.Working)
+    act(() => {
+      useActivityStateStore.getState().setTabState('t1', ActivityState.Completed, { kind: ActivityTransitionKind.Debugger, snapshot: '' })
+      rerender(<WorkspaceAttentionFlash tabIds={['t1']} unread={true} />)
+    })
+    expect(container.querySelector('.tree-item-flash.activity-completed')).not.toBeNull()
   })
 })
