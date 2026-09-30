@@ -1386,6 +1386,27 @@ describe('createAnalyzerStore', () => {
       vi.useRealTimers()
     })
 
+    it('marks the branch as defined when auto-renaming so later analyzers leave it alone', async () => {
+      vi.useFakeTimers()
+      const mock = makeMockTty()
+      deps = makeDeps({
+        openTtyStream: makeTtyStreamMock(mock, ['$ ']),
+      })
+      const store = createAnalyzerStore('tab-1', deps)
+
+      store.getState().start('pty-1')
+      await vi.advanceTimersByTimeAsync(0)
+
+      store.getState().onUserInput('hello\r')
+      await vi.advanceTimersByTimeAsync(1000)
+
+      expect(deps.updateMetadata).toHaveBeenCalledWith('branchIsUserDefined', 'true', 'analyzerSetBranch')
+      expect(deps.renameBranch).toHaveBeenCalledTimes(1)
+
+      store.getState().stop()
+      vi.useRealTimers()
+    })
+
     it('skips title, description and branch rename when workspace has no parent', async () => {
       const mock = makeMockTty()
       deps = makeDeps({

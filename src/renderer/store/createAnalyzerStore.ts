@@ -432,6 +432,11 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
       deps.updateMetadata('descriptionPrompted', 'true', 'analyzerSetDescriptionPrompted')
     }
     if (!deps.getBranchIsUserDefined()) {
+      // One shot per workspace. `titleGenerated` only lives as long as this analyzer, so
+      // without a persisted flag every new tab or app restart (while the workspace still
+      // lacks a description) renamed the branch again — including branches the user
+      // named or checked out themselves in the meantime.
+      deps.updateMetadata('branchIsUserDefined', 'true', 'analyzerSetBranch')
       const renamed = await applyBranchName(result.branchName)
       if (renamed.status === TitleRefreshStatus.Failure) {
         console.warn('[analyzer] automatic branch rename skipped:', renamed.error)
