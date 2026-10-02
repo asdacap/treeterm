@@ -12,6 +12,8 @@ import type {
   WorktreeInfo,
   DiffResult,
   DiffFile,
+  FileChangeStats,
+  UncommittedFile,
   ConflictCheckResult,
   UncommittedChanges,
   FileDiffContents,
@@ -22,6 +24,7 @@ import type {
 /* eslint-disable custom/no-string-literal-comparison -- parses git porcelain output; status chars/tokens are git CLI conventions, not our domain */
 import { DEFAULT_EXEC_TIMEOUT_MS, ExecEventType, type IpcResult } from '../../shared/ipc-types'
 import { FileChangeStatus } from '../../shared/types'
+import { FileStatKind } from '../types'
 import { resolveHomedir } from './homedir'
 import { withTimeout } from './withTimeout'
 import { MAX_READ_FILE_BYTES } from './fileLimits'
@@ -178,25 +181,69 @@ export function parseStatus(output: string): GitStatusEntry[] {
   return entries
 }
 
-/** Reads the leading `<additions>\t<deletions>` of a numstat line. Binary files
- *  report `-` for both, which counts as zero changed lines. */
-function parseNumstatCounts(line: string): { additions: number; deletions: number } {
+type ParsedNumstat = FileChangeStats | { kind: FileStatKind.Binary }
+
+type ChangedPath = { path: string; originalPath?: string }
+
+/** Preserve Git's -/- binary marker until its actual byte sizes are available. */
+function parseNumstatCounts(line: string): ParsedNumstat {
   const [add, del] = line.split('\t')
-  return {
-    additions: (add ?? '') === '-' ? 0 : parseInt(add ?? '', 10) || 0,
-    deletions: (del ?? '') === '-' ? 0 : parseInt(del ?? '', 10) || 0,
+  if (add === '-' && del === '-') return { kind: FileStatKind.Binary }
+  if (!add || !del || !/^\d+$/.test(add) || !/^\d+$/.test(del)) {
+    throw new Error(`Invalid git numstat counts: ${line}`)
   }
+  return { kind: FileStatKind.Text, additions: Number(add), deletions: Number(del) }
 }
 
-/** Indexes whole `git diff --numstat` output by the path in its third column. */
-function parseNumstat(stdout: string): Map<string, { additions: number; deletions: number }> {
-  const stats = new Map<string, { additions: number; deletions: number }>()
+/** `--numstat` uses a compact `old => new` path for renames. */
+function numstatPath(path: string): string {
+  const nested = /^(.*)\{[^{}]* => ([^{}]*)\}(.*)$/.exec(path)
+  if (nested) return `${nested[1] ?? ''}${nested[2] ?? ''}${nested[3] ?? ''}`
+  const arrow = path.indexOf(' => ')
+  return arrow < 0 ? path : path.slice(arrow + 4)
+}
+
+function parseNumstat(stdout: string, knownPaths: ReadonlySet<string>): Map<string, ParsedNumstat> {
+  const stats = new Map<string, ParsedNumstat>()
   for (const line of stdout.trim().split('\n').filter(Boolean)) {
-    const filePath = line.split('\t')[2]
-    if (!filePath) continue
-    stats.set(filePath, parseNumstatCounts(line))
+    const columns = line.split('\t')
+    const path = columns.slice(2).join('\t')
+    if (!path) throw new Error(`Missing path in git numstat: ${line}`)
+    stats.set(knownPaths.has(path) ? path : numstatPath(path), parseNumstatCounts(line))
   }
   return stats
+}
+
+/** Parse the only binary stat for one changed path, without interpreting the filename. */
+function parseBinaryByteChange(stdout: string, path: string): number {
+  const binLines = stdout.split('\n').filter(line => /\|\s*Bin\s/.test(line))
+  if (binLines.length !== 1) throw new Error(`Missing or ambiguous binary byte sizes for ${path}`)
+  const match = /\|\s*Bin\s+(\d+)\s+->\s+(\d+)\s+bytes\s*$/.exec(binLines[0] ?? '')
+  if (!match) throw new Error(`Invalid binary byte sizes for ${path}`)
+  const oldSize = Number(match[1])
+  const newSize = Number(match[2])
+  if (!Number.isSafeInteger(oldSize) || !Number.isSafeInteger(newSize)) {
+    throw new Error(`Invalid binary byte sizes for ${path}`)
+  }
+  return newSize - oldSize
+}
+
+function parseNameStatuses(stdout: string): Map<string, { status: FileChangeStatus; originalPath?: string }> {
+  const statuses = new Map<string, { status: FileChangeStatus; originalPath?: string }>()
+  for (const line of stdout.trim().split('\n').filter(Boolean)) {
+    const [change, ...paths] = line.split('\t')
+    const path = paths[paths.length - 1]
+    if (!path || !change) continue
+    const status = change.startsWith('A') ? FileChangeStatus.Added
+      : change.startsWith('D') ? FileChangeStatus.Deleted
+        : change.startsWith('R') ? FileChangeStatus.Renamed
+          : FileChangeStatus.Modified
+    statuses.set(path, {
+      status,
+      ...(change.startsWith('R') && paths.length > 1 ? { originalPath: paths[0] } : {}),
+    })
+  }
+  return statuses
 }
 
 function interpretError(result: ExecResult): Error {
@@ -269,6 +316,20 @@ export function createGitApi(exec: ExecApi, filesystem: FilesystemApi, connectio
     options?: { timeoutMs?: number; onProgress?: (data: string) => void },
   ): Promise<ExecResult> {
     return execGit(exec, connectionId, cwd, args, options)
+  }
+
+  async function fileStats(
+    repoPath: string,
+    parsed: ParsedNumstat,
+    args: string[],
+    changed: ChangedPath,
+    noIndex = false,
+  ): Promise<FileChangeStats> {
+    if (parsed.kind === FileStatKind.Text) return parsed
+    const paths = changed.originalPath ? [changed.originalPath, changed.path] : [changed.path]
+    const result = await git(repoPath, [...args, '--', ...(noIndex ? ['/dev/null', changed.path] : paths)])
+    if (result.exitCode !== 0 && !(noIndex && result.exitCode === 1)) throw interpretError(result)
+    return { kind: FileStatKind.Binary, byteChange: parseBinaryByteChange(result.stdout, changed.path) }
   }
 
   async function isWorktreesDirInGitignore(rootPath: string): Promise<boolean> {
@@ -525,42 +586,22 @@ export function createGitApi(exec: ExecApi, filesystem: FilesystemApi, connectio
           git(worktreePath, ['diff', '--name-status', mergeBase, currentBranch]),
         ])
 
+        if (statResult.exitCode !== 0) throw interpretError(statResult)
+        if (nameStatusResult.exitCode !== 0) throw interpretError(nameStatusResult)
+        const statusMap = parseNameStatuses(nameStatusResult.stdout)
         const files: DiffFile[] = []
         let totalAdditions = 0
         let totalDeletions = 0
 
-        // Parse name status
-        const statusMap = new Map<string, DiffFile['status']>()
-        const nameStatusLines = nameStatusResult.stdout.trim().split('\n').filter(Boolean)
-
-        for (const line of nameStatusLines) {
-          const [status, ...pathParts] = line.split('\t')
-          const filePath = pathParts[pathParts.length - 1] ?? ''
-          if (!status) continue
-          if (status.startsWith('A')) statusMap.set(filePath, FileChangeStatus.Added)
-          else if (status.startsWith('M')) statusMap.set(filePath, FileChangeStatus.Modified)
-          else if (status.startsWith('D')) statusMap.set(filePath, FileChangeStatus.Deleted)
-          else if (status.startsWith('R')) statusMap.set(filePath, FileChangeStatus.Renamed)
-        }
-
-        // Parse numstat
-        const statLines = statResult.stdout.trim().split('\n').filter(Boolean)
-
-        for (const line of statLines) {
-          const [add, del, filePath] = line.split('\t')
-          const additions = (add ?? '') === '-' ? 0 : parseInt(add ?? '', 10) || 0
-          const deletions = (del ?? '') === '-' ? 0 : parseInt(del ?? '', 10) || 0
-          const resolvedPath = filePath ?? ''
-
-          files.push({
-            path: resolvedPath,
-            status: statusMap.get(resolvedPath) || FileChangeStatus.Modified,
-            additions,
-            deletions,
-          })
-
-          totalAdditions += additions
-          totalDeletions += deletions
+        for (const [path, parsed] of Array.from(parseNumstat(statResult.stdout, new Set(statusMap.keys())))) {
+          const change = statusMap.get(path)
+          const stats = await fileStats(worktreePath, parsed,
+            ['diff', '--stat', mergeBase, currentBranch], { path, originalPath: change?.originalPath })
+          files.push({ path, status: change?.status ?? FileChangeStatus.Modified, ...stats })
+          if (stats.kind === FileStatKind.Text) {
+            totalAdditions += stats.additions
+            totalDeletions += stats.deletions
+          }
         }
 
         return {
@@ -720,45 +761,42 @@ export function createGitApi(exec: ExecApi, filesystem: FilesystemApi, connectio
 
         const status = parseStatus(statusResult.stdout)
 
-        // Get staged diff stats
         const stagedStatResult = await git(repoPath, ['diff', '--cached', '--numstat'])
-        const stagedStatMap = parseNumstat(stagedStatResult.stdout)
+        if (stagedStatResult.exitCode !== 0) throw interpretError(stagedStatResult)
+        const stagedStatMap = parseNumstat(stagedStatResult.stdout, new Set(status.map(entry => entry.path)))
 
-        // Get unstaged diff stats
         const unstagedStatResult = await git(repoPath, ['diff', '--numstat'])
-        const unstagedStatMap = parseNumstat(unstagedStatResult.stdout)
+        if (unstagedStatResult.exitCode !== 0) throw interpretError(unstagedStatResult)
+        const unstagedStatMap = parseNumstat(unstagedStatResult.stdout, new Set(status.map(entry => entry.path)))
 
-        // `git diff` only ever reports paths git already knows about, so an untracked
-        // file has no numstat entry in either map and would render as +0/-0. Diff each
-        // one against an empty blob to get its real line count. Note --no-index exits 1
-        // when the inputs differ — always, here — so only >1 is an actual failure, and
-        // it names the pair as `/dev/null => path` rather than a bare path, hence
-        // reading the counts off the single output line instead of keying by path.
-        const untrackedStatMap = new Map<string, { additions: number; deletions: number }>()
+        // `git diff` omits untracked files. Diff each against /dev/null; exit 1
+        // means they differ, while exit codes above 1 are errors.
+        const untrackedStatMap = new Map<string, ParsedNumstat>()
         await Promise.all(
           status
-            .filter((s) => s.status === FileChangeStatus.Untracked)
-            .map(async (s) => {
-              const result = await git(repoPath, ['diff', '--numstat', '--no-index', '--', '/dev/null', s.path])
+            .filter((entry) => entry.status === FileChangeStatus.Untracked)
+            .map(async (entry) => {
+              const result = await git(repoPath, ['diff', '--numstat', '--no-index', '--', '/dev/null', entry.path])
               if (result.exitCode > 1) throw interpretError(result)
               const line = result.stdout.trim().split('\n').filter(Boolean)[0]
-              if (line) untrackedStatMap.set(s.path, parseNumstatCounts(line))
+              if (line) untrackedStatMap.set(entry.path, parseNumstatCounts(line))
             })
         )
 
-        const files = status.map((s) => {
-          const statMap = s.status === FileChangeStatus.Untracked
+        const files: UncommittedFile[] = await Promise.all(status.map(async (entry) => {
+          const statMap = entry.status === FileChangeStatus.Untracked
             ? untrackedStatMap
-            : s.staged ? stagedStatMap : unstagedStatMap
-          return {
-            ...s,
-            additions: statMap.get(s.path)?.additions || 0,
-            deletions: statMap.get(s.path)?.deletions || 0,
-          }
-        })
+            : entry.staged ? stagedStatMap : unstagedStatMap
+          const parsed = statMap.get(entry.path) ?? { kind: FileStatKind.Text as const, additions: 0, deletions: 0 }
+          const args = entry.status === FileChangeStatus.Untracked
+            ? ['diff', '--stat', '--no-index']
+            : entry.staged ? ['diff', '--cached', '--stat'] : ['diff', '--stat']
+          const stats = await fileStats(repoPath, parsed, args, entry, entry.status === FileChangeStatus.Untracked)
+          return { ...entry, ...stats }
+        }))
 
-        const totalAdditions = files.reduce((sum, f) => sum + f.additions, 0)
-        const totalDeletions = files.reduce((sum, f) => sum + f.deletions, 0)
+        const totalAdditions = files.reduce((sum, file) => sum + (file.kind === FileStatKind.Text ? file.additions : 0), 0)
+        const totalDeletions = files.reduce((sum, file) => sum + (file.kind === FileStatKind.Text ? file.deletions : 0), 0)
 
         return { success: true, changes: { files, totalAdditions, totalDeletions } }
       } catch (error) {
@@ -979,27 +1017,15 @@ export function createGitApi(exec: ExecApi, filesystem: FilesystemApi, connectio
 
         if (statResult.exitCode !== 0) throw interpretError(statResult)
 
-        const statusMap = new Map<string, DiffFile['status']>()
-        for (const line of nameStatusResult.stdout.trim().split('\n').filter(Boolean)) {
-          const [status, ...pathParts] = line.split('\t')
-          const filePath = pathParts[pathParts.length - 1] ?? ''
-          if (!status) continue
-          if (status.startsWith('A')) statusMap.set(filePath, FileChangeStatus.Added)
-          else if (status.startsWith('M')) statusMap.set(filePath, FileChangeStatus.Modified)
-          else if (status.startsWith('D')) statusMap.set(filePath, FileChangeStatus.Deleted)
-          else if (status.startsWith('R')) statusMap.set(filePath, FileChangeStatus.Renamed)
-        }
-
+        if (nameStatusResult.exitCode !== 0) throw interpretError(nameStatusResult)
+        const statusMap = parseNameStatuses(nameStatusResult.stdout)
         const files: DiffFile[] = []
-        for (const line of statResult.stdout.trim().split('\n').filter(Boolean)) {
-          const [add, del, filePath] = line.split('\t')
-          const resolvedPath = filePath ?? ''
-          files.push({
-            path: resolvedPath,
-            status: statusMap.get(resolvedPath) || FileChangeStatus.Modified,
-            additions: (add ?? '') === '-' ? 0 : parseInt(add ?? '', 10) || 0,
-            deletions: (del ?? '') === '-' ? 0 : parseInt(del ?? '', 10) || 0,
-          })
+        for (const [path, parsed] of Array.from(parseNumstat(statResult.stdout, new Set(statusMap.keys())))) {
+          const change = statusMap.get(path)
+          const stats = await fileStats(repoPath, parsed,
+            ['diff-tree', '--no-commit-id', '--root', '-r', '--stat', commitHash],
+            { path, originalPath: change?.originalPath })
+          files.push({ path, status: change?.status ?? FileChangeStatus.Modified, ...stats })
         }
 
         return { success: true, files }

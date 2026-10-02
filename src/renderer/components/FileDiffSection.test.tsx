@@ -37,12 +37,13 @@ vi.mock('../pierre-diffs-config', () => ({
 
 import { FileDiffSection } from './FileDiffSection'
 import type { DiffFile, FileDiffContents, ReviewComment } from '../types'
-import { FileChangeStatus } from '../types'
+import { FileChangeStatus, FileStatKind } from '../types'
 
-function makeDiffFile(overrides: Partial<DiffFile> = {}): DiffFile {
+function makeDiffFile(overrides: Partial<Extract<DiffFile, { kind: FileStatKind.Text }>> = {}): DiffFile {
   return {
     path: 'src/app.ts',
     status: FileChangeStatus.Modified,
+    kind: FileStatKind.Text,
     additions: 10,
     deletions: 5,
     ...overrides,
@@ -84,6 +85,19 @@ describe('FileDiffSection', () => {
     expect(screen.getByText('src/app.ts')).toBeDefined()
     expect(screen.getByText('+10')).toBeDefined()
     expect(screen.getByText('-5')).toBeDefined()
+  })
+
+  it.each([
+    [25, '+25 bytes'],
+    [-20, '-20 bytes'],
+    [0, '0 bytes'],
+  ])('renders a binary delta of %i bytes without line counts', (byteChange, expected) => {
+    const file: DiffFile = { path: 'image.png', status: FileChangeStatus.Modified, kind: FileStatKind.Binary, byteChange }
+    const { container } = render(<FileDiffSection {...defaultProps} file={file} />)
+    const stats = container.querySelector('.file-diff-stats')
+    expect(stats?.textContent).toBe(expected)
+    expect(stats?.querySelectorAll('span')).toHaveLength(1)
+    expect(stats?.textContent).not.toContain('+0-0')
   })
 
   it('calls getStatusIcon with file status', () => {

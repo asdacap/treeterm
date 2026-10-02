@@ -181,10 +181,8 @@ export interface FilesystemState {
   scrollTop?: number
 }
 
-export interface ViewedFileStats {
-  additions: number
-  deletions: number
-}
+/** Legacy text entries predate the discriminator and remain readable. */
+export type ViewedFileStats = FileChangeStats | { additions: number; deletions: number }
 
 export interface ReviewState {
   // parentWorkspaceId identifies the target branch for merging.
@@ -309,12 +307,20 @@ export interface BranchInfo {
   worktreePath?: string
 }
 
-export interface DiffFile {
+export enum FileStatKind {
+  Text = 'text',
+  Binary = 'binary',
+}
+
+/** A binary change has a signed net byte delta, never line counts. */
+export type FileChangeStats =
+  | { kind: FileStatKind.Text; additions: number; deletions: number }
+  | { kind: FileStatKind.Binary; byteChange: number }
+
+export type DiffFile = {
   path: string
   status: FileChangeStatus
-  additions: number
-  deletions: number
-}
+} & FileChangeStats
 
 export interface DiffResult {
   files: DiffFile[]
@@ -330,13 +336,11 @@ export interface ConflictInfo {
   messages: string[]
 }
 
-export interface UncommittedFile {
+export type UncommittedFile = {
   path: string
   status: FileChangeStatus
   staged: boolean
-  additions: number
-  deletions: number
-}
+} & FileChangeStats
 
 export interface UncommittedChanges {
   files: UncommittedFile[]

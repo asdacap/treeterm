@@ -4,7 +4,7 @@ import { render, screen, fireEvent } from '@testing-library/react'
 
 import { getSortedFilePaths, sortFilesAsTree, filterFilesByDir, CommittedDiffFileTree, UncommittedDiffFileTree } from './DiffFileTree'
 import type { DiffFile, UncommittedFile } from '../types'
-import { FileChangeStatus } from '../types'
+import { FileChangeStatus, FileStatKind } from '../types'
 
 vi.mock('../store/contextMenu', async () => {
   const { create } = await import('zustand')
@@ -26,21 +26,23 @@ vi.mock('../store/contextMenu', async () => {
   }
 })
 
-function makeDiffFile(overrides: Partial<DiffFile> = {}): DiffFile {
+function makeDiffFile(overrides: Partial<Extract<DiffFile, { kind: FileStatKind.Text }>> = {}): DiffFile {
   return {
     path: 'src/app.ts',
     status: FileChangeStatus.Modified,
+    kind: FileStatKind.Text,
     additions: 10,
     deletions: 5,
     ...overrides,
   }
 }
 
-function makeUncommittedFile(overrides: Partial<UncommittedFile> = {}): UncommittedFile {
+function makeUncommittedFile(overrides: Partial<Extract<UncommittedFile, { kind: FileStatKind.Text }>> = {}): UncommittedFile {
   return {
     path: 'src/app.ts',
     status: FileChangeStatus.Modified,
     staged: false,
+    kind: FileStatKind.Text,
     additions: 10,
     deletions: 5,
     ...overrides,
@@ -168,6 +170,29 @@ describe('CommittedDiffFileTree', () => {
     )
     expect(screen.getByText('+7')).toBeDefined()
     expect(screen.getByText('-3')).toBeDefined()
+  })
+
+  it('shows signed binary bytes per file but counts only text lines in directories', () => {
+    const files: DiffFile[] = [
+      makeDiffFile({ path: 'src/text.ts', additions: 7, deletions: 3 }),
+      { path: 'src/growing.png', status: FileChangeStatus.Modified, kind: FileStatKind.Binary, byteChange: 25 },
+      { path: 'src/shrinking.png', status: FileChangeStatus.Modified, kind: FileStatKind.Binary, byteChange: -20 },
+      { path: 'src/same.png', status: FileChangeStatus.Modified, kind: FileStatKind.Binary, byteChange: 0 },
+    ]
+    const { container } = render(
+      <CommittedDiffFileTree files={files} selectedFile={null} onSelectFile={onSelectFile} getStatusIcon={getStatusIcon} />
+    )
+    const rows = container.querySelectorAll('.diff-file-item')
+    expect(Array.from(rows).map(row => row.querySelector('.diff-file-stats')?.textContent)).toEqual([
+      '+25 bytes', '0 bytes', '-20 bytes', '+7-3',
+    ])
+    for (const row of Array.from(rows).filter(row => row.textContent.includes('.png'))) {
+      expect(row.querySelector('.diff-file-stats .additions')?.textContent).not.toBe('+0')
+      expect(row.querySelector('.diff-file-stats .deletions')?.textContent).not.toBe('-0')
+    }
+    const dirStats = container.querySelector('.diff-tree-dir .diff-file-stats')
+    expect(dirStats?.textContent).toBe('+7-3')
+    expect(dirStats?.textContent).not.toContain('bytes')
   })
 
   it('calls onSelectFile when a file item is clicked', () => {
@@ -365,6 +390,27 @@ describe('UncommittedDiffFileTree', () => {
     if (!dirStats) throw new Error('expected directory stats')
     expect(dirStats.querySelector('.additions')?.textContent).toBe('+7')
     expect(dirStats.querySelector('.deletions')?.textContent).toBe('-3')
+  })
+
+  it('shows uncommitted binary byte changes without adding them to directory line totals', () => {
+    const files: UncommittedFile[] = [
+      makeUncommittedFile({ path: 'src/text.ts', additions: 4, deletions: 2 }),
+      { path: 'src/image.png', status: FileChangeStatus.Modified, staged: true, kind: FileStatKind.Binary, byteChange: -12 },
+    ]
+    const { container } = render(
+      <UncommittedDiffFileTree
+        files={files} selectedFile={null} onSelectFile={onSelectFile} getStatusIcon={getStatusIcon}
+        onAction={onAction} actionLabel="Unstage" stagingInProgress={false}
+      />
+    )
+    const image = Array.from(container.querySelectorAll('.diff-file-item'))
+      .find(row => row.textContent.includes('image.png'))
+    expect(image?.querySelector('.diff-file-stats')?.textContent).toBe('-12 bytes')
+    expect(image?.querySelectorAll('.diff-file-stats .additions, .diff-file-stats .deletions')).toHaveLength(1)
+    expect(container.querySelector('.diff-tree-dir .diff-file-stats')?.textContent).toBe('+4-2')
+    expect(container.querySelector('.diff-tree-dir .diff-file-stats')?.textContent).not.toContain('bytes')
+    fireEvent.click(image!.querySelector('.diff-file-action')!)
+    expect(onAction).toHaveBeenCalledWith('src/image.png')
   })
 
   it('action button click does not trigger onSelectFile', () => {

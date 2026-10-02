@@ -2180,13 +2180,20 @@ body,
 }
 
 .diff-stats .additions,
-.diff-file-stats .additions {
+.diff-file-stats .additions,
+.file-diff-stats .additions {
   color: #3fb950;
 }
 
 .diff-stats .deletions,
-.diff-file-stats .deletions {
+.diff-file-stats .deletions,
+.file-diff-stats .deletions {
   color: #f85149;
+}
+
+.diff-file-stats .binary-bytes,
+.file-diff-stats .binary-bytes {
+  color: var(--text-secondary);
 }
 
 .diff-content {

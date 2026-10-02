@@ -5,6 +5,7 @@ import {
   REVIEW_VIEWED_FILES_KEY,
 } from './createReviewViewedFilesStore'
 import type { ViewedFileStats } from '../types'
+import { FileStatKind } from '../types'
 
 function setup(initial: Record<string, ViewedFileStats> = {}) {
   const metadata: Record<string, string> = Object.keys(initial).length
@@ -21,6 +22,7 @@ function setup(initial: Record<string, ViewedFileStats> = {}) {
 }
 
 const file = (path: string, additions = 1, deletions = 2) => ({ path, additions, deletions })
+const binary = (path: string, byteChange: number) => ({ path, kind: FileStatKind.Binary as const, byteChange })
 
 describe('parseViewedFiles', () => {
   it('returns empty when key absent', () => {
@@ -121,6 +123,26 @@ describe('reconcileViewedFiles', () => {
   it('does not write when nothing is invalidated', () => {
     const { store, updateMetadata } = setup({ 'b.ts': { additions: 3, deletions: 3 } })
     store.reconcileViewedFiles([file('a.ts', 1, 1)])
+    expect(updateMetadata).not.toHaveBeenCalled()
+  })
+})
+
+describe('binary viewed-file stats', () => {
+  it('stores a binary byte delta without line counts', () => {
+    const { store, metadata } = setup()
+    store.toggleViewedFile(binary('asset.png', 40))
+    expect(parseViewedFiles(metadata)['asset.png']).toEqual({ kind: FileStatKind.Binary, byteChange: 40 })
+  })
+
+  it('invalidates an existing viewed binary when its byte delta changes', () => {
+    const { store, metadata } = setup({ 'asset.png': { kind: FileStatKind.Binary, byteChange: 40 } })
+    store.reconcileViewedFiles([binary('asset.png', -10)])
+    expect(parseViewedFiles(metadata)).toEqual({})
+  })
+
+  it('keeps a legacy viewed text file when counts match', () => {
+    const { store, updateMetadata } = setup({ 'a.ts': { additions: 1, deletions: 2 } })
+    store.reconcileViewedFiles([file('a.ts')])
     expect(updateMetadata).not.toHaveBeenCalled()
   })
 })

@@ -1,6 +1,7 @@
 import { createStore } from 'zustand/vanilla'
 import type { StoreApi } from 'zustand'
-import type { ViewedFileStats } from '../types'
+import type { FileChangeStats, ViewedFileStats } from '../types'
+import { FileStatKind } from '../types'
 
 export interface ReviewViewedFilesDeps {
   getMetadata: () => Record<string, string>
@@ -8,10 +9,20 @@ export interface ReviewViewedFilesDeps {
 }
 
 /** The subset of DiffFile / UncommittedFile this store needs to key and invalidate entries. */
-export interface ViewedFileEntry {
-  path: string
-  additions: number
-  deletions: number
+export type ViewedFileEntry = { path: string } & (FileChangeStats | { additions: number; deletions: number })
+
+/** Older metadata had text counts without a discriminator. */
+function viewedStats(file: ViewedFileEntry): ViewedFileStats {
+  if ('kind' in file && file.kind === FileStatKind.Binary) {
+    return { kind: FileStatKind.Binary, byteChange: file.byteChange }
+  }
+  const text = { additions: file.additions, deletions: file.deletions }
+  return 'kind' in file ? { kind: FileStatKind.Text, ...text } : text
+}
+
+function statsMatch(file: ViewedFileEntry, stats: ViewedFileStats): boolean {
+  if ('kind' in file && file.kind === FileStatKind.Binary) return 'kind' in stats && stats.kind === FileStatKind.Binary && file.byteChange === stats.byteChange
+  return 'additions' in file && 'additions' in stats && file.additions === stats.additions && file.deletions === stats.deletions
 }
 
 export interface ReviewViewedFilesState {
@@ -60,7 +71,7 @@ export function createReviewViewedFilesStore(deps: ReviewViewedFilesDeps): Revie
         return
       }
       persist(
-        { ...viewed, [file.path]: { additions: file.additions, deletions: file.deletions } },
+        { ...viewed, [file.path]: viewedStats(file) },
         'toggleViewedFile'
       )
     },
@@ -71,7 +82,7 @@ export function createReviewViewedFilesStore(deps: ReviewViewedFilesDeps): Revie
       let changed = false
       for (const file of files) {
         if (!next[file.path]) {
-          next[file.path] = { additions: file.additions, deletions: file.deletions }
+          next[file.path] = viewedStats(file)
           changed = true
         }
       }
@@ -90,7 +101,7 @@ export function createReviewViewedFilesStore(deps: ReviewViewedFilesDeps): Revie
           next[path] = stats
           continue
         }
-        if (file.additions === stats.additions && file.deletions === stats.deletions) {
+        if (statsMatch(file, stats)) {
           next[path] = stats
         } else {
           changed = true

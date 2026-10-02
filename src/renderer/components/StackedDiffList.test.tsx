@@ -69,12 +69,13 @@ vi.mock('../pierre-diffs-config', () => ({
 
 import { StackedDiffList, SETTLE_FRAMES, MAX_ALIGN_FRAMES } from './StackedDiffList'
 import type { DiffFile, FileDiffContents, ReviewComment } from '../types'
-import { FileChangeStatus } from '../types'
+import { FileChangeStatus, FileStatKind } from '../types'
 
 function makeDiffFile(path: string): DiffFile {
   return {
     path,
     status: FileChangeStatus.Modified,
+    kind: FileStatKind.Text,
     additions: 10,
     deletions: 5,
   }

@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight, Loader2, RefreshCw } from 'lucide-react'
 import type { DiffFile, UncommittedFile, FileDiffContents, ReviewComment } from '../types'
 import { FileChangeStatus } from '../types'
 import { PierreDiffViewer } from './PierreDiffViewer'
+import { FileChangeStats } from './FileChangeStats'
 
 // Rendering an entire file's diff into the DOM in one shot can exhaust renderer
 // memory and crash the window. Files past these thresholds require an explicit
@@ -203,8 +204,7 @@ export function FileDiffSection({
         {getStatusIcon(file.status)}
         <span className="file-diff-path" title={file.path}>{file.path}</span>
         <span className="file-diff-stats">
-          <span className="additions">+{file.additions}</span>
-          <span className="deletions">-{file.deletions}</span>
+          <FileChangeStats stats={file} />
         </span>
         {stagingAction && (
           <button

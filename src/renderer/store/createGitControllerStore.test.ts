@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createGitControllerStore } from './createGitControllerStore'
 import type { GitControllerDeps } from './createGitControllerStore'
 import type { Workspace } from '../types'
-import { FileChangeStatus } from '../types'
+import { FileChangeStatus, FileStatKind } from '../types'
 import { makeWorkspace as makeWorkspaceBase } from '../../shared/test-fixtures/workspace'
 
 function makeWorkspace(overrides: Partial<Workspace> = {}): Workspace {
@@ -117,7 +117,7 @@ describe('createGitControllerStore', () => {
         getWorkspace: vi.fn().mockReturnValue(ws),
         lookupWorkspace: vi.fn().mockReturnValue(parentWs),
       })
-      vi.mocked(deps.git.getDiff).mockResolvedValue({ success: true, diff: { files: [{ path: 'a.ts', status: FileChangeStatus.Modified, additions: 1, deletions: 0 }], totalAdditions: 1, totalDeletions: 0, baseBranch: 'main', headBranch: 'feat' } })
+      vi.mocked(deps.git.getDiff).mockResolvedValue({ success: true, diff: { files: [{ path: 'a.ts', status: FileChangeStatus.Modified, kind: FileStatKind.Text, additions: 1, deletions: 0 }], totalAdditions: 1, totalDeletions: 0, baseBranch: 'main', headBranch: 'feat' } })
       const store = createGitControllerStore(deps)
 
       await flushRefresh(store)

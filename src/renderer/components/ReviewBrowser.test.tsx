@@ -3,8 +3,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, act, fireEvent, waitFor, screen } from '@testing-library/react'
 import React from 'react'
-import type { UncommittedFile, WorkspaceFilesystemApi, WorkspaceGitApi, WorkspaceStore } from '../types'
-import { FileChangeStatus } from '../types'
+import type { DiffFile, UncommittedFile, WorkspaceFilesystemApi, WorkspaceGitApi, WorkspaceStore } from '../types'
+import { FileChangeStatus, FileStatKind } from '../types'
 import type { ReviewCommentState } from '../store/createReviewCommentStore'
 import type { ReviewViewedFilesState } from '../store/createReviewViewedFilesStore'
 import type { GitControllerState } from '../store/createGitControllerStore'
@@ -441,7 +441,8 @@ describe('BaseBranchSelector', () => {
 function makeReviewWorkspace(
   favouritePaths: string[],
   viewMode: string,
-  uncommittedFiles: UncommittedFile[] = []
+  uncommittedFiles: UncommittedFile[] = [],
+  gitOverrides: Partial<WorkspaceGitApi> = {}
 ): WorkspaceStore {
   const reviewComments = createStore<ReviewCommentState>()(() => ({
     getReviewComments: () => [],
@@ -469,6 +470,7 @@ function makeReviewWorkspace(
       contents: { original: '', modified: '', language: 'typescript' },
     }),
     getHeadCommitHash: vi.fn().mockResolvedValue({ success: true, hash: 'head' }),
+    ...gitOverrides,
   } as unknown as WorkspaceGitApi, {
     get(target, property: string) {
       if (property in target) return (target as unknown as Record<string, unknown>)[property]
@@ -568,6 +570,7 @@ describe('ReviewBrowser favourites', () => {
       path: 'src/index.ts',
       status: FileChangeStatus.Modified,
       staged: false,
+      kind: FileStatKind.Text,
       additions: 1,
       deletions: 0,
     }])
@@ -586,6 +589,62 @@ describe('ReviewBrowser favourites', () => {
     const list = container.querySelector('.stacked-diff-list') as HTMLElement
     expect(list.scrollTop).toBe(TARGET_OFFSET)
     expect(screen.queryByTestId('file-viewer')).toBeNull()
+  })
+})
+
+describe('ReviewBrowser binary statistics', () => {
+  const binary: DiffFile = { path: 'image.png', status: FileChangeStatus.Modified, kind: FileStatKind.Binary, byteChange: 25 }
+  const text: DiffFile = { path: 'notes.ts', status: FileChangeStatus.Modified, kind: FileStatKind.Text, additions: 4, deletions: 2 }
+
+  it('keeps uncommitted summary in text lines and puts bytes only beside the binary file', async () => {
+    const workspace = makeReviewWorkspace([], 'uncommitted', [
+      { ...binary, staged: false }, { ...text, staged: false },
+    ], {
+      getUncommittedChanges: vi.fn().mockResolvedValue({
+        success: true,
+        changes: { files: [{ ...binary, staged: false }, { ...text, staged: false }], totalAdditions: 4, totalDeletions: 2 },
+      }),
+    })
+    const { container } = render(<ReviewBrowser workspace={workspace} tabId="review" isVisible={false} />)
+    await waitFor(() => { expect(container.querySelector('.diff-summary .diff-stats')?.textContent).toBe('+4-2') })
+    const binaryRow = container.querySelector('.diff-file-item[title="image.png"]')
+    expect(binaryRow?.querySelector('.diff-file-stats')?.textContent).toBe('+25 bytes')
+    expect(container.querySelector('.file-diff-section[data-file-path="image.png"] .file-diff-stats')?.textContent).toBe('+25 bytes')
+    expect(container.querySelector('.diff-summary')?.textContent).not.toContain('bytes')
+  })
+
+  it('keeps committed summary in text lines when committed files include a binary', async () => {
+    const workspace = makeReviewWorkspace([], 'committed', [], {
+      getDiff: vi.fn().mockResolvedValue({
+        success: true,
+        diff: { files: [binary, text], totalAdditions: 4, totalDeletions: 2, baseBranch: 'main', headBranch: 'feature' },
+      }),
+    })
+    const parent = makeWorkspace({ id: 'parent', path: '/parent', gitBranch: 'main' })
+    ;(workspace as unknown as StoreApi<unknown>).setState({
+      workspace: makeWorkspace({ id: 'child', path: '/repo', parentId: 'parent', isWorktree: true, gitBranch: 'feature',
+        appStates: { review: { applicationId: 'review', title: 'Review', state: { viewMode: 'committed' } } } }),
+      lookupWorkspace: (id: string) => id === 'parent' ? parent : undefined,
+    })
+    const { container } = render(<ReviewBrowser workspace={workspace} tabId="review" isVisible={false} parentWorkspaceId="parent" />)
+    await waitFor(() => { expect(container.querySelector('.diff-summary .diff-stats')?.textContent).toBe('+4-2') })
+    expect(container.querySelector('.diff-file-item[title="image.png"] .diff-file-stats')?.textContent).toBe('+25 bytes')
+    expect(container.querySelector('.file-diff-section[data-file-path="image.png"] .file-diff-stats')?.textContent).toBe('+25 bytes')
+    expect(container.querySelector('.diff-summary')?.textContent).not.toContain('bytes')
+  })
+
+  it('shows byte changes in the selected commit file row', async () => {
+    const workspace = makeReviewWorkspace([], 'commits', [], {
+      getLog: vi.fn().mockResolvedValue({ success: true, result: { commits: [{
+        hash: 'abcd', shortHash: 'abcd', author: 'A', date: '2024-01-01T00:00:00Z', message: 'Binary update', parentHashes: [],
+      }], hasMore: false } }),
+      getCommitDiff: vi.fn().mockResolvedValue({ success: true, files: [binary, text] }),
+    })
+    const { container } = render(<ReviewBrowser workspace={workspace} tabId="review" isVisible={false} />)
+    fireEvent.click(await screen.findByText('Binary update'))
+    await waitFor(() => { expect(container.querySelector('.diff-file-item[title="image.png"] .diff-file-stats')?.textContent).toBe('+25 bytes') })
+    expect(container.querySelector('.file-diff-section[data-file-path="image.png"] .file-diff-stats')?.textContent).toBe('+25 bytes')
+    expect(container.querySelector('.diff-file-item[title="notes.ts"] .diff-file-stats')?.textContent).toBe('+4-2')
   })
 })
 

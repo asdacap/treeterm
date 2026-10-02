@@ -4,6 +4,7 @@ import { createGitApi, parseStatus } from './gitClient'
 import type { ExecApi, FilesystemApi } from '../types'
 import { DEFAULT_EXEC_TIMEOUT_MS, ExecEventType, type ExecEvent } from '../../shared/ipc-types'
 import { FileChangeStatus } from '../../shared/types'
+import { FileStatKind } from '../types'
 
 // ---------------------------------------------------------------------------
 // Mock helpers (adapted from githubClient.test.ts pattern)
@@ -405,12 +406,12 @@ describe('createGitApi', () => {
 
         const appFile = diff.files.find(f => f.path === 'src/app.ts')
         expect(appFile?.status).toBe(FileChangeStatus.Modified)
-        expect(appFile?.additions).toBe(10)
-        expect(appFile?.deletions).toBe(5)
+        expect(appFile).toMatchObject({ kind: FileStatKind.Text, additions: 10 })
+        expect(appFile).toMatchObject({ kind: FileStatKind.Text, deletions: 5 })
 
         const newFile = diff.files.find(f => f.path === 'src/new.ts')
         expect(newFile?.status).toBe(FileChangeStatus.Added)
-        expect(newFile?.additions).toBe(3)
+        expect(newFile).toMatchObject({ kind: FileStatKind.Text, additions: 3 })
       }
     })
 
@@ -422,6 +423,7 @@ describe('createGitApi', () => {
         { stdout: 'base123' },
         { stdout: '-\t-\timage.png' },
         { stdout: 'M\timage.png' },
+        { stdout: ' image.png | Bin 100 -> 125 bytes\n 1 file changed' },
       ])
 
       const git = createGitApi(exec, fs, 'conn-1')
@@ -430,9 +432,103 @@ describe('createGitApi', () => {
       expect(result.success).toBe(true)
       if (result.success) {
         const imageFile = result.diff.files.find(f => f.path === 'image.png')
-        expect(imageFile?.additions).toBe(0)
-        expect(imageFile?.deletions).toBe(0)
+        expect(imageFile).toMatchObject({ kind: FileStatKind.Binary, byteChange: 25 })
       }
+    })
+  })
+
+  describe('binary branch comparison', () => {
+    it('keeps text-only totals and computes negative and zero byte changes by path', async () => {
+      const exec = createMockExec()
+      autoComplete(exec, [
+        { stdout: 'feature' },
+        { stdout: 'base123' },
+        { stdout: '3\t1\tsrc/app.ts\n-\t-\tfiles/shrunk image.png\n-\t-\tfiles/same.png' },
+        { stdout: 'M\tsrc/app.ts\nM\tfiles/shrunk image.png\nM\tfiles/same.png' },
+        { stdout: ' files/shrunk image.png | Bin 125 -> 80 bytes\n' },
+        { stdout: ' files/same.png | Bin 80 -> 80 bytes\n' },
+      ])
+      const result = await createGitApi(exec, createMockFilesystem(), 'conn-1').getDiff('/repo', 'main')
+      expect(result.success).toBe(true)
+      if (result.success) {
+        expect(result.diff.totalAdditions).toBe(3)
+        expect(result.diff.totalDeletions).toBe(1)
+        expect(result.diff.files).toEqual([
+          { path: 'src/app.ts', status: FileChangeStatus.Modified, kind: FileStatKind.Text, additions: 3, deletions: 1 },
+          { path: 'files/shrunk image.png', status: FileChangeStatus.Modified, kind: FileStatKind.Binary, byteChange: -45 },
+          { path: 'files/same.png', status: FileChangeStatus.Modified, kind: FileStatKind.Binary, byteChange: 0 },
+        ])
+      }
+      expect(exec.start).toHaveBeenNthCalledWith(5, 'conn-1', '/repo', 'git',
+        ['diff', '--stat', 'base123', 'feature', '--', 'files/shrunk image.png'], DEFAULT_EXEC_TIMEOUT_MS)
+    })
+
+    it('resolves a renamed binary using both original and new paths', async () => {
+      const exec = createMockExec()
+      autoComplete(exec, [
+        { stdout: 'feature' },
+        { stdout: 'base123' },
+        { stdout: '-\t-\tdir/{old => new}.png' },
+        { stdout: 'R099\tdir/old.png\tdir/new.png' },
+        { stdout: ' dir/{old => new}.png | Bin 100 -> 110 bytes\n' },
+      ])
+      const result = await createGitApi(exec, createMockFilesystem(), 'conn-1').getDiff('/repo', 'main')
+      expect(result.success).toBe(true)
+      if (result.success) expect(result.diff.files).toEqual([
+        { path: 'dir/new.png', status: FileChangeStatus.Renamed, kind: FileStatKind.Binary, byteChange: 10 },
+      ])
+      expect(exec.start).toHaveBeenNthCalledWith(5, 'conn-1', '/repo', 'git',
+        ['diff', '--stat', 'base123', 'feature', '--', 'dir/old.png', 'dir/new.png'], DEFAULT_EXEC_TIMEOUT_MS)
+    })
+
+    it('preserves a literal arrow in a binary filename', async () => {
+      const exec = createMockExec()
+      autoComplete(exec, [
+        { stdout: 'feature' }, { stdout: 'base123' },
+        { stdout: '-\t-\ticon => cover.png' }, { stdout: 'M\ticon => cover.png' },
+        { stdout: ' icon => cover.png | Bin 20 -> 21 bytes\n' },
+      ])
+      const result = await createGitApi(exec, createMockFilesystem(), 'conn-1').getDiff('/repo', 'main')
+      expect(result.success).toBe(true)
+      if (result.success) expect(result.diff.files[0]).toMatchObject({ path: 'icon => cover.png', kind: FileStatKind.Binary, byteChange: 1 })
+      expect(exec.start).toHaveBeenCalledWith('conn-1', '/repo', 'git',
+        ['diff', '--stat', 'base123', 'feature', '--', 'icon => cover.png'], DEFAULT_EXEC_TIMEOUT_MS)
+    })
+
+    it('rejects a missing binary stat instead of inventing zero bytes', async () => {
+      const exec = createMockExec()
+      autoComplete(exec, [
+        { stdout: 'feature' }, { stdout: 'base123' },
+        { stdout: '-\t-\timage.png' }, { stdout: 'M\timage.png' },
+        { stdout: ' 1 file changed, 0 insertions(+), 0 deletions(-)\n' },
+      ])
+      const result = await createGitApi(exec, createMockFilesystem(), 'conn-1').getDiff('/repo', 'main')
+      expect(result.success).toBe(false)
+      if (!result.success) expect(result.error).toContain('Missing or ambiguous binary byte sizes')
+    })
+
+    it('fails when Git has no binary byte sizes or reports rounded sizes', async () => {
+      const exec = createMockExec()
+      autoComplete(exec, [
+        { stdout: 'feature' }, { stdout: 'base123' },
+        { stdout: '-\t-\timage.png' }, { stdout: 'M\timage.png' },
+        { stdout: ' image.png | Bin 100 -> 0.1 KiB\n' },
+      ])
+      const result = await createGitApi(exec, createMockFilesystem(), 'conn-1').getDiff('/repo', 'main')
+      expect(result.success).toBe(false)
+      if (!result.success) expect(result.error).toContain('Invalid binary byte sizes')
+    })
+
+    it('fails if the size lookup command fails', async () => {
+      const exec = createMockExec()
+      autoComplete(exec, [
+        { stdout: 'feature' }, { stdout: 'base123' },
+        { stdout: '-\t-\timage.png' }, { stdout: 'M\timage.png' },
+        { stderr: 'fatal: invalid path', exitCode: 128 },
+      ])
+      const result = await createGitApi(exec, createMockFilesystem(), 'conn-1').getDiff('/repo', 'main')
+      expect(result.success).toBe(false)
+      if (!result.success) expect(result.error).toContain('fatal: invalid path')
     })
   })
 
@@ -757,8 +853,8 @@ describe('createGitApi', () => {
       if (result.success) {
         expect(result.changes.files).toHaveLength(1)
         expect(result.changes.files[0]!.path).toBe('src/app.ts')
-        expect(result.changes.files[0]!.additions).toBe(5)
-        expect(result.changes.files[0]!.deletions).toBe(2)
+        expect(result.changes.files[0]!).toMatchObject({ kind: FileStatKind.Text, additions: 5 })
+        expect(result.changes.files[0]!).toMatchObject({ kind: FileStatKind.Text, deletions: 2 })
         expect(result.changes.totalAdditions).toBe(5)
         expect(result.changes.totalDeletions).toBe(2)
       }
@@ -814,8 +910,8 @@ describe('createGitApi', () => {
       )
       expect(result.success).toBe(true)
       if (result.success) {
-        expect(result.changes.files[0]!.additions).toBe(7)
-        expect(result.changes.files[0]!.deletions).toBe(0)
+        expect(result.changes.files[0]!).toMatchObject({ kind: FileStatKind.Text, additions: 7 })
+        expect(result.changes.files[0]!).toMatchObject({ kind: FileStatKind.Text, deletions: 0 })
         expect(result.changes.totalAdditions).toBe(7)
       }
     })
@@ -828,14 +924,14 @@ describe('createGitApi', () => {
         { stdout: '' },
         { stdout: '' },
         { stdout: '-\t-\t/dev/null => logo.png\n', exitCode: 1 },
+        { stdout: ' /dev/null => logo.png | Bin 0 -> 23 bytes\n', exitCode: 1 },
       ])
 
       const git = createGitApi(exec, fs, 'conn-1')
       const result = await git.getUncommittedChanges('/repo')
       expect(result.success).toBe(true)
       if (result.success) {
-        expect(result.changes.files[0]!.additions).toBe(0)
-        expect(result.changes.files[0]!.deletions).toBe(0)
+        expect(result.changes.files[0]!).toMatchObject({ kind: FileStatKind.Binary, byteChange: 23 })
       }
     })
 
@@ -873,8 +969,8 @@ describe('createGitApi', () => {
       expect(result.success).toBe(true)
       if (result.success) {
         const tracked = result.changes.files.find(f => f.path === 'src/app.ts')
-        expect(tracked!.additions).toBe(3)
-        expect(tracked!.deletions).toBe(4)
+        expect(tracked!).toMatchObject({ kind: FileStatKind.Text, additions: 3 })
+        expect(tracked!).toMatchObject({ kind: FileStatKind.Text, deletions: 4 })
         expect(result.changes.totalAdditions).toBe(4)
         expect(result.changes.totalDeletions).toBe(4)
       }
@@ -910,6 +1006,48 @@ describe('createGitApi', () => {
       if (!result.success) {
         expect(result.error).toContain('Not a git repository')
       }
+    })
+  })
+
+  describe('binary uncommitted comparisons', () => {
+    it('tracks staged growth separately from unstaged shrinkage of the same path', async () => {
+      const exec = createMockExec()
+      autoComplete(exec, [
+        { stdout: 'MM asset.png\n M src/app.ts' },
+        { stdout: '-\t-\tasset.png' },
+        { stdout: '-\t-\tasset.png\n4\t2\tsrc/app.ts' },
+        { stdout: ' asset.png | Bin 100 -> 150 bytes\n' },
+        { stdout: ' asset.png | Bin 150 -> 120 bytes\n' },
+      ])
+      const result = await createGitApi(exec, createMockFilesystem(), 'conn-1').getUncommittedChanges('/repo')
+      expect(result.success).toBe(true)
+      if (result.success) {
+        expect(result.changes.files).toEqual([
+          { path: 'asset.png', status: FileChangeStatus.Modified, staged: true, kind: FileStatKind.Binary, byteChange: 50 },
+          { path: 'asset.png', status: FileChangeStatus.Modified, staged: false, kind: FileStatKind.Binary, byteChange: -30 },
+          { path: 'src/app.ts', status: FileChangeStatus.Modified, staged: false, kind: FileStatKind.Text, additions: 4, deletions: 2 },
+        ])
+        expect(result.changes.totalAdditions).toBe(4)
+        expect(result.changes.totalDeletions).toBe(2)
+      }
+      expect(exec.start).toHaveBeenCalledWith('conn-1', '/repo', 'git',
+        ['diff', '--cached', '--stat', '--', 'asset.png'], DEFAULT_EXEC_TIMEOUT_MS)
+      expect(exec.start).toHaveBeenCalledWith('conn-1', '/repo', 'git',
+        ['diff', '--stat', '--', 'asset.png'], DEFAULT_EXEC_TIMEOUT_MS)
+    })
+
+    it('compares a renamed staged binary using its original path', async () => {
+      const exec = createMockExec()
+      autoComplete(exec, [
+        { stdout: 'R  old name.png -> new name.png' },
+        { stdout: '-\t-\told name.png => new name.png' }, { stdout: '' },
+        { stdout: ' old name.png => new name.png | Bin 100 -> 90 bytes\n' },
+      ])
+      const result = await createGitApi(exec, createMockFilesystem(), 'conn-1').getUncommittedChanges('/repo')
+      expect(result.success).toBe(true)
+      if (result.success) expect(result.changes.files[0]).toMatchObject({ path: 'new name.png', kind: FileStatKind.Binary, byteChange: -10 })
+      expect(exec.start).toHaveBeenCalledWith('conn-1', '/repo', 'git',
+        ['diff', '--cached', '--stat', '--', 'old name.png', 'new name.png'], DEFAULT_EXEC_TIMEOUT_MS)
     })
   })
 
@@ -1188,6 +1326,38 @@ describe('createGitApi', () => {
     })
   })
 
+  describe('binary commit comparisons', () => {
+    it('uses --root size stats for a binary in the initial commit', async () => {
+      const exec = createMockExec()
+      autoComplete(exec, [
+        { stdout: '-\t-\tnew.png' },
+        { stdout: 'A\tnew.png' },
+        { stdout: ' new.png | Bin 0 -> 62 bytes\n' },
+      ])
+      const result = await createGitApi(exec, createMockFilesystem(), 'conn-1').getCommitDiff('/repo', 'root123')
+      expect(result.success).toBe(true)
+      if (result.success) expect(result.files).toEqual([
+        { path: 'new.png', status: FileChangeStatus.Added, kind: FileStatKind.Binary, byteChange: 62 },
+      ])
+      expect(exec.start).toHaveBeenCalledWith('conn-1', '/repo', 'git',
+        ['diff-tree', '--no-commit-id', '--root', '-r', '--stat', 'root123', '--', 'new.png'], DEFAULT_EXEC_TIMEOUT_MS)
+    })
+
+    it('counts removed binary bytes in a subsequent commit', async () => {
+      const exec = createMockExec()
+      autoComplete(exec, [
+        { stdout: '-\t-\told.png' },
+        { stdout: 'D\told.png' },
+        { stdout: ' old.png | Bin 73 -> 0 bytes\n' },
+      ])
+      const result = await createGitApi(exec, createMockFilesystem(), 'conn-1').getCommitDiff('/repo', 'commit123')
+      expect(result.success).toBe(true)
+      if (result.success) expect(result.files).toEqual([
+        { path: 'old.png', status: FileChangeStatus.Deleted, kind: FileStatKind.Binary, byteChange: -73 },
+      ])
+    })
+  })
+
   describe('getCommitDiff', () => {
     it('parses A/M/D/R status types', async () => {
       const nameStatus = 'A\tnew.ts\nM\tmod.ts\nD\tdel.ts\nR100\trenamed.ts'
@@ -1218,14 +1388,14 @@ describe('createGitApi', () => {
       autoComplete(exec, [
         { stdout: '-\t-\timage.png' },
         { stdout: 'M\timage.png' },
+        { stdout: ' image.png | Bin 100 -> 125 bytes\n 1 file changed' },
       ])
 
       const git = createGitApi(exec, fs, 'conn-1')
       const result = await git.getCommitDiff('/repo', 'abc123')
       expect(result.success).toBe(true)
       if (result.success) {
-        expect(result.files[0]!.additions).toBe(0)
-        expect(result.files[0]!.deletions).toBe(0)
+        expect(result.files[0]!).toMatchObject({ kind: FileStatKind.Binary, byteChange: 25 })
       }
     })
 
@@ -2315,8 +2485,8 @@ describe('createGitApi', () => {
       expect(result.success).toBe(true)
       if (result.success) {
         expect(result.changes.files).toHaveLength(1)
-        expect(result.changes.files[0]!.additions).toBe(3)
-        expect(result.changes.files[0]!.deletions).toBe(1)
+        expect(result.changes.files[0]!).toMatchObject({ kind: FileStatKind.Text, additions: 3 })
+        expect(result.changes.files[0]!).toMatchObject({ kind: FileStatKind.Text, deletions: 1 })
       }
     })
 
@@ -2327,14 +2497,14 @@ describe('createGitApi', () => {
         { stdout: 'M  image.png' },
         { stdout: '-\t-\timage.png' },  // binary in staged numstat
         { stdout: '' },
+        { stdout: ' image.png | Bin 100 -> 125 bytes\n' },
       ])
 
       const git = createGitApi(exec, fs, 'conn-1')
       const result = await git.getUncommittedChanges('/repo')
       expect(result.success).toBe(true)
       if (result.success) {
-        expect(result.changes.files[0]!.additions).toBe(0)
-        expect(result.changes.files[0]!.deletions).toBe(0)
+        expect(result.changes.files[0]!).toMatchObject({ kind: FileStatKind.Binary, byteChange: 25 })
       }
     })
   })

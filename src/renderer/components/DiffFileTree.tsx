@@ -1,6 +1,8 @@
 import React, { useState } from 'react'
 import { Check } from 'lucide-react'
 import type { DiffFile, UncommittedFile } from '../types'
+import { FileStatKind } from '../types'
+import { FileChangeStats } from './FileChangeStats'
 import { useContextMenuStore } from '../store/contextMenu'
 import ContextMenu from './ContextMenu'
 
@@ -115,7 +117,9 @@ export function filterFilesByDir<T extends DiffFile | UncommittedFile>(
 // Sum additions and deletions for every file under a node's subtree.
 function getNodeStats(node: TreeNode): { additions: number; deletions: number } {
   if (node.file !== null) {
-    return { additions: node.file.additions, deletions: node.file.deletions }
+    return node.file.kind === FileStatKind.Text
+      ? { additions: node.file.additions, deletions: node.file.deletions }
+      : { additions: 0, deletions: 0 }
   }
   let additions = 0
   let deletions = 0
@@ -190,8 +194,7 @@ export function CommittedDiffFileTree({
           {getStatusIcon(file.status)}
           <span className="diff-file-path">{node.name}</span>
           <span className="diff-file-stats">
-            <span className="additions">+{file.additions}</span>
-            <span className="deletions">-{file.deletions}</span>
+            <FileChangeStats stats={file} />
           </span>
           {isViewed && <Check size={12} className="diff-file-viewed-icon" />}
         </div>
@@ -290,8 +293,7 @@ export function UncommittedDiffFileTree({
           {getStatusIcon(file.status)}
           <span className="diff-file-path">{node.name}</span>
           <span className="diff-file-stats">
-            <span className="additions">+{file.additions}</span>
-            <span className="deletions">-{file.deletions}</span>
+            <FileChangeStats stats={file} />
           </span>
           <button
             className="diff-file-action"
