@@ -60,10 +60,11 @@ enum MergeOutputStatus {
   Failed = 'failed',
 }
 
-/** Live output of the `git merge` started from this page, shown terminal-style above the diff. */
+/** Live output of every git command in a merge started from this page (auto-commit, merge, worktree
+ *  removal), shown terminal-style above the diff. */
 type MergeOutput =
   | { status: MergeOutputStatus.Hidden }
-  | { status: MergeOutputStatus.Running | MergeOutputStatus.Succeeded | MergeOutputStatus.Failed; command: string; output: string[] }
+  | { status: MergeOutputStatus.Running | MergeOutputStatus.Succeeded | MergeOutputStatus.Failed; title: string; output: string[] }
 
 export default function ReviewBrowser({
   workspace,
@@ -559,9 +560,9 @@ export default function ReviewBrowser({
     setCommitting(false)
   }
 
-  const startMergeOutput = (squash: boolean): ((data: string) => void) => {
-    const command = `git merge ${squash ? '--squash ' : ''}${wsData.gitBranch ?? ''}`
-    setMergeOutput({ status: MergeOutputStatus.Running, command, output: [] })
+  const startMergeOutput = (squash: boolean, removeWorktree: boolean): ((data: string) => void) => {
+    const title = `${squash ? 'Squash merge' : 'Merge'} ${wsData.gitBranch ?? ''}${removeWorktree ? ' and remove worktree' : ''}`
+    setMergeOutput({ status: MergeOutputStatus.Running, title, output: [] })
     return (data: string) => {
       setMergeOutput((prev) => prev.status === MergeOutputStatus.Hidden ? prev : { ...prev, output: [...prev.output, data] })
     }
@@ -601,7 +602,7 @@ export default function ReviewBrowser({
     setIsProcessing(true)
     setProcessingAction(squash ? 'squash' : 'merge')
 
-    const onProgress = startMergeOutput(squash)
+    const onProgress = startMergeOutput(squash, true)
     try {
       const result = await mergeAndRemove(squash, onProgress)
       if (!result.success) {
@@ -636,7 +637,7 @@ export default function ReviewBrowser({
     setIsProcessing(true)
     setProcessingAction(squash ? 'squash-keep' : 'merge-keep')
 
-    const onProgress = startMergeOutput(squash)
+    const onProgress = startMergeOutput(squash, false)
     try {
       const result = await mergeAndKeep(squash, onProgress)
       if (!result.success) {
@@ -1670,7 +1671,7 @@ function renderMergeOutput(mergeOutput: MergeOutput, onDismiss: () => void): Rea
     <div className="review-merge-output-panel" data-status={mergeOutput.status}>
       <div className="review-merge-output-header">
         {icons[mergeOutput.status]()}
-        <span className="review-merge-output-command">$ {mergeOutput.command}</span>
+        <span className="review-merge-output-title">{mergeOutput.title}</span>
         {mergeOutput.status !== MergeOutputStatus.Running && (
           <button className="review-merge-output-close" onClick={onDismiss} title="Hide merge output">
             <X size={14} />

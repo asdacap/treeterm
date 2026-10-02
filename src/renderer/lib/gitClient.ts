@@ -37,6 +37,9 @@ const GIT_EXEC_BACKSTOP_MARGIN_MS = 5000
 // takes over 30s on large repos.
 const WORKTREE_ADD_TIMEOUT_MS = 10 * 60_000
 
+// `git worktree remove` deletes the whole checkout, which is as slow as adding it on large repos.
+const WORKTREE_REMOVE_TIMEOUT_MS = 10 * 60_000
+
 // `git merge` updates the parent's checkout (plus LFS smudge and hooks), which takes over 30s on large repos.
 const MERGE_TIMEOUT_MS = 5 * 60_000
 
@@ -67,7 +70,7 @@ export interface GitApi {
   merge: (targetWorktreePath: string, worktreeBranch: string, squash?: boolean, onProgress?: (data: string) => void) => Promise<IpcResult>
   checkMergeConflicts: (repoPath: string, sourceBranch: string, targetBranch: string) => Promise<ConflictCheckResult>
   hasUncommittedChanges: (repoPath: string) => Promise<boolean>
-  commitAll: (repoPath: string, message: string) => Promise<IpcResult>
+  commitAll: (repoPath: string, message: string, onProgress?: (data: string) => void) => Promise<IpcResult>
   deleteBranch: (repoPath: string, branchName: string, onProgress?: (data: string) => void) => Promise<IpcResult>
   renameBranch: (repoPath: string, oldName: string, newName: string) => Promise<IpcResult>
   getUncommittedChanges: (repoPath: string) => Promise<IpcResult<{ changes: UncommittedChanges }>>
@@ -107,6 +110,8 @@ async function execGit(
   const startResult = await exec.start(connectionId, cwd, 'git', args, timeoutMs)
   if (!startResult.success) throw new Error(startResult.error)
   const { execId } = startResult
+  // Echo the command so a progress view reads like a terminal session.
+  options?.onProgress?.(`$ git ${args.join(' ')}\n`)
 
   let unsub: () => void = () => undefined
   return withTimeout(new Promise<ExecResult>((resolve, reject) => {
@@ -436,7 +441,7 @@ export function createGitApi(exec: ExecApi, filesystem: FilesystemApi, connectio
 
         if (deleteBranch) {
           try {
-            const branchResult = await git(worktreePath, ['rev-parse', '--abbrev-ref', 'HEAD'])
+            const branchResult = await git(worktreePath, ['rev-parse', '--abbrev-ref', 'HEAD'], { onProgress })
             if (branchResult.exitCode === 0) {
               branchName = branchResult.stdout.trim()
             }
@@ -445,7 +450,7 @@ export function createGitApi(exec: ExecApi, filesystem: FilesystemApi, connectio
           }
         }
 
-        const result = await git(repoPath, ['worktree', 'remove', worktreePath, '--force'], { onProgress })
+        const result = await git(repoPath, ['worktree', 'remove', worktreePath, '--force'], { onProgress, timeoutMs: WORKTREE_REMOVE_TIMEOUT_MS })
         if (result.exitCode !== 0) {
           return { success: false, error: interpretError(result).message }
         }
@@ -705,9 +710,9 @@ export function createGitApi(exec: ExecApi, filesystem: FilesystemApi, connectio
     },
 
     // ----- commitAll -----
-    async commitAll(repoPath: string, message: string): Promise<IpcResult> {
+    async commitAll(repoPath: string, message: string, onProgress?: (data: string) => void): Promise<IpcResult> {
       try {
-        const result = await git(repoPath, ['commit', '-am', message])
+        const result = await git(repoPath, ['commit', '-am', message], { onProgress })
         if (result.exitCode !== 0) {
           return { success: false, error: interpretError(result).message }
         }

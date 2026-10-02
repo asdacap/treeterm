@@ -3654,7 +3654,7 @@ body,
   background: var(--bg-secondary);
 }
 
-.review-merge-output-command {
+.review-merge-output-title {
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;

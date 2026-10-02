@@ -682,7 +682,7 @@ describe('ReviewBrowser merge output', () => {
     await waitFor(() => {
       expect(container.querySelector('.review-merge-output')?.textContent).toBe('Updating abc..def\n')
     })
-    expect(container.querySelector('.review-merge-output-command')?.textContent).toBe('$ git merge feature')
+    expect(container.querySelector('.review-merge-output-title')?.textContent).toBe('Merge feature')
     expect(screen.queryByTitle('Hide merge output')).toBeNull()
 
     act(() => { finishMerge({ success: true }) })

@@ -1281,7 +1281,8 @@ export function createSessionStore(
         if (hasChanges) {
           const commitResult = await deps.git.commitAll(
             workspace.path,
-            `WIP: Auto-commit before merge from ${workspace.name}`
+            `WIP: Auto-commit before merge from ${workspace.name}`,
+            onProgress
           )
           if (!commitResult.success) {
             store.setState(s => ({
@@ -1800,7 +1801,7 @@ export function createSessionStore(
         }
 
         try {
-          await removeWorkspaceInternal(id, { keepBranch: false, keepWorktree: false })
+          await removeWorkspaceInternal(id, { keepBranch: false, keepWorktree: false, onProgress })
         } catch (err) {
           // Merge succeeded but removal failed — show operation error
           const currentEntry = get().workspaces.get(id)

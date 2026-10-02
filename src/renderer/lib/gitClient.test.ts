@@ -708,6 +708,17 @@ describe('createGitApi', () => {
   })
 
   describe('commitAll', () => {
+    it('streams the commit to onProgress', async () => {
+      const exec = createMockExec()
+      const fs = createMockFilesystem()
+      autoComplete(exec, [{ stdout: '[feature def5678] fix bug\n' }])
+
+      const onProgress = vi.fn()
+      const git = createGitApi(exec, fs, 'conn-1')
+      await git.commitAll('/repo', 'fix bug', onProgress)
+      expect(onProgress.mock.calls).toEqual([['$ git commit -am fix bug\n'], ['[feature def5678] fix bug\n']])
+    })
+
     it('returns success on commit', async () => {
       const exec = createMockExec()
       const fs = createMockFilesystem()
@@ -1578,6 +1589,29 @@ describe('createGitApi', () => {
   })
 
   describe('removeWorktree', () => {
+    it('streams every command with a 10 minute removal timeout', async () => {
+      const exec = createMockExec()
+      const fs = createMockFilesystem()
+      autoComplete(exec, [
+        { stdout: 'feature\n' },  // rev-parse --abbrev-ref HEAD
+        { stdout: '' },           // worktree remove
+        { stdout: 'Deleted branch feature\n' },  // branch -D
+      ])
+
+      const onProgress = vi.fn()
+      const git = createGitApi(exec, fs, 'conn-1')
+      const result = await git.removeWorktree('/repo', '/repo/.worktrees/feature', true, onProgress)
+      expect(result.success).toBe(true)
+      expect(vi.mocked(exec.start).mock.calls[1]?.[4]).toBe(10 * 60_000)
+      expect(onProgress.mock.calls).toEqual([
+        ['$ git rev-parse --abbrev-ref HEAD\n'],
+        ['feature\n'],
+        ['$ git worktree remove /repo/.worktrees/feature --force\n'],
+        ['$ git branch -D feature\n'],
+        ['Deleted branch feature\n'],
+      ])
+    })
+
     it('removes worktree without branch deletion', async () => {
       const exec = createMockExec()
       const fs = createMockFilesystem()
@@ -1708,7 +1742,7 @@ describe('createGitApi', () => {
       await git.merge('/repo', 'feature', false, onProgress)
 
       expect(vi.mocked(exec.start).mock.calls[0]?.[4]).toBe(5 * 60_000)
-      expect(onProgress).toHaveBeenCalledWith('Updating abc..def\nFast-forward\n')
+      expect(onProgress.mock.calls).toEqual([['$ git merge feature\n'], ['Updating abc..def\nFast-forward\n']])
     })
   })
 

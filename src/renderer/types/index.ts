@@ -426,7 +426,7 @@ export interface GitApi {
   checkMergeConflicts: (repoPath: string, sourceBranch: string, targetBranch: string) => Promise<ConflictCheckResult>
   merge: (targetWorktreePath: string, worktreeBranch: string, squash?: boolean, onProgress?: (data: string) => void) => Promise<IpcResult>
   hasUncommittedChanges: (repoPath: string) => Promise<boolean>
-  commitAll: (repoPath: string, message: string) => Promise<IpcResult>
+  commitAll: (repoPath: string, message: string, onProgress?: (data: string) => void) => Promise<IpcResult>
   deleteBranch: (repoPath: string, branchName: string, onProgress?: (data: string) => void) => Promise<IpcResult>
   renameBranch: (repoPath: string, oldName: string, newName: string) => Promise<IpcResult>
   getUncommittedChanges: (repoPath: string) => Promise<IpcResult<{ changes: UncommittedChanges }>>

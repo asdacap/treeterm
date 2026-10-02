@@ -797,6 +797,7 @@ describe('createSessionStore', () => {
       const result = await store.getState().mergeAndRemoveWorkspace(childId, false, onProgress)
       expect(result).toEqual({ success: true })
       expect(deps.git.merge).toHaveBeenCalledWith(expect.any(String), expect.any(String), false, onProgress)
+      expect(deps.git.removeWorktree).toHaveBeenCalledWith(expect.any(String), expect.any(String), true, onProgress)
       expect(store.getState().workspaces.get(childId)).toBeUndefined()
     })
 
@@ -805,8 +806,9 @@ describe('createSessionStore', () => {
       vi.mocked(deps.git.hasUncommittedChanges)
         .mockResolvedValueOnce(false)
         .mockResolvedValueOnce(true)
-      await store.getState().mergeAndRemoveWorkspace(childId, false, vi.fn())
-      expect(deps.git.commitAll).toHaveBeenCalled()
+      const onProgress = vi.fn()
+      await store.getState().mergeAndRemoveWorkspace(childId, false, onProgress)
+      expect(deps.git.commitAll).toHaveBeenCalledWith(expect.any(String), expect.any(String), onProgress)
     })
 
     it('mergeAndRemoveWorkspace fails when parent has uncommitted changes', async () => {
