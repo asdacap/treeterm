@@ -13,6 +13,7 @@ import {
   type CreatePtyRequest,
   type KillPtyRequest,
   type PtyInput,
+  PtyAttachKind as ProtoPtyAttachKind,
   type PtyOutput,
   type ExecInput,
   type ExecOutput,
@@ -29,6 +30,7 @@ import {
 } from '../generated/treeterm'
 import { getDefaultSocketPath } from './socketPath'
 import {
+  PtyAttachKind,
   PtyEventType,
   FileWatchEventType,
   type PtyEvent,
@@ -59,6 +61,11 @@ type CreateSessionConfig = {
 
 type DisconnectListener = () => void
 
+const PROTO_ATTACH_KIND: Record<PtyAttachKind, ProtoPtyAttachKind> = {
+  [PtyAttachKind.Background]: ProtoPtyAttachKind.PTY_ATTACH_KIND_BACKGROUND,
+  [PtyAttachKind.Terminal]: ProtoPtyAttachKind.PTY_ATTACH_KIND_TERMINAL,
+}
+
 /**
  * Self-contained class owning one gRPC duplex stream for one terminal.
  * No shared state — each terminal gets its own independent PtyStream.
@@ -74,7 +81,7 @@ export class PtyStream {
   private detached: boolean = false
   private pendingWrites: Array<(err: Error | null) => void> = []
 
-  constructor(client: TreeTermDaemonClient, handle: string, sessionId: string, onEvent: (event: PtyEvent) => void) {
+  constructor(client: TreeTermDaemonClient, handle: string, sessionId: string, kind: PtyAttachKind, onEvent: (event: PtyEvent) => void) {
     this.handle = handle
     this.sessionId = sessionId
     const metadata = new grpc.Metadata()
@@ -88,6 +95,10 @@ export class PtyStream {
         onEvent({ type: PtyEventType.Exit, exitCode: output.exit.exitCode, signal: output.exit.signal })
       } else if (output.resize) {
         onEvent({ type: PtyEventType.Resize, cols: output.resize.cols, rows: output.resize.rows })
+      } else if (output.replayStart) {
+        onEvent({ type: PtyEventType.ReplayStart })
+      } else if (output.replayEnd) {
+        onEvent({ type: PtyEventType.ReplayEnd })
       }
     })
 
@@ -108,7 +119,7 @@ export class PtyStream {
       onEvent({ type: PtyEventType.End })
     })
 
-    this.stream.write({ start: { sessionId } })
+    this.stream.write({ start: { sessionId, kind: PROTO_ATTACH_KIND[kind] } })
   }
 
   private drainPendingWrites(error: Error): void {
@@ -142,6 +153,16 @@ export class PtyStream {
         reject(error instanceof Error ? error : new Error(String(error)))
       }
     })
+  }
+
+  focus(): void {
+    if (this.closed) return
+    try {
+      this.stream.write({ focus: {} })
+    } catch (error) {
+      console.error(`[PtyStream ${this.handle}] failed to send focus:`, error)
+      this.closed = true
+    }
   }
 
   resize(cols: number, rows: number): void {
@@ -305,11 +326,11 @@ export class GrpcDaemonClient {
    * Open a new independent PtyStream for a given session.
    * Each caller gets its own gRPC duplex stream — no shared state.
    */
-  openPtyStream(handle: string, sessionId: string, onEvent: (event: PtyEvent) => void): PtyStream {
+  openPtyStream(handle: string, sessionId: string, kind: PtyAttachKind, onEvent: (event: PtyEvent) => void): PtyStream {
     if (!this.client) {
       throw new Error('Not connected to daemon')
     }
-    return new PtyStream(this.client, handle, sessionId, onEvent)
+    return new PtyStream(this.client, handle, sessionId, kind, onEvent)
   }
 
   onDisconnect(listener: DisconnectListener): () => void {

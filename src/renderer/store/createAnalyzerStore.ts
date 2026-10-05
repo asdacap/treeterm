@@ -8,7 +8,7 @@ import { ClassifierProvider } from '../../shared/types'
 import { classificationIdentity } from '../lib/classificationProvider'
 import type { Classification, ClassifierSettings } from '../types/classification'
 import type { LlmApi, Settings, PtyEvent } from '../types'
-import { PtyEventType } from '../../shared/ipc-types'
+import { PtyAttachKind, PtyEventType } from '../../shared/ipc-types'
 import { DisposableStore, thenRegisterOrDispose, toDisposable } from '../../shared/lifecycle'
 import type { Tty } from './createTtyStore'
 import { createIdleDetector, idleTimeoutMs } from '../utils/idleDetector'
@@ -24,7 +24,7 @@ export interface AnalyzerDeps {
   getDisplayName: () => string | undefined
   getDescription: () => string | undefined
   setActivityTabState: SetActivityTabState
-  openTtyStream: (ptyId: string, onEvent: (event: PtyEvent) => void) => Promise<Tty>
+  openTtyStream: (ptyId: string, kind: PtyAttachKind, onEvent: (event: PtyEvent) => void) => Promise<Tty>
   cwd: string
   renameBranch: (oldName: string, newName: string) => Promise<void>
   getGitBranch: () => string | undefined
@@ -492,7 +492,7 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
 
       // The daemon replays scrollback as Data events after attach, and an
       // already-exited PTY arrives as an Exit event — both land in onEvent below.
-      void thenRegisterOrDispose(deps.openTtyStream(ptyId, (event) => {
+      void thenRegisterOrDispose(deps.openTtyStream(ptyId, PtyAttachKind.Background, (event) => {
         if (owner.isDisposed) return
         switch (event.type) {
           case PtyEventType.Data:

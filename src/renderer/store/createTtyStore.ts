@@ -6,6 +6,7 @@ import type { IDisposable } from '../../shared/lifecycle'
 export interface TtyTerminalDeps {
   write: (handle: string, data: string) => Promise<void>
   resize: (handle: string, cols: number, rows: number) => void
+  focus: (handle: string) => void
   kill: (sessionId: string) => void
   /** Detach this attachment's main-side stream (by routing handle) without killing the PTY. */
   detach: (handle: string) => void
@@ -15,6 +16,8 @@ export interface TtyState {
   ptyId: string
   write(data: string): Promise<void>
   resize(cols: number, rows: number): void
+  /** Claim input for this attachment: the daemon drops other attachments' writes. */
+  focus(): void
   /** Destroys the daemon-side PTY process. This is `close()`, not `dispose()`. */
   kill(): void
 }
@@ -42,6 +45,7 @@ export function createTtyStore(
     ptyId,
     write: (data: string) => terminal.write(handle, data),
     resize: (cols: number, rows: number) => { terminal.resize(handle, cols, rows); },
+    focus: () => { terminal.focus(handle); },
     kill: () => { terminal.kill(ptyId); },
   }))
   // Detach exactly once: double-dispose (e.g. a DisposableStore also owning it) must

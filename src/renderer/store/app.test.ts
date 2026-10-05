@@ -187,6 +187,7 @@ const mockDeps = {
   openExternal: vi.fn<(url: string) => void>(),
   getViewportSize: vi.fn<() => { width: number; height: number }>().mockReturnValue({ width: 1024, height: 768 }),
   keyEventTarget: { addEventListener: vi.fn(), removeEventListener: vi.fn() },
+  windowFocusTarget: { addEventListener: vi.fn(), removeEventListener: vi.fn() },
   isKeyDiagEnabled: vi.fn<() => boolean>().mockReturnValue(false),
   sessionNamesStore: useSessionNamesStore,
 } as unknown as AppDeps

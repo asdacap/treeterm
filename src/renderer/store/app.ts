@@ -7,6 +7,7 @@ import { getUnmergedSubWorkspaces } from './createSessionStore'
 import { useSettingsStore } from './settings'
 import { useKeybindingStore } from './keybinding'
 import type { KeyEventTarget } from './keybinding'
+import type { WindowFocusTarget } from '../utils/keyboardFocus'
 import { initKeyboardHealthMonitor } from '../utils/keyboardHealthMonitor'
 import { useNavigationStore } from './navigation'
 import { useActivityStateStore } from './activityState'
@@ -63,6 +64,7 @@ export interface AppDeps {
   openExternal: (url: string) => void
   getViewportSize: () => { width: number; height: number }
   keyEventTarget: KeyEventTarget
+  windowFocusTarget: WindowFocusTarget
   isKeyDiagEnabled: () => boolean
   sessionNamesStore: StoreApi<SessionNamesState>
 }
@@ -131,6 +133,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
   openExternal: UNINITIALIZED,
   getViewportSize: UNINITIALIZED,
   keyEventTarget: UNINITIALIZED,
+  windowFocusTarget: UNINITIALIZED,
   isKeyDiagEnabled: UNINITIALIZED,
   sessionNamesStore: UNINITIALIZED,
 

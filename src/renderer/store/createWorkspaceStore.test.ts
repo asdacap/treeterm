@@ -1017,9 +1017,9 @@ describe('createWorkspaceStore', () => {
       const writeFn = vi.fn<(handle: string, data: string) => Promise<void>>().mockResolvedValue(undefined)
       const killFn = vi.fn<(ptyId: string) => void>()
       const unsubscribe = vi.fn()
-      const terminal: TtyTerminalDeps = { write: writeFn, resize: vi.fn(), kill: killFn, detach: vi.fn() }
+      const terminal: TtyTerminalDeps = { write: writeFn, resize: vi.fn(), focus: vi.fn(), kill: killFn, detach: vi.fn() }
       const deps = makeHandleDeps({
-        openTtyStream: vi.fn<(...args: any[]) => any>().mockImplementation((ptyId: string, onEvent: (event: { type: string }) => void) => {
+        openTtyStream: vi.fn<(...args: any[]) => any>().mockImplementation((ptyId: string, _kind: string, onEvent: (event: { type: string }) => void) => {
           onEventCb = onEvent
           return Promise.resolve(createTtyStore(ptyId, 'handle-1', terminal, toDisposable(unsubscribe)))
         }),
@@ -1029,6 +1029,15 @@ describe('createWorkspaceStore', () => {
         return onEventCb
       } }
     }
+
+    it('attaches as background, so its writes land whichever terminal holds focus', async () => {
+      const { deps } = makeTtyDeps()
+      const store = createWorkspaceStore(makeWorkspace(), deps)
+
+      await store.getState().getTtyWriter('pty-1')
+
+      expect(deps.openTtyStream).toHaveBeenCalledWith('pty-1', 'background', expect.any(Function))
+    })
 
     // These three pin the leak this refactor fixed: getTtyWriter used to discard the
     // subscription returned by openTtyStream, so nothing ever released it — not on

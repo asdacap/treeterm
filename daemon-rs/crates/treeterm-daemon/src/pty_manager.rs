@@ -1,7 +1,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::ffi::{CStr, CString};
 use std::os::unix::io::{AsRawFd, RawFd};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use tokio::io::unix::AsyncFd;
 use tokio::sync::{broadcast, mpsc, Mutex, RwLock};
@@ -47,6 +47,9 @@ pub struct PtySession {
     /// Client-supplied idempotency key (see `create_pty`). Kept on the session so
     /// `kill` can clean the handle→session map.
     pub handle: Option<String>,
+    /// The attachment that focused most recently; only it may write (see `write_from`).
+    /// None until some attachment focuses, or after the owner detaches — then any may write.
+    pub input_owner: Option<u64>,
 }
 
 #[derive(Clone)]
@@ -58,6 +61,8 @@ pub struct PtyManager {
     /// re-issues CreatePty with the same handle and gets the running session back
     /// instead of spawning a duplicate that orphans the original.
     handles: Arc<RwLock<HashMap<String, String>>>,
+    /// Source of attachment ids — one per PtyStream, for `input_owner`.
+    attachments: Arc<AtomicU64>,
 }
 
 fn get_login_shell() -> String {
@@ -79,6 +84,7 @@ impl PtyManager {
         Self {
             sessions: Arc::new(RwLock::new(HashMap::new())),
             counter: Arc::new(AtomicUsize::new(0)),
+            attachments: Arc::new(AtomicU64::new(0)),
             handles: Arc::new(RwLock::new(HashMap::new())),
         }
     }
@@ -191,6 +197,7 @@ impl PtyManager {
             resize_tx: resize_tx.clone(),
             reader_handle: None,
             handle: handle.clone(),
+            input_owner: None,
         };
 
         let session = Arc::new(Mutex::new(session));
@@ -277,6 +284,40 @@ impl PtyManager {
         }
 
         Ok(events)
+    }
+
+    /// A fresh id for one attachment (PtyStream) to a session.
+    pub fn next_attachment_id(&self) -> u64 {
+        self.attachments.fetch_add(1, Ordering::Relaxed) + 1
+    }
+
+    /// Make `attachment` the only one allowed to write to the session.
+    pub async fn focus(&self, session_id: &str, attachment: u64) -> Result<(), String> {
+        let session = self.get_session(session_id).await?;
+        session.lock().await.input_owner = Some(attachment);
+        Ok(())
+    }
+
+    /// Give up ownership when `attachment` detaches, so the remaining ones can write.
+    pub async fn release(&self, session_id: &str, attachment: u64) {
+        let Ok(session) = self.get_session(session_id).await else { return };
+        let mut session = session.lock().await;
+        if session.input_owner == Some(attachment) {
+            session.input_owner = None;
+        }
+    }
+
+    /// Write on behalf of an attachment. Every attached terminal answers the program's
+    /// queries; of the `gated` (terminal) attachments, only the focused one's answers and
+    /// keystrokes reach the PTY. Ungated (background) writes always land. Returns whether
+    /// the data was written.
+    pub async fn write_from(&self, session_id: &str, attachment: u64, gated: bool, data: &[u8]) -> Result<bool, String> {
+        let owner = self.get_session(session_id).await?.lock().await.input_owner;
+        if gated && owner.is_some_and(|owner| owner != attachment) {
+            return Ok(false);
+        }
+        self.write(session_id, data).await?;
+        Ok(true)
     }
 
     pub async fn write(&self, session_id: &str, data: &[u8]) -> Result<(), String> {
@@ -896,6 +937,73 @@ mod tests {
         assert!(result.unwrap().is_ok(), "write returned an error");
 
         mgr.kill(&id).await;
+    }
+
+    #[tokio::test]
+    async fn any_attachment_writes_until_one_focuses() {
+        let mgr = PtyManager::new();
+        let id = mgr.create_pty("/tmp".into(), HashMap::new(), 80, 24, None, None).await.unwrap();
+        let (a, b) = (mgr.next_attachment_id(), mgr.next_attachment_id());
+        assert_ne!(a, b);
+
+        assert!(mgr.write_from(&id, a, true, b"x").await.unwrap());
+        assert!(mgr.write_from(&id, b, true, b"x").await.unwrap());
+
+        mgr.kill(&id).await;
+    }
+
+    #[tokio::test]
+    async fn only_the_most_recently_focused_attachment_writes() {
+        let mgr = PtyManager::new();
+        let id = mgr.create_pty("/tmp".into(), HashMap::new(), 80, 24, None, None).await.unwrap();
+        let (a, b) = (mgr.next_attachment_id(), mgr.next_attachment_id());
+
+        mgr.focus(&id, a).await.unwrap();
+        assert!(mgr.write_from(&id, a, true, b"x").await.unwrap());
+        assert!(!mgr.write_from(&id, b, true, b"\x1b[?1;2c").await.unwrap());
+
+        mgr.focus(&id, b).await.unwrap();
+        assert!(!mgr.write_from(&id, a, true, b"\x1b[?1;2c").await.unwrap());
+        assert!(mgr.write_from(&id, b, true, b"x").await.unwrap());
+
+        mgr.kill(&id).await;
+    }
+
+    #[tokio::test]
+    async fn background_attachments_write_regardless_of_focus() {
+        let mgr = PtyManager::new();
+        let id = mgr.create_pty("/tmp".into(), HashMap::new(), 80, 24, None, None).await.unwrap();
+        let (terminal, background) = (mgr.next_attachment_id(), mgr.next_attachment_id());
+        mgr.focus(&id, terminal).await.unwrap();
+
+        assert!(mgr.write_from(&id, background, false, b"prompt\n").await.unwrap());
+
+        mgr.kill(&id).await;
+    }
+
+    #[tokio::test]
+    async fn releasing_the_owner_lets_every_attachment_write_again() {
+        let mgr = PtyManager::new();
+        let id = mgr.create_pty("/tmp".into(), HashMap::new(), 80, 24, None, None).await.unwrap();
+        let (a, b) = (mgr.next_attachment_id(), mgr.next_attachment_id());
+        mgr.focus(&id, a).await.unwrap();
+
+        // A non-owner detaching leaves ownership alone.
+        mgr.release(&id, b).await;
+        assert!(!mgr.write_from(&id, b, true, b"x").await.unwrap());
+
+        mgr.release(&id, a).await;
+        assert!(mgr.write_from(&id, b, true, b"x").await.unwrap());
+
+        mgr.kill(&id).await;
+    }
+
+    #[tokio::test]
+    async fn focus_on_a_missing_session_errors() {
+        let mgr = PtyManager::new();
+        assert!(mgr.focus("nonexistent", 1).await.is_err());
+        assert!(mgr.write_from("nonexistent", 1, true, b"x").await.is_err());
+        mgr.release("nonexistent", 1).await;
     }
 
     #[tokio::test]

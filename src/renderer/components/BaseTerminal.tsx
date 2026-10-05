@@ -6,13 +6,14 @@ import { useAppStore } from '../store/app'
 import { ActivityTransitionKind, useActivityStateStore } from '../store/activityState'
 import { useSessionApi } from '../contexts/SessionStoreContext'
 import { createIdleDetector, idleTimeoutMs } from '../utils/idleDetector'
+import { hasKeyboardFocus, onKeyboardFocus } from '../utils/keyboardFocus'
 import { hasUnreadWorkspaceAttention } from '../store/workspaceAttention'
 import type { Tty } from '../store/createTtyStore'
 import { ActivityState, ScrollPosition, isIdleDetectorDisabled, isWidthLimitDisabled } from '../types'
 import type { CachedTerminal, TerminalAppRef, PtyEvent, SandboxConfig, TerminalState, WorkspaceStore } from '../types'
 import type { TerminalBufferHost, TerminalEngine, TerminalEngineFactory } from '../terminal/engine'
 import { snapshotViewport } from '../terminal/engine'
-import { PtyEventType } from '../../shared/ipc-types'
+import { PtyAttachKind, PtyEventType } from '../../shared/ipc-types'
 import { DisposableStore, thenRegisterOrDispose, toDisposable } from '../../shared/lifecycle'
 import { useContextMenuStore } from '../store/contextMenu'
 import ContextMenu from './ContextMenu'
@@ -44,6 +45,18 @@ function formatRawChars(str: string): string {
 }
 
 /**
+ * Track the daemon's attach-time replay. The engine parses writes asynchronously, so the
+ * replay only ends once it has parsed everything queued before ReplayEnd.
+ */
+function handleReplayMarker(cache: CachedTerminal, type: PtyEventType.ReplayStart | PtyEventType.ReplayEnd): void {
+  if (type === PtyEventType.ReplayStart) {
+    cache.replaying = true
+    return
+  }
+  cache.engine.write(new Uint8Array(0), () => { cache.replaying = false })
+}
+
+/**
  * Background event handler for cached terminals.
  * Dispatches to mountedHandler when the component is mounted,
  * falls back to buffer writes and activity detection when unmounted.
@@ -67,6 +80,10 @@ function handleCachedEvent(cache: CachedTerminal, event: PtyEvent): void {
       break
     case PtyEventType.Exit:
       cache.onExitUnmounted(event.exitCode)
+      break
+    case PtyEventType.ReplayStart:
+    case PtyEventType.ReplayEnd:
+      handleReplayMarker(cache, event.type)
       break
     case PtyEventType.Error:
     case PtyEventType.End:
@@ -138,6 +155,7 @@ export default function BaseTerminal({
   const settings = useSettingsStore((state) => state.settings)
   const clipboard = useAppStore((state) => state.clipboard)
   const openExternal = useAppStore((state) => state.openExternal)
+  const windowFocusTarget = useAppStore((state) => state.windowFocusTarget)
 
   // Get existing ptyId from store for reconnection
   // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- tabId guaranteed to exist in appStates
@@ -148,13 +166,15 @@ export default function BaseTerminal({
 
   useEffect(() => {
     const currentExistingPtyId = existingPtyIdRef.current
-    if (!containerRef.current) return
+    const mountContainer = containerRef.current
+    if (!mountContainer) return
 
     let cancelled = false
     let resizeTimeout: ReturnType<typeof setTimeout> | null = null
     let inputDisposable: { dispose(): void } | null = null
     let scrollDisposable: { dispose(): void } | null = null
     let wheelDisposable: { dispose(): void } | null = null
+    let focusClaimDisposable: { dispose(): void } | null = null
     let resizeObserver: ResizeObserver | null = null
     let unsubscribeFocus: (() => void) | null = null
     let rawChars = ''
@@ -230,6 +250,8 @@ export default function BaseTerminal({
       })
 
       // Auto-unpin on intentional mouse wheel scroll up
+      focusClaimDisposable = onKeyboardFocus(mountContainer, windowFocusTarget, () => { tty.getState().focus() })
+
       wheelDisposable = engine.onWheel((deltaY) => {
         if (deltaY < 0 && cache.pinnedToBottom) {
           cache.pinnedToBottom = false
@@ -340,6 +362,10 @@ export default function BaseTerminal({
             setOverlay((prev) => prev ?? { message: 'Terminal disconnected', type: 'error' })
             break
           }
+          case PtyEventType.ReplayStart:
+          case PtyEventType.ReplayEnd:
+            handleReplayMarker(cache, event.type)
+            break
         }
       }
 
@@ -363,9 +389,13 @@ export default function BaseTerminal({
         initialResizeDone = true
       }, INITIAL_FIT_DELAY_MS)
 
-      // Forward terminal input to PTY only when this tab is active.
-      // Inactive tabs can't receive keystrokes so any onData during
-      // replay is an auto-response (OSC 11, DA, etc.) — drop it.
+      // Forward terminal input to the PTY only from the terminal holding keyboard focus in the
+      // focused window. Keystrokes and pastes can only originate there, so any other onData is
+      // the engine answering a query (DA, DECRQM, OSC 11, ...). Every terminal attached to the
+      // PTY — other windows, other tabs, a process viewer — parses the same query; only one may
+      // answer it, or the program reads the extra answers as typed input. Answers to replayed
+      // queries are dropped too: the query was answered when it first ran. (The context-menu
+      // paste writes to the tty directly and is not gated.)
       //
       // The write is awaited end-to-end — under PTY backpressure the daemon
       // pauses tonic's message loop, HTTP/2 closes the client's stream-level
@@ -373,8 +403,7 @@ export default function BaseTerminal({
       // landed. The engine queues subsequent onData firings while the previous
       // one is in flight, preserving order.
       inputDisposable = engine.onData((data) => {
-        const activeTab = workspace.getState().workspace.activeTabId
-        if (activeTab !== undefined && activeTab !== tabId) return
+        if (cache.replaying || !hasKeyboardFocus(containerRef.current)) return
         const tty = ttyRef.current
         if (!tty) return
         tty.getState().write(data).catch((error: unknown) => {
@@ -478,6 +507,7 @@ export default function BaseTerminal({
           dataVersion: 0,
           pinnedToBottom: false,
           badgeClickTimer: null,
+          replaying: false,
           onExitUnmounted: (exitCode: number) => {
             log.debug(`[${config.logPrefix} ${tabId}] PTY exited while unmounted, code:`, exitCode)
             const currentTab = workspace.getState().workspace.appStates[tabId]
@@ -495,7 +525,7 @@ export default function BaseTerminal({
         try {
           // `owner` takes the Tty, so the subscription cannot outlive the engine.
           tty = await thenRegisterOrDispose(
-            session.openTtyStream(currentExistingPtyId, (event) => { handleCachedEvent(cache, event) }),
+            session.openTtyStream(currentExistingPtyId, PtyAttachKind.Terminal, (event) => { handleCachedEvent(cache, event) }),
             owner,
           )
           log.debug(`[${config.logPrefix} ${tabId}] reattached to session:`, currentExistingPtyId)
@@ -544,6 +574,7 @@ export default function BaseTerminal({
       inputDisposable?.dispose()
       scrollDisposable?.dispose()
       wheelDisposable?.dispose()
+      focusClaimDisposable?.dispose()
       resizeObserver?.disconnect()
       unsubscribeFocus?.()
 
@@ -561,7 +592,7 @@ export default function BaseTerminal({
       ttyRef.current = null
       // Do NOT dispose the engine or unsubscribe the TTY — they stay cached
     }
-  }, [tabId, workspaceId, config, settings, removeTab, setTabState, sessionStore, workspace, refreshCounter, openExternal, clipboard.writeText])
+  }, [tabId, workspaceId, config, settings, removeTab, setTabState, sessionStore, workspace, refreshCounter, openExternal, clipboard.writeText, windowFocusTarget])
 
   const handleScrollDown = useCallback(() => {
     engineRef.current?.scrollToBottom()

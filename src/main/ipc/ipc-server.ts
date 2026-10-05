@@ -73,6 +73,7 @@ const CHANNELS = {
   // Send channels
   ptyWrite: 'pty:write',
   ptyResize: 'pty:resize',
+  ptyFocus: 'pty:focus',
   ptyKill: 'pty:kill',
   ptyDetach: 'pty:detach',
   fsUnwatchFile: 'fs:unwatchFile',
@@ -156,6 +157,12 @@ export class IpcServer {
   onPtyResize(handler: (...args: IpcSends['ptyResize']['params']) => void): void {
     ipcMain.on(CHANNELS.ptyResize, (_event: IpcMainEvent, ...args: unknown[]) =>
       { handler(...(args as IpcSends['ptyResize']['params'])); }
+    )
+  }
+
+  onPtyFocus(handler: (...args: IpcSends['ptyFocus']['params']) => void): void {
+    ipcMain.on(CHANNELS.ptyFocus, (_event: IpcMainEvent, ...args: unknown[]) =>
+      { handler(...(args as IpcSends['ptyFocus']['params'])); }
     )
   }
 

@@ -55,6 +55,7 @@ window.electron.app.onReady(() => {
     openExternal: (url: string) => { window.open(url, '_blank') },
     getViewportSize: () => ({ width: window.innerWidth, height: window.innerHeight }),
     keyEventTarget: window,
+    windowFocusTarget: window,
     isKeyDiagEnabled: () => !!window.__enableKeyDiag,
     sessionNamesStore: useSessionNamesStore,
   })

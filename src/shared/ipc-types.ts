@@ -48,6 +48,18 @@ export enum PtyEventType {
   Resize = 'resize',
   Error = 'error',
   End = 'end',
+  /** Brackets the daemon's attach-time replay. Absent from daemons that predate it. */
+  ReplayStart = 'replay-start',
+  ReplayEnd = 'replay-end',
+}
+
+/** What an attachment to a PTY is for — mirrors the proto's PtyAttachKind. */
+export enum PtyAttachKind {
+  /** Writes programmatically or only reads. Never gated. */
+  Background = 'background',
+  /** Renders the output in a terminal, which answers the program's queries. The daemon
+   *  accepts writes only from the most recently focused of these. */
+  Terminal = 'terminal',
 }
 
 /** Discriminated union for PTY output events (mirrors gRPC PtyOutput) */
@@ -57,6 +69,8 @@ export type PtyEvent =
   | { type: PtyEventType.Resize; cols: number; rows: number }
   | { type: PtyEventType.Error; message: string }
   | { type: PtyEventType.End }
+  | { type: PtyEventType.ReplayStart }
+  | { type: PtyEventType.ReplayEnd }
 
 // The daemon SIGTERMs an exec after this long. Callers pass it explicitly; long-running
 // commands (e.g. `git worktree add` on a large LFS repo) pass a larger value.
@@ -91,7 +105,7 @@ export interface IpcRequests {
     result: IpcResult<{ sessionId: string }>
   }
   ptyAttach: {
-    params: [connectionId: string, handle: string, sessionId: string]
+    params: [connectionId: string, handle: string, sessionId: string, kind: PtyAttachKind]
     result: IpcResult
   }
   ptyList: {
@@ -329,6 +343,11 @@ export interface IpcRequests {
 export interface IpcSends {
   ptyResize: {
     params: [handle: string, cols: number, rows: number]
+  }
+  // This attachment's terminal now holds the user's focus; the daemon accepts input only
+  // from the most recently focused attachment to a PTY.
+  ptyFocus: {
+    params: [handle: string]
   }
   ptyKill: {
     params: [connectionId: string, sessionId: string]

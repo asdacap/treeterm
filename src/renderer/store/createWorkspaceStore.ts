@@ -6,7 +6,7 @@ import type { SetActivityTabState } from './activityState'
 import type { WorktreeRegistryApi } from '../lib/worktreeRegistry'
 import { buildEntryFromWorkspace } from '../lib/worktreeRegistry'
 import { MAX_READ_FILE_BYTES } from '../lib/fileLimits'
-import { PtyEventType } from '../../shared/ipc-types'
+import { PtyAttachKind, PtyEventType } from '../../shared/ipc-types'
 import { getTabs, isAiHarnessState, isIdleDetectorDisabled } from '../types'
 import type { TerminalEngine } from '../terminal/engine'
 import type { Tty, TtyWriter } from './createTtyStore'
@@ -56,6 +56,9 @@ export interface CachedTerminal {
   pinnedToBottom: boolean
   /** Timer ID for badge single-click delay (to discriminate from double-click) */
   badgeClickTimer: ReturnType<typeof setTimeout> | null
+  /** True from the daemon's ReplayStart until the engine has parsed everything before ReplayEnd.
+   *  Replayed output carries queries that were already answered when they first ran. */
+  replaying: boolean
 }
 
 /** A cached TtyWriter together with ownership of the Tty backing it. */
@@ -74,7 +77,7 @@ export interface TerminalAppRef extends AppRef {
 
 export interface WorkspaceStoreDeps {
   appRegistry: AppRegistryApi
-  openTtyStream: (ptyId: string, onEvent: (event: PtyEvent) => void) => Promise<Tty>
+  openTtyStream: (ptyId: string, kind: PtyAttachKind, onEvent: (event: PtyEvent) => void) => Promise<Tty>
   createTty: (cwd: string, sandbox?: SandboxConfig, startupCommand?: string, ptyHandle?: string) => Promise<string>
   connectionId: string
   // Whether connectionId is an SSH connection. A connection's target never changes.
@@ -404,7 +407,7 @@ export function createWorkspaceStore(
       if (cached) return cached.writer
 
       let disconnected = false
-      const tty = await deps.openTtyStream(ptyId, (event) => {
+      const tty = await deps.openTtyStream(ptyId, PtyAttachKind.Background, (event) => {
         if (event.type === PtyEventType.End || event.type === PtyEventType.Error) {
           disconnected = true
           // Releases the Tty's subscription as it evicts the entry.

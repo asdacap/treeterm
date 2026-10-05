@@ -6,6 +6,7 @@ function makeMockTerminalDeps(): TtyTerminalDeps {
   return {
     write: vi.fn<(handle: string, data: string) => Promise<void>>().mockResolvedValue(undefined),
     resize: vi.fn(),
+    focus: vi.fn(),
     kill: vi.fn(),
     detach: vi.fn(),
   }

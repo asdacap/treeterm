@@ -27,6 +27,44 @@ import {
 
 export const protobufPackage = "treeterm";
 
+export enum PtyAttachKind {
+  /** PTY_ATTACH_KIND_BACKGROUND - Writes programmatically (prompts, startup input) or only reads. Never gated. */
+  PTY_ATTACH_KIND_BACKGROUND = 0,
+  /**
+   * PTY_ATTACH_KIND_TERMINAL - Renders the output in a terminal, which answers the program's queries. Of these, only
+   * the most recently focused may write (see PtyInput.focus).
+   */
+  PTY_ATTACH_KIND_TERMINAL = 1,
+  UNRECOGNIZED = -1,
+}
+
+export function ptyAttachKindFromJSON(object: any): PtyAttachKind {
+  switch (object) {
+    case 0:
+    case "PTY_ATTACH_KIND_BACKGROUND":
+      return PtyAttachKind.PTY_ATTACH_KIND_BACKGROUND;
+    case 1:
+    case "PTY_ATTACH_KIND_TERMINAL":
+      return PtyAttachKind.PTY_ATTACH_KIND_TERMINAL;
+    case -1:
+    case "UNRECOGNIZED":
+    default:
+      return PtyAttachKind.UNRECOGNIZED;
+  }
+}
+
+export function ptyAttachKindToJSON(object: PtyAttachKind): string {
+  switch (object) {
+    case PtyAttachKind.PTY_ATTACH_KIND_BACKGROUND:
+      return "PTY_ATTACH_KIND_BACKGROUND";
+    case PtyAttachKind.PTY_ATTACH_KIND_TERMINAL:
+      return "PTY_ATTACH_KIND_TERMINAL";
+    case PtyAttachKind.UNRECOGNIZED:
+    default:
+      return "UNRECOGNIZED";
+  }
+}
+
 export interface Empty {
 }
 
@@ -115,11 +153,20 @@ export interface PtyInput {
   /** First message, scopes stream to a session */
   start?: PtyStartData | undefined;
   write?: PtyWriteData | undefined;
-  resize?: PtyResizeData | undefined;
+  resize?:
+    | PtyResizeData
+    | undefined;
+  /**
+   * The user is now at this attachment's terminal. Of the TERMINAL attachments to a PTY,
+   * only the one that focused most recently may write: every attached terminal answers
+   * the program's queries (DA, OSC 11, ...), and the program must see only one answer.
+   */
+  focus?: Empty | undefined;
 }
 
 export interface PtyStartData {
   sessionId: string;
+  kind: PtyAttachKind;
 }
 
 export interface PtyWriteData {
@@ -135,7 +182,16 @@ export interface PtyResizeData {
 export interface PtyOutput {
   data?: PtyData | undefined;
   exit?: PtyExit | undefined;
-  resize?: PtyResizeData | undefined;
+  resize?:
+    | PtyResizeData
+    | undefined;
+  /**
+   * Bracket the initial state (snapshot + raw buffer) sent on attach. The raw buffer
+   * holds the program's original output verbatim — including terminal queries the
+   * client must not answer again.
+   */
+  replayStart?: Empty | undefined;
+  replayEnd?: Empty | undefined;
 }
 
 export interface PtyData {
@@ -1492,7 +1548,7 @@ export const ListPtySessionsResponse: MessageFns<ListPtySessionsResponse> = {
 };
 
 function createBasePtyInput(): PtyInput {
-  return { start: undefined, write: undefined, resize: undefined };
+  return { start: undefined, write: undefined, resize: undefined, focus: undefined };
 }
 
 export const PtyInput: MessageFns<PtyInput> = {
@@ -1505,6 +1561,9 @@ export const PtyInput: MessageFns<PtyInput> = {
     }
     if (message.resize !== undefined) {
       PtyResizeData.encode(message.resize, writer.uint32(26).fork()).join();
+    }
+    if (message.focus !== undefined) {
+      Empty.encode(message.focus, writer.uint32(34).fork()).join();
     }
     return writer;
   },
@@ -1540,6 +1599,14 @@ export const PtyInput: MessageFns<PtyInput> = {
           message.resize = PtyResizeData.decode(reader, reader.uint32());
           continue;
         }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.focus = Empty.decode(reader, reader.uint32());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1554,6 +1621,7 @@ export const PtyInput: MessageFns<PtyInput> = {
       start: isSet(object.start) ? PtyStartData.fromJSON(object.start) : undefined,
       write: isSet(object.write) ? PtyWriteData.fromJSON(object.write) : undefined,
       resize: isSet(object.resize) ? PtyResizeData.fromJSON(object.resize) : undefined,
+      focus: isSet(object.focus) ? Empty.fromJSON(object.focus) : undefined,
     };
   },
 
@@ -1567,6 +1635,9 @@ export const PtyInput: MessageFns<PtyInput> = {
     }
     if (message.resize !== undefined) {
       obj.resize = PtyResizeData.toJSON(message.resize);
+    }
+    if (message.focus !== undefined) {
+      obj.focus = Empty.toJSON(message.focus);
     }
     return obj;
   },
@@ -1585,18 +1656,22 @@ export const PtyInput: MessageFns<PtyInput> = {
     message.resize = (object.resize !== undefined && object.resize !== null)
       ? PtyResizeData.fromPartial(object.resize)
       : undefined;
+    message.focus = (object.focus !== undefined && object.focus !== null) ? Empty.fromPartial(object.focus) : undefined;
     return message;
   },
 };
 
 function createBasePtyStartData(): PtyStartData {
-  return { sessionId: "" };
+  return { sessionId: "", kind: 0 };
 }
 
 export const PtyStartData: MessageFns<PtyStartData> = {
   encode(message: PtyStartData, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
     if (message.sessionId !== "") {
       writer.uint32(10).string(message.sessionId);
+    }
+    if (message.kind !== 0) {
+      writer.uint32(16).int32(message.kind);
     }
     return writer;
   },
@@ -1616,6 +1691,14 @@ export const PtyStartData: MessageFns<PtyStartData> = {
           message.sessionId = reader.string();
           continue;
         }
+        case 2: {
+          if (tag !== 16) {
+            break;
+          }
+
+          message.kind = reader.int32() as any;
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1632,6 +1715,7 @@ export const PtyStartData: MessageFns<PtyStartData> = {
         : isSet(object.session_id)
         ? globalThis.String(object.session_id)
         : "",
+      kind: isSet(object.kind) ? ptyAttachKindFromJSON(object.kind) : 0,
     };
   },
 
@@ -1639,6 +1723,9 @@ export const PtyStartData: MessageFns<PtyStartData> = {
     const obj: any = {};
     if (message.sessionId !== "") {
       obj.sessionId = message.sessionId;
+    }
+    if (message.kind !== 0) {
+      obj.kind = ptyAttachKindToJSON(message.kind);
     }
     return obj;
   },
@@ -1649,6 +1736,7 @@ export const PtyStartData: MessageFns<PtyStartData> = {
   fromPartial<I extends Exact<DeepPartial<PtyStartData>, I>>(object: I): PtyStartData {
     const message = createBasePtyStartData();
     message.sessionId = object.sessionId ?? "";
+    message.kind = object.kind ?? 0;
     return message;
   },
 };
@@ -1788,7 +1876,7 @@ export const PtyResizeData: MessageFns<PtyResizeData> = {
 };
 
 function createBasePtyOutput(): PtyOutput {
-  return { data: undefined, exit: undefined, resize: undefined };
+  return { data: undefined, exit: undefined, resize: undefined, replayStart: undefined, replayEnd: undefined };
 }
 
 export const PtyOutput: MessageFns<PtyOutput> = {
@@ -1801,6 +1889,12 @@ export const PtyOutput: MessageFns<PtyOutput> = {
     }
     if (message.resize !== undefined) {
       PtyResizeData.encode(message.resize, writer.uint32(26).fork()).join();
+    }
+    if (message.replayStart !== undefined) {
+      Empty.encode(message.replayStart, writer.uint32(34).fork()).join();
+    }
+    if (message.replayEnd !== undefined) {
+      Empty.encode(message.replayEnd, writer.uint32(42).fork()).join();
     }
     return writer;
   },
@@ -1836,6 +1930,22 @@ export const PtyOutput: MessageFns<PtyOutput> = {
           message.resize = PtyResizeData.decode(reader, reader.uint32());
           continue;
         }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.replayStart = Empty.decode(reader, reader.uint32());
+          continue;
+        }
+        case 5: {
+          if (tag !== 42) {
+            break;
+          }
+
+          message.replayEnd = Empty.decode(reader, reader.uint32());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1850,6 +1960,16 @@ export const PtyOutput: MessageFns<PtyOutput> = {
       data: isSet(object.data) ? PtyData.fromJSON(object.data) : undefined,
       exit: isSet(object.exit) ? PtyExit.fromJSON(object.exit) : undefined,
       resize: isSet(object.resize) ? PtyResizeData.fromJSON(object.resize) : undefined,
+      replayStart: isSet(object.replayStart)
+        ? Empty.fromJSON(object.replayStart)
+        : isSet(object.replay_start)
+        ? Empty.fromJSON(object.replay_start)
+        : undefined,
+      replayEnd: isSet(object.replayEnd)
+        ? Empty.fromJSON(object.replayEnd)
+        : isSet(object.replay_end)
+        ? Empty.fromJSON(object.replay_end)
+        : undefined,
     };
   },
 
@@ -1864,6 +1984,12 @@ export const PtyOutput: MessageFns<PtyOutput> = {
     if (message.resize !== undefined) {
       obj.resize = PtyResizeData.toJSON(message.resize);
     }
+    if (message.replayStart !== undefined) {
+      obj.replayStart = Empty.toJSON(message.replayStart);
+    }
+    if (message.replayEnd !== undefined) {
+      obj.replayEnd = Empty.toJSON(message.replayEnd);
+    }
     return obj;
   },
 
@@ -1876,6 +2002,12 @@ export const PtyOutput: MessageFns<PtyOutput> = {
     message.exit = (object.exit !== undefined && object.exit !== null) ? PtyExit.fromPartial(object.exit) : undefined;
     message.resize = (object.resize !== undefined && object.resize !== null)
       ? PtyResizeData.fromPartial(object.resize)
+      : undefined;
+    message.replayStart = (object.replayStart !== undefined && object.replayStart !== null)
+      ? Empty.fromPartial(object.replayStart)
+      : undefined;
+    message.replayEnd = (object.replayEnd !== undefined && object.replayEnd !== null)
+      ? Empty.fromPartial(object.replayEnd)
       : undefined;
     return message;
   },

@@ -71,6 +71,7 @@ const CHANNELS = {
   // Send channels
   ptyWrite: 'pty:write',
   ptyResize: 'pty:resize',
+  ptyFocus: 'pty:focus',
   ptyKill: 'pty:kill',
   ptyDetach: 'pty:detach',
   appCloseConfirmed: 'app:close-confirmed',
@@ -321,6 +322,10 @@ export class IpcClient {
 
   ptyResize(...args: IpcSends['ptyResize']['params']): void {
     ipcRenderer.send(CHANNELS.ptyResize, ...args)
+  }
+
+  ptyFocus(...args: IpcSends['ptyFocus']['params']): void {
+    ipcRenderer.send(CHANNELS.ptyFocus, ...args)
   }
 
   ptyKill(...args: IpcSends['ptyKill']['params']): void {

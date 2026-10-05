@@ -21,6 +21,30 @@ fn connection_id<T>(req: &Request<T>) -> Result<String, Status> {
         .ok_or_else(|| Status::internal("missing connection ID"))
 }
 
+/// Frame the attach-time initial state for the wire, bracketed by ReplayStart/ReplayEnd.
+/// The buffered events are the program's output verbatim — terminal queries included — so
+/// the client needs to know which output is a replay and must not be answered again.
+fn replay_messages(events: Vec<BufferEvent>) -> Vec<PtyOutput> {
+    let start = PtyOutput {
+        output: Some(pty_output::Output::ReplayStart(Empty {})),
+    };
+    let end = PtyOutput {
+        output: Some(pty_output::Output::ReplayEnd(Empty {})),
+    };
+    let body = events.into_iter().map(|event| match event {
+        BufferEvent::Data(data) => PtyOutput {
+            output: Some(pty_output::Output::Data(PtyData { data })),
+        },
+        BufferEvent::Resize { cols, rows } => PtyOutput {
+            output: Some(pty_output::Output::Resize(PtyResizeData {
+                cols: cols as i32,
+                rows: rows as i32,
+            })),
+        },
+    });
+    std::iter::once(start).chain(body).chain(std::iter::once(end)).collect()
+}
+
 pub struct DaemonService {
     session_store: SessionStore,
     file_watcher: FileWatcher,
@@ -80,10 +104,13 @@ impl TreeTermDaemon for DaemonService {
 
         tokio::spawn(async move {
             // Wait for PtyStartData as first message
-            let session_id = match in_stream.message().await {
+            let (session_id, gated) = match in_stream.message().await {
                 Ok(Some(PtyInput {
                     input: Some(pty_input::Input::Start(s)),
-                })) => s.session_id,
+                })) => {
+                    let gated = s.kind() == PtyAttachKind::Terminal;
+                    (s.session_id, gated)
+                }
                 _ => return,
             };
 
@@ -95,18 +122,7 @@ impl TreeTermDaemon for DaemonService {
             };
 
             // Send initial state (vt100 snapshot + parser size + buffered events)
-            for event in initial_events {
-                let msg = match event {
-                    BufferEvent::Data(data) => PtyOutput {
-                        output: Some(pty_output::Output::Data(PtyData { data })),
-                    },
-                    BufferEvent::Resize { cols, rows } => PtyOutput {
-                        output: Some(pty_output::Output::Resize(PtyResizeData {
-                            cols: cols as i32,
-                            rows: rows as i32,
-                        })),
-                    },
-                };
+            for msg in replay_messages(initial_events) {
                 if tx.send(Ok(msg)).await.is_err() {
                     return;
                 }
@@ -142,13 +158,28 @@ impl TreeTermDaemon for DaemonService {
             let pty_mgr2 = pty_mgr.clone();
             let sid = session_id.clone();
             let tx_write = tx.clone();
+            let attachment = pty_mgr.next_attachment_id();
             tokio::spawn(async move {
                 while let Ok(Some(msg)) = in_stream.message().await {
                     match msg.input {
                         Some(pty_input::Input::Write(w)) => {
-                            if let Err(e) = pty_mgr2.write(&sid, &w.data).await {
-                                let _ = tx_write.send(Err(Status::internal(e))).await;
-                                break;
+                            match pty_mgr2.write_from(&sid, attachment, gated, &w.data).await {
+                                Ok(true) => {}
+                                Ok(false) => tracing::debug!(
+                                    session_id = %sid,
+                                    attachment,
+                                    bytes = w.data.len(),
+                                    "dropped write from an unfocused attachment"
+                                ),
+                                Err(e) => {
+                                    let _ = tx_write.send(Err(Status::internal(e))).await;
+                                    break;
+                                }
+                            }
+                        }
+                        Some(pty_input::Input::Focus(_)) => {
+                            if let Err(e) = pty_mgr2.focus(&sid, attachment).await {
+                                tracing::warn!(session_id = %sid, attachment, error = %e, "focus failed");
                             }
                         }
                         Some(pty_input::Input::Resize(r)) => {
@@ -159,6 +190,7 @@ impl TreeTermDaemon for DaemonService {
                         _ => {}
                     }
                 }
+                pty_mgr2.release(&sid, attachment).await;
             });
 
             // Forward live events to client
@@ -509,5 +541,42 @@ impl TreeTermDaemon for DaemonService {
             .await?;
 
         Ok(Response::new(ReceiverStream::new(rx)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn replay_messages_brackets_the_initial_state() {
+        let messages = replay_messages(vec![
+            BufferEvent::Data(b"\x1b[c".to_vec()),
+            BufferEvent::Resize { cols: 80, rows: 24 },
+        ]);
+        let outputs: Vec<_> = messages.into_iter().map(|m| m.output).collect();
+        assert_eq!(
+            outputs,
+            vec![
+                Some(pty_output::Output::ReplayStart(Empty {})),
+                Some(pty_output::Output::Data(PtyData {
+                    data: b"\x1b[c".to_vec(),
+                })),
+                Some(pty_output::Output::Resize(PtyResizeData { cols: 80, rows: 24 })),
+                Some(pty_output::Output::ReplayEnd(Empty {})),
+            ]
+        );
+    }
+
+    #[test]
+    fn replay_messages_brackets_an_empty_initial_state() {
+        let outputs: Vec<_> = replay_messages(vec![]).into_iter().map(|m| m.output).collect();
+        assert_eq!(
+            outputs,
+            vec![
+                Some(pty_output::Output::ReplayStart(Empty {})),
+                Some(pty_output::Output::ReplayEnd(Empty {})),
+            ]
+        );
     }
 }

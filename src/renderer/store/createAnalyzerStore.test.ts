@@ -10,7 +10,7 @@ import type { LlmApi, Settings } from '../types'
 import type { Tty, TtyState } from './createTtyStore'
 import { createStore } from 'zustand/vanilla'
 import { Terminal } from '@xterm/xterm'
-import { PtyEventType } from '../../shared/ipc-types'
+import { PtyAttachKind, PtyEventType } from '../../shared/ipc-types'
 import type { PtyEvent } from '../../shared/ipc-types'
 import { defaultClassifierCriteria } from '../../shared/classifierSettings'
 
@@ -23,6 +23,7 @@ function makeMockTty() {
     ptyId: 'pty-1',
     write: vi.fn<(data: string) => Promise<void>>().mockResolvedValue(undefined),
     resize: vi.fn(),
+    focus: vi.fn(),
     kill: vi.fn(),
   }
 
@@ -50,7 +51,7 @@ function makeMockTty() {
  * branch in the analyzer looking alive. Model the events, not a convenient return value.
  */
 function makeTtyStreamMock(mock: ReturnType<typeof makeMockTty>, scrollback: string[] = []) {
-  return vi.fn().mockImplementation((_ptyId: string, onEvent: (event: PtyEvent) => void) => {
+  return vi.fn().mockImplementation((_ptyId: string, _kind: PtyAttachKind, onEvent: (event: PtyEvent) => void) => {
     mock.setEventCallback(onEvent)
     for (const chunk of scrollback) {
       onEvent({ type: PtyEventType.Data, data: new TextEncoder().encode(chunk) })
@@ -623,7 +624,7 @@ describe('createAnalyzerStore', () => {
     vi.useFakeTimers()
     const mock = makeMockTty()
     deps = makeDeps({
-      openTtyStream: vi.fn().mockImplementation((_ptyId: string, onEvent: (event: PtyEvent) => void) => {
+      openTtyStream: vi.fn().mockImplementation((_ptyId: string, _kind: PtyAttachKind, onEvent: (event: PtyEvent) => void) => {
         onEvent({ type: PtyEventType.Exit, exitCode: 0 })
         return Promise.resolve(mock.tty)
       }),

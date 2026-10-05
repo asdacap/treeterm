@@ -183,6 +183,7 @@ describe('IpcServer', () => {
 
     it.each([
       ['onPtyResize', 'pty:resize'],
+      ['onPtyFocus', 'pty:focus'],
       ['onPtyKill', 'pty:kill'],
       ['onPtyDetach', 'pty:detach'],
       ['onClipboardWriteText', 'clipboard:writeText'],

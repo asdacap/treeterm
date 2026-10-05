@@ -9,7 +9,7 @@ import { ConnectionManager } from './connectionManager'
 import type { ExecInput, ExecOutput } from '../generated/treeterm'
 import { ConnectionStatus, ConnectionTargetType, ConnectionErrorKind } from '../shared/types'
 import type { SSHConnectionConfig, PortForwardConfig } from '../shared/types'
-import { PtyEventType, ExecEventType, type ExecEvent } from '../shared/ipc-types'
+import { PtyAttachKind, PtyEventType, ExecEventType, type ExecEvent } from '../shared/ipc-types'
 import { createExecStreamRegistry } from './execStreamRegistry'
 import { attachWebviewGuard } from './webviewGuard'
 
@@ -313,7 +313,7 @@ server.onPtyCreate(async (event, connectionId, handle, cwd, sandbox, startupComm
     const client = getClientForConnection(connectionId)
     await client.ensureDaemonRunning()
     const sessionId = await client.createPtySession({ cwd, sandbox: sandbox, startupCommand, handle: ptyHandle })
-    const ptyStream = client.openPtyStream(handle, sessionId, (evt) => {
+    const ptyStream = client.openPtyStream(handle, sessionId, PtyAttachKind.Background, (evt) => {
       if (!event.sender.isDestroyed()) {
         event.sender.send('pty:event', handle, evt)
       }
@@ -329,7 +329,7 @@ server.onPtyCreate(async (event, connectionId, handle, cwd, sandbox, startupComm
   }
 })
 
-server.onPtyAttach(async (event, connectionId, handle, sessionId) => {
+server.onPtyAttach(async (event, connectionId, handle, sessionId, kind) => {
   if (!connectionManager) {
     return { success: false, error: 'ConnectionManager not initialized' }
   }
@@ -337,7 +337,7 @@ server.onPtyAttach(async (event, connectionId, handle, sessionId) => {
   try {
     const client = getClientForConnection(connectionId)
     await client.ensureDaemonRunning()
-    const ptyStream = client.openPtyStream(handle, sessionId, (evt) => {
+    const ptyStream = client.openPtyStream(handle, sessionId, kind, (evt) => {
       if (!event.sender.isDestroyed()) {
         event.sender.send('pty:event', handle, evt)
       }
@@ -375,6 +375,10 @@ server.onPtyWrite(async (handle, data) => {
 
 server.onPtyResize((handle, cols, rows) => {
   ptyStreams.get(handle)?.resize(cols, rows)
+})
+
+server.onPtyFocus((handle) => {
+  ptyStreams.get(handle)?.focus()
 })
 
 server.onPtyKill((connectionId, sessionId) => {

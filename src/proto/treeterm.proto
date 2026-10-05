@@ -88,11 +88,24 @@ message PtyInput {
     PtyStartData start = 1;    // First message, scopes stream to a session
     PtyWriteData write = 2;
     PtyResizeData resize = 3;
+    // The user is now at this attachment's terminal. Of the TERMINAL attachments to a PTY,
+    // only the one that focused most recently may write: every attached terminal answers
+    // the program's queries (DA, OSC 11, ...), and the program must see only one answer.
+    Empty focus = 4;
   }
 }
 
 message PtyStartData {
   string session_id = 1;
+  PtyAttachKind kind = 2;
+}
+
+enum PtyAttachKind {
+  // Writes programmatically (prompts, startup input) or only reads. Never gated.
+  PTY_ATTACH_KIND_BACKGROUND = 0;
+  // Renders the output in a terminal, which answers the program's queries. Of these, only
+  // the most recently focused may write (see PtyInput.focus).
+  PTY_ATTACH_KIND_TERMINAL = 1;
 }
 
 message PtyWriteData {
@@ -109,6 +122,11 @@ message PtyOutput {
     PtyData data = 1;
     PtyExit exit = 2;
     PtyResizeData resize = 3;
+    // Bracket the initial state (snapshot + raw buffer) sent on attach. The raw buffer
+    // holds the program's original output verbatim — including terminal queries the
+    // client must not answer again.
+    Empty replay_start = 4;
+    Empty replay_end = 5;
   }
 }
 

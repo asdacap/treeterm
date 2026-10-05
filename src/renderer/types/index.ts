@@ -35,7 +35,7 @@ import type {
   ReasoningEffort
 } from '../../shared/types'
 export { FileChangeStatus }
-import type { PtyEvent, ExecEvent, IpcResult, FsWriteFileResult, FileWatchEvent } from '../../shared/ipc-types'
+import type { PtyAttachKind, PtyEvent, ExecEvent, IpcResult, FsWriteFileResult, FileWatchEvent } from '../../shared/ipc-types'
 export type { PtyEvent, ExecEvent, IpcResult, FsWriteFileResult, FileWatchEvent }
 
 export type {
@@ -397,7 +397,7 @@ export interface TerminalApi {
    *  in tab state) sent to the daemon as an idempotency key so re-creation after a
    *  reconnect returns the existing live PTY instead of spawning a duplicate. */
   create: (connectionId: string, handle: string, cwd: string, sandbox?: SandboxConfig, startupCommand?: string, ptyHandle?: string) => Promise<IpcResult<{ sessionId: string }>>
-  attach: (connectionId: string, handle: string, sessionId: string) => Promise<IpcResult>
+  attach: (connectionId: string, handle: string, sessionId: string, kind: PtyAttachKind) => Promise<IpcResult>
   /** Detach the stream for `handle` (the routing handle from a prior `attach`) without
    *  killing the PTY. Releases the main-side gRPC duplex so the daemon stops streaming
    *  to this attachment; other attachments to the same PTY are unaffected. */
@@ -405,6 +405,8 @@ export interface TerminalApi {
   list: (connectionId: string) => Promise<TTYSessionInfo[]>
   write: (handle: string, data: string) => Promise<void>
   resize: (handle: string, cols: number, rows: number) => void
+  /** Tell the daemon this attachment's terminal holds the user's focus — see `ptyFocus`. */
+  focus: (handle: string) => void
   kill: (connectionId: string, sessionId: string) => void
   onEvent: (handle: string, callback: (event: PtyEvent) => void) => () => void
   onActiveProcessesOpen: (callback: () => void) => () => void

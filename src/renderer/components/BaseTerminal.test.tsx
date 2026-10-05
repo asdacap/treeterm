@@ -8,7 +8,7 @@ import BaseTerminal, { type BaseTerminalConfig, type TerminalContainerElement } 
 import { ActivityState, ScrollPosition } from '../types'
 import { ActivityTransitionKind } from '../store/activityState'
 import { useSettingsStore } from '../store/settings'
-import { PtyEventType } from '../../shared/ipc-types'
+import { PtyAttachKind, PtyEventType } from '../../shared/ipc-types'
 import type { CachedTerminal, PtyEvent } from '../types'
 import type { TerminalDisposable, TerminalEngine } from '../terminal/engine'
 
@@ -28,7 +28,10 @@ class FakeEngine implements TerminalEngine {
   resizes: { cols: number; rows: number }[] = []
   displayOptions: unknown = null
   selection = ''
-  readonly element = document.createElement('div')
+  readonly element = Object.assign(document.createElement('div'), { tabIndex: 0 })
+  /** When set, write callbacks wait for `parse()` — the real engines parse asynchronously. */
+  deferWrites = false
+  pendingWriteCallbacks: (() => void)[] = []
   // A minimal line buffer that `write` feeds, so `snapshotViewport` (activity detection) reads
   // real rendered content instead of an empty stub.
   readonly bufferLines: string[] = []
@@ -58,10 +61,15 @@ class FakeEngine implements TerminalEngine {
     const text = typeof data === 'string' ? data : new TextDecoder().decode(data)
     for (const line of text.split('\n')) this.bufferLines.push(line)
     this.raw.buffer.active.length = this.bufferLines.length
-    onWritten?.()
+    if (!onWritten) return
+    if (this.deferWrites) this.pendingWriteCallbacks.push(onWritten)
+    else onWritten()
+  }
+  parse(): void {
+    for (const callback of this.pendingWriteCallbacks.splice(0)) callback()
   }
   resize(cols: number, rows: number): void { this.cols = cols; this.rows = rows; this.resizes.push({ cols, rows }) }
-  focus(): void { this.focused = true }
+  focus(): void { this.focused = true; this.element.focus() }
   getSelection(): string { return this.selection }
   dispose(): void { this.disposed = true; this.element.remove() }
   onData(handler: (data: string) => void): TerminalDisposable {
@@ -99,9 +107,10 @@ const createEngine = vi.fn(async (): Promise<TerminalEngine> => {
   return engine
 })
 
-const { processedData, setTabState } = vi.hoisted(() => ({
+const { processedData, setTabState, windowFocusTarget } = vi.hoisted(() => ({
   processedData: [] as string[],
   setTabState: vi.fn(),
+  windowFocusTarget: new EventTarget(),
 }))
 vi.mock('../utils/idleDetector', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../utils/idleDetector')>()
@@ -135,7 +144,7 @@ vi.mock('../store/settings', () => {
   return { useSettingsStore }
 })
 vi.mock('../store/app', () => {
-  const state = { clipboard: { writeText: () => {}, readText: () => {} }, openExternal: () => {} }
+  const state = { clipboard: { writeText: () => {}, readText: () => {} }, openExternal: () => {}, windowFocusTarget }
   return { useAppStore: <T,>(selector: (s: typeof state) => T): T => selector(state) }
 })
 vi.mock('../store/activityState', async (importOriginal) => {
@@ -184,6 +193,7 @@ function makeFakeTty() {
     ptyId: 'pty1',
     write: vi.fn<(d: string) => Promise<void>>().mockResolvedValue(undefined),
     resize: vi.fn<(cols: number, rows: number) => void>(),
+    focus: vi.fn<() => void>(),
     kill: vi.fn(),
   }
   return { getState: () => state, state, dispose: vi.fn() }
@@ -231,7 +241,7 @@ function makeSessionStore(deferreds: Deferred[]) {
 function makeLiveSessionStore() {
   const events: ((event: PtyEvent) => void)[] = []
   const tty = makeFakeTty()
-  const openTtyStream = vi.fn(async (_ptyId: string, onEvent: (event: PtyEvent) => void) => {
+  const openTtyStream = vi.fn(async (_ptyId: string, _kind: PtyAttachKind, onEvent: (event: PtyEvent) => void) => {
     events.push(onEvent)
     await Promise.resolve()
     return tty
@@ -360,6 +370,34 @@ describe('BaseTerminal — terminal cache across unmount', () => {
     act(() => { session.events[0]?.({ type: PtyEventType.Data, data: new TextEncoder().encode('while away') }) })
 
     expect(engines[0]?.writes).toHaveLength(1)
+  })
+
+  it('tracks a replay that streams while unmounted, gating input on remount until it ends', async () => {
+    const { store: workspace } = makeWorkspaceStore('tab1')
+    const session = makeLiveSessionStore()
+    const view = () => (
+      <SessionStoreContext.Provider value={session.store}>
+        <BaseTerminal workspace={workspace as never} tabId="tab1" config={config} />
+      </SessionStoreContext.Provider>
+    )
+
+    const first = render(view())
+    await flush()
+    first.unmount()
+    act(() => { session.events[0]?.({ type: PtyEventType.ReplayStart }) })
+    render(view())
+    await flush()
+
+    act(() => { engines[0]?.dataListener?.('\x1b[?1;2c') })
+    expect(session.tty.write).not.toHaveBeenCalled()
+
+    cleanup()
+    act(() => { session.events[0]?.({ type: PtyEventType.ReplayEnd }) })
+    render(view())
+    await flush()
+
+    act(() => { engines[0]?.dataListener?.('ls\r') })
+    expect(session.tty.write).toHaveBeenCalledWith('ls\r')
   })
 
   it('publishes the engine buffer on the container for e2e to read', async () => {
@@ -829,7 +867,7 @@ describe('BaseTerminal — mounted UI', () => {
     vi.restoreAllMocks()
   })
 
-  it('forwards keystrokes to the PTY when its tab is active', async () => {
+  it('forwards keystrokes to the PTY while the terminal holds keyboard focus', async () => {
     const { engine, tty } = await mount()
 
     act(() => { engine.dataListener?.('ls\r') })
@@ -837,12 +875,113 @@ describe('BaseTerminal — mounted UI', () => {
     expect(tty.write).toHaveBeenCalledWith('ls\r')
   })
 
-  it('drops onData from an inactive tab — it can only be a replay auto-response', async () => {
+  it('does not focus an inactive tab, so its query answers never reach the PTY', async () => {
     const { engine, tty } = await mount({ activeTabId: 'other-tab' })
 
     act(() => { engine.dataListener?.('\x1b[>0;10;1c') })
 
+    expect(engine.focused).toBe(false)
     expect(tty.write).not.toHaveBeenCalled()
+  })
+
+  it('drops onData while keyboard focus is elsewhere in the window', async () => {
+    const { engine, tty } = await mount()
+    const elsewhere = document.body.appendChild(document.createElement('input'))
+    elsewhere.focus()
+
+    act(() => { engine.dataListener?.('\x1b[?1;2c') })
+
+    expect(tty.write).not.toHaveBeenCalled()
+    elsewhere.remove()
+  })
+
+  it('drops onData when its window is not focused — another window answers the query', async () => {
+    const { engine, tty } = await mount()
+    const hasFocus = vi.spyOn(document, 'hasFocus').mockReturnValue(false)
+
+    act(() => { engine.dataListener?.('\x1b]11;rgb:1e1e/1e1e/1e1e\x1b\\') })
+
+    expect(tty.write).not.toHaveBeenCalled()
+    hasFocus.mockRestore()
+  })
+
+  it('attaches as a terminal, so the daemon gates its writes on focus', async () => {
+    const { store: workspace } = makeWorkspaceStore('tab1')
+    const session = makeLiveSessionStore()
+    render(
+      <SessionStoreContext.Provider value={session.store}>
+        <BaseTerminal workspace={workspace as never} tabId="tab1" config={config} />
+      </SessionStoreContext.Provider>,
+    )
+    await flush()
+
+    expect(session.openTtyStream).toHaveBeenCalledWith('pty1', PtyAttachKind.Terminal, expect.any(Function))
+  })
+
+  it('claims the PTY input for this attachment when the terminal takes focus', async () => {
+    const { tty } = await mount()
+
+    expect(tty.focus).toHaveBeenCalled()
+  })
+
+  it('re-claims the input when its window regains focus with the terminal still focused', async () => {
+    const { tty } = await mount()
+    tty.focus.mockClear()
+
+    act(() => { windowFocusTarget.dispatchEvent(new Event('focus')) })
+
+    expect(tty.focus).toHaveBeenCalledTimes(1)
+  })
+
+  it('re-claims the input on a key or pointer press — no focus event fires on an already-focused machine', async () => {
+    const { tty, engine } = await mount()
+    tty.focus.mockClear()
+
+    act(() => { engine.element.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true })) })
+    expect(tty.focus).toHaveBeenCalledTimes(1)
+
+    act(() => { engine.element.dispatchEvent(new Event('pointerdown', { bubbles: true })) })
+    expect(tty.focus).toHaveBeenCalledTimes(2)
+  })
+
+  it('leaves the input alone when the window regains focus on something other than the terminal', async () => {
+    const { tty } = await mount()
+    const elsewhere = document.body.appendChild(document.createElement('input'))
+    elsewhere.focus()
+    tty.focus.mockClear()
+
+    act(() => { windowFocusTarget.dispatchEvent(new Event('focus')) })
+
+    expect(tty.focus).not.toHaveBeenCalled()
+    elsewhere.remove()
+  })
+
+  it('stops claiming the input once unmounted', async () => {
+    const { tty, unmount, engine } = await mount()
+    const container = engine.element.parentElement!
+    unmount()
+    tty.focus.mockClear()
+
+    act(() => { windowFocusTarget.dispatchEvent(new Event('focus')) })
+    act(() => { container.dispatchEvent(new Event('pointerdown')) })
+
+    expect(tty.focus).not.toHaveBeenCalled()
+  })
+
+  it('drops answers to replayed queries until the engine has parsed the whole replay', async () => {
+    const { engine, tty, emit } = await mount()
+    engine.deferWrites = true
+
+    emit({ type: PtyEventType.ReplayStart })
+    emit({ type: PtyEventType.Data, data: new TextEncoder().encode('\x1b[?2026$p\x1b[c') })
+    emit({ type: PtyEventType.ReplayEnd })
+    act(() => { engine.dataListener?.('\x1b[?2026;2$y') })
+    expect(tty.write).not.toHaveBeenCalled()
+
+    act(() => { engine.parse() })
+    act(() => { engine.dataListener?.('ls\r') })
+    expect(tty.write).toHaveBeenCalledTimes(1)
+    expect(tty.write).toHaveBeenCalledWith('ls\r')
   })
 
   it('surfaces a stream error, then clears it on the next byte of output', async () => {

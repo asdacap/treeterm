@@ -1,6 +1,6 @@
 import { contextBridge } from 'electron'
 import type { SandboxConfig, Session, TTYSessionInfo, WorkspaceRef, Settings, SSHConnectionConfig, ConnectionInfo, PortForwardConfig, PortForwardInfo } from '../shared/types'
-import { PtyEventType, ExecEventType, FileWatchEventType, type PtyEvent, type ExecEvent, type FileWatchEvent, type IpcResult } from '../shared/ipc-types'
+import { type PtyAttachKind, PtyEventType, ExecEventType, FileWatchEventType, type PtyEvent, type ExecEvent, type FileWatchEvent, type IpcResult } from '../shared/ipc-types'
 import { IpcClient } from './ipc-client'
 import { createEventDispatcher } from './eventDispatcher'
 import type { PreloadApi, Platform } from '../renderer/types'
@@ -167,8 +167,8 @@ const preloadApi: PreloadApi = {
     create: (connectionId: string, handle: string, cwd: string, sandbox?: SandboxConfig, startupCommand?: string, ptyHandle?: string) => {
       return client.ptyCreate(connectionId, handle, cwd, sandbox, startupCommand, ptyHandle)
     },
-    attach: (connectionId: string, handle: string, sessionId: string) => {
-      return client.ptyAttach(connectionId, handle, sessionId)
+    attach: (connectionId: string, handle: string, sessionId: string, kind: PtyAttachKind) => {
+      return client.ptyAttach(connectionId, handle, sessionId, kind)
     },
     detach: (handle: string): void => {
       client.ptyDetach(handle)
@@ -182,6 +182,9 @@ const preloadApi: PreloadApi = {
     },
     resize: (id: string, cols: number, rows: number): void => {
       client.ptyResize(id, cols, rows)
+    },
+    focus: (id: string): void => {
+      client.ptyFocus(id)
     },
     kill: (connectionId: string, id: string): void => {
       client.ptyKill(connectionId, id)

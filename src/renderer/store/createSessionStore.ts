@@ -7,7 +7,7 @@ import { createWorkspaceStore } from './createWorkspaceStore'
 import type { WorkspaceStore, WorkspaceStoreDeps } from './createWorkspaceStore'
 import { createTtyStore } from './createTtyStore'
 import type { Tty, TtyTerminalDeps } from './createTtyStore'
-import { FileWatchEventType, type PtyEvent, type FileWatchEvent } from '../../shared/ipc-types'
+import { FileWatchEventType, type PtyAttachKind, type PtyEvent, type FileWatchEvent } from '../../shared/ipc-types'
 import { ConnectionStatus, ConnectionTargetType, WorkspaceStatus } from '../../shared/types'
 import type {
   Workspace, Session, AppState, GitInfo, WorkspaceRef,
@@ -80,7 +80,7 @@ export interface SessionState {
   /** The returned Tty owns its event subscription — give it to a DisposableStore.
    *  There is no separate cleanup value for a caller to drop, nor for a narrowed
    *  dependency type to silently erase. */
-  openTtyStream: (ptyId: string, onEvent: (event: PtyEvent) => void) => Promise<Tty>
+  openTtyStream: (ptyId: string, kind: PtyAttachKind, onEvent: (event: PtyEvent) => void) => Promise<Tty>
   killTty: (ptyId: string) => void
   listTty: () => Promise<TTYSessionInfo[]>
 
@@ -907,7 +907,7 @@ export function createSessionStore(
   function makeHandleDeps(workspaceId: string): WorkspaceStoreDeps {
     return {
       appRegistry: deps.appRegistry,
-      openTtyStream: (ptyId: string, onEvent: (event: PtyEvent) => void) => store.getState().openTtyStream(ptyId, onEvent),
+      openTtyStream: (ptyId: string, kind: PtyAttachKind, onEvent: (event: PtyEvent) => void) => store.getState().openTtyStream(ptyId, kind, onEvent),
       createTty: (cwd, sandbox?, startupCommand?, ptyHandle?) => store.getState().createTty(cwd, sandbox, startupCommand, ptyHandle),
       connectionId: config.connection.id,
       isRemote: config.connection.target.type === ConnectionTargetType.Remote,
@@ -1322,6 +1322,7 @@ export function createSessionStore(
   const boundTerminal: TtyTerminalDeps = {
     write: deps.terminal.write,
     resize: deps.terminal.resize,
+    focus: deps.terminal.focus,
     kill: (sessionId: string) => { deps.terminal.kill(connectionId, sessionId); },
     detach: (handle: string) => { deps.terminal.detach(handle); },
   }
@@ -1373,13 +1374,13 @@ export function createSessionStore(
       return result.sessionId
     },
 
-    openTtyStream: async (ptyId: string, onEvent: (event: PtyEvent) => void): Promise<Tty> => {
+    openTtyStream: async (ptyId: string, kind: PtyAttachKind, onEvent: (event: PtyEvent) => void): Promise<Tty> => {
       const handle = crypto.randomUUID()
       // Registered before attach so the daemon's replayed scrollback is not missed.
       const subscription = toDisposable(deps.terminal.onEvent(handle, onEvent))
       let result: IpcResult
       try {
-        result = await deps.terminal.attach(connectionId, handle, ptyId)
+        result = await deps.terminal.attach(connectionId, handle, ptyId, kind)
       } catch (error) {
         subscription.dispose()
         throw error

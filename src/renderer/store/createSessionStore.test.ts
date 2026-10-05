@@ -7,7 +7,7 @@ import { ConnectionStatus, ConnectionTargetType, type ConnectionInfo } from '../
 import type { StoreApi } from 'zustand'
 import { createMockExecApi } from '../../shared/mockApis'
 import { makeWorkspace, makeSession, makeSessionLock } from '../../shared/test-fixtures/workspace'
-import { FileWatchEventType, type FileWatchEvent } from '../../shared/ipc-types'
+import { FileWatchEventType, PtyAttachKind, type FileWatchEvent } from '../../shared/ipc-types'
 import { toStoredWorkspaceFile, type Workspace } from '../../shared/workspaceFile'
 import { getWorkspaceAttention, hasUnreadWorkspaceAttention, WORKSPACE_ATTENTION_KEY } from './workspaceAttention'
 import { sha256Hex } from '../lib/sha256'
@@ -106,6 +106,7 @@ function makeDeps(overrides?: Partial<SessionDeps>): SessionDeps {
       list: vi.fn().mockResolvedValue([]),
       write: vi.fn(),
       resize: vi.fn(),
+      focus: vi.fn(),
       kill: vi.fn(),
       detach: vi.fn(),
       onEvent: vi.fn().mockReturnValue(() => {}),
@@ -1227,16 +1228,21 @@ describe('createSessionStore', () => {
   describe('openTtyStream', () => {
     it('throws when terminal.attach fails with error message', async () => {
       vi.mocked(deps.terminal.attach).mockResolvedValue({ success: false, error: 'PTY not found' })
-      await expect(store.getState().openTtyStream('pty-1', vi.fn())).rejects.toThrow('PTY not found')
+      await expect(store.getState().openTtyStream('pty-1', PtyAttachKind.Terminal, vi.fn())).rejects.toThrow('PTY not found')
     })
 
     it('throws default message when terminal.attach fails without error', async () => {
       vi.mocked(deps.terminal.attach).mockResolvedValue({ success: false, error: '' } as never)
-      await expect(store.getState().openTtyStream('pty-1', vi.fn())).rejects.toThrow('Failed to attach to PTY')
+      await expect(store.getState().openTtyStream('pty-1', PtyAttachKind.Terminal, vi.fn())).rejects.toThrow('Failed to attach to PTY')
+    })
+
+    it('attaches with the kind the caller asked for', async () => {
+      await store.getState().openTtyStream('pty-1', PtyAttachKind.Background, vi.fn())
+      expect(vi.mocked(deps.terminal.attach).mock.calls[0]?.[3]).toBe(PtyAttachKind.Background)
     })
 
     it('disposing the returned Tty detaches the main-side stream with its attach handle', async () => {
-      const tty = await store.getState().openTtyStream('pty-1', vi.fn())
+      const tty = await store.getState().openTtyStream('pty-1', PtyAttachKind.Terminal, vi.fn())
       const attachCall = vi.mocked(deps.terminal.attach).mock.calls[0]!
       const handle = attachCall[1]
 
@@ -1247,7 +1253,7 @@ describe('createSessionStore', () => {
     })
 
     it('double-disposing the returned Tty detaches exactly once', async () => {
-      const tty = await store.getState().openTtyStream('pty-1', vi.fn())
+      const tty = await store.getState().openTtyStream('pty-1', PtyAttachKind.Terminal, vi.fn())
 
       tty.dispose()
       tty.dispose()
