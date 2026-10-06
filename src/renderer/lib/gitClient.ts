@@ -672,23 +672,16 @@ export function createGitApi(exec: ExecApi, filesystem: FilesystemApi, connectio
       targetBranch: string,
     ): Promise<ConflictCheckResult> {
       try {
-        const result = await git(repoPath, ['merge-tree', targetBranch, sourceBranch])
-
-        const conflictedFiles: string[] = []
-        const lines = result.stdout.split('\n')
-
-        for (const line of lines) {
-          if (line.includes('conflict') || line.startsWith('<<<<<<<')) {
-            const parts = line.split(/\s+/)
-            for (const part of parts) {
-              if (part.includes('.') && !part.startsWith('<') && !part.startsWith('=') && !part.startsWith('>')) {
-                if (!conflictedFiles.includes(part)) {
-                  conflictedFiles.push(part)
-                }
-              }
-            }
-          }
+        // Machine-readable output: "<tree-oid>\0" then one "<path>\0" per conflicted file.
+        // Exit 0 = clean, 1 = conflicts; git also exits 1 (with no tree) on bad refs.
+        const result = await git(repoPath, [
+          'merge-tree', '--write-tree', '--name-only', '--no-messages', '-z', targetBranch, sourceBranch,
+        ])
+        const [treeOid = '', ...paths] = result.stdout.split('\0')
+        if ((result.exitCode !== 0 && result.exitCode !== 1) || !/^[0-9a-f]{40,64}$/.test(treeOid)) {
+          throw interpretError(result)
         }
+        const conflictedFiles = result.exitCode === 1 ? Array.from(new Set(paths.filter(p => p !== ''))) : []
 
         return {
           success: true,

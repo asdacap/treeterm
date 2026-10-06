@@ -1668,10 +1668,12 @@ describe('createGitApi', () => {
   })
 
   describe('checkMergeConflicts', () => {
+    const TREE_OID = 'b86bcd7cdc13608e0904c28f3c0876b06ef8bbd1'
+
     it('returns no conflicts for clean merge', async () => {
       const exec = createMockExec()
       const fs = createMockFilesystem()
-      autoComplete(exec, [{ stdout: '' }])
+      autoComplete(exec, [{ stdout: `${TREE_OID}\0` }])
 
       const git = createGitApi(exec, fs, 'conn-1')
       const result = await git.checkMergeConflicts('/repo', 'feature', 'main')
@@ -1684,19 +1686,34 @@ describe('createGitApi', () => {
       }
     })
 
-    it('detects conflicts', async () => {
-      const output = 'conflict in src/app.ts\n<<<<<<< HEAD\nsome content'
+    it('detects conflicts, including files deleted on the target and paths without an extension', async () => {
       const exec = createMockExec()
       const fs = createMockFilesystem()
-      autoComplete(exec, [{ stdout: output }])
+      autoComplete(exec, [{ stdout: `${TREE_OID}\0Makefile\0src/app.ts\0`, exitCode: 1 }])
 
       const git = createGitApi(exec, fs, 'conn-1')
       const result = await git.checkMergeConflicts('/repo', 'feature', 'main')
 
+      expect(exec.start).toHaveBeenCalledWith('conn-1', '/repo', 'git',
+        ['merge-tree', '--write-tree', '--name-only', '--no-messages', '-z', 'main', 'feature'], DEFAULT_EXEC_TIMEOUT_MS)
       expect(result.success).toBe(true)
       if (result.success) {
         expect(result.conflicts.hasConflicts).toBe(true)
-        expect(result.conflicts.conflictedFiles.length).toBeGreaterThan(0)
+        expect(result.conflicts.conflictedFiles).toEqual(['Makefile', 'src/app.ts'])
+      }
+    })
+
+    it('fails when git cannot run the merge (e.g. unknown ref)', async () => {
+      const exec = createMockExec()
+      const fs = createMockFilesystem()
+      autoComplete(exec, [{ stderr: 'merge-tree: nope - not something we can merge', exitCode: 1 }])
+
+      const git = createGitApi(exec, fs, 'conn-1')
+      const result = await git.checkMergeConflicts('/repo', 'nope', 'main')
+
+      expect(result.success).toBe(false)
+      if (!result.success) {
+        expect(result.error).toContain('not something we can merge')
       }
     })
   })
