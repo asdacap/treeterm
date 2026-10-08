@@ -115,6 +115,7 @@ vi.mock('./portForward', () => ({
 }))
 
 import { ConnectionManager } from './connectionManager'
+import { SSHTunnel } from './ssh'
 import type { GrpcDaemonClient } from './grpcClient'
 
 describe('ConnectionManager', () => {
@@ -736,6 +737,19 @@ describe('ConnectionManager', () => {
       expect(mockTunnelInstance.connect).toHaveBeenCalledTimes(connectCalls)
       expect(manager.getConnection('remote-1')?.status).toBe(ConnectionStatus.Connected)
       expect(() => manager.getClient('remote-1')).not.toThrow()
+    })
+
+    it('carries "connect anyway" into reconnect tunnels but never replays refreshDaemon', async () => {
+      await manager.connectRemote(remoteConfig, { allowOutdatedDaemon: true })
+      manager.forceReconnect('remote-1')
+      await vi.advanceTimersByTimeAsync(1_000)
+      expect(vi.mocked(SSHTunnel).mock.calls.at(-1)?.[1]).toEqual({ allowOutdatedDaemon: true })
+
+      manager.disconnect('remote-1')
+      await manager.connectRemote(remoteConfig, { refreshDaemon: true })
+      manager.forceReconnect('remote-1')
+      await vi.advanceTimersByTimeAsync(1_000)
+      expect(vi.mocked(SSHTunnel).mock.calls.at(-1)?.[1]).toEqual({ allowOutdatedDaemon: false })
     })
 
     it('does not schedule another attempt when the tunnel drops during reconnect', async () => {

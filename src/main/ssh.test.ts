@@ -505,6 +505,35 @@ describe('SSHTunnel', () => {
       expect(spawn).toHaveBeenCalledTimes(1)
     })
 
+    it.each([
+      ['no flags', {}],
+      ['allowOutdatedDaemon', { allowOutdatedDaemon: true }],
+    ])('does not replace a different remote binary whose daemon is not running (%s)', async (_label, options) => {
+      const proc = makeMockProcess()
+      vi.mocked(spawn).mockReturnValue(proc as unknown as ChildProcess)
+
+      const tunnel = new SSHTunnel(makeConfig(), options)
+      vi.spyOn(priv(tunnel), 'getLocalDaemonChecksum').mockReturnValue('localhash000')
+
+      const promise = priv(tunnel).bootstrapRemoteDaemon()
+
+      proc.stdout.emit(
+        'data',
+        Buffer.from(
+          'TREETERM_OS:Linux\nTREETERM_ARCH:x86_64\nTREETERM_HOME:/home/testuser\nTREETERM_REMOTE_HASH:remotehash999\nTREETERM_SOCKET:NEEDS_UPLOAD\n',
+        ),
+      )
+      proc.emit('close', 0)
+
+      expect(await promise).toEqual({
+        type: BootstrapResultType.HashMismatch,
+        localHash: 'localhash000',
+        remoteHash: 'remotehash999',
+      })
+      // Only bootstrap spawn — no upload
+      expect(spawn).toHaveBeenCalledTimes(1)
+    })
+
     it('trusts running daemon when sha256sum is unavailable (NONE hash)', async () => {
       const proc = makeMockProcess()
       vi.mocked(spawn).mockReturnValue(proc as unknown as ChildProcess)

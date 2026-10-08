@@ -32,6 +32,9 @@ class Connection {
   error?: string
   errorKind: ConnectionErrorKind = ConnectionErrorKind.Generic
   tunnel?: SSHTunnel
+  /** Set when the user chose "connect anyway" against an outdated remote daemon.
+   *  Background reconnects must honour it, or they hit the mismatch again and loop. */
+  allowOutdatedDaemon: boolean = false
 
   private static HEARTBEAT_TIMEOUT_MS = 50_000
   private static RECONNECT_MAX_DELAY_MS = 30_000
@@ -421,8 +424,10 @@ class Connection {
     // Tear down old client and tunnel
     this.teardownTransport()
 
-    // Create new tunnel with original config
-    const tunnel = new SSHTunnel(this.target.config)
+    // Create new tunnel with original config. Carry over "connect anyway" so an
+    // accepted outdated daemon stays accepted; never replay refreshDaemon — a
+    // reconnect must not kill the remote's running processes.
+    const tunnel = new SSHTunnel(this.target.config, { allowOutdatedDaemon: this.allowOutdatedDaemon })
     this.tunnel = tunnel
 
     // Forward tunnel output to connection's watchers
@@ -585,6 +590,7 @@ export class ConnectionManager {
     const target: ConnectionTarget = { type: ConnectionTargetType.Remote, config }
 
     const conn = new Connection(config.id, target, null, ConnectionStatus.Connecting, tunnel)
+    conn.allowOutdatedDaemon = options?.allowOutdatedDaemon ?? false
     conn.connectPhase = ConnectPhase.Bootstrap
     // A stale (Error/Disconnected/Reconnecting) entry is being replaced: stop its
     // port forwards and reconnect loop, or they keep running with no owner and

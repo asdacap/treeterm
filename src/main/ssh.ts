@@ -490,7 +490,23 @@ export class SSHTunnel {
               return
             }
 
-            // Upload and start daemon (binary missing, wrong arch, or hash mismatch)
+            // No daemon came up. If the remote already has a different binary, replacing
+            // it is a daemon update — only do that on an explicit refresh. Otherwise
+            // surface the mismatch so the user decides (e.g. a reconnect after the old
+            // daemon died must not silently upgrade it).
+            // eslint-disable-next-line custom/no-string-literal-comparison -- sentinel value from remote shell script
+            if (remoteHash && remoteHash !== 'NONE' && !this.options.refreshDaemon) {
+              const localHash = this.getLocalDaemonChecksum(remote)
+              if (remoteHash !== localHash) {
+                this.appendBootstrapOutput(
+                  `Remote daemon is not running and its binary differs from the local build (local=${localHash.substring(0, 12)}... remote=${remoteHash.substring(0, 12)}...). Not replacing it without a refresh.`,
+                )
+                resolve({ type: BootstrapResultType.HashMismatch, localHash, remoteHash })
+                return
+              }
+            }
+
+            // Upload and start daemon (binary missing, failed to start, or refresh requested)
             resolve({ type: BootstrapResultType.Connected, socketPath: await this.uploadAndStartDaemon(remote, remoteHome) })
           } catch (err) {
             reject(
