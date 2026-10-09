@@ -694,3 +694,43 @@ describe('ReviewBrowser merge output', () => {
     expect(container.querySelector('.review-merge-output-panel')).toBeNull()
   })
 })
+
+describe('ReviewBrowser prompt update from parent', () => {
+  function renderChild(parentMerged: boolean) {
+    const promptHarness = vi.fn()
+    const isAncestor = vi.fn().mockResolvedValue(parentMerged)
+    const workspace = makeReviewWorkspace([], 'uncommitted', [], {
+      isAncestor,
+      checkMergeConflicts: vi.fn().mockResolvedValue({ success: true, conflicts: { hasConflicts: false, conflictedFiles: [], messages: [] } }),
+    })
+    const parent = makeWorkspace({ id: 'parent', path: '/parent', gitBranch: 'main', gitRootPath: '/parent' })
+    ;(workspace as unknown as StoreApi<unknown>).setState({
+      workspace: makeWorkspace({ id: 'child', path: '/repo', parentId: 'parent', isWorktree: true, gitBranch: 'feature',
+        appStates: {
+          review: { applicationId: 'review', title: 'Review', state: { viewMode: 'uncommitted' } },
+          harness: { applicationId: 'aiharness-claude', title: 'AI', state: { ptyId: 'pty-1', sandbox: {} } },
+        } }),
+      lookupWorkspace: (id: string) => id === 'parent' ? parent : undefined,
+      promptHarness,
+    })
+    render(<ReviewBrowser workspace={workspace} tabId="review" isVisible={false} parentWorkspaceId="parent" />)
+    return { promptHarness, isAncestor }
+  }
+
+  it('prompts the harness to merge the parent in when the parent has new commits', async () => {
+    const { promptHarness, isAncestor } = renderChild(false)
+
+    fireEvent.click(await screen.findByText('Prompt Update from Parent'))
+
+    expect(isAncestor).toHaveBeenCalledWith('main', 'feature')
+    expect(promptHarness).toHaveBeenCalledWith('merge main into local branch feature')
+  })
+
+  it('hides the button when the parent is already merged into this branch', async () => {
+    const { isAncestor } = renderChild(true)
+
+    await waitFor(() => { expect(isAncestor).toHaveBeenCalled() })
+    await act(async () => { await Promise.resolve() })
+    expect(screen.queryByText('Prompt Update from Parent')).toBeNull()
+  })
+})

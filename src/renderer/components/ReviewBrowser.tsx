@@ -155,6 +155,8 @@ export default function ReviewBrowser({
   const [conflictInfo, setConflictInfo] = useState<ConflictInfo | null>(null)
   const [conflictError, setConflictError] = useState<string | null>(null)
   const [isCheckingConflicts, setIsCheckingConflicts] = useState(false)
+  // Parent branch has commits this branch does not contain yet
+  const [parentHasNewCommits, setParentHasNewCommits] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
 
   // Action state
@@ -274,6 +276,12 @@ export default function ReviewBrowser({
   const handlePromptRebase = useCallback(() => {
     if (parentWorkspace?.gitBranch) {
       void promptHarness(`rebase local branch ${wsData.gitBranch ?? ''} onto ${parentWorkspace.gitBranch}`)
+    }
+  }, [promptHarness, wsData.gitBranch, parentWorkspace?.gitBranch])
+
+  const handlePromptUpdateFromParent = useCallback(() => {
+    if (parentWorkspace?.gitBranch) {
+      void promptHarness(`merge ${parentWorkspace.gitBranch} into local branch ${wsData.gitBranch ?? ''}`)
     }
   }, [promptHarness, wsData.gitBranch, parentWorkspace?.gitBranch])
 
@@ -425,10 +433,11 @@ export default function ReviewBrowser({
     setIsCheckingConflicts(true)
     setConflictError(null)
     try {
-      const result = await git.checkMergeConflicts(
-        wsData.gitBranch,
-        parentWorkspace.gitBranch
-      )
+      const [result, parentMerged] = await Promise.all([
+        git.checkMergeConflicts(wsData.gitBranch, parentWorkspace.gitBranch),
+        git.isAncestor(parentWorkspace.gitBranch, wsData.gitBranch),
+      ])
+      setParentHasNewCommits(!parentMerged)
       if (result.success) {
         setConflictInfo(result.conflicts)
       } else {
@@ -949,6 +958,16 @@ export default function ReviewBrowser({
                   title="Send rebase command to the AI harness"
                 >
                   Prompt Rebase
+                </button>
+              )}
+              {parentHasNewCommits && runningHarness && parentWorkspace?.gitBranch && (
+                <button
+                  className="review-action-btn review-prompt-update-btn"
+                  onClick={handlePromptUpdateFromParent}
+                  disabled={isProcessing}
+                  title={`Ask the AI harness to merge ${parentWorkspace.gitBranch} into this branch`}
+                >
+                  Prompt Update from Parent
                 </button>
               )}
               <div className="merge-btn-group">

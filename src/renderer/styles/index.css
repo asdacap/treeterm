@@ -3905,12 +3905,14 @@ body,
   background: #7c7ff7;
 }
 
-.review-prompt-rebase-btn {
+.review-prompt-rebase-btn,
+.review-prompt-update-btn {
   background: #8b5cf6;
   color: white;
 }
 
-.review-prompt-rebase-btn:hover:not(:disabled) {
+.review-prompt-rebase-btn:hover:not(:disabled),
+.review-prompt-update-btn:hover:not(:disabled) {
   background: #a78bfa;
 }
 
