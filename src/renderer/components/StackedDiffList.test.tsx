@@ -56,18 +56,33 @@ function stubRects(filePath: string, topOf: () => number): void {
 
 vi.mock('@pierre/diffs/react', () => ({
   MultiFileDiff: (props: Record<string, unknown>) => {
-    const { oldFile } = props as { oldFile: { name: string } }
-    return <div data-testid={`diff-${oldFile.name}`} />
+    const { oldFile, selectedLines } = props as {
+      oldFile: { name: string }
+      selectedLines: { start: number; side: string } | null
+    }
+    return (
+      <div
+        data-testid={`diff-${oldFile.name}`}
+        data-selected={selectedLines ? `${selectedLines.side}:${String(selectedLines.start)}` : ''}
+      />
+    )
   },
   WorkerPoolContextProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }))
 
-vi.mock('@pierre/diffs', () => ({}))
+// Find in diff parses with the real parser so its matches mirror the viewer.
+vi.mock('@pierre/diffs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@pierre/diffs')>()
+  return {
+    parseDiffFromFile: actual.parseDiffFromFile,
+    DEFAULT_COLLAPSED_CONTEXT_THRESHOLD: actual.DEFAULT_COLLAPSED_CONTEXT_THRESHOLD,
+  }
+})
 vi.mock('../pierre-diffs-config', () => ({
   createDiffsWorker: () => ({} as Worker),
 }))
 
-import { StackedDiffList, SETTLE_FRAMES, MAX_ALIGN_FRAMES } from './StackedDiffList'
+import { StackedDiffList, SETTLE_FRAMES, MAX_ALIGN_FRAMES, MAX_SEARCH_LOADS } from './StackedDiffList'
 import type { DiffFile, FileDiffContents, ReviewComment } from '../types'
 import { FileChangeStatus, FileStatKind } from '../types'
 
@@ -279,5 +294,146 @@ describe('StackedDiffList', () => {
     // Right-click on first file's viewed label - should not trigger
     fireEvent.contextMenu(viewedLabels[0]!)
     expect(onMarkViewedAbove).not.toHaveBeenCalled()
+  })
+
+  describe('find in diff', () => {
+    function contentsWith(modified: string): FileDiffContents {
+      return { originalContent: 'shared\n', modifiedContent: `shared\n${modified}\n`, language: 'typescript' }
+    }
+
+    // jsdom lays nothing out; the shortcut only fires for a list that's on screen.
+    function markVisible(): void {
+      vi.spyOn(Element.prototype, 'getClientRects').mockReturnValue([{}] as unknown as DOMRectList)
+    }
+
+    function pressFind(target: Element | Document = document): void {
+      fireEvent.keyDown(target, { key: 'f', metaKey: true })
+    }
+
+    async function typeQuery(query: string): Promise<void> {
+      // eslint-disable-next-line @typescript-eslint/require-await -- act needs async to flush promise-based state updates
+      await act(async () => {
+        fireEvent.change(screen.getByPlaceholderText('Find in diff'), { target: { value: query } })
+      })
+    }
+
+    it('opens the find bar on Cmd+F', () => {
+      markVisible()
+      render(<StackedDiffList {...defaultProps} />)
+      expect(screen.queryByPlaceholderText('Find in diff')).toBeNull()
+
+      pressFind()
+
+      const input = screen.getByPlaceholderText('Find in diff')
+      expect(document.activeElement).toBe(input)
+    })
+
+    it('ignores Cmd+F while focus is outside the review', () => {
+      markVisible()
+      render(<StackedDiffList {...defaultProps} />)
+      const outside = document.createElement('input')
+      document.body.appendChild(outside)
+      outside.focus()
+
+      pressFind(outside)
+
+      expect(screen.queryByPlaceholderText('Find in diff')).toBeNull()
+      outside.remove()
+    })
+
+    it('ignores Cmd+F while the list is hidden', () => {
+      render(<StackedDiffList {...defaultProps} />)
+      pressFind()
+      expect(screen.queryByPlaceholderText('Find in diff')).toBeNull()
+    })
+
+    it('loads files that were never scrolled to, a few at a time', async () => {
+      markVisible()
+      const files = Array.from({ length: MAX_SEARCH_LOADS + 2 }, (_, i) => makeDiffFile(`f${String(i)}.ts`))
+      const resolvers: Array<() => void> = []
+      const loadFileContents = vi.fn(() => new Promise<FileDiffContents>((resolve) => {
+        resolvers.push(() => { resolve(contentsWith('needle')) })
+      }))
+      render(<StackedDiffList {...defaultProps} files={files} loadFileContents={loadFileContents} />)
+      pressFind()
+      await typeQuery('needle')
+
+      expect(loadFileContents).toHaveBeenCalledTimes(MAX_SEARCH_LOADS)
+      expect(screen.getByText('Searching…')).toBeDefined()
+
+      // eslint-disable-next-line @typescript-eslint/require-await -- act needs async to flush promise-based state updates
+      await act(async () => { resolvers.splice(0).forEach(r => { r() }) })
+      expect(loadFileContents).toHaveBeenCalledTimes(files.length)
+
+      // eslint-disable-next-line @typescript-eslint/require-await -- act needs async to flush promise-based state updates
+      await act(async () => { resolvers.splice(0).forEach(r => { r() }) })
+      expect(screen.getByText(`${String(files.length)} found`)).toBeDefined()
+    })
+
+    it('steps through matches across files and highlights the current line', async () => {
+      markVisible()
+      const byPath: Record<string, FileDiffContents> = {
+        'src/a.ts': contentsWith('const needle = 1'),
+        'src/b.ts': contentsWith('NEEDLE()'),
+      }
+      const loadFileContents = vi.fn((path: string) => Promise.resolve(byPath[path]!))
+      render(<StackedDiffList {...defaultProps} loadFileContents={loadFileContents} />)
+      pressFind()
+      await typeQuery('needle')
+      expect(screen.getByText('2 found')).toBeDefined()
+
+      const input = screen.getByPlaceholderText('Find in diff')
+      fireEvent.keyDown(input, { key: 'Enter' })
+      expect(screen.getByText('1/2')).toBeDefined()
+      expect(screen.getByTestId('diff-src/a.ts').dataset.selected).toBe('additions:2')
+      expect(screen.getByTestId('diff-src/b.ts').dataset.selected).toBe('')
+
+      fireEvent.keyDown(input, { key: 'Enter' })
+      expect(screen.getByText('2/2')).toBeDefined()
+      expect(screen.getByTestId('diff-src/a.ts').dataset.selected).toBe('')
+      expect(screen.getByTestId('diff-src/b.ts').dataset.selected).toBe('additions:2')
+
+      // Wraps around, both ways.
+      fireEvent.keyDown(input, { key: 'Enter' })
+      expect(screen.getByText('1/2')).toBeDefined()
+      fireEvent.keyDown(input, { key: 'Enter', shiftKey: true })
+      expect(screen.getByText('2/2')).toBeDefined()
+    })
+
+    it('expands a collapsed file when navigating to a match in it', async () => {
+      markVisible()
+      const loadFileContents = vi.fn(() => Promise.resolve(contentsWith('needle')))
+      render(
+        <StackedDiffList
+          {...defaultProps}
+          files={[makeDiffFile('src/a.ts')]}
+          loadFileContents={loadFileContents}
+          isFileViewed={() => true}
+          onToggleViewed={vi.fn()}
+        />
+      )
+      pressFind()
+      await typeQuery('needle')
+      expect(screen.queryByTestId('diff-src/a.ts')).toBeNull()
+
+      fireEvent.keyDown(screen.getByPlaceholderText('Find in diff'), { key: 'Enter' })
+
+      expect(screen.getByTestId('diff-src/a.ts').dataset.selected).toBe('additions:2')
+    })
+
+    it('clears the highlight when closed with Escape', async () => {
+      markVisible()
+      render(<StackedDiffList {...defaultProps} loadFileContents={() => Promise.resolve(contentsWith('needle'))} />)
+      pressFind()
+      await typeQuery('needle')
+      const input = screen.getByPlaceholderText('Find in diff')
+      fireEvent.keyDown(input, { key: 'Enter' })
+      expect(screen.getByTestId('diff-src/a.ts').dataset.selected).toBe('additions:2')
+
+      fireEvent.keyDown(input, { key: 'Escape' })
+
+      expect(screen.queryByPlaceholderText('Find in diff')).toBeNull()
+      expect(screen.getByTestId('diff-src/a.ts').dataset.selected).toBe('')
+    })
   })
 })

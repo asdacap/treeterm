@@ -4,6 +4,7 @@ import type { DiffFile, UncommittedFile, FileDiffContents, ReviewComment } from 
 import { FileChangeStatus } from '../types'
 import { PierreDiffViewer } from './PierreDiffViewer'
 import { FileChangeStats } from './FileChangeStats'
+import type { DiffSearchHit } from '../utils/diffSearch'
 
 // Rendering an entire file's diff into the DOM in one shot can exhaust renderer
 // memory and crash the window. Files past these thresholds require an explicit
@@ -68,6 +69,9 @@ interface FileDiffSectionProps {
   onToggleViewed?: () => void
   onMarkViewedAbove?: () => void
   isFirstFile?: boolean
+  // Current find match in this file. A new nonce means "navigated here again":
+  // the section expands and mounts its viewer so the line can be scrolled to.
+  searchHit?: (DiffSearchHit & { nonce: number }) | null
 }
 
 export function FileDiffSection({
@@ -92,6 +96,7 @@ export function FileDiffSection({
   onToggleViewed,
   onMarkViewedAbove,
   isFirstFile,
+  searchHit,
 }: FileDiffSectionProps): React.JSX.Element {
   const [collapsed, setCollapsed] = useState(isViewed ?? false)
   const [forceRender, setForceRender] = useState(false)
@@ -118,6 +123,16 @@ export function FileDiffSection({
     setPrevIsViewed(isViewed)
     if (isViewed) {
       setCollapsed(true)
+    }
+  }
+
+  const [prevSearchNonce, setPrevSearchNonce] = useState<number | null>(null)
+  const searchNonce = searchHit?.nonce ?? null
+  if (searchNonce !== prevSearchNonce) {
+    setPrevSearchNonce(searchNonce)
+    if (searchNonce !== null) {
+      setCollapsed(false)
+      setShouldRender(true)
     }
   }
 
@@ -317,6 +332,7 @@ export function FileDiffSection({
                   onCommentSubmit={onCommentSubmit}
                   onCommentCancel={onCommentCancel}
                   onCommentDelete={onCommentDelete}
+                  selectedLine={searchHit ?? null}
                 />
               )
             })()

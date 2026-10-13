@@ -3,6 +3,7 @@ import React from 'react'
 import { MultiFileDiff } from '@pierre/diffs/react'
 import type { DiffLineAnnotation, OnDiffLineClickProps, AnnotationSide } from '@pierre/diffs'
 import type { ReviewComment } from '../types'
+import type { DiffSearchHit } from '../utils/diffSearch'
 import { CommentInput } from './CommentInput'
 import { CommentDisplay } from './CommentDisplay'
 
@@ -19,6 +20,8 @@ interface PierreDiffViewerProps {
   onCommentSubmit?: (text: string) => void
   onCommentCancel?: () => void
   onCommentDelete?: (commentId: string) => void
+  // Line to highlight, e.g. the current find-in-review match.
+  selectedLine?: DiffSearchHit | null
 }
 
 type CommentAnnotationData = {
@@ -48,6 +51,7 @@ export function PierreDiffViewer({
   onCommentSubmit,
   onCommentCancel,
   onCommentDelete,
+  selectedLine,
 }: PierreDiffViewerProps): React.JSX.Element {
   const handleLineNumberClick = (props: OnDiffLineClickProps) => {
     onLineClick?.(props.lineNumber, annotationToSide(props.annotationSide))
@@ -129,6 +133,9 @@ export function PierreDiffViewer({
         newFile={{ name: filePath, contents: modifiedContent }}
         lineAnnotations={lineAnnotations}
         renderAnnotation={renderAnnotation}
+        selectedLines={selectedLine
+          ? { start: selectedLine.lineNumber, end: selectedLine.lineNumber, side: selectedLine.side }
+          : null}
         options={{
           diffStyle,
           expandUnchanged,
