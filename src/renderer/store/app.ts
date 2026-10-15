@@ -11,6 +11,7 @@ import type { WindowFocusTarget } from '../utils/keyboardFocus'
 import { initKeyboardHealthMonitor } from '../utils/keyboardHealthMonitor'
 import { useNavigationStore } from './navigation'
 import { useActivityStateStore } from './activityState'
+import { createTrafficMeterStore, type TrafficMeterState } from './createTrafficMeterStore'
 import type { SessionNamesState } from './sessionNames'
 import { createTerminalApplication, createTerminalVariant } from '../../applications/terminal/renderer'
 import { createGhosttyTerminalApplication } from '../../applications/ghosttyTerminal/renderer'
@@ -97,6 +98,9 @@ interface AppState extends AppDeps {
 
   // Session management
   sessionStores: Map<string, SessionEntry>
+  /** Download meter for every workspace and connection in this window. Outlives
+   *  session stores, so a reconnect rebuild keeps the counts. */
+  trafficMeter: StoreApi<TrafficMeterState>
 
   // Actions
   initialize: (deps: AppDeps) => Promise<() => void>
@@ -125,6 +129,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
   exec: UNINITIALIZED,
   sandbox: UNINITIALIZED,
   ssh: UNINITIALIZED,
+  trafficMeter: UNINITIALIZED,
   clipboard: UNINITIALIZED,
   selectFolder: UNINITIALIZED,
   selectFile: UNINITIALIZED,
@@ -305,6 +310,14 @@ export const useAppStore = create<AppState>()((set, get) => ({
   initialize: async (deps: AppDeps) => {
     set(deps)
     const { terminal, sessionApi, settingsApi, appApi, ssh, getWindowUuid, getInitialWorkspace, keyEventTarget, isKeyDiagEnabled } = deps
+    const trafficMeter = createTrafficMeterStore({
+      getReceivedBytes: (connectionId) => ssh.getReceivedBytes(connectionId),
+      listConnectionIds: () => Array.from(get().sessionStores.values()).map((entry) => entry.store.getState().connection.id),
+      now: () => Date.now(),
+      setInterval: (callback, ms) => setInterval(callback, ms),
+      clearInterval: (handle) => { clearInterval(handle) },
+    })
+    set({ trafficMeter })
 
     get().initializeApplications()
     useSettingsStore.getState().init(settingsApi, terminal.kill.bind(terminal))
@@ -447,6 +460,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
     }
 
     return () => {
+      trafficMeter.getState().dispose()
       unsubSettings()
       unsubClose()
       unsubSync()
@@ -602,6 +616,7 @@ function getOrCreateSession(
       worktreeRegistry: boundWorktreeRegistry,
       llm: createLlmClient(),
       setActivityTabState: (tabId, state, detail) => { useActivityStateStore.getState().setTabState(tabId, state, detail); },
+      traffic: get().trafficMeter.getState(),
     }
   )
   set((state) => ({

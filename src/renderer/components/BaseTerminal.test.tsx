@@ -241,7 +241,7 @@ function makeSessionStore(deferreds: Deferred[]) {
 function makeLiveSessionStore() {
   const events: ((event: PtyEvent) => void)[] = []
   const tty = makeFakeTty()
-  const openTtyStream = vi.fn(async (_ptyId: string, _kind: PtyAttachKind, onEvent: (event: PtyEvent) => void) => {
+  const openTtyStream = vi.fn(async (_workspaceId: string, _ptyId: string, _kind: PtyAttachKind, onEvent: (event: PtyEvent) => void) => {
     events.push(onEvent)
     await Promise.resolve()
     return tty
@@ -905,7 +905,7 @@ describe('BaseTerminal — mounted UI', () => {
     hasFocus.mockRestore()
   })
 
-  it('attaches as a terminal, so the daemon gates its writes on focus', async () => {
+  it('attaches as a terminal for its workspace, so the daemon gates its writes on focus', async () => {
     const { store: workspace } = makeWorkspaceStore('tab1')
     const session = makeLiveSessionStore()
     render(
@@ -915,7 +915,7 @@ describe('BaseTerminal — mounted UI', () => {
     )
     await flush()
 
-    expect(session.openTtyStream).toHaveBeenCalledWith('pty1', PtyAttachKind.Terminal, expect.any(Function))
+    expect(session.openTtyStream).toHaveBeenCalledWith('ws1', 'pty1', PtyAttachKind.Terminal, expect.any(Function))
   })
 
   it('claims the PTY input for this attachment when the terminal takes focus', async () => {

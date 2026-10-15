@@ -7,7 +7,7 @@ import { ConnectionStatus, ConnectionTargetType, type ConnectionInfo } from '../
 import type { StoreApi } from 'zustand'
 import { createMockExecApi } from '../../shared/mockApis'
 import { makeWorkspace, makeSession, makeSessionLock } from '../../shared/test-fixtures/workspace'
-import { FileWatchEventType, PtyAttachKind, type FileWatchEvent } from '../../shared/ipc-types'
+import { FileWatchEventType, PtyAttachKind, PtyEventType, type FileWatchEvent } from '../../shared/ipc-types'
 import { toStoredWorkspaceFile, type Workspace } from '../../shared/workspaceFile'
 import { getWorkspaceAttention, hasUnreadWorkspaceAttention, WORKSPACE_ATTENTION_KEY } from './workspaceAttention'
 import { sha256Hex } from '../lib/sha256'
@@ -127,6 +127,7 @@ function makeDeps(overrides?: Partial<SessionDeps>): SessionDeps {
       generateTitle: vi.fn().mockResolvedValue({ title: '', description: '', branchName: '' }),
     } as unknown as LlmApi,
     setActivityTabState: vi.fn(),
+    traffic: { recordWorkspace: vi.fn(), removeWorkspace: vi.fn() },
     github: {
       getPrInfo: vi.fn().mockResolvedValue({ noPr: true, createUrl: 'https://github.com/test/repo/compare/main...feat?expand=1' }),
       listOpenPrs: vi.fn().mockResolvedValue({ prs: [] }),
@@ -682,6 +683,7 @@ describe('createSessionStore', () => {
 
     it('onWorkspaceRemoved removes without git cleanup', () => {
       store.getState().onWorkspaceRemoved(childId)
+      expect(deps.traffic.removeWorkspace).toHaveBeenCalledWith(childId)
       expect(store.getState().workspaces.get(childId)).toBeUndefined()
       expect(deps.git.removeWorktree).not.toHaveBeenCalled()
     })
@@ -1228,21 +1230,21 @@ describe('createSessionStore', () => {
   describe('openTtyStream', () => {
     it('throws when terminal.attach fails with error message', async () => {
       vi.mocked(deps.terminal.attach).mockResolvedValue({ success: false, error: 'PTY not found' })
-      await expect(store.getState().openTtyStream('pty-1', PtyAttachKind.Terminal, vi.fn())).rejects.toThrow('PTY not found')
+      await expect(store.getState().openTtyStream('ws-1', 'pty-1', PtyAttachKind.Terminal, vi.fn())).rejects.toThrow('PTY not found')
     })
 
     it('throws default message when terminal.attach fails without error', async () => {
       vi.mocked(deps.terminal.attach).mockResolvedValue({ success: false, error: '' } as never)
-      await expect(store.getState().openTtyStream('pty-1', PtyAttachKind.Terminal, vi.fn())).rejects.toThrow('Failed to attach to PTY')
+      await expect(store.getState().openTtyStream('ws-1', 'pty-1', PtyAttachKind.Terminal, vi.fn())).rejects.toThrow('Failed to attach to PTY')
     })
 
     it('attaches with the kind the caller asked for', async () => {
-      await store.getState().openTtyStream('pty-1', PtyAttachKind.Background, vi.fn())
+      await store.getState().openTtyStream('ws-1', 'pty-1', PtyAttachKind.Background, vi.fn())
       expect(vi.mocked(deps.terminal.attach).mock.calls[0]?.[3]).toBe(PtyAttachKind.Background)
     })
 
     it('disposing the returned Tty detaches the main-side stream with its attach handle', async () => {
-      const tty = await store.getState().openTtyStream('pty-1', PtyAttachKind.Terminal, vi.fn())
+      const tty = await store.getState().openTtyStream('ws-1', 'pty-1', PtyAttachKind.Terminal, vi.fn())
       const attachCall = vi.mocked(deps.terminal.attach).mock.calls[0]!
       const handle = attachCall[1]
 
@@ -1252,8 +1254,21 @@ describe('createSessionStore', () => {
       expect(deps.terminal.detach).toHaveBeenCalledWith(handle)
     })
 
+    it('counts Data bytes toward the workspace and forwards every event', async () => {
+      const onEvent = vi.fn()
+      await store.getState().openTtyStream('ws-1', 'pty-1', PtyAttachKind.Terminal, onEvent)
+      const listener = vi.mocked(deps.terminal.onEvent).mock.calls[0]![1]
+
+      listener({ type: PtyEventType.Data, data: new Uint8Array(7) })
+      listener({ type: PtyEventType.Exit, exitCode: 0 })
+
+      expect(deps.traffic.recordWorkspace).toHaveBeenCalledTimes(1)
+      expect(deps.traffic.recordWorkspace).toHaveBeenCalledWith('ws-1', 7)
+      expect(onEvent).toHaveBeenCalledTimes(2)
+    })
+
     it('double-disposing the returned Tty detaches exactly once', async () => {
-      const tty = await store.getState().openTtyStream('pty-1', PtyAttachKind.Terminal, vi.fn())
+      const tty = await store.getState().openTtyStream('ws-1', 'pty-1', PtyAttachKind.Terminal, vi.fn())
 
       tty.dispose()
       tty.dispose()

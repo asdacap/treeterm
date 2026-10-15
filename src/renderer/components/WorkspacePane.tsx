@@ -23,6 +23,7 @@ import { PromptDescriptionButton } from './PromptDescriptionButton'
 import { RefreshTitleButton } from './RefreshTitleButton'
 import { BranchBadge } from './BranchBadge'
 import RunActionDropdown from './RunActionDropdown'
+import { WorkspaceTrafficBadge } from './TrafficBadge'
 
 interface WorkspacePaneProps {
   sessionStore: StoreApi<SessionState>
@@ -53,6 +54,7 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
   const clearWorkspaceError = useStore(sessionStore, s => s.clearWorkspaceError)
   const dismissWorkspace = useStore(sessionStore, s => s.dismissWorkspace)
   const forceUnlock = useStore(sessionStore, s => s.forceUnlock)
+  const trafficMeter = useAppStore(s => s.trafficMeter)
   const enterWorkspaceFocus = useKeybindingStore(s => s.enterWorkspaceFocus)
   const applications = useAppStore((s) => s.applications)
   const clipboard = useAppStore((s) => s.clipboard)
@@ -351,6 +353,7 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
                     {activeHandle && <RefreshTitleButton workspace={activeHandle} />}
                   </>
                 )}
+                <WorkspaceTrafficBadge meter={trafficMeter} workspaceId={activeWorkspace.id} />
                 <div className="workspace-actions">
                   {activeWorkspace.gitBranch && activeHandle && (
                     <BranchBadge

@@ -1,0 +1,11 @@
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${String(bytes)} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`
+}
+
+/** A rate is an average, so whole bytes are rounded before formatting. */
+export function formatRate(bytesPerSec: number): string {
+  return `${formatBytes(Math.round(bytesPerSec))}/s`
+}

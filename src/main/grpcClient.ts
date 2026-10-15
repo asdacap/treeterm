@@ -8,8 +8,9 @@ import { spawn } from 'child_process'
 import * as path from 'path'
 import * as fs from 'fs'
 import { app } from 'electron'
+import { ByteCounter, createCountingClient } from './grpcByteCounter'
 import {
-  TreeTermDaemonClient,
+  type TreeTermDaemonClient,
   type CreatePtyRequest,
   type KillPtyRequest,
   type PtyInput,
@@ -28,7 +29,6 @@ import {
   type DirectoryContents,
   type FileEntry
 } from '../generated/treeterm'
-import { getDefaultSocketPath } from './socketPath'
 import {
   PtyAttachKind,
   PtyEventType,
@@ -228,7 +228,8 @@ export class GrpcDaemonClient {
   private disconnectListeners: Set<DisconnectListener> = new Set()
   private clientId: string = `client-${String(Date.now())}`
 
-  constructor(private _socketPath: string = getDefaultSocketPath()) {
+  /** `byteCounter` is shared by every client of one connection, so its total spans clients and reconnects. */
+  constructor(private _socketPath: string, private readonly byteCounter: ByteCounter) {
     console.log('[grpcDaemonClient] initialized with socket path:', _socketPath)
   }
 
@@ -264,7 +265,7 @@ export class GrpcDaemonClient {
         'grpc.max_send_message_length': 8 * 1024 * 1024 // 8 MB
       }
 
-      this.client = new TreeTermDaemonClient(socketUri, credentials, channelOptions)
+      this.client = createCountingClient(socketUri, credentials, channelOptions, this.byteCounter)
 
       const deadline = Date.now() + 5000
       console.log('[grpcDaemonClient] waitForReady with 5s deadline')

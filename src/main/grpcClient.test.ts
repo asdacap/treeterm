@@ -70,9 +70,13 @@ vi.mock('../generated/treeterm', () => {
   return {
     // The real module builds gRPC service definitions against the mocked grpc-js; only the enum is needed.
     PtyAttachKind: { PTY_ATTACH_KIND_BACKGROUND: 0, PTY_ATTACH_KIND_TERMINAL: 1 },
-    TreeTermDaemonClient: function TreeTermDaemonClient() { Object.assign(this, mocks.mockClientInstance) }
   }
 })
+
+vi.mock('./grpcByteCounter', async () => ({
+  ByteCounter: (await vi.importActual<typeof import('./grpcByteCounter')>('./grpcByteCounter')).ByteCounter,
+  createCountingClient: vi.fn<(...args: any[]) => any>().mockImplementation(() => mocks.mockClientInstance),
+}))
 
 vi.mock('fs', () => ({
   existsSync: vi.fn<(...args: any[]) => boolean>().mockReturnValue(true),
@@ -95,6 +99,7 @@ vi.mock('./socketPath', () => ({
 }))
 
 import { GrpcDaemonClient, UNARY_DEADLINE_MS } from './grpcClient'
+import { ByteCounter, createCountingClient } from './grpcByteCounter'
 import { FileWatchEventType, PtyAttachKind, type FileWatchEvent } from '../shared/ipc-types'
 import { PtyAttachKind as ProtoPtyAttachKind } from '../generated/treeterm'
 
@@ -133,13 +138,15 @@ function connectClient(): void {
 
 describe('GrpcDaemonClient', () => {
   let client: GrpcDaemonClient
+  let byteCounter: ByteCounter
 
   beforeEach(() => {
     vi.clearAllMocks()
     mockChannel.state = READY
     mockChannel.watchers = []
     mockClientInstance.getChannel.mockReturnValue(mockChannel)
-    client = new GrpcDaemonClient('/tmp/test.sock')
+    byteCounter = new ByteCounter()
+    client = new GrpcDaemonClient('/tmp/test.sock', byteCounter)
   })
 
   describe('connection lifecycle', () => {
@@ -147,6 +154,12 @@ describe('GrpcDaemonClient', () => {
       connectClient()
       await client.connect()
       expect(client.isConnected()).toBe(true)
+    })
+
+    it('connect builds the client over the connection byte counter', async () => {
+      connectClient()
+      await client.connect()
+      expect(vi.mocked(createCountingClient)).toHaveBeenCalledWith('unix:///tmp/test.sock', 'insecure-creds', expect.any(Object), byteCounter)
     })
 
     it('notifies onDisconnect listeners when the channel leaves READY', async () => {

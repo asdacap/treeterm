@@ -248,6 +248,11 @@ export interface IpcRequests {
     params: []
     result: ConnectionInfo[]
   }
+  /** Running total of bytes the connection's gRPC clients have received from its daemon. */
+  sshGetReceivedBytes: {
+    params: [connectionId: string]
+    result: number
+  }
   sshSaveConnection: {
     params: [config: SSHConnectionConfig]
     result: undefined

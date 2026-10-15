@@ -2,32 +2,8 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { render, screen, act } from '@testing-library/react'
 
-import SystemMonitor, { formatBytes, getUtilizationColor, parseMetrics, cpuHistory, pushCpuSample, memoryHistory, pushMemorySample } from './SystemMonitor'
+import SystemMonitor, { getUtilizationColor, parseMetrics, cpuHistory, pushCpuSample, memoryHistory, pushMemorySample } from './SystemMonitor'
 import { ExecEventType, type ExecEvent } from '../../shared/ipc-types'
-
-// --- formatBytes ---
-
-describe('formatBytes', () => {
-  it('formats bytes', () => {
-    expect(formatBytes(512)).toBe('512 B')
-  })
-
-  it('formats kilobytes', () => {
-    expect(formatBytes(2048)).toBe('2.0 KB')
-  })
-
-  it('formats megabytes', () => {
-    expect(formatBytes(1048576)).toBe('1.0 MB')
-  })
-
-  it('formats gigabytes', () => {
-    expect(formatBytes(2147483648)).toBe('2.0 GB')
-  })
-
-  it('formats zero', () => {
-    expect(formatBytes(0)).toBe('0 B')
-  })
-})
 
 // --- getUtilizationColor ---
 

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Loader2, RefreshCw, Square, X } from 'lucide-react'
 import type { ExecApi } from '../types'
+import { formatBytes } from '../utils/formatBytes'
 import { DEFAULT_EXEC_TIMEOUT_MS, ExecEventType, type ExecEvent } from '../../shared/ipc-types'
 
 // --- Types ---
@@ -125,13 +126,6 @@ echo "PROC_END"
 `.trim()
 
 // --- Helpers ---
-
-export function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${String(bytes)} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`
-}
 
 export function getUtilizationColor(percent: number): string {
   if (percent >= 85) return '#f44336'

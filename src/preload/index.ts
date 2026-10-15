@@ -406,6 +406,9 @@ const preloadApi: PreloadApi = {
     listConnections: (): Promise<ConnectionInfo[]> => {
       return client.sshListConnections()
     },
+    getReceivedBytes: (connectionId: string): Promise<number> => {
+      return client.sshGetReceivedBytes(connectionId)
+    },
     saveConnection: (config: SSHConnectionConfig): Promise<void> => {
       return client.sshSaveConnection(config)
     },

@@ -20,6 +20,7 @@ import type { ReviewState, WorktreeSettings, Workspace, WorkspaceStore } from '.
 import type { GitController } from '../store/createGitControllerStore'
 import { ConnectionStatus, ConnectionTargetType } from '../../shared/types'
 import { PrIndicators } from './PrIndicators'
+import { ConnectionTrafficBadge } from './TrafficBadge'
 import { hasUnreadWorkspaceAttention } from '../store/workspaceAttention'
 import { TitleRefreshStatus } from '../store/createAnalyzerStore'
 import type { TitleRefreshResult } from '../store/createAnalyzerStore'
@@ -51,6 +52,7 @@ export default function SessionPanel({
   selectFolder,
 }: SessionPanelProps): React.JSX.Element {
   const connection = useStore(sessionStore, s => s.connection)
+  const trafficMeter = useAppStore(s => s.trafficMeter)
   const sessionLock = useStore(sessionStore, s => s.sessionLock)
   const workspaces = useStore(sessionStore, s => s.workspaces)
   const activeWorkspaceId = useStore(sessionStore, s => s.activeWorkspaceId)
@@ -598,6 +600,7 @@ export default function SessionPanel({
           >
             {renderStatusIcon(connection.status)}
             {displayName}
+            <ConnectionTrafficBadge meter={trafficMeter} connectionId={connection.id} />
             {sessionLock && (
               <button
                 className="force-unlock-button"

@@ -116,7 +116,7 @@ vi.mock('./portForward', () => ({
 
 import { ConnectionManager } from './connectionManager'
 import { SSHTunnel } from './ssh'
-import type { GrpcDaemonClient } from './grpcClient'
+import { GrpcDaemonClient } from './grpcClient'
 
 describe('ConnectionManager', () => {
   let manager: ConnectionManager
@@ -178,6 +178,28 @@ describe('ConnectionManager', () => {
 
     it('throws for missing connection', () => {
       expect(() => manager.getClient('nonexistent')).toThrow('Connection not found: nonexistent')
+    })
+  })
+
+  describe('getByteCounter', () => {
+    it('returns the counter the connection handed its client', () => {
+      const counter = manager.getByteCounter(localConnectionId)
+      expect(vi.mocked(GrpcDaemonClient).mock.calls.at(-1)?.[1]).toBe(counter)
+    })
+
+    it('throws for missing connection', () => {
+      expect(() => manager.getByteCounter('nonexistent')).toThrow('Connection not found: nonexistent')
+    })
+
+    it('keeps a remote counter when a stale entry is replaced', async () => {
+      mockRemoteClient.connect.mockRejectedValueOnce(new Error('daemon not running'))
+      const failed = await manager.connectRemote(remoteConfig)
+      expect(failed.status).toBe(ConnectionStatus.Error)
+      const counter = manager.getByteCounter('remote-1')
+
+      await manager.connectRemote(remoteConfig)
+      expect(manager.getByteCounter('remote-1')).toBe(counter)
+      expect(vi.mocked(GrpcDaemonClient).mock.calls.at(-1)?.[1]).toBe(counter)
     })
   })
 
@@ -834,6 +856,8 @@ describe('ConnectionManager', () => {
 
       const client2 = manager.getClient(localConnectionId) as unknown as MockGrpcClientInstance
       expect(client2).not.toBe(client1)
+      // The rebuilt client keeps counting into the same total.
+      expect(vi.mocked(GrpcDaemonClient).mock.calls.at(-1)?.[1]).toBe(manager.getByteCounter(localConnectionId))
       // The core assertion: the rebuilt client has its OWN disconnect listener.
       expect(client2.hasDisconnectListener()).toBe(true)
 
@@ -857,6 +881,7 @@ describe('ConnectionManager', () => {
       const client2 = manager.getClient('remote-1') as unknown as MockGrpcClientInstance
       expect(client2).not.toBe(client1)
       expect(client2.hasDisconnectListener()).toBe(true)
+      expect(vi.mocked(GrpcDaemonClient).mock.calls.at(-1)?.[1]).toBe(manager.getByteCounter('remote-1'))
 
       // Drop #2 via the new client's transport watcher — detected promptly
       client2.fireDisconnect()

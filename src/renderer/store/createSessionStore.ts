@@ -7,7 +7,7 @@ import { createWorkspaceStore } from './createWorkspaceStore'
 import type { WorkspaceStore, WorkspaceStoreDeps } from './createWorkspaceStore'
 import { createTtyStore } from './createTtyStore'
 import type { Tty, TtyTerminalDeps } from './createTtyStore'
-import { FileWatchEventType, type PtyAttachKind, type PtyEvent, type FileWatchEvent } from '../../shared/ipc-types'
+import { FileWatchEventType, PtyEventType, type PtyAttachKind, type PtyEvent, type FileWatchEvent } from '../../shared/ipc-types'
 import { ConnectionStatus, ConnectionTargetType, WorkspaceStatus } from '../../shared/types'
 import type {
   Workspace, Session, AppState, GitInfo, WorkspaceRef,
@@ -17,6 +17,7 @@ import type {
 } from '../types'
 import { toDisposable } from '../../shared/lifecycle'
 import type { SetActivityTabState } from './activityState'
+import type { WorkspaceTrafficRecorder } from './createTrafficMeterStore'
 import type { SessionLock } from '../../shared/types'
 import { defaultWorktreeSettings, parseWorkspaceFile, toStoredWorkspaceFile } from '../../shared/workspaceFile'
 import type { WorktreeRegistryApi } from '../lib/worktreeRegistry'
@@ -54,6 +55,7 @@ export interface SessionDeps {
   appRegistry: AppRegistryApi
   llm: LlmApi
   setActivityTabState: SetActivityTabState
+  traffic: WorkspaceTrafficRecorder
 }
 
 /** One worktree to load in an {@link SessionState.autoOpenWorktrees} batch. */
@@ -80,7 +82,7 @@ export interface SessionState {
   /** The returned Tty owns its event subscription — give it to a DisposableStore.
    *  There is no separate cleanup value for a caller to drop, nor for a narrowed
    *  dependency type to silently erase. */
-  openTtyStream: (ptyId: string, kind: PtyAttachKind, onEvent: (event: PtyEvent) => void) => Promise<Tty>
+  openTtyStream: (workspaceId: string, ptyId: string, kind: PtyAttachKind, onEvent: (event: PtyEvent) => void) => Promise<Tty>
   killTty: (ptyId: string) => void
   listTty: () => Promise<TTYSessionInfo[]>
 
@@ -907,7 +909,7 @@ export function createSessionStore(
   function makeHandleDeps(workspaceId: string): WorkspaceStoreDeps {
     return {
       appRegistry: deps.appRegistry,
-      openTtyStream: (ptyId: string, kind: PtyAttachKind, onEvent: (event: PtyEvent) => void) => store.getState().openTtyStream(ptyId, kind, onEvent),
+      openTtyStream: (ptyId: string, kind: PtyAttachKind, onEvent: (event: PtyEvent) => void) => store.getState().openTtyStream(workspaceId, ptyId, kind, onEvent),
       createTty: (cwd, sandbox?, startupCommand?, ptyHandle?) => store.getState().createTty(cwd, sandbox, startupCommand, ptyHandle),
       connectionId: config.connection.id,
       isRemote: config.connection.target.type === ConnectionTargetType.Remote,
@@ -1374,10 +1376,14 @@ export function createSessionStore(
       return result.sessionId
     },
 
-    openTtyStream: async (ptyId: string, kind: PtyAttachKind, onEvent: (event: PtyEvent) => void): Promise<Tty> => {
+    openTtyStream: async (workspaceId: string, ptyId: string, kind: PtyAttachKind, onEvent: (event: PtyEvent) => void): Promise<Tty> => {
       const handle = crypto.randomUUID()
       // Registered before attach so the daemon's replayed scrollback is not missed.
-      const subscription = toDisposable(deps.terminal.onEvent(handle, onEvent))
+      // Every attach is its own download, so each one counts toward the workspace.
+      const subscription = toDisposable(deps.terminal.onEvent(handle, (event) => {
+        if (event.type === PtyEventType.Data) deps.traffic.recordWorkspace(workspaceId, event.data.byteLength)
+        onEvent(event)
+      }))
       let result: IpcResult
       try {
         result = await deps.terminal.attach(connectionId, handle, ptyId, kind)
@@ -1430,6 +1436,7 @@ export function createSessionStore(
     onWorkspaceRemoved: (id: string): void => {
       const entry = get().workspaces.get(id)
       if (!entry) return
+      deps.traffic.removeWorkspace(id)
       unpublishedIds.delete(id)
       knownRefs.delete(id)
       // Stop watching this workspace's file and forget its sync bookkeeping.

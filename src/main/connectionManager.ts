@@ -5,6 +5,7 @@
 
 import { randomUUID } from 'crypto'
 import { GrpcDaemonClient } from './grpcClient'
+import { ByteCounter } from './grpcByteCounter'
 import { SSHTunnel, BootstrapResultType } from './ssh'
 import { PortForwardProcess } from './portForward'
 import {
@@ -35,6 +36,8 @@ class Connection {
   /** Set when the user chose "connect anyway" against an outdated remote daemon.
    *  Background reconnects must honour it, or they hit the mismatch again and loop. */
   allowOutdatedDaemon: boolean = false
+  /** Bytes received from the daemon by every client this connection creates, across reconnects. */
+  readonly byteCounter: ByteCounter
 
   private static HEARTBEAT_TIMEOUT_MS = 50_000
   private static RECONNECT_MAX_DELAY_MS = 30_000
@@ -58,9 +61,11 @@ class Connection {
     readonly target: ConnectionTarget,
     client: GrpcDaemonClient | null,
     status: ConnectionStatus,
+    byteCounter: ByteCounter,
     tunnel?: SSHTunnel
   ) {
     this.client = client
+    this.byteCounter = byteCounter
     this.status = status
     this.tunnel = tunnel
   }
@@ -408,7 +413,7 @@ class Connection {
       throw new Error('No socket path available for local reconnect')
     }
 
-    const newClient = new GrpcDaemonClient(socketPath)
+    const newClient = new GrpcDaemonClient(socketPath, this.byteCounter)
     await newClient.connect()
     this.client = newClient
     // Re-wire the transport watcher on the fresh client so subsequent drops are
@@ -448,7 +453,7 @@ class Connection {
     }
 
     // Connect gRPC client through the new forwarded socket
-    const client = new GrpcDaemonClient(result.socketPath)
+    const client = new GrpcDaemonClient(result.socketPath, this.byteCounter)
     await client.connect()
     this.client = client
     // Re-wire the drop handlers on the fresh tunnel and client. Without this the
@@ -502,10 +507,11 @@ export class ConnectionManager {
 
   async connectLocal(): Promise<ConnectionInfo> {
     const id = randomUUID()
-    const client = new GrpcDaemonClient(this.socketPath)
+    const byteCounter = new ByteCounter()
+    const client = new GrpcDaemonClient(this.socketPath, byteCounter)
     await client.connect()
 
-    const conn = new Connection(id, { type: ConnectionTargetType.Local }, client, ConnectionStatus.Connected)
+    const conn = new Connection(id, { type: ConnectionTargetType.Local }, client, ConnectionStatus.Connected, byteCounter)
     this.connections.set(id, conn)
 
     conn.startHeartbeatMonitor(() => {
@@ -531,6 +537,14 @@ export class ConnectionManager {
       throw new Error(`Connection ${connectionId} is ${conn.status}${conn.error ? ': ' + conn.error : ''}`)
     }
     return conn.client
+  }
+
+  getByteCounter(connectionId: string): ByteCounter {
+    const conn = this.connections.get(connectionId)
+    if (!conn) {
+      throw new Error(`Connection not found: ${connectionId}`)
+    }
+    return conn.byteCounter
   }
 
   listConnections(): ConnectionInfo[] {
@@ -589,7 +603,9 @@ export class ConnectionManager {
     const tunnel = new SSHTunnel(config, { refreshDaemon: options?.refreshDaemon, allowOutdatedDaemon: options?.allowOutdatedDaemon })
     const target: ConnectionTarget = { type: ConnectionTargetType.Remote, config }
 
-    const conn = new Connection(config.id, target, null, ConnectionStatus.Connecting, tunnel)
+    // A replaced stale entry hands over its counter, so the host's total keeps counting.
+    const byteCounter = this.connections.get(config.id)?.byteCounter ?? new ByteCounter()
+    const conn = new Connection(config.id, target, null, ConnectionStatus.Connecting, byteCounter, tunnel)
     conn.allowOutdatedDaemon = options?.allowOutdatedDaemon ?? false
     conn.connectPhase = ConnectPhase.Bootstrap
     // A stale (Error/Disconnected/Reconnecting) entry is being replaced: stop its
@@ -641,7 +657,7 @@ export class ConnectionManager {
       conn.connectPhase = ConnectPhase.Daemon
       this.emitStatus(config.id)
       conn.emitDaemonOutput('Connecting to daemon via gRPC...')
-      const client = new GrpcDaemonClient(localSocketPath)
+      const client = new GrpcDaemonClient(localSocketPath, conn.byteCounter)
       console.log(`[connectionManager] Connecting gRPC daemon client via forwarded socket...`)
       await client.connect()
       console.log(`[connectionManager] gRPC daemon client connected successfully`)

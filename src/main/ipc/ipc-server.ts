@@ -40,6 +40,7 @@ const CHANNELS = {
   sshForceReconnect: 'ssh:forceReconnect',
   sshCancelReconnect: 'ssh:cancelReconnect',
   sshListConnections: 'ssh:listConnections',
+  sshGetReceivedBytes: 'ssh:getReceivedBytes',
   sshSaveConnection: 'ssh:saveConnection',
   sshGetSavedConnections: 'ssh:getSavedConnections',
   sshRemoveSavedConnection: 'ssh:removeSavedConnection',
@@ -466,6 +467,16 @@ export class IpcServer {
   ): void {
     ipcMain.handle(CHANNELS.sshListConnections, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
       handler(...(args as IpcRequests['sshListConnections']['params']))
+    )
+  }
+
+  onSshGetReceivedBytes(
+    handler: (
+      ...args: IpcRequests['sshGetReceivedBytes']['params']
+    ) => IpcRequests['sshGetReceivedBytes']['result'] | Promise<IpcRequests['sshGetReceivedBytes']['result']>
+  ): void {
+    ipcMain.handle(CHANNELS.sshGetReceivedBytes, (_event: IpcMainInvokeEvent, ...args: unknown[]) =>
+      handler(...(args as IpcRequests['sshGetReceivedBytes']['params']))
     )
   }
 

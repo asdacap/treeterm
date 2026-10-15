@@ -640,6 +640,8 @@ export interface SSHApi {
   forceReconnect: (connectionId: string) => Promise<void>
   cancelReconnect: (connectionId: string) => Promise<void>
   listConnections: () => Promise<ConnectionInfo[]>
+  /** Running total of bytes received over the connection's gRPC traffic. */
+  getReceivedBytes: (connectionId: string) => Promise<number>
   saveConnection: (config: SSHConnectionConfig) => Promise<void>
   getSavedConnections: () => Promise<SSHConnectionConfig[]>
   removeSavedConnection: (id: string) => Promise<void>

@@ -42,6 +42,7 @@ const CHANNELS = {
   sshForceReconnect: 'ssh:forceReconnect',
   sshCancelReconnect: 'ssh:cancelReconnect',
   sshListConnections: 'ssh:listConnections',
+  sshGetReceivedBytes: 'ssh:getReceivedBytes',
   sshSaveConnection: 'ssh:saveConnection',
   sshGetSavedConnections: 'ssh:getSavedConnections',
   sshRemoveSavedConnection: 'ssh:removeSavedConnection',
@@ -244,6 +245,10 @@ export class IpcClient {
 
   sshListConnections(...args: IpcRequests['sshListConnections']['params']): Promise<IpcRequests['sshListConnections']['result']> {
     return ipcRenderer.invoke(CHANNELS.sshListConnections, ...args)
+  }
+
+  sshGetReceivedBytes(...args: IpcRequests['sshGetReceivedBytes']['params']): Promise<IpcRequests['sshGetReceivedBytes']['result']> {
+    return ipcRenderer.invoke(CHANNELS.sshGetReceivedBytes, ...args)
   }
 
   sshSaveConnection(...args: IpcRequests['sshSaveConnection']['params']): Promise<IpcRequests['sshSaveConnection']['result']> {

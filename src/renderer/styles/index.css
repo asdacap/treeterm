@@ -794,6 +794,25 @@ body,
   gap: 4px;
 }
 
+.traffic-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: normal;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  /* The session header is uppercased; "KB/S" would misread the unit. */
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--text-secondary);
+}
+
+.traffic-badge-error {
+  color: #ff9800;
+}
+
 .workspace-title {
   font-size: 13px;
   font-weight: 500;

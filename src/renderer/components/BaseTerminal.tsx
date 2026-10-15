@@ -525,7 +525,7 @@ export default function BaseTerminal({
         try {
           // `owner` takes the Tty, so the subscription cannot outlive the engine.
           tty = await thenRegisterOrDispose(
-            session.openTtyStream(currentExistingPtyId, PtyAttachKind.Terminal, (event) => { handleCachedEvent(cache, event) }),
+            session.openTtyStream(workspace.getState().workspace.id, currentExistingPtyId, PtyAttachKind.Terminal, (event) => { handleCachedEvent(cache, event) }),
             owner,
           )
           log.debug(`[${config.logPrefix} ${tabId}] reattached to session:`, currentExistingPtyId)

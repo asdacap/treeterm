@@ -6,6 +6,7 @@ import { GrpcDaemonClient, PtyStream } from './grpcClient'
 import { getDefaultSocketPath } from './socketPath'
 import { IpcServer } from './ipc/ipc-server'
 import { ConnectionManager } from './connectionManager'
+import { ByteCounter } from './grpcByteCounter'
 import type { ExecInput, ExecOutput } from '../generated/treeterm'
 import { ConnectionStatus, ConnectionTargetType, ConnectionErrorKind } from '../shared/types'
 import type { SSHConnectionConfig, PortForwardConfig } from '../shared/types'
@@ -37,7 +38,9 @@ const windowUuids = new Map<number, string>()
 const windowConnectionMap = new Map<string, string>()
 
 async function createSessionClient(connectionId: string, socketPath: string): Promise<void> {
-  const client = new GrpcDaemonClient(socketPath)
+  if (!connectionManager) throw new Error('ConnectionManager not initialized')
+  // The lock client is still this connection's traffic.
+  const client = new GrpcDaemonClient(socketPath, connectionManager.getByteCounter(connectionId))
   await client.connect()
   sessionClientMap.set(connectionId, client)
   console.log(`[main] per-session gRPC client created for connection ${connectionId}`)
@@ -870,6 +873,11 @@ server.onSshListConnections(() => {
   return connectionManager.listConnections()
 })
 
+server.onSshGetReceivedBytes((connectionId) => {
+  if (!connectionManager) throw new Error('ConnectionManager not initialized')
+  return connectionManager.getByteCounter(connectionId).total
+})
+
 // eslint-disable-next-line @typescript-eslint/require-await
 server.onSshSaveConnection(async (config) => {
   const settings = loadSettings()
@@ -1088,7 +1096,7 @@ void app.whenReady().then(async () => {
   const socketPath = process.env.TREETERM_SOCKET_PATH || getDefaultSocketPath()
 
   // Bootstrap: ensure daemon is running before any window connects
-  const bootstrapClient = new GrpcDaemonClient(socketPath)
+  const bootstrapClient = new GrpcDaemonClient(socketPath, new ByteCounter())
   await bootstrapClient.ensureDaemonRunning()
   bootstrapClient.disconnect()
 
@@ -1211,7 +1219,7 @@ async function quitAndKillDaemon(): Promise<void> {
         // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- length > 0 checked above
         await connectionManager.getClient(localConns[0]!.id).shutdownDaemon()
       } else {
-        const tempClient = new GrpcDaemonClient(connectionManager.socketPath)
+        const tempClient = new GrpcDaemonClient(connectionManager.socketPath, new ByteCounter())
         await tempClient.connect()
         await tempClient.shutdownDaemon()
         tempClient.disconnect()
