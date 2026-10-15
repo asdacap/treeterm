@@ -353,8 +353,8 @@ export default function WorkspacePane({ sessionStore, platform }: WorkspacePaneP
                     {activeHandle && <RefreshTitleButton workspace={activeHandle} />}
                   </>
                 )}
-                <WorkspaceTrafficBadge meter={trafficMeter} workspaceId={activeWorkspace.id} />
                 <div className="workspace-actions">
+                  <WorkspaceTrafficBadge meter={trafficMeter} workspaceId={activeWorkspace.id} />
                   {activeWorkspace.gitBranch && activeHandle && (
                     <BranchBadge
                       branch={activeWorkspace.gitBranch}
