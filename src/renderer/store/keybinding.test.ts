@@ -165,14 +165,38 @@ describe('useKeybindingStore', () => {
       expect(useKeybindingStore.getState().prefixState).toBe(PrefixModeState.Active)
     })
 
-    it('pressing prefix key in active mode deactivates (toggle)', () => {
+    it('pressing prefix key in active mode deactivates and passes the key through', () => {
       const handleKeyDown = initAndGetHandler()
 
       handleKeyDown(createKeyEvent({ key: 'b', ctrlKey: true }))
       expect(useKeybindingStore.getState().prefixState).toBe(PrefixModeState.Active)
 
-      handleKeyDown(createKeyEvent({ key: 'b', ctrlKey: true }))
+      const second = createKeyEvent({ key: 'b', ctrlKey: true })
+      handleKeyDown(second)
       expect(useKeybindingStore.getState().prefixState).toBe(PrefixModeState.Idle)
+      expect(useKeybindingStore.getState().activatedAt).toBeNull()
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      expect(second.preventDefault).not.toHaveBeenCalled()
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      expect(second.stopPropagation).not.toHaveBeenCalled()
+
+      const third = createKeyEvent({ key: 'b', ctrlKey: true })
+      handleKeyDown(third)
+      expect(useKeybindingStore.getState().prefixState).toBe(PrefixModeState.Active)
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      expect(third.preventDefault).toHaveBeenCalled()
+    })
+
+    it('pressing prefix key in workspace focus consumes the key and cancels navigation', () => {
+      const handleKeyDown = initAndGetHandler()
+      useKeybindingStore.getState().enterWorkspaceFocus(['ws1'], 0)
+      const event = createKeyEvent({ key: 'b', ctrlKey: true })
+      handleKeyDown(event)
+      expect(useKeybindingStore.getState().prefixState).toBe(PrefixModeState.Idle)
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      expect(event.preventDefault).toHaveBeenCalled()
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      expect(event.stopPropagation).toHaveBeenCalled()
     })
 
     it('prefix key preventDefault and stopPropagation', () => {
@@ -293,6 +317,25 @@ describe('useKeybindingStore', () => {
   describe('timeout', () => {
     beforeEach(() => vi.useFakeTimers())
     afterEach(() => vi.useRealTimers())
+
+    it('double prefix clears the timeout', () => {
+      const handleKeyDown = initAndGetHandler()
+      handleKeyDown(createKeyEvent({ key: 'b', ctrlKey: true }))
+      expect(vi.getTimerCount()).toBe(1)
+      handleKeyDown(createKeyEvent({ key: 'b', ctrlKey: true }))
+      expect(vi.getTimerCount()).toBe(0)
+    })
+
+    it('prefix after timeout is consumed as a new activation', () => {
+      const handleKeyDown = initAndGetHandler()
+      handleKeyDown(createKeyEvent({ key: 'b', ctrlKey: true }))
+      vi.advanceTimersByTime(1500)
+      const event = createKeyEvent({ key: 'b', ctrlKey: true })
+      handleKeyDown(event)
+      expect(useKeybindingStore.getState().prefixState).toBe(PrefixModeState.Active)
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      expect(event.preventDefault).toHaveBeenCalled()
+    })
 
     it('activate auto-deactivates after timeout', () => {
       useKeybindingStore.getState().activate()

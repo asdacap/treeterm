@@ -100,6 +100,11 @@ export const useKeybindingStore = create<KeybindingStore>((set, get) => ({
         // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- length > 0 checked above
         const [modifiers, key] = prefixParts[0]!
         if (matchesKeybinding(e, modifiers, key)) {
+          if (prefixState === PrefixModeState.Active) {
+            get().deactivate()
+            // Let the focused terminal handle the second prefix key normally.
+            return
+          }
           e.preventDefault()
           e.stopPropagation()
           if (prefixState === PrefixModeState.Idle) {
