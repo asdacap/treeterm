@@ -4,7 +4,8 @@ import type { WorkspaceStoreDeps } from './createWorkspaceStore'
 import { TitleRefreshStatus } from './createAnalyzerStore'
 import { getUnmergedSubWorkspaces, WorkspaceEntryStatus } from './createSessionStore'
 import type { WorkspaceEntry } from './createSessionStore'
-import type { LlmApi, Workspace, Application } from '../types'
+import type { LlmApi, Workspace, Application, ReviewComment } from '../types'
+import { buildPromptForComments } from '../utils/reviewPrompt'
 import { createMockExecApi } from '../../shared/mockApis'
 import { WorkspaceStatus } from '../../shared/types'
 import { makeWorkspace } from '../../shared/test-fixtures/workspace'
@@ -39,6 +40,7 @@ function makeHandleDeps(overrides?: Partial<WorkspaceStoreDeps>): WorkspaceStore
     quickForkWorkspace: vi.fn<(...args: any[]) => Promise<{ success: boolean }>>().mockResolvedValue({ success: true }),
     refreshGitInfo: vi.fn<(...args: any[]) => Promise<void>>().mockResolvedValue(undefined),
     lookupWorkspace: vi.fn<(...args: any[]) => any>().mockReturnValue(undefined),
+    lookupWorkspaceStore: vi.fn<(...args: any[]) => any>().mockReturnValue(undefined),
     subscribeWorkspaceChanges: vi.fn<(...args: any[]) => () => void>().mockReturnValue(() => {}),
     getSettings: vi.fn<() => any>().mockReturnValue({
       llm: { apiKey: '', baseUrl: '' },
@@ -915,6 +917,73 @@ describe('createWorkspaceStore', () => {
       const result = await store.getState().promptHarness('retry test')
       expect(result).toBe(true)
       expect(writeFn).toHaveBeenCalledWith('retry test\r')
+    })
+  })
+
+  describe('promptParentReviewComments', () => {
+    function makeComment(id: string, addressed: boolean): TestComment {
+      return { id, filePath: 'src/a.ts', lineNumber: 3, text: `fix ${id}`, commitHash: null, createdAt: 1, isOutdated: false, addressed, side: 'modified' }
+    }
+
+    function setup(opts: { parentId: string | undefined; parentComments: TestComment[] | null; sent: boolean }) {
+      const parent = opts.parentComments === null
+        ? undefined
+        : createWorkspaceStore(
+          makeWorkspace({ id: 'parent', path: '/repo', metadata: { reviewComments: JSON.stringify(opts.parentComments) } }),
+          makeHandleDeps(),
+        )
+      const child = createWorkspaceStore(
+        makeWorkspace({ id: 'child', path: '/wt/child', parentId: opts.parentId, isWorktree: true }),
+        makeHandleDeps({ lookupWorkspaceStore: () => parent }),
+      )
+      const promptHarness = vi.fn<(text: string) => Promise<boolean>>().mockResolvedValue(opts.sent)
+      child.setState({ promptHarness })
+      const parentComments = (): TestComment[] =>
+        JSON.parse(parent!.getState().metadata.reviewComments!) as TestComment[]
+      return { child, promptHarness, parentComments }
+    }
+
+    it('returns false when the workspace has no parent', async () => {
+      const { child, promptHarness } = setup({ parentId: undefined, parentComments: [makeComment('c1', false)], sent: true })
+      expect(await child.getState().promptParentReviewComments()).toBe(false)
+      expect(promptHarness).not.toHaveBeenCalled()
+    })
+
+    it('returns false when the parent store is not loaded', async () => {
+      const { child, promptHarness } = setup({ parentId: 'parent', parentComments: null, sent: true })
+      expect(await child.getState().promptParentReviewComments()).toBe(false)
+      expect(promptHarness).not.toHaveBeenCalled()
+    })
+
+    it('returns false without prompting when the parent has no unaddressed comments', async () => {
+      const { child, promptHarness } = setup({ parentId: 'parent', parentComments: [makeComment('c1', true)], sent: true })
+      expect(await child.getState().promptParentReviewComments()).toBe(false)
+      expect(promptHarness).not.toHaveBeenCalled()
+    })
+
+    it('leaves parent comments unaddressed when the prompt is not sent', async () => {
+      const { child, parentComments } = setup({ parentId: 'parent', parentComments: [makeComment('c1', false)], sent: false })
+      expect(await child.getState().promptParentReviewComments()).toBe(false)
+      expect(parentComments().map(c => c.addressed)).toEqual([false])
+    })
+
+    it('prompts with the unaddressed parent comments and marks them addressed on the parent', async () => {
+      const comments = [makeComment('c1', false), makeComment('c2', true)]
+      const { child, promptHarness, parentComments } = setup({ parentId: 'parent', parentComments: comments, sent: true })
+      expect(await child.getState().promptParentReviewComments()).toBe(true)
+      expect(promptHarness).toHaveBeenCalledWith(buildPromptForComments([comments[0]] as ReviewComment[]))
+      expect(parentComments().map(c => c.addressed)).toEqual([true, true])
+    })
+
+    it('rebases absolute parent paths onto this workspace and keeps relative paths', async () => {
+      const absolute = { ...makeComment('c1', false), filePath: '/repo/src/a.ts' }
+      const relative = { ...makeComment('c2', false), filePath: 'src/b.ts' }
+      const { child, promptHarness } = setup({ parentId: 'parent', parentComments: [absolute, relative], sent: true })
+      await child.getState().promptParentReviewComments()
+      expect(promptHarness).toHaveBeenCalledWith(buildPromptForComments([
+        { ...absolute, filePath: '/wt/child/src/a.ts' },
+        relative,
+      ] as ReviewComment[]))
     })
   })
 

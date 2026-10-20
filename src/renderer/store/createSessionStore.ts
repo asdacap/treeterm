@@ -934,6 +934,10 @@ export function createSessionStore(
         const entry = store.getState().workspaces.get(id)
         return entry && (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError) ? entry.data : undefined
       },
+      lookupWorkspaceStore: (id) => {
+        const entry = store.getState().workspaces.get(id)
+        return entry && (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError) ? entry.store : undefined
+      },
       subscribeWorkspaceChanges: (callback) => store.subscribe(callback),
       github: deps.github,
       worktreeRegistry: deps.worktreeRegistry,

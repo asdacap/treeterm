@@ -7,6 +7,7 @@ import type { TerminalEngine } from '../terminal/engine'
 import { PromptCommitButton } from './PromptCommitButton'
 import { PromptRebaseButton } from './PromptRebaseButton'
 import { ReviewCommentsButton } from './ReviewCommentsButton'
+import { ParentReviewCommentsButton } from './ParentReviewCommentsButton'
 import { PromptGitHubCommentsButton } from './PromptGitHubCommentsButton'
 import type { SandboxConfig, WorkspaceStore } from '../types'
 import { isAiHarnessState } from '../types'
@@ -112,6 +113,7 @@ function AiHarnessContent({
               <PromptCommitButton workspace={workspace} />
               <PromptRebaseButton workspace={workspace} />
               <ReviewCommentsButton workspace={workspace} />
+              <ParentReviewCommentsButton workspace={workspace} />
               <PromptGitHubCommentsButton workspace={workspace} />
             </>
           }

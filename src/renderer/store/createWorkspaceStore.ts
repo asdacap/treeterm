@@ -22,6 +22,7 @@ import { DisposableMap, DisposableStore } from '../../shared/lifecycle'
 import type { IDisposable } from '../../shared/lifecycle'
 import { getWorkspaceFavouritePaths, isFavouritePath, normalizeFavouritePath } from '../../shared/workspaceFavourites'
 import { hasUnreadWorkspaceAttention } from './workspaceAttention'
+import { buildPromptForComments } from '../utils/reviewPrompt'
 
 /** The LLM labeller reads the AI Harness terminal buffer; without one there is nothing to label from. */
 const NO_AI_HARNESS_TAB: TitleRefreshResult = {
@@ -100,6 +101,7 @@ export interface WorkspaceStoreDeps {
   quickForkWorkspace: (id: string) => Promise<{ success: boolean; error?: string }>
   refreshGitInfo: (id: string) => Promise<void>
   lookupWorkspace: (id: string) => Workspace | undefined
+  lookupWorkspaceStore: (id: string) => WorkspaceStore | undefined
   subscribeWorkspaceChanges: (callback: () => void) => () => void
   github: GitHubApi
   worktreeRegistry: WorktreeRegistryApi
@@ -182,6 +184,10 @@ export interface WorkspaceStoreState {
 
   // Other per-workspace
   promptHarness: (text: string) => Promise<boolean>
+  /** Prompt this workspace's harness with the parent workspace's unaddressed review
+   *  comments, then mark them addressed on the parent. For forks that address a
+   *  parent's review without carrying its diff. */
+  promptParentReviewComments: () => Promise<boolean>
   updateMetadata: (key: string, value: string, reason: string) => void
   deleteMetadata: (key: string, reason: string) => void
   toggleFavourite: () => void
@@ -229,6 +235,7 @@ export interface WorkspaceStoreState {
   removeKeepBranch: () => Promise<void>
   removeKeepBoth: () => Promise<void>
   lookupWorkspace: (id: string) => Workspace | undefined
+  lookupWorkspaceStore: (id: string) => WorkspaceStore | undefined
 }
 
 export type WorkspaceStore = StoreApi<WorkspaceStoreState>
@@ -673,6 +680,27 @@ export function createWorkspaceStore(
       return true
     },
 
+    promptParentReviewComments: async (): Promise<boolean> => {
+      const parentId = get().workspace.parentId
+      if (!parentId) return false
+      const parent = deps.lookupWorkspaceStore(parentId)
+      if (!parent) return false
+      const parentComments = parent.getState().reviewComments.getState()
+      const unaddressed = parentComments.getReviewComments().filter(c => !c.addressed)
+      if (unaddressed.length === 0) return false
+      // Files-browser comments carry absolute paths into the parent's worktree; point them at ours.
+      const parentPrefix = parent.getState().workspace.path + '/'
+      const ownPrefix = get().workspace.path + '/'
+      const rebased = unaddressed.map(c =>
+        c.filePath.startsWith(parentPrefix) ? { ...c, filePath: ownPrefix + c.filePath.slice(parentPrefix.length) } : c
+      )
+      const sent = await get().promptHarness(buildPromptForComments(rebased))
+      if (sent) {
+        parentComments.markReviewCommentsAddressed(unaddressed.map(c => c.id))
+      }
+      return sent
+    },
+
     gitApi: {
       getInfo: () => deps.git.getInfo(workspace.path),
       createWorktree: (name, baseBranch?) => deps.git.createWorktree(workspace.path, name, baseBranch),
@@ -736,6 +764,7 @@ export function createWorkspaceStore(
     removeKeepBranch: () => deps.removeWorkspaceKeepBranch(id),
     removeKeepBoth: () => deps.removeWorkspaceKeepBoth(id),
     lookupWorkspace: (otherId: string) => deps.lookupWorkspace(otherId),
+    lookupWorkspaceStore: (otherId: string) => deps.lookupWorkspaceStore(otherId),
   }))
 
   let inheritedFavouritesKey = getWorkspaceFavouritePaths(store.getState().workspace, deps.lookupWorkspace).join('\0')
