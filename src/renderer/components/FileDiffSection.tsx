@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { ChevronDown, ChevronRight, Loader2, RefreshCw } from 'lucide-react'
-import type { DiffFile, UncommittedFile, FileDiffContents, ReviewComment } from '../types'
-import { FileChangeStatus } from '../types'
+import type { DiffFile, UncommittedFile, FileDiffContents, TextDiffContents, ReviewComment } from '../types'
+import { DiffContentKind, FileChangeStatus } from '../types'
 import { PierreDiffViewer } from './PierreDiffViewer'
+import { ImageDiffViewer } from './ImageDiffViewer'
 import { FileChangeStats } from './FileChangeStats'
 import type { DiffSearchHit } from '../utils/diffSearch'
 
@@ -35,7 +36,7 @@ interface DiffSize {
   oversized: boolean
 }
 
-function measureDiff(contents: FileDiffContents): DiffSize {
+function measureDiff(contents: TextDiffContents): DiffSize {
   const lines = countLines(contents.originalContent) + countLines(contents.modifiedContent)
   const bytes = contents.originalContent.length + contents.modifiedContent.length
   return { lines, bytes, oversized: lines > MAX_DIFF_LINES || bytes > MAX_DIFF_BYTES }
@@ -202,6 +203,54 @@ export function FileDiffSection({
     setPendingScrollAnchor(null)
   }, [pendingScrollAnchor])
 
+  // Called, never mounted as components.
+  /* eslint-disable react/no-unstable-nested-components */
+  const diffViews: Record<DiffContentKind, () => React.ReactNode> = {
+    [DiffContentKind.Text]: () => {
+      if (contents?.kind !== DiffContentKind.Text) return null
+      const text = contents
+      const size = measureDiff(text)
+      if (size.oversized && !forceRender) {
+        return (
+          <div className="file-diff-too-large">
+            <p>
+              This diff is large ({size.lines.toLocaleString()} lines,{' '}
+              {Math.round(size.bytes / 1024).toLocaleString()} KB) and may slow down or crash the app.
+            </p>
+            <button
+              className="file-diff-load-anyway-btn"
+              onClick={() => { setForceRender(true) }}
+            >
+              Load anyway
+            </button>
+          </div>
+        )
+      }
+      return (
+        <PierreDiffViewer
+          originalContent={text.originalContent}
+          modifiedContent={text.modifiedContent}
+          filePath={file.path}
+          diffStyle={diffStyle}
+          expandUnchanged={expandUnchanged}
+          ignoreWhitespace={ignoreWhitespace}
+          comments={comments}
+          onLineClick={onLineClick}
+          inlineCommentInput={inlineCommentInput}
+          onCommentSubmit={onCommentSubmit}
+          onCommentCancel={onCommentCancel}
+          onCommentDelete={onCommentDelete}
+          selectedLine={searchHit ?? null}
+        />
+      )
+    },
+    [DiffContentKind.Image]: () => contents?.kind === DiffContentKind.Image && (
+      <ImageDiffViewer contents={contents} filePath={file.path} />
+    ),
+    [DiffContentKind.Binary]: () => <div className="file-diff-placeholder">Binary file — diff not shown</div>,
+  }
+  /* eslint-enable react/no-unstable-nested-components */
+
   return (
     <div className="file-diff-section" ref={sectionRef} data-file-path={file.path}>
       <div
@@ -300,42 +349,7 @@ export function FileDiffSection({
                 className="file-diff-offscreen-placeholder"
                 style={{ height: placeholderHeight }}
               />
-            ) : (() => {
-              const size = measureDiff(contents)
-              if (size.oversized && !forceRender) {
-                return (
-                  <div className="file-diff-too-large">
-                    <p>
-                      This diff is large ({size.lines.toLocaleString()} lines,{' '}
-                      {Math.round(size.bytes / 1024).toLocaleString()} KB) and may slow down or crash the app.
-                    </p>
-                    <button
-                      className="file-diff-load-anyway-btn"
-                      onClick={() => { setForceRender(true) }}
-                    >
-                      Load anyway
-                    </button>
-                  </div>
-                )
-              }
-              return (
-                <PierreDiffViewer
-                  originalContent={contents.originalContent}
-                  modifiedContent={contents.modifiedContent}
-                  filePath={file.path}
-                  diffStyle={diffStyle}
-                  expandUnchanged={expandUnchanged}
-                  ignoreWhitespace={ignoreWhitespace}
-                  comments={comments}
-                  onLineClick={onLineClick}
-                  inlineCommentInput={inlineCommentInput}
-                  onCommentSubmit={onCommentSubmit}
-                  onCommentCancel={onCommentCancel}
-                  onCommentDelete={onCommentDelete}
-                  selectedLine={searchHit ?? null}
-                />
-              )
-            })()
+            ) : diffViews[contents.kind]()
           ) : (
             <div className="file-diff-placeholder">Scroll to load diff</div>
           )}

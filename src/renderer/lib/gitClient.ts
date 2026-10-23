@@ -24,7 +24,8 @@ import type {
 /* eslint-disable custom/no-string-literal-comparison -- parses git porcelain output; status chars/tokens are git CLI conventions, not our domain */
 import { DEFAULT_EXEC_TIMEOUT_MS, ExecEventType, type IpcResult } from '../../shared/ipc-types'
 import { FileChangeStatus } from '../../shared/types'
-import { FileStatKind } from '../types'
+import { DiffContentKind, FileStatKind } from '../types'
+import { isBinaryContent, isImagePath } from '../../shared/fileContentKind'
 import { resolveHomedir } from './homedir'
 import { withTimeout } from './withTimeout'
 import { MAX_READ_FILE_BYTES } from './fileLimits'
@@ -106,12 +107,23 @@ async function execGit(
   args: string[],
   options?: { timeoutMs?: number; onProgress?: (data: string) => void },
 ): Promise<ExecResult> {
+  return execCommand(exec, connectionId, cwd, 'git', args, options)
+}
+
+async function execCommand(
+  exec: ExecApi,
+  connectionId: string,
+  cwd: string,
+  command: string,
+  args: string[],
+  options?: { timeoutMs?: number; onProgress?: (data: string) => void },
+): Promise<ExecResult> {
   const timeoutMs = options?.timeoutMs ?? DEFAULT_EXEC_TIMEOUT_MS
-  const startResult = await exec.start(connectionId, cwd, 'git', args, timeoutMs)
+  const startResult = await exec.start(connectionId, cwd, command, args, timeoutMs)
   if (!startResult.success) throw new Error(startResult.error)
   const { execId } = startResult
   // Echo the command so a progress view reads like a terminal session.
-  options?.onProgress?.(`$ git ${args.join(' ')}\n`)
+  options?.onProgress?.(`$ ${command} ${args.join(' ')}\n`)
 
   let unsub: () => void = () => undefined
   return withTimeout(new Promise<ExecResult>((resolve, reject) => {
@@ -133,7 +145,21 @@ async function execGit(
         reject(new Error(event.message))
       }
     })
-  }), timeoutMs + GIT_EXEC_BACKSTOP_MARGIN_MS, `git ${args.join(' ')}`, () => { unsub(); })
+  }), timeoutMs + GIT_EXEC_BACKSTOP_MARGIN_MS, `${command} ${args.join(' ')}`, () => { unsub(); })
+}
+
+/** Where one side of a file diff is read from. */
+enum DiffSideKind {
+  /** A `git show` object spec such as `HEAD:path` or `:path` (the index). */
+  Blob = 'blob',
+  WorkingTree = 'working-tree',
+}
+
+type DiffSide = { kind: DiffSideKind.Blob; spec: string } | { kind: DiffSideKind.WorkingTree }
+
+enum DiffSideEncoding {
+  Text = 'text',
+  Base64 = 'base64',
 }
 
 export function parseStatus(output: string): GitStatusEntry[] {
@@ -321,6 +347,53 @@ export function createGitApi(exec: ExecApi, filesystem: FilesystemApi, connectio
     options?: { timeoutMs?: number; onProgress?: (data: string) => void },
   ): Promise<ExecResult> {
     return execGit(exec, connectionId, cwd, args, options)
+  }
+
+  /** A side that does not exist (added/deleted file) reads as empty. */
+  async function readDiffSide(repoPath: string, filePath: string, side: DiffSide, encoding: DiffSideEncoding): Promise<string> {
+    if (side.kind === DiffSideKind.WorkingTree) {
+      // Main base64-encodes image files itself.
+      try {
+        const fileResult = await filesystem.readFile(repoPath, filePath, MAX_READ_FILE_BYTES)
+        return fileResult.success ? fileResult.file.content : ''
+      } catch {
+        // File might not exist in working tree (deleted)
+        return ''
+      }
+    }
+    if (encoding === DiffSideEncoding.Text) {
+      const result = await git(repoPath, ['show', side.spec])
+      return result.exitCode === 0 ? result.stdout : ''
+    }
+    // Exec output reaches the renderer as UTF-8 text, which would mangle raw image
+    // bytes, so the blob is base64-encoded before it leaves the host. The spec is a
+    // positional argument rather than interpolated, so no quoting is needed.
+    const result = await execCommand(exec, connectionId, repoPath, 'sh', ['-c', 'git show "$1" | base64', 'sh', side.spec])
+    return result.exitCode === 0 ? result.stdout.replace(/\s/g, '') : ''
+  }
+
+  async function loadDiffContents(
+    repoPath: string,
+    filePath: string,
+    original: DiffSide,
+    modified: DiffSide,
+  ): Promise<FileDiffContents> {
+    if (isImagePath(filePath)) {
+      const [originalBase64, modifiedBase64] = await Promise.all([
+        readDiffSide(repoPath, filePath, original, DiffSideEncoding.Base64),
+        readDiffSide(repoPath, filePath, modified, DiffSideEncoding.Base64),
+      ])
+      return { kind: DiffContentKind.Image, originalBase64, modifiedBase64 }
+    }
+    const [originalContent, modifiedContent] = await Promise.all([
+      readDiffSide(repoPath, filePath, original, DiffSideEncoding.Text),
+      readDiffSide(repoPath, filePath, modified, DiffSideEncoding.Text),
+    ])
+    if (isBinaryContent(originalContent) || isBinaryContent(modifiedContent)) {
+      return { kind: DiffContentKind.Binary }
+    }
+    const language = detectLanguage(filePath.split('.').pop() || '')
+    return { kind: DiffContentKind.Text, originalContent, modifiedContent, language }
   }
 
   async function fileStats(
@@ -898,16 +971,13 @@ export function createGitApi(exec: ExecApi, filesystem: FilesystemApi, connectio
         if (mergeBaseResult.exitCode !== 0) throw interpretError(mergeBaseResult)
         const mergeBase = mergeBaseResult.stdout.trim()
 
-        const originalResult = await git(worktreePath, ['show', `${mergeBase}:${filePath}`])
-        const originalContent = originalResult.exitCode === 0 ? originalResult.stdout : ''
-
-        const modifiedResult = await git(worktreePath, ['show', `HEAD:${filePath}`])
-        const modifiedContent = modifiedResult.exitCode === 0 ? modifiedResult.stdout : ''
-
-        const ext = filePath.split('.').pop() || ''
-        const language = detectLanguage(ext)
-
-        return { success: true, contents: { originalContent, modifiedContent, language } }
+        const contents = await loadDiffContents(
+          worktreePath,
+          filePath,
+          { kind: DiffSideKind.Blob, spec: `${mergeBase}:${filePath}` },
+          { kind: DiffSideKind.Blob, spec: `HEAD:${filePath}` },
+        )
+        return { success: true, contents }
       } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : String(error) }
       }
@@ -920,35 +990,11 @@ export function createGitApi(exec: ExecApi, filesystem: FilesystemApi, connectio
       staged: boolean,
     ): Promise<IpcResult<{ contents: FileDiffContents }>> {
       try {
-        const ext = filePath.split('.').pop() || ''
-        const language = detectLanguage(ext)
-
-        if (staged) {
-          const originalResult = await git(repoPath, ['show', `HEAD:${filePath}`])
-          const modifiedResult = await git(repoPath, ['show', `:${filePath}`])
-
-          const originalContent = originalResult.exitCode === 0 ? originalResult.stdout : ''
-          const modifiedContent = modifiedResult.exitCode === 0 ? modifiedResult.stdout : ''
-
-          return { success: true, contents: { originalContent, modifiedContent, language } }
-        } else {
-          const originalResult = await git(repoPath, ['show', `:${filePath}`])
-          const originalContent = originalResult.exitCode === 0 ? originalResult.stdout : ''
-
-          // Read working tree file via FilesystemApi
-          let modifiedContent = ''
-          try {
-            const fileResult = await filesystem.readFile(repoPath, filePath, MAX_READ_FILE_BYTES)
-            if (fileResult.success) {
-              modifiedContent = fileResult.file.content
-            }
-          } catch {
-            // File might not exist in working tree (deleted)
-            modifiedContent = ''
-          }
-
-          return { success: true, contents: { originalContent, modifiedContent, language } }
-        }
+        const index: DiffSide = { kind: DiffSideKind.Blob, spec: `:${filePath}` }
+        const contents = staged
+          ? await loadDiffContents(repoPath, filePath, { kind: DiffSideKind.Blob, spec: `HEAD:${filePath}` }, index)
+          : await loadDiffContents(repoPath, filePath, index, { kind: DiffSideKind.WorkingTree })
+        return { success: true, contents }
       } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : String(error) }
       }
@@ -1039,22 +1085,13 @@ export function createGitApi(exec: ExecApi, filesystem: FilesystemApi, connectio
       filePath: string,
     ): Promise<IpcResult<{ contents: FileDiffContents }>> {
       try {
-        const [modifiedResult, originalResult] = await Promise.all([
-          git(repoPath, ['show', `${commitHash}:${filePath}`]),
-          git(repoPath, ['show', `${commitHash}~1:${filePath}`]),
-        ])
-
-        const ext = filePath.split('.').pop() || ''
-        const language = detectLanguage(ext)
-
-        return {
-          success: true,
-          contents: {
-            originalContent: originalResult.exitCode === 0 ? originalResult.stdout : '',
-            modifiedContent: modifiedResult.exitCode === 0 ? modifiedResult.stdout : '',
-            language,
-          },
-        }
+        const contents = await loadDiffContents(
+          repoPath,
+          filePath,
+          { kind: DiffSideKind.Blob, spec: `${commitHash}~1:${filePath}` },
+          { kind: DiffSideKind.Blob, spec: `${commitHash}:${filePath}` },
+        )
+        return { success: true, contents }
       } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : String(error) }
       }

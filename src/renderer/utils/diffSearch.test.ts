@@ -1,13 +1,14 @@
 import { describe, it, expect } from 'vitest'
 import { findLinesInDiff, createLineMatcher, type DiffSearchOptions } from './diffSearch'
 import type { FileDiffContents } from '../types'
+import { DiffContentKind } from '../types'
 
 function lines(count: number, label = (i: number) => `line ${String(i)}`): string {
   return Array.from({ length: count }, (_, i) => `${label(i + 1)}\n`).join('')
 }
 
 function contents(originalContent: string, modifiedContent: string): FileDiffContents {
-  return { originalContent, modifiedContent, language: 'plaintext' }
+  return { kind: DiffContentKind.Text, originalContent, modifiedContent, language: 'plaintext' }
 }
 
 const unified: DiffSearchOptions = { diffStyle: 'unified', expandUnchanged: false, ignoreWhitespace: false }
@@ -81,5 +82,13 @@ describe('findLinesInDiff', () => {
 
   it('returns no hits when both sides are identical', () => {
     expect(findLinesInDiff(contents('same\n', 'same\n'), 'f.ts', 'same', unified)).toEqual([])
+  })
+})
+
+describe('findLinesInDiff on non-text diffs', () => {
+  it('finds nothing in image or binary diffs', () => {
+    const image: FileDiffContents = { kind: DiffContentKind.Image, originalBase64: 'aGk=', modifiedBase64: '' }
+    expect(findLinesInDiff(image, 'a.png', 'a', unified)).toEqual([])
+    expect(findLinesInDiff({ kind: DiffContentKind.Binary }, 'a.bin', 'a', unified)).toEqual([])
   })
 })

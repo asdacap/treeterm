@@ -84,6 +84,32 @@ describe('FileViewer', () => {
     expect(screen.getByTestId('monaco-editor').getAttribute('data-language')).toBe('csharp')
   })
 
+  it('shows a binary placeholder instead of the editor for binary content', async () => {
+    filesystem.readFile.mockResolvedValue({
+      success: true,
+      file: { path: '/repo/app.bin', content: 'ELF\0\0\x01', size: 6, language: 'plaintext' },
+    })
+
+    render(<FileViewer workspace={makeWorkspace()} filePath="app.bin" />)
+
+    expect(await screen.findByText('Binary file — not shown as text')).toBeTruthy()
+    expect(screen.getByText('binary')).toBeTruthy()
+    expect(screen.queryByTestId('monaco-editor')).toBeNull()
+    expect(screen.queryByText('⇗ Open in Tab')).toBeNull()
+  })
+
+  it('renders an image file as an image with its mime type', async () => {
+    filesystem.readFile.mockResolvedValue({
+      success: true,
+      file: { path: '/repo/logo.jpg', content: 'AAEC', size: 3, language: 'image' },
+    })
+
+    render(<FileViewer workspace={makeWorkspace()} filePath="logo.jpg" />)
+
+    const img = await screen.findByAltText('logo.jpg')
+    expect(img.getAttribute('src')).toBe('data:image/jpeg;base64,AAEC')
+  })
+
   describe('scroll restoration', () => {
     function mockFile(): void {
       filesystem.readFile.mockResolvedValue({

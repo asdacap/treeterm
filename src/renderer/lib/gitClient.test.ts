@@ -4,7 +4,7 @@ import { createGitApi, parseStatus } from './gitClient'
 import type { ExecApi, FilesystemApi } from '../types'
 import { DEFAULT_EXEC_TIMEOUT_MS, ExecEventType, type ExecEvent } from '../../shared/ipc-types'
 import { FileChangeStatus } from '../../shared/types'
-import { FileStatKind } from '../types'
+import { DiffContentKind, FileStatKind } from '../types'
 
 // ---------------------------------------------------------------------------
 // Mock helpers (adapted from githubClient.test.ts pattern)
@@ -303,7 +303,7 @@ describe('createGitApi', () => {
       const result = await git.getFileContentsForDiff('/repo', 'main', 'src/app.ts')
       expect(result.success).toBe(true)
       if (result.success) {
-        expect(result.contents.language).toBe('typescript')
+        expect(result.contents).toMatchObject({ language: 'typescript' })
       }
     })
 
@@ -321,7 +321,7 @@ describe('createGitApi', () => {
       const result = await git.getFileContentsForDiff('/repo', 'main', 'script.py')
       expect(result.success).toBe(true)
       if (result.success) {
-        expect(result.contents.language).toBe('python')
+        expect(result.contents).toMatchObject({ language: 'python' })
       }
     })
 
@@ -339,7 +339,7 @@ describe('createGitApi', () => {
       const result = await git.getFileContentsForDiff('/repo', 'main', 'data.xyz')
       expect(result.success).toBe(true)
       if (result.success) {
-        expect(result.contents.language).toBe('plaintext')
+        expect(result.contents).toMatchObject({ language: 'plaintext' })
       }
     })
   })
@@ -1429,8 +1429,8 @@ describe('createGitApi', () => {
       const exec = createMockExec()
       const fs = createMockFilesystem()
       autoComplete(exec, [
-        { stdout: 'modified content' },
         { stdout: 'original content' },
+        { stdout: 'modified content' },
       ])
 
       const git = createGitApi(exec, fs, 'conn-1')
@@ -1438,9 +1438,9 @@ describe('createGitApi', () => {
 
       expect(result.success).toBe(true)
       if (result.success) {
-        expect(result.contents.modifiedContent).toBe('modified content')
-        expect(result.contents.originalContent).toBe('original content')
-        expect(result.contents.language).toBe('typescript')
+        expect(result.contents).toMatchObject({ modifiedContent: 'modified content' })
+        expect(result.contents).toMatchObject({ originalContent: 'original content' })
+        expect(result.contents).toMatchObject({ language: 'typescript' })
       }
     })
 
@@ -1457,9 +1457,61 @@ describe('createGitApi', () => {
 
       expect(result.success).toBe(true)
       if (result.success) {
-        expect(result.contents.modifiedContent).toBe('')
-        expect(result.contents.originalContent).toBe('')
+        expect(result.contents).toMatchObject({ modifiedContent: '' })
+        expect(result.contents).toMatchObject({ originalContent: '' })
       }
+    })
+  })
+
+  describe('binary and image diff contents', () => {
+    it('loads image blobs base64-encoded through sh', async () => {
+      const exec = createMockExec()
+      const fs = createMockFilesystem()
+      autoComplete(exec, [
+        { stdout: 'AAAA\nBBBB\n' },
+        { stdout: '', exitCode: 1 },
+      ])
+
+      const git = createGitApi(exec, fs, 'conn-1')
+      const result = await git.getCommitFileDiff('/repo', 'abc123', 'img/logo.png')
+
+      expect(result).toEqual({
+        success: true,
+        contents: { kind: DiffContentKind.Image, originalBase64: 'AAAABBBB', modifiedBase64: '' },
+      })
+      expect(exec.start).toHaveBeenCalledWith(
+        'conn-1', '/repo', 'sh', ['-c', 'git show "$1" | base64', 'sh', 'abc123~1:img/logo.png'], DEFAULT_EXEC_TIMEOUT_MS,
+      )
+    })
+
+    it('reads the working tree image from the filesystem', async () => {
+      const exec = createMockExec()
+      const fs = createMockFilesystem({
+        readFile: vi.fn().mockResolvedValue({ success: true, file: { content: 'V09SSw==' } }),
+      })
+      autoComplete(exec, [{ stdout: 'SU5ERVg=\n' }])
+
+      const git = createGitApi(exec, fs, 'conn-1')
+      const result = await git.getUncommittedFileContentsForDiff('/repo', 'logo.png', false)
+
+      expect(result).toEqual({
+        success: true,
+        contents: { kind: DiffContentKind.Image, originalBase64: 'SU5ERVg=', modifiedBase64: 'V09SSw==' },
+      })
+    })
+
+    it('reports binary content without returning it as text', async () => {
+      const exec = createMockExec()
+      const fs = createMockFilesystem()
+      autoComplete(exec, [
+        { stdout: 'text' },
+        { stdout: 'ELF\0\0' },
+      ])
+
+      const git = createGitApi(exec, fs, 'conn-1')
+      const result = await git.getUncommittedFileContentsForDiff('/repo', 'app.bin', true)
+
+      expect(result).toEqual({ success: true, contents: { kind: DiffContentKind.Binary } })
     })
   })
 
@@ -1777,9 +1829,9 @@ describe('createGitApi', () => {
 
       expect(result.success).toBe(true)
       if (result.success) {
-        expect(result.contents.originalContent).toBe('original from HEAD')
-        expect(result.contents.modifiedContent).toBe('modified from index')
-        expect(result.contents.language).toBe('typescript')
+        expect(result.contents).toMatchObject({ originalContent: 'original from HEAD' })
+        expect(result.contents).toMatchObject({ modifiedContent: 'modified from index' })
+        expect(result.contents).toMatchObject({ language: 'typescript' })
       }
     })
 
@@ -1797,8 +1849,8 @@ describe('createGitApi', () => {
 
       expect(result.success).toBe(true)
       if (result.success) {
-        expect(result.contents.originalContent).toBe('index content')
-        expect(result.contents.modifiedContent).toBe('working tree content')
+        expect(result.contents).toMatchObject({ originalContent: 'index content' })
+        expect(result.contents).toMatchObject({ modifiedContent: 'working tree content' })
       }
     })
 
@@ -1816,8 +1868,8 @@ describe('createGitApi', () => {
 
       expect(result.success).toBe(true)
       if (result.success) {
-        expect(result.contents.originalContent).toBe('index content')
-        expect(result.contents.modifiedContent).toBe('')
+        expect(result.contents).toMatchObject({ originalContent: 'index content' })
+        expect(result.contents).toMatchObject({ modifiedContent: '' })
       }
     })
 
@@ -1834,8 +1886,8 @@ describe('createGitApi', () => {
 
       expect(result.success).toBe(true)
       if (result.success) {
-        expect(result.contents.originalContent).toBe('')
-        expect(result.contents.modifiedContent).toBe('new staged content')
+        expect(result.contents).toMatchObject({ originalContent: '' })
+        expect(result.contents).toMatchObject({ modifiedContent: 'new staged content' })
       }
     })
   })
@@ -2094,8 +2146,8 @@ describe('createGitApi', () => {
       const result = await git.getFileContentsForDiff('/repo', 'main', 'new-file.ts')
       expect(result.success).toBe(true)
       if (result.success) {
-        expect(result.contents.originalContent).toBe('')
-        expect(result.contents.modifiedContent).toBe('modified content')
+        expect(result.contents).toMatchObject({ originalContent: '' })
+        expect(result.contents).toMatchObject({ modifiedContent: 'modified content' })
       }
     })
 
@@ -2113,8 +2165,8 @@ describe('createGitApi', () => {
       const result = await git.getFileContentsForDiff('/repo', 'main', 'deleted-file.ts')
       expect(result.success).toBe(true)
       if (result.success) {
-        expect(result.contents.originalContent).toBe('original content')
-        expect(result.contents.modifiedContent).toBe('')
+        expect(result.contents).toMatchObject({ originalContent: 'original content' })
+        expect(result.contents).toMatchObject({ modifiedContent: '' })
       }
     })
 
@@ -2199,8 +2251,8 @@ describe('createGitApi', () => {
       const result = await git.getUncommittedFileContentsForDiff('/repo', 'src/app.ts', false)
       expect(result.success).toBe(true)
       if (result.success) {
-        expect(result.contents.originalContent).toBe('index content')
-        expect(result.contents.modifiedContent).toBe('')
+        expect(result.contents).toMatchObject({ originalContent: 'index content' })
+        expect(result.contents).toMatchObject({ modifiedContent: '' })
       }
     })
 
@@ -2217,8 +2269,8 @@ describe('createGitApi', () => {
       const result = await git.getUncommittedFileContentsForDiff('/repo', 'new-file.ts', false)
       expect(result.success).toBe(true)
       if (result.success) {
-        expect(result.contents.originalContent).toBe('')
-        expect(result.contents.modifiedContent).toBe('working')
+        expect(result.contents).toMatchObject({ originalContent: '' })
+        expect(result.contents).toMatchObject({ modifiedContent: 'working' })
       }
     })
 
@@ -2234,8 +2286,8 @@ describe('createGitApi', () => {
       const result = await git.getUncommittedFileContentsForDiff('/repo', 'deleted.ts', true)
       expect(result.success).toBe(true)
       if (result.success) {
-        expect(result.contents.originalContent).toBe('original from HEAD')
-        expect(result.contents.modifiedContent).toBe('')
+        expect(result.contents).toMatchObject({ originalContent: 'original from HEAD' })
+        expect(result.contents).toMatchObject({ modifiedContent: '' })
       }
     })
   })

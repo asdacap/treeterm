@@ -1,5 +1,6 @@
 import { parseDiffFromFile, DEFAULT_COLLAPSED_CONTEXT_THRESHOLD } from '@pierre/diffs'
-import type { FileDiffContents } from '../types'
+import type { FileDiffContents, TextDiffContents } from '../types'
+import { DiffContentKind } from '../types'
 
 // Searches a diff the way PierreDiffViewer shows it: the same hunks (parsed by the
 // same parseDiffFromFile call the viewer makes), in on-screen row order. Lines
@@ -29,9 +30,9 @@ interface SearchableRow extends DiffSearchHit {
 
 // Parsing is the expensive part, so rows are cached per contents object and
 // reused across keystrokes. Keyed weakly: a refreshed file gets a new object.
-const rowCache = new WeakMap<FileDiffContents, Map<string, SearchableRow[]>>()
+const rowCache = new WeakMap<TextDiffContents, Map<string, SearchableRow[]>>()
 
-function buildRows(contents: FileDiffContents, filePath: string, opts: DiffSearchOptions): SearchableRow[] {
+function buildRows(contents: TextDiffContents, filePath: string, opts: DiffSearchOptions): SearchableRow[] {
   let diff
   try {
     diff = parseDiffFromFile(
@@ -85,7 +86,7 @@ function buildRows(contents: FileDiffContents, filePath: string, opts: DiffSearc
   return rows
 }
 
-function getRows(contents: FileDiffContents, filePath: string, opts: DiffSearchOptions): SearchableRow[] {
+function getRows(contents: TextDiffContents, filePath: string, opts: DiffSearchOptions): SearchableRow[] {
   const key = `${filePath}|${opts.diffStyle}|${String(opts.expandUnchanged)}|${String(opts.ignoreWhitespace)}`
   let byKey = rowCache.get(contents)
   if (!byKey) {
@@ -113,7 +114,8 @@ export function findLinesInDiff(
   query: string,
   opts: DiffSearchOptions
 ): DiffSearchHit[] {
-  if (!query) return []
+  // Image and binary diffs have no text lines to search.
+  if (!query || contents.kind !== DiffContentKind.Text) return []
   const matches = createLineMatcher(query)
   return getRows(contents, filePath, opts)
     .filter((row) => matches(row.text))

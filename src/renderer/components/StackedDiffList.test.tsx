@@ -84,7 +84,7 @@ vi.mock('../pierre-diffs-config', () => ({
 
 import { StackedDiffList, SETTLE_FRAMES, MAX_ALIGN_FRAMES, MAX_SEARCH_LOADS } from './StackedDiffList'
 import type { DiffFile, FileDiffContents, ReviewComment } from '../types'
-import { FileChangeStatus, FileStatKind } from '../types'
+import { DiffContentKind, FileChangeStatus, FileStatKind } from '../types'
 
 function makeDiffFile(path: string): DiffFile {
   return {
@@ -98,6 +98,7 @@ function makeDiffFile(path: string): DiffFile {
 
 function makeContents(): FileDiffContents {
   return {
+    kind: DiffContentKind.Text,
     originalContent: 'old',
     modifiedContent: 'new',
     language: 'typescript',
@@ -298,7 +299,7 @@ describe('StackedDiffList', () => {
 
   describe('find in diff', () => {
     function contentsWith(modified: string): FileDiffContents {
-      return { originalContent: 'shared\n', modifiedContent: `shared\n${modified}\n`, language: 'typescript' }
+      return { kind: DiffContentKind.Text, originalContent: 'shared\n', modifiedContent: `shared\n${modified}\n`, language: 'typescript' }
     }
 
     // jsdom lays nothing out; the shortcut only fires for a list that's on screen.

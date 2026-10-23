@@ -45,6 +45,7 @@ import type {
   WorkspaceRef,
   Session
 } from '../shared/types'
+import { isImagePath } from '../shared/fileContentKind'
 
 // Alias for backward compat
 type CreateSessionConfig = {
@@ -197,13 +198,6 @@ export class PtyStream {
     this.drainPendingWrites(new Error('pty stream detached'))
     this.stream.cancel()
   }
-}
-
-const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'ico', 'avif', 'svg'])
-
-function isImageFile(filePath: string): boolean {
-  const ext = filePath.split('.').pop()?.toLowerCase() || ''
-  return IMAGE_EXTENSIONS.has(ext)
 }
 
 /** Byte count for the oversize-file message. Main has no access to the renderer's
@@ -746,7 +740,7 @@ export class GrpcDaemonClient {
           if (!chunk.end.success) {
             settle({ success: false as const, error: chunk.end.error ?? 'Unknown error' })
           } else if (fileMetadata) {
-            const isImage = isImageFile(fileMetadata.path)
+            const isImage = isImagePath(fileMetadata.path)
             settle({
               success: true,
               file: {

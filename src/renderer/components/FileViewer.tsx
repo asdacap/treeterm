@@ -11,6 +11,7 @@ import { monacoNavigationBridge } from '../monaco-config'
 import { searchDefinition } from '../utils/definitionSearch'
 import { detectMonacoLanguage } from '../utils/detectMonacoLanguage'
 import { MarkdownPreview } from './MarkdownPreview'
+import { imageMimeType, isBinaryContent } from '../../shared/fileContentKind'
 import { CommentInput } from './CommentInput'
 import { CommentDisplay } from './CommentDisplay'
 
@@ -37,22 +38,6 @@ interface FileState {
   language: string
   loading: boolean
   error: string | null
-}
-
-function getMimeType(filePath: string): string {
-  const ext = filePath.split('.').pop()?.toLowerCase() || ''
-  const mimeMap: Record<string, string> = {
-    png: 'image/png',
-    jpg: 'image/jpeg',
-    jpeg: 'image/jpeg',
-    gif: 'image/gif',
-    webp: 'image/webp',
-    bmp: 'image/bmp',
-    ico: 'image/x-icon',
-    avif: 'image/avif',
-    svg: 'image/svg+xml',
-  }
-  return mimeMap[ext] || 'image/png'
 }
 
 export function FileViewer({
@@ -399,6 +384,7 @@ export function FileViewer({
   const fileName = filePath.split('/').pop() || filePath
   const isMarkdown = fileState.language === 'markdown'
   const isImage = fileState.language === 'image'
+  const isBinary = !isImage && isBinaryContent(fileState.content)
 
   return (
     <div className="file-viewer">
@@ -414,7 +400,7 @@ export function FileViewer({
               {viewMode === 'preview' ? '</> Source' : 'Preview'}
             </button>
           )}
-          {!isImage && (
+          {!isImage && !isBinary && (
             <button
               className="file-viewer-open-btn"
               onClick={handleOpenInTab}
@@ -423,17 +409,19 @@ export function FileViewer({
               ⇗ Open in Tab
             </button>
           )}
-          <span className="file-viewer-language">{fileState.language}</span>
+          <span className="file-viewer-language">{isBinary ? 'binary' : fileState.language}</span>
         </div>
       </div>
       <div className="file-viewer-content">
         {isImage ? (
           <div className="file-viewer-image-container">
             <img
-              src={`data:${getMimeType(filePath)};base64,${fileState.content}`}
+              src={`data:${imageMimeType(filePath)};base64,${fileState.content}`}
               alt={fileName}
             />
           </div>
+        ) : isBinary ? (
+          <div className="file-viewer-placeholder">Binary file — not shown as text</div>
         ) : isMarkdown && viewMode === 'preview' ? (
           <MarkdownPreview content={fileState.content} />
         ) : (

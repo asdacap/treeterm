@@ -348,11 +348,30 @@ export interface UncommittedChanges {
   totalDeletions: number
 }
 
-export interface FileDiffContents {
+export enum DiffContentKind {
+  Text = 'text',
+  Image = 'image',
+  Binary = 'binary',
+}
+
+export interface TextDiffContents {
+  kind: DiffContentKind.Text
   originalContent: string
   modifiedContent: string
   language: string
 }
+
+/** Each side is base64 image bytes; empty when the file does not exist on that side. */
+export interface ImageDiffContents {
+  kind: DiffContentKind.Image
+  originalBase64: string
+  modifiedBase64: string
+}
+
+export type FileDiffContents =
+  | TextDiffContents
+  | ImageDiffContents
+  | { kind: DiffContentKind.Binary }
 
 export interface GitLogCommit {
   hash: string

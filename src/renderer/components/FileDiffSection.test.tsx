@@ -36,8 +36,8 @@ vi.mock('../pierre-diffs-config', () => ({
 }))
 
 import { FileDiffSection } from './FileDiffSection'
-import type { DiffFile, FileDiffContents, ReviewComment } from '../types'
-import { FileChangeStatus, FileStatKind } from '../types'
+import type { DiffFile, FileDiffContents, TextDiffContents, ReviewComment } from '../types'
+import { DiffContentKind, FileChangeStatus, FileStatKind } from '../types'
 
 function makeDiffFile(overrides: Partial<Extract<DiffFile, { kind: FileStatKind.Text }>> = {}): DiffFile {
   return {
@@ -50,8 +50,9 @@ function makeDiffFile(overrides: Partial<Extract<DiffFile, { kind: FileStatKind.
   }
 }
 
-function makeContents(overrides: Partial<FileDiffContents> = {}): FileDiffContents {
+function makeContents(overrides: Partial<TextDiffContents> = {}): TextDiffContents {
   return {
+    kind: DiffContentKind.Text,
     originalContent: 'old content',
     modifiedContent: 'new content',
     language: 'typescript',
@@ -124,6 +125,27 @@ describe('FileDiffSection', () => {
   it('renders diff when contents provided', () => {
     render(<FileDiffSection {...defaultProps} contents={makeContents()} />)
     expect(screen.getByTestId('multi-file-diff')).toBeDefined()
+  })
+
+  it('renders an image diff with before and after images', () => {
+    const file: DiffFile = { path: 'logo.png', status: FileChangeStatus.Modified, kind: FileStatKind.Binary, byteChange: 3 }
+    render(
+      <FileDiffSection
+        {...defaultProps}
+        file={file}
+        contents={{ kind: DiffContentKind.Image, originalBase64: 'AAA=', modifiedBase64: '' }}
+      />
+    )
+    expect(screen.getByAltText('Before: logo.png').getAttribute('src')).toBe('data:image/png;base64,AAA=')
+    expect(screen.queryByAltText('After: logo.png')).toBeNull()
+    expect(screen.getByText('No file')).toBeDefined()
+    expect(screen.queryByTestId('multi-file-diff')).toBeNull()
+  })
+
+  it('renders a placeholder for a binary diff', () => {
+    render(<FileDiffSection {...defaultProps} contents={{ kind: DiffContentKind.Binary }} />)
+    expect(screen.getByText('Binary file — diff not shown')).toBeDefined()
+    expect(screen.queryByTestId('multi-file-diff')).toBeNull()
   })
 
   it('collapses body when header is clicked', () => {
