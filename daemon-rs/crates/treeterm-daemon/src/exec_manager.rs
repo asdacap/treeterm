@@ -144,11 +144,18 @@ pub async fn handle_exec_stream(
         None
     };
 
-    // 7. Wait for child to exit
-    let exit_code = match child.wait().await {
-        Ok(status) => status.code().unwrap_or(-1),
-        Err(e) => {
+    // 7. Wait for child to exit, or kill it if the client cancelled
+    let exit_code = match wait_or_cancel(&mut child, &tx).await {
+        Some(Ok(status)) => status.code().unwrap_or(-1),
+        Some(Err(e)) => {
             let _ = send_result(&tx, 1, Some(format!("wait error: {e}"))).await;
+            return;
+        }
+        None => {
+            if let Some(t) = timeout_task {
+                t.abort();
+            }
+            stdin_task.abort();
             return;
         }
     };
@@ -175,4 +182,51 @@ async fn send_result(
         output: Some(exec_output::Output::Result(ExecResult { exit_code, error })),
     }))
     .await
+}
+
+/// Wait for the child to exit. If the client goes away first (the output receiver is
+/// dropped, e.g. the exec was cancelled), nobody wants the output any more: kill the
+/// child and return None. Without this, a command that rarely writes keeps running
+/// until it finishes, since it only notices the closed pipe on its next write.
+async fn wait_or_cancel(
+    child: &mut tokio::process::Child,
+    tx: &mpsc::Sender<Result<ExecOutput, tonic::Status>>,
+) -> Option<std::io::Result<std::process::ExitStatus>> {
+    tokio::select! {
+        status = child.wait() => return Some(status),
+        _ = tx.closed() => {}
+    }
+    // Process may already be gone, that's fine
+    let _ = child.kill().await;
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn spawn(args: &[&str]) -> tokio::process::Child {
+        Command::new(args[0]).args(&args[1..]).spawn().expect("spawn")
+    }
+
+    #[tokio::test]
+    async fn wait_or_cancel_returns_exit_status() {
+        let mut child = spawn(&["sh", "-c", "exit 3"]);
+        let (tx, _rx) = mpsc::channel(1);
+        let status = wait_or_cancel(&mut child, &tx).await.expect("not cancelled").expect("waited");
+        assert_eq!(status.code(), Some(3));
+    }
+
+    #[tokio::test]
+    async fn wait_or_cancel_kills_child_when_client_goes_away() {
+        let mut child = spawn(&["sleep", "30"]);
+        let (tx, rx) = mpsc::channel(1);
+        drop(rx);
+        let result = tokio::time::timeout(std::time::Duration::from_secs(5), wait_or_cancel(&mut child, &tx))
+            .await
+            .expect("returned promptly");
+        assert!(result.is_none());
+        // The child was killed and reaped.
+        assert!(child.try_wait().expect("try_wait").is_some());
+    }
 }

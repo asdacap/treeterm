@@ -108,6 +108,27 @@ export function createLineMatcher(query: string): (text: string) => boolean {
   return (text) => text.toLowerCase().includes(query)
 }
 
+export interface TextSearchHit {
+  // 1-based, as Monaco counts.
+  lineNumber: number
+  column: number
+}
+
+// Every occurrence of `query` in `text`, with the same smart-case rule as
+// createLineMatcher.
+export function findInText(text: string, query: string): TextSearchHit[] {
+  if (!query) return []
+  const ignoreCase = query === query.toLowerCase()
+  const hits: TextSearchHit[] = []
+  text.split('\n').forEach((line, index) => {
+    const haystack = ignoreCase ? line.toLowerCase() : line
+    for (let at = haystack.indexOf(query); at !== -1; at = haystack.indexOf(query, at + query.length)) {
+      hits.push({ lineNumber: index + 1, column: at + 1 })
+    }
+  })
+  return hits
+}
+
 export function findLinesInDiff(
   contents: FileDiffContents,
   filePath: string,

@@ -13,6 +13,7 @@ import { StackedDiffList } from './StackedDiffList'
 import { DiffToolbar } from './DiffToolbar'
 import { createDiffsWorker } from '../pierre-diffs-config'
 import { FileViewer } from './FileViewer'
+import { openInFileBrowser } from './SearchPanel'
 import { AutoScrollPre } from './AutoScrollPre'
 import { favouriteFileName, resolveFavouriteFiles, type FavouriteFile } from '../utils/favouriteFiles'
 
@@ -824,6 +825,7 @@ export default function ReviewBrowser({
           onCommentSubmit={handleCommentSubmit}
           onCommentCancel={() => { setCommentInput(null) }}
           onCommentDelete={handleCommentDelete}
+          onOpenLocation={(relativePath, lineNumber) => { openInFileBrowser(workspace, relativePath, lineNumber) }}
         />
       </div>
     )
@@ -1171,6 +1173,7 @@ export default function ReviewBrowser({
                         highlighterOptions={{ preferredHighlighter: 'shiki-wasm' }}
                       >
                         <StackedDiffList
+                          workspace={workspace}
                           files={sortFilesAsTree(filterFilesByDir(commitDiffFiles, dirFilter))}
                           loadFileContents={loadCommitFileContents}
                           diffStyle={isSplitView ? 'split' : 'unified'}
@@ -1257,6 +1260,7 @@ export default function ReviewBrowser({
                     highlighterOptions={{ preferredHighlighter: 'shiki-wasm' }}
                   >
                     <StackedDiffList
+                      workspace={workspace}
                       files={sortFilesAsTree(filterFilesByDir(diff.files, dirFilter))}
                       loadFileContents={loadCommittedFileContents}
                       diffStyle={isSplitView ? 'split' : 'unified'}
@@ -1373,6 +1377,7 @@ export default function ReviewBrowser({
                     highlighterOptions={{ preferredHighlighter: 'shiki-wasm' }}
                   >
                     <StackedDiffList
+                      workspace={workspace}
                       files={sortFilesAsTree([...filteredStagedFiles, ...filteredUnstagedFiles])}
                       loadFileContents={loadUncommittedFileContents}
                       diffStyle={isSplitView ? 'split' : 'unified'}

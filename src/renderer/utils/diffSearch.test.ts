@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { findLinesInDiff, createLineMatcher, type DiffSearchOptions } from './diffSearch'
+import { findLinesInDiff, findInText, createLineMatcher, type DiffSearchOptions } from './diffSearch'
 import type { FileDiffContents } from '../types'
 import { DiffContentKind } from '../types'
 
@@ -90,5 +90,24 @@ describe('findLinesInDiff on non-text diffs', () => {
     const image: FileDiffContents = { kind: DiffContentKind.Image, originalBase64: 'aGk=', modifiedBase64: '' }
     expect(findLinesInDiff(image, 'a.png', 'a', unified)).toEqual([])
     expect(findLinesInDiff({ kind: DiffContentKind.Binary }, 'a.bin', 'a', unified)).toEqual([])
+  })
+})
+
+describe('findInText', () => {
+  it('finds every occurrence with 1-based line and column', () => {
+    expect(findInText('foo bar foo\nbaz\n  foo', 'foo')).toEqual([
+      { lineNumber: 1, column: 1 },
+      { lineNumber: 1, column: 9 },
+      { lineNumber: 3, column: 3 },
+    ])
+  })
+
+  it('is case-insensitive for a lowercase query and case-sensitive otherwise', () => {
+    expect(findInText('Foo foo', 'foo')).toHaveLength(2)
+    expect(findInText('Foo foo', 'Foo')).toEqual([{ lineNumber: 1, column: 1 }])
+  })
+
+  it('finds nothing for an empty query', () => {
+    expect(findInText('foo', '')).toEqual([])
   })
 })

@@ -57,3 +57,13 @@ export function createExecStreamRegistry<
     },
   }
 }
+
+/**
+ * Map the daemon's terminal exec result to the event sent to the renderer. A system
+ * error (e.g. the binary could not be spawned) is not an exit code of the command, so it
+ * is surfaced as an Error event rather than being folded into a plain exit.
+ */
+export function execResultEvent(result: { exitCode: number; error?: string | undefined }): ExecEvent {
+  if (result.error) return { type: ExecEventType.Error, message: result.error }
+  return { type: ExecEventType.Exit, exitCode: result.exitCode }
+}

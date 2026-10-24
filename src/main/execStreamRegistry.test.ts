@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { createExecStreamRegistry } from './execStreamRegistry'
+import { createExecStreamRegistry, execResultEvent } from './execStreamRegistry'
 import { ExecEventType, type ExecEvent } from '../shared/ipc-types'
 
 interface FakeSender { id: string }
@@ -74,5 +74,16 @@ describe('createExecStreamRegistry', () => {
 
     expect(notify).not.toHaveBeenCalled()
     expect(registry.has('e1')).toBe(true)
+  })
+})
+
+describe('execResultEvent', () => {
+  it('maps a normal result to an Exit event', () => {
+    expect(execResultEvent({ exitCode: 2 })).toEqual({ type: ExecEventType.Exit, exitCode: 2 })
+  })
+
+  it('maps a system error to an Error event', () => {
+    expect(execResultEvent({ exitCode: 1, error: 'spawn error: No such file or directory' }))
+      .toEqual({ type: ExecEventType.Error, message: 'spawn error: No such file or directory' })
   })
 })

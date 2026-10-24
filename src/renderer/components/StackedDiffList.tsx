@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
-import type { DiffFile, UncommittedFile, FileDiffContents, ReviewComment } from '../types'
-import { FileChangeStatus } from '../types'
+import type { DiffFile, UncommittedFile, FileDiffContents, ReviewComment, WorkspaceStore } from '../types'
+import { DiffContentKind, FileChangeStatus } from '../types'
 import { FileDiffSection } from './FileDiffSection'
-import { DiffFindBar } from './DiffFindBar'
-import { findLinesInDiff, type DiffSearchHit } from '../utils/diffSearch'
+import { SearchPanel, openInFileBrowser, type InViewHit } from './SearchPanel'
+import { DiffSearchSide, findLinesInDiff, type DiffSearchHit } from '../utils/diffSearch'
 
 interface FileLoadState {
   contents: FileDiffContents | null
@@ -37,6 +37,29 @@ function findSelectedLineElement(section: HTMLElement): HTMLElement | null {
   return null
 }
 
+// The word a double-click selected inside the diff viewer, or null when the
+// double-click was elsewhere (file header, comment input) or selected no word.
+function doubleClickedWord(e: React.MouseEvent): string | null {
+  const path = e.nativeEvent.composedPath()
+  const inEditable = path.some(node =>
+    node instanceof HTMLElement && node.matches('input, textarea, [contenteditable], .pierre-diff-annotation'))
+  if (inEditable) return null
+  const host = path.find((node): node is HTMLElement =>
+    node instanceof HTMLElement && node.matches(DIFFS_HOST_SELECTOR))
+  if (!host) return null
+  // The selection made inside a shadow root is only visible through that root.
+  const root = host.shadowRoot as (ShadowRoot & { getSelection?: () => Selection | null }) | null
+  const selection = root?.getSelection?.() ?? host.ownerDocument.getSelection()
+  const word = selection?.toString().trim() ?? ''
+  return word && !/\s/.test(word) ? word : null
+}
+
+function lineText(contents: FileDiffContents, hit: DiffSearchHit): string {
+  if (contents.kind !== DiffContentKind.Text) return ''
+  const text = hit.side === DiffSearchSide.Additions ? contents.modifiedContent : contents.originalContent
+  return text.split('\n')[hit.lineNumber - 1] ?? ''
+}
+
 function isFindShortcut(e: KeyboardEvent): boolean {
   // eslint-disable-next-line custom/no-string-literal-comparison -- DOM key names are external
   return (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'f'
@@ -49,6 +72,7 @@ interface StagingAction {
 }
 
 interface StackedDiffListProps {
+  workspace: WorkspaceStore
   files: (DiffFile | UncommittedFile)[]
   loadFileContents: (filePath: string) => Promise<FileDiffContents>
   diffStyle: 'split' | 'unified'
@@ -71,6 +95,7 @@ interface StackedDiffListProps {
 }
 
 export function StackedDiffList({
+  workspace,
   files,
   loadFileContents,
   diffStyle,
@@ -323,25 +348,32 @@ export function StackedDiffList({
     }
   }, [])
 
+  const openFind = (query: string): void => {
+    setFindOpen(true)
+    setFindQuery(query)
+    setActiveMatch(null)
+    setFindFocusNonce(n => n + 1)
+  }
+
+  const inViewHits: InViewHit[] = matches.map(match => {
+    const contents = loadStates.get(match.filePath)?.contents
+    return {
+      filePath: match.filePath,
+      label: `${match.side === DiffSearchSide.Deletions ? '−' : ''}${String(match.lineNumber)}`,
+      preview: contents ? lineText(contents, match) : '',
+    }
+  })
+
   return (
     <div className="stacked-diff-list-wrapper" ref={wrapperRef}>
-      {findOpen && (
-        <DiffFindBar
-          query={findQuery}
-          onQueryChange={(q) => {
-            setFindQuery(q)
-            setActiveMatch(null)
-          }}
-          onNext={() => { stepMatch(1) }}
-          onPrev={() => { stepMatch(-1) }}
-          onClose={closeFind}
-          current={activeIndex >= 0 ? activeIndex + 1 : null}
-          total={matches.length}
-          pending={pendingSearch}
-          focusNonce={findFocusNonce}
-        />
-      )}
-      <div className="stacked-diff-list" ref={scrollContainerRef}>
+      <div
+        className="stacked-diff-list"
+        ref={scrollContainerRef}
+        onDoubleClick={(e) => {
+          const word = doubleClickedWord(e)
+          if (word) openFind(word)
+        }}
+      >
         {files.map((file, index) => {
           const state = loadStates.get(file.path)
           const fileComments = reviews.filter(c => c.filePath === file.path)
@@ -380,6 +412,30 @@ export function StackedDiffList({
           )
         })}
       </div>
+      {findOpen && (
+        <SearchPanel
+          workspace={workspace}
+          query={findQuery}
+          onQueryChange={(q) => {
+            setFindQuery(q)
+            setActiveMatch(null)
+          }}
+          focusNonce={findFocusNonce}
+          onClose={closeFind}
+          inViewTitle="In diff"
+          inViewHits={inViewHits}
+          activeIndex={activeIndex >= 0 ? activeIndex : null}
+          inViewPending={pendingSearch}
+          onSelectInView={(index) => {
+            const match = matches[index]
+            if (match) setActiveMatch({ ...match, nonce: ++matchNonceRef.current })
+          }}
+          onNext={() => { stepMatch(1) }}
+          onPrev={() => { stepMatch(-1) }}
+          excludeFilePaths={files.map(f => f.path)}
+          onSelectRepo={(hit) => { openInFileBrowser(workspace, hit.filePath, hit.lineNumber) }}
+        />
+      )}
     </div>
   )
 }

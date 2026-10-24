@@ -14,6 +14,9 @@ import { MarkdownPreview } from './MarkdownPreview'
 import { imageMimeType, isBinaryContent } from '../../shared/fileContentKind'
 import { CommentInput } from './CommentInput'
 import { CommentDisplay } from './CommentDisplay'
+import { SearchPanel, type InViewHit } from './SearchPanel'
+import { findInText } from '../utils/diffSearch'
+import { toWorkspaceRelative } from '../utils/repoSearch'
 
 interface FileViewerProps {
   workspace: WorkspaceStore
@@ -31,7 +34,18 @@ interface FileViewerProps {
   // Scroll position persistence
   initialScrollTop?: number
   onScrollPositionChange?: (scrollTop: number) => void
+  // Open a search result in another file (workspace-relative path)
+  onOpenLocation: (relativePath: string, lineNumber: number) => void
 }
+
+enum SearchStatus {
+  Closed = 'closed',
+  Open = 'open',
+}
+
+type SearchState =
+  | { status: SearchStatus.Closed }
+  | { status: SearchStatus.Open; query: string; focusNonce: number; activeIndex: number | null }
 
 interface FileState {
   content: string
@@ -52,7 +66,8 @@ export function FileViewer({
   scrollToLine,
   onScrollToLineUsed,
   initialScrollTop,
-  onScrollPositionChange
+  onScrollPositionChange,
+  onOpenLocation
 }: FileViewerProps): React.JSX.Element {
   const wsData = useStore(workspace, s => s.workspace)
   const addTab = useStore(workspace, s => s.addTab)
@@ -77,6 +92,8 @@ export function FileViewer({
   // Inline comment display zones
   const commentDisplayZonesRef = useRef(new Map<string, { zoneId: string; container: HTMLDivElement }>())
   const [commentDisplayContainers, setCommentDisplayContainers] = useState(new Map<string, { container: HTMLDivElement; comments: ReviewComment[] }>())
+  // Search panel: Cmd/Ctrl+F or double-clicking a word opens it
+  const [search, setSearch] = useState<SearchState>({ status: SearchStatus.Closed })
 
   // Callers rebuild the comments array on every render (they filter a store selection), so its
   // identity is useless as an effect dependency — the view-zone effect below would re-run forever,
@@ -102,6 +119,7 @@ export function FileViewer({
     }
     setViewMode(onLineClick ? 'source' : 'preview')
     setScrollRestoredFor(null)
+    setSearch(s => s.status === SearchStatus.Open ? { ...s, activeIndex: null } : s)
   }
 
   useEffect(() => {
@@ -159,6 +177,37 @@ export function FileViewer({
         }
       })
     }
+
+    const openSearch = (query: string): void => {
+      setSearch(s => ({
+        status: SearchStatus.Open,
+        query,
+        focusNonce: (s.status === SearchStatus.Open ? s.focusNonce : 0) + 1,
+        activeIndex: null,
+      }))
+    }
+
+    // Double-clicking a word searches for it
+    editor.onMouseDown((e: { event: { detail: number }; target: { type: number; position?: { lineNumber: number; column: number } | null } }) => {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+      if (e.event.detail !== 2 || e.target.type !== monaco.editor.MouseTargetType.CONTENT_TEXT || !e.target.position) return
+      const word = editor.getModel()?.getWordAtPosition(e.target.position)
+      if (word) openSearch(word.word)
+    })
+
+    // Cmd/Ctrl+F opens the search panel (seeded with the selection) instead of Monaco's find widget
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyF, () => {
+      const selection = editor.getSelection()
+      const selected = selection ? editor.getModel()?.getValueInRange(selection) ?? '' : ''
+      if (selected && !selected.includes('\n')) {
+        openSearch(selected)
+      } else {
+        setSearch(s => s.status === SearchStatus.Open
+          ? { ...s, focusNonce: s.focusNonce + 1 }
+          : { status: SearchStatus.Open, query: '', focusNonce: 1, activeIndex: null })
+      }
+    })
 
     // Wire navigation bridge for go-to-definition
     monacoNavigationBridge.searchDefinition = (symbol, language) =>
@@ -357,122 +406,183 @@ export function FileViewer({
     })
   }, [filePath, fileState, addTab])
 
-  if (!filePath) {
-    return (
-      <div className="file-viewer">
-        <div className="file-viewer-placeholder">Select a file to view its contents</div>
-      </div>
-    )
-  }
-
-  if (fileState.loading) {
-    return (
-      <div className="file-viewer">
-        <div className="file-viewer-placeholder">Loading...</div>
-      </div>
-    )
-  }
-
-  if (fileState.error) {
-    return (
-      <div className="file-viewer">
-        <div className="file-viewer-error">{fileState.error}</div>
-      </div>
-    )
-  }
-
-  const fileName = filePath.split('/').pop() || filePath
-  const isMarkdown = fileState.language === 'markdown'
   const isImage = fileState.language === 'image'
   const isBinary = !isImage && isBinaryContent(fileState.content)
+  const searchable = !!filePath && !fileState.loading && !fileState.error && !isImage && !isBinary
+  const relativePath = filePath ? toWorkspaceRelative(wsData.path, filePath) : ''
 
-  return (
-    <div className="file-viewer">
-      <div className="file-viewer-header">
-        <span className="file-viewer-filename">{fileName}</span>
-        <div className="file-viewer-header-actions">
-          {isMarkdown && (
-            <button
-              className="file-viewer-toggle-btn"
-              onClick={() => { setViewMode(v => v === 'preview' ? 'source' : 'preview'); }}
-              title={viewMode === 'preview' ? 'View source' : 'View preview'}
-            >
-              {viewMode === 'preview' ? '</> Source' : 'Preview'}
-            </button>
-          )}
-          {!isImage && !isBinary && (
-            <button
-              className="file-viewer-open-btn"
-              onClick={handleOpenInTab}
-              title="Open in new tab for editing"
-            >
-              ⇗ Open in Tab
-            </button>
-          )}
-          <span className="file-viewer-language">{isBinary ? 'binary' : fileState.language}</span>
+  const renderViewer = (): React.JSX.Element => {
+    if (!filePath) {
+      return (
+        <div className="file-viewer">
+          <div className="file-viewer-placeholder">Select a file to view its contents</div>
         </div>
-      </div>
-      <div className="file-viewer-content">
-        {isImage ? (
-          <div className="file-viewer-image-container">
-            <img
-              src={`data:${imageMimeType(filePath)};base64,${fileState.content}`}
-              alt={fileName}
-            />
+      )
+    }
+
+    if (fileState.loading) {
+      return (
+        <div className="file-viewer">
+          <div className="file-viewer-placeholder">Loading...</div>
+        </div>
+      )
+    }
+
+    if (fileState.error) {
+      return (
+        <div className="file-viewer">
+          <div className="file-viewer-error">{fileState.error}</div>
+        </div>
+      )
+    }
+
+    const fileName = filePath.split('/').pop() || filePath
+    const isMarkdown = fileState.language === 'markdown'
+
+    return (
+      <div className="file-viewer">
+        <div className="file-viewer-header">
+          <span className="file-viewer-filename">{fileName}</span>
+          <div className="file-viewer-header-actions">
+            {isMarkdown && (
+              <button
+                className="file-viewer-toggle-btn"
+                onClick={() => { setViewMode(v => v === 'preview' ? 'source' : 'preview'); }}
+                title={viewMode === 'preview' ? 'View source' : 'View preview'}
+              >
+                {viewMode === 'preview' ? '</> Source' : 'Preview'}
+              </button>
+            )}
+            {!isImage && !isBinary && (
+              <button
+                className="file-viewer-open-btn"
+                onClick={handleOpenInTab}
+                title="Open in new tab for editing"
+              >
+                ⇗ Open in Tab
+              </button>
+            )}
+            <span className="file-viewer-language">{isBinary ? 'binary' : fileState.language}</span>
           </div>
-        ) : isBinary ? (
-          <div className="file-viewer-placeholder">Binary file — not shown as text</div>
-        ) : isMarkdown && viewMode === 'preview' ? (
-          <MarkdownPreview content={fileState.content} />
-        ) : (
-          <Editor
-            height="100%"
-            language={fileState.language}
-            value={fileState.content}
-            theme="vs-dark"
-            onMount={handleEditorMount}
-            options={{
-              readOnly: true,
-              minimap: { enabled: false },
-              lineNumbers: 'on',
-              scrollBeyondLastLine: false,
-              wordWrap: 'on',
-              fontSize: 14,
-              folding: true,
-              renderLineHighlight: 'line',
-              scrollbar: {
-                vertical: 'auto',
-                horizontal: 'auto'
-              },
-              padding: { top: 8 },
-              glyphMargin: !!onLineClick
-            }}
-          />
+        </div>
+        <div className="file-viewer-content">
+          {isImage ? (
+            <div className="file-viewer-image-container">
+              <img
+                src={`data:${imageMimeType(filePath)};base64,${fileState.content}`}
+                alt={fileName}
+              />
+            </div>
+          ) : isBinary ? (
+            <div className="file-viewer-placeholder">Binary file — not shown as text</div>
+          ) : isMarkdown && viewMode === 'preview' ? (
+            <MarkdownPreview content={fileState.content} />
+          ) : (
+            <Editor
+              height="100%"
+              language={fileState.language}
+              value={fileState.content}
+              theme="vs-dark"
+              onMount={handleEditorMount}
+              options={{
+                readOnly: true,
+                minimap: { enabled: false },
+                lineNumbers: 'on',
+                scrollBeyondLastLine: false,
+                wordWrap: 'on',
+                fontSize: 14,
+                folding: true,
+                renderLineHighlight: 'line',
+                scrollbar: {
+                  vertical: 'auto',
+                  horizontal: 'auto'
+                },
+                padding: { top: 8 },
+                glyphMargin: !!onLineClick
+              }}
+            />
+          )}
+        </div>
+        {commentContainer && inlineCommentInput && onCommentSubmit && onCommentCancel && createPortal(
+          <CommentInput
+            lineNumber={inlineCommentInput.lineNumber}
+            onSubmit={onCommentSubmit}
+            onCancel={onCommentCancel}
+          />,
+          commentContainer
+        )}
+        {Array.from(commentDisplayContainers.entries()).map(([key, { container, comments: groupComments }]) =>
+          createPortal(
+            <div className="inline-comment-display-group" key={key}>
+              {groupComments.map(comment => (
+                <CommentDisplay
+                  key={comment.id}
+                  comment={comment}
+                  onDelete={onCommentDelete ?? (() => {})}
+                  hideLineRef
+                />
+              ))}
+            </div>,
+            container
+          )
         )}
       </div>
-      {commentContainer && inlineCommentInput && onCommentSubmit && onCommentCancel && createPortal(
-        <CommentInput
-          lineNumber={inlineCommentInput.lineNumber}
-          onSubmit={onCommentSubmit}
-          onCancel={onCommentCancel}
-        />,
-        commentContainer
-      )}
-      {Array.from(commentDisplayContainers.entries()).map(([key, { container, comments: groupComments }]) =>
-        createPortal(
-          <div className="inline-comment-display-group" key={key}>
-            {groupComments.map(comment => (
-              <CommentDisplay
-                key={comment.id}
-                comment={comment}
-                onDelete={onCommentDelete ?? (() => {})}
-                hideLineRef
-              />
-            ))}
-          </div>,
-          container
-        )
-      )}
+    )
+  }
+
+  const renderSearchPanel = (s: Extract<SearchState, { status: SearchStatus.Open }>): React.JSX.Element => {
+    const textHits = searchable ? findInText(fileState.content, s.query) : []
+    const lines = fileState.content.split('\n')
+    const inViewHits: InViewHit[] = textHits.map(hit => ({
+      filePath: relativePath,
+      label: String(hit.lineNumber),
+      preview: lines[hit.lineNumber - 1] ?? '',
+    }))
+    const select = (index: number): void => {
+      const hit = textHits[index]
+      if (!hit) return
+      setSearch({ ...s, activeIndex: index })
+      const ed = editorRef.current
+      if (!ed) return
+      ed.revealLineInCenter(hit.lineNumber)
+      ed.setSelection({
+        startLineNumber: hit.lineNumber,
+        startColumn: hit.column,
+        endLineNumber: hit.lineNumber,
+        endColumn: hit.column + s.query.length,
+      })
+    }
+    const step = (dir: 1 | -1): void => {
+      if (textHits.length === 0) return
+      const next = s.activeIndex === null
+        ? (dir === 1 ? 0 : textHits.length - 1)
+        : (s.activeIndex + dir + textHits.length) % textHits.length
+      select(next)
+    }
+    return (
+      <SearchPanel
+        workspace={workspace}
+        query={s.query}
+        onQueryChange={(query) => { setSearch({ ...s, query, activeIndex: null }) }}
+        focusNonce={s.focusNonce}
+        onClose={() => { setSearch({ status: SearchStatus.Closed }) }}
+        inViewTitle="In this file"
+        inViewHits={inViewHits}
+        activeIndex={s.activeIndex}
+        inViewPending={fileState.loading}
+        onSelectInView={select}
+        onNext={() => { step(1) }}
+        onPrev={() => { step(-1) }}
+        excludeFilePaths={[relativePath]}
+        onSelectRepo={(hit) => { onOpenLocation(hit.filePath, hit.lineNumber) }}
+      />
+    )
+  }
+
+  return (
+    <div className="file-viewer-with-search">
+      {renderViewer()}
+      {search.status === SearchStatus.Open && renderSearchPanel(search)}
     </div>
   )
 }

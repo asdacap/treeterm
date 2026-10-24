@@ -23,6 +23,10 @@ class MockIntersectionObserver {
 
 vi.stubGlobal('IntersectionObserver', MockIntersectionObserver)
 
+// The real diffs-container element (registered by @pierre/diffs) adopts a constructed
+// stylesheet, which jsdom can't fill.
+CSSStyleSheet.prototype.replaceSync = function () {}
+
 // Hand-driven animation frames, so the scroll-settling loop can be stepped one
 // frame at a time.
 const pendingFrames = new Map<number, FrameRequestCallback>()
@@ -60,12 +64,13 @@ vi.mock('@pierre/diffs/react', () => ({
       oldFile: { name: string }
       selectedLines: { start: number; side: string } | null
     }
-    return (
+    // The real viewer renders inside a diffs-container host element.
+    return React.createElement('diffs-container', null, (
       <div
         data-testid={`diff-${oldFile.name}`}
         data-selected={selectedLines ? `${selectedLines.side}:${String(selectedLines.start)}` : ''}
       />
-    )
+    ))
   },
   WorkerPoolContextProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }))
@@ -82,9 +87,36 @@ vi.mock('../pierre-diffs-config', () => ({
   createDiffsWorker: () => ({} as Worker),
 }))
 
+// The repo search is driven by hand: the test grabs the onEvent callback.
+const repoSearch = vi.hoisted(() => ({
+  onEvent: null as ((event: unknown) => void) | null,
+}))
+vi.mock('../utils/repoSearch', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../utils/repoSearch')>()
+  return {
+    ...actual,
+    startRepoSearch: vi.fn((_exec: unknown, _conn: unknown, _cwd: unknown, _query: unknown, onEvent: (event: unknown) => void) => {
+      repoSearch.onEvent = onEvent
+      return () => { repoSearch.onEvent = null }
+    }),
+  }
+})
+
 import { StackedDiffList, SETTLE_FRAMES, MAX_ALIGN_FRAMES, MAX_SEARCH_LOADS } from './StackedDiffList'
 import type { DiffFile, FileDiffContents, ReviewComment } from '../types'
+import type { WorkspaceStore } from '../types'
 import { DiffContentKind, FileChangeStatus, FileStatKind } from '../types'
+import { createStore } from 'zustand/vanilla'
+import { RepoSearchEventType, RepoSearchTool } from '../utils/repoSearch'
+import { REPO_SEARCH_DEBOUNCE_MS } from './SearchPanel'
+
+const addTab = vi.fn()
+const workspace = createStore(() => ({
+  workspace: { path: '/repo' },
+  connectionId: 'conn',
+  execApi: { start: vi.fn(), kill: vi.fn(), onEvent: vi.fn() },
+  addTab,
+})) as unknown as WorkspaceStore
 
 function makeDiffFile(path: string): DiffFile {
   return {
@@ -106,6 +138,7 @@ function makeContents(): FileDiffContents {
 }
 
 const defaultProps = {
+  workspace,
   files: [makeDiffFile('src/a.ts'), makeDiffFile('src/b.ts')],
   loadFileContents: vi.fn(() => Promise.resolve(makeContents())),
   diffStyle: 'split' as const,
@@ -314,18 +347,18 @@ describe('StackedDiffList', () => {
     async function typeQuery(query: string): Promise<void> {
       // eslint-disable-next-line @typescript-eslint/require-await -- act needs async to flush promise-based state updates
       await act(async () => {
-        fireEvent.change(screen.getByPlaceholderText('Find in diff'), { target: { value: query } })
+        fireEvent.change(screen.getByPlaceholderText('Search'), { target: { value: query } })
       })
     }
 
     it('opens the find bar on Cmd+F', () => {
       markVisible()
       render(<StackedDiffList {...defaultProps} />)
-      expect(screen.queryByPlaceholderText('Find in diff')).toBeNull()
+      expect(screen.queryByPlaceholderText('Search')).toBeNull()
 
       pressFind()
 
-      const input = screen.getByPlaceholderText('Find in diff')
+      const input = screen.getByPlaceholderText<HTMLInputElement>('Search')
       expect(document.activeElement).toBe(input)
     })
 
@@ -338,14 +371,14 @@ describe('StackedDiffList', () => {
 
       pressFind(outside)
 
-      expect(screen.queryByPlaceholderText('Find in diff')).toBeNull()
+      expect(screen.queryByPlaceholderText('Search')).toBeNull()
       outside.remove()
     })
 
     it('ignores Cmd+F while the list is hidden', () => {
       render(<StackedDiffList {...defaultProps} />)
       pressFind()
-      expect(screen.queryByPlaceholderText('Find in diff')).toBeNull()
+      expect(screen.queryByPlaceholderText('Search')).toBeNull()
     })
 
     it('loads files that were never scrolled to, a few at a time', async () => {
@@ -360,7 +393,7 @@ describe('StackedDiffList', () => {
       await typeQuery('needle')
 
       expect(loadFileContents).toHaveBeenCalledTimes(MAX_SEARCH_LOADS)
-      expect(screen.getByText('Searching…')).toBeDefined()
+      expect(screen.getAllByText('Searching…')).toHaveLength(1)
 
       // eslint-disable-next-line @typescript-eslint/require-await -- act needs async to flush promise-based state updates
       await act(async () => { resolvers.splice(0).forEach(r => { r() }) })
@@ -383,7 +416,7 @@ describe('StackedDiffList', () => {
       await typeQuery('needle')
       expect(screen.getByText('2 found')).toBeDefined()
 
-      const input = screen.getByPlaceholderText('Find in diff')
+      const input = screen.getByPlaceholderText<HTMLInputElement>('Search')
       fireEvent.keyDown(input, { key: 'Enter' })
       expect(screen.getByText('1/2')).toBeDefined()
       expect(screen.getByTestId('diff-src/a.ts').dataset.selected).toBe('additions:2')
@@ -417,7 +450,7 @@ describe('StackedDiffList', () => {
       await typeQuery('needle')
       expect(screen.queryByTestId('diff-src/a.ts')).toBeNull()
 
-      fireEvent.keyDown(screen.getByPlaceholderText('Find in diff'), { key: 'Enter' })
+      fireEvent.keyDown(screen.getByPlaceholderText('Search'), { key: 'Enter' })
 
       expect(screen.getByTestId('diff-src/a.ts').dataset.selected).toBe('additions:2')
     })
@@ -427,14 +460,113 @@ describe('StackedDiffList', () => {
       render(<StackedDiffList {...defaultProps} loadFileContents={() => Promise.resolve(contentsWith('needle'))} />)
       pressFind()
       await typeQuery('needle')
-      const input = screen.getByPlaceholderText('Find in diff')
+      const input = screen.getByPlaceholderText<HTMLInputElement>('Search')
       fireEvent.keyDown(input, { key: 'Enter' })
       expect(screen.getByTestId('diff-src/a.ts').dataset.selected).toBe('additions:2')
 
       fireEvent.keyDown(input, { key: 'Escape' })
 
-      expect(screen.queryByPlaceholderText('Find in diff')).toBeNull()
+      expect(screen.queryByPlaceholderText('Search')).toBeNull()
       expect(screen.getByTestId('diff-src/a.ts').dataset.selected).toBe('')
+    })
+
+    async function renderLoaded(): Promise<void> {
+      const byPath: Record<string, FileDiffContents> = {
+        'src/a.ts': contentsWith('const needle = 1'),
+        'src/b.ts': contentsWith('NEEDLE()'),
+      }
+      render(<StackedDiffList {...defaultProps} loadFileContents={(path: string) => Promise.resolve(byPath[path]!)} />)
+      // Sections load as they scroll into view.
+      // eslint-disable-next-line @typescript-eslint/require-await -- act needs async to flush promise-based state updates
+      await act(async () => {
+        for (const observer of mockObservers) {
+          observer.callback([{ isIntersecting: true, target: document.body } as unknown as IntersectionObserverEntry], {} as IntersectionObserver)
+        }
+      })
+    }
+
+    function selectText(text: string): void {
+      vi.spyOn(document, 'getSelection').mockReturnValue({ toString: () => text } as Selection)
+    }
+
+    it('double-clicking a word in the diff searches for it', async () => {
+      await renderLoaded()
+      selectText('needle')
+
+      // eslint-disable-next-line @typescript-eslint/require-await -- act needs async to flush promise-based state updates
+      await act(async () => { fireEvent.doubleClick(screen.getByTestId('diff-src/a.ts')) })
+
+      const input = screen.getByPlaceholderText<HTMLInputElement>('Search')
+      expect(input.value).toBe('needle')
+      expect(screen.getByText('2 found')).toBeDefined()
+      expect(screen.getByText('const needle = 1')).toBeDefined()
+    })
+
+    it.each([
+      ['a multi-word selection', 'two words', 'diff-src/a.ts'],
+      ['an empty selection', '  ', 'diff-src/a.ts'],
+    ])('ignores a double-click that selected %s', async (_label, text, testId) => {
+      await renderLoaded()
+      selectText(text)
+      fireEvent.doubleClick(screen.getByTestId(testId))
+      expect(screen.queryByPlaceholderText('Search')).toBeNull()
+    })
+
+    it('ignores a double-click outside the diff viewer', async () => {
+      await renderLoaded()
+      selectText('needle')
+      fireEvent.doubleClick(screen.getAllByText('M')[0]!)
+      expect(screen.queryByPlaceholderText('Search')).toBeNull()
+    })
+
+    it('ignores a double-click inside an input', async () => {
+      await renderLoaded()
+      selectText('needle')
+      const container = screen.getByTestId('diff-src/a.ts')
+      const input = document.createElement('input')
+      container.appendChild(input)
+      fireEvent.doubleClick(input)
+      expect(screen.queryByPlaceholderText('Search')).toBeNull()
+    })
+
+    it('clicking an in-diff result highlights that line', async () => {
+      await renderLoaded()
+      selectText('needle')
+      // eslint-disable-next-line @typescript-eslint/require-await -- act needs async to flush promise-based state updates
+      await act(async () => { fireEvent.doubleClick(screen.getByTestId('diff-src/a.ts')) })
+
+      fireEvent.click(screen.getByText('NEEDLE()'))
+
+      expect(screen.getByText('2/2')).toBeDefined()
+      expect(screen.getByTestId('diff-src/b.ts').dataset.selected).toBe('additions:2')
+    })
+
+    it('lists repo results outside the diff and opens them in a file browser tab', async () => {
+      vi.useFakeTimers()
+      try {
+        await renderLoaded()
+        selectText('needle')
+        act(() => { fireEvent.doubleClick(screen.getByTestId('diff-src/a.ts')) })
+        act(() => { vi.advanceTimersByTime(REPO_SEARCH_DEBOUNCE_MS) })
+
+        act(() => {
+          repoSearch.onEvent?.({
+            type: RepoSearchEventType.Hits,
+            hits: [
+              { filePath: 'src/a.ts', lineNumber: 2, column: 7, preview: 'in the diff already' },
+              { filePath: 'lib/other.ts', lineNumber: 9, column: 1, preview: 'needle elsewhere' },
+            ],
+          })
+          repoSearch.onEvent?.({ type: RepoSearchEventType.Done, tool: RepoSearchTool.Ripgrep, truncated: false })
+        })
+
+        expect(screen.queryByText('in the diff already')).toBeNull()
+        expect(screen.getByText('1 found · rg')).toBeDefined()
+        fireEvent.click(screen.getByText('needle elsewhere'))
+        expect(addTab).toHaveBeenCalledWith('filesystem', { selectedPath: '/repo/lib/other.ts', scrollToLine: 9 })
+      } finally {
+        vi.useRealTimers()
+      }
     })
   })
 })

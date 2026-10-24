@@ -11,7 +11,7 @@ import type { ExecInput, ExecOutput } from '../generated/treeterm'
 import { ConnectionStatus, ConnectionTargetType, ConnectionErrorKind } from '../shared/types'
 import type { SSHConnectionConfig, PortForwardConfig } from '../shared/types'
 import { PtyAttachKind, PtyEventType, ExecEventType, type ExecEvent } from '../shared/ipc-types'
-import { createExecStreamRegistry } from './execStreamRegistry'
+import { createExecStreamRegistry, execResultEvent } from './execStreamRegistry'
 import { attachWebviewGuard } from './webviewGuard'
 
 // Parse initial workspace and SSH target from command line
@@ -636,7 +636,7 @@ server.onExecStart((event, connectionId, cwd, command, args, timeoutMs) => {
       } else if (output.stderr) {
         sendExecEvent(sender, execId, { type: ExecEventType.Stderr, data: output.stderr.data.toString('utf-8') })
       } else if (output.result) {
-        sendExecEvent(sender, execId, { type: ExecEventType.Exit, exitCode: output.result.exitCode })
+        sendExecEvent(sender, execId, execResultEvent(output.result))
         execStreams.delete(execId)
       }
     })

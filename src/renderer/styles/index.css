@@ -3197,6 +3197,14 @@ body,
 }
 
 /* File Viewer */
+.file-viewer-with-search {
+  flex: 1;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .file-viewer {
   flex: 1;
   display: flex;
@@ -7708,12 +7716,100 @@ body,
 .stacked-diff-list-wrapper {
   flex: 1;
   display: flex;
-  flex-direction: column;
   min-width: 0;
   min-height: 0;
 }
 
-/* Find in diff */
+/* Search panel (in-view matches + repo search), shown on the right */
+.search-panel {
+  width: 320px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--bg-secondary);
+  border-left: 1px solid var(--border-color);
+}
+
+.search-panel-results {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  padding-bottom: 8px;
+}
+
+.search-panel-section-title {
+  padding: 8px 8px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.search-panel-file {
+  padding: 4px 8px 2px;
+  font-size: 11px;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+
+.search-panel-hit {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  padding: 2px 8px 2px 16px;
+  font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
+  font-size: 11px;
+  text-align: left;
+  color: var(--text-secondary);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.search-panel-hit:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.search-panel-hit.active {
+  background: var(--bg-active);
+  color: var(--text-primary);
+}
+
+.search-panel-hit-label {
+  flex-shrink: 0;
+  min-width: 32px;
+  text-align: right;
+}
+
+.search-panel-hit-preview {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: pre;
+}
+
+.search-panel-note {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.search-panel-error {
+  padding: 4px 8px;
+  font-size: 11px;
+  color: #f14c4c;
+  word-break: break-word;
+}
+
+/* Search input row */
 .diff-find-bar {
   display: flex;
   align-items: center;

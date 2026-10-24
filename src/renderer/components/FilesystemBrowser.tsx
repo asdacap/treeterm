@@ -5,6 +5,7 @@ import { FileTree } from './FileTree'
 import { FileViewer } from './FileViewer'
 import type { FilesystemState, WorkspaceStore } from '../types'
 import { useGitApi } from '../hooks/useWorkspaceApis'
+import { toWorkspaceAbsolute } from '../utils/repoSearch'
 
 interface FilesystemBrowserProps {
   workspace: WorkspaceStore
@@ -77,6 +78,15 @@ function FilesystemBrowserContent({
       scrollToLine: undefined
     }))
   }, [tabId, updateTabState])
+
+  const handleOpenLocation = (relativePath: string, lineNumber: number) => {
+    updateTabState<FilesystemState>(tabId, (s) => ({
+      ...s,
+      selectedPath: toWorkspaceAbsolute(workspacePath, relativePath),
+      scrollToLine: lineNumber,
+      scrollTop: undefined
+    }))
+  }
 
   const toggleExpandedDir = (dirPath: string) => {
     updateTabState<FilesystemState>(tabId, (s) => {
@@ -207,6 +217,7 @@ function FilesystemBrowserContent({
           onScrollToLineUsed={handleScrollToLineUsed}
           initialScrollTop={state.scrollTop}
           onScrollPositionChange={handleScrollPositionChange}
+          onOpenLocation={handleOpenLocation}
         />
       </div>
     </div>

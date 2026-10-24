@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
 import React, { useEffect } from 'react'
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { createStore } from 'zustand/vanilla'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { WorkspaceFilesystemApi, WorkspaceStore } from '../types'
 import { FileViewer } from './FileViewer'
+import { REPO_SEARCH_DEBOUNCE_MS } from './SearchPanel'
+import { RepoSearchEventType, RepoSearchTool } from '../utils/repoSearch'
 
 const filesystem = vi.hoisted(() => ({ readFile: vi.fn() }))
 
@@ -14,6 +16,10 @@ const fakeEditor = vi.hoisted(() => ({
   revealLineInCenter: vi.fn(),
   onDidScrollChange: vi.fn(),
   onMouseDown: vi.fn(),
+  addCommand: vi.fn(),
+  getModel: vi.fn(),
+  getSelection: vi.fn(),
+  setSelection: vi.fn(),
   createDecorationsCollection: vi.fn(() => ({ clear: vi.fn() })),
   changeViewZones: vi.fn((cb: (accessor: unknown) => void) => {
     cb({ addZone: () => 'zone-1', removeZone: () => undefined })
@@ -21,7 +27,9 @@ const fakeEditor = vi.hoisted(() => ({
 }))
 
 const fakeMonaco = vi.hoisted(() => ({
-  editor: { MouseTargetType: { GUTTER_LINE_NUMBERS: 3 } },
+  editor: { MouseTargetType: { GUTTER_LINE_NUMBERS: 3, CONTENT_TEXT: 6 } },
+  KeyMod: { CtrlCmd: 2048 },
+  KeyCode: { KeyF: 36 },
 }))
 
 vi.mock('../hooks/useWorkspaceApis', () => ({
@@ -54,6 +62,21 @@ function MockEditor({
 
 vi.mock('@monaco-editor/react', () => ({ default: MockEditor }))
 
+// The repo search is driven by hand: the test grabs the onEvent callback.
+const repoSearch = vi.hoisted(() => ({
+  onEvent: null as ((event: unknown) => void) | null,
+}))
+vi.mock('../utils/repoSearch', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../utils/repoSearch')>()
+  return {
+    ...actual,
+    startRepoSearch: vi.fn((_exec: unknown, _conn: unknown, _cwd: unknown, _query: unknown, onEvent: (event: unknown) => void) => {
+      repoSearch.onEvent = onEvent
+      return () => { repoSearch.onEvent = null }
+    }),
+  }
+})
+
 function makeWorkspace(): WorkspaceStore {
   return createStore(() => ({
     workspace: { id: 'workspace-1', path: '/repo' },
@@ -78,7 +101,7 @@ describe('FileViewer', () => {
       },
     })
 
-    render(<FileViewer workspace={makeWorkspace()} filePath="src/Example.cs" />)
+    render(<FileViewer workspace={makeWorkspace()} onOpenLocation={vi.fn()} filePath="src/Example.cs" />)
 
     expect(await screen.findByText('csharp')).toBeTruthy()
     expect(screen.getByTestId('monaco-editor').getAttribute('data-language')).toBe('csharp')
@@ -90,7 +113,7 @@ describe('FileViewer', () => {
       file: { path: '/repo/app.bin', content: 'ELF\0\0\x01', size: 6, language: 'plaintext' },
     })
 
-    render(<FileViewer workspace={makeWorkspace()} filePath="app.bin" />)
+    render(<FileViewer workspace={makeWorkspace()} onOpenLocation={vi.fn()} filePath="app.bin" />)
 
     expect(await screen.findByText('Binary file — not shown as text')).toBeTruthy()
     expect(screen.getByText('binary')).toBeTruthy()
@@ -104,7 +127,7 @@ describe('FileViewer', () => {
       file: { path: '/repo/logo.jpg', content: 'AAEC', size: 3, language: 'image' },
     })
 
-    render(<FileViewer workspace={makeWorkspace()} filePath="logo.jpg" />)
+    render(<FileViewer workspace={makeWorkspace()} onOpenLocation={vi.fn()} filePath="logo.jpg" />)
 
     const img = await screen.findByAltText('logo.jpg')
     expect(img.getAttribute('src')).toBe('data:image/jpeg;base64,AAEC')
@@ -123,7 +146,7 @@ describe('FileViewer', () => {
 
       render(
         <FileViewer
-          workspace={makeWorkspace()}
+          workspace={makeWorkspace()} onOpenLocation={vi.fn()}
           filePath="src/app.ts"
           initialScrollTop={4200}
           onLineClick={vi.fn()}
@@ -140,6 +163,7 @@ describe('FileViewer', () => {
       const { rerender } = render(
         <FileViewer
           workspace={workspace}
+          onOpenLocation={vi.fn()}
           filePath="src/app.ts"
           initialScrollTop={4200}
           onLineClick={vi.fn()}
@@ -155,6 +179,7 @@ describe('FileViewer', () => {
       rerender(
         <FileViewer
           workspace={workspace}
+          onOpenLocation={vi.fn()}
           filePath="src/app.ts"
           initialScrollTop={4200}
           onLineClick={vi.fn()}
@@ -174,7 +199,7 @@ describe('FileViewer', () => {
 
       render(
         <FileViewer
-          workspace={makeWorkspace()}
+          workspace={makeWorkspace()} onOpenLocation={vi.fn()}
           filePath="src/app.ts"
           initialScrollTop={4200}
           scrollToLine={12}
@@ -185,6 +210,160 @@ describe('FileViewer', () => {
 
       await waitFor(() => { expect(fakeEditor.revealLineInCenter).toHaveBeenCalledWith(12) })
       expect(fakeEditor.setScrollTop).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('search', () => {
+    const content = 'const needle = 1\nother line\nneedle(needle)'
+
+    type MouseDownHandler = (e: { event: { detail: number }; target: { type: number; position: { lineNumber: number; column: number } | null } }) => void
+
+    async function renderLoaded(onOpenLocation = vi.fn()): Promise<void> {
+      filesystem.readFile.mockResolvedValue({
+        success: true,
+        file: { path: '/repo/src/app.ts', content, size: content.length, language: 'plaintext' },
+      })
+      fakeEditor.getModel.mockReturnValue({
+        getWordAtPosition: () => ({ word: 'needle' }),
+        getValueInRange: () => 'other',
+      })
+      render(<FileViewer workspace={makeWorkspace()} filePath="/repo/src/app.ts" onOpenLocation={onOpenLocation} />)
+      await screen.findByTestId('monaco-editor')
+    }
+
+    function mouseDown(detail: number, type = 6, position: { lineNumber: number; column: number } | null = { lineNumber: 1, column: 8 }): void {
+      const handlers = fakeEditor.onMouseDown.mock.calls.map(c => c[0] as MouseDownHandler)
+      act(() => { for (const h of handlers) h({ event: { detail }, target: { type, position } }) })
+    }
+
+    function pressCmdF(): void {
+      const command = fakeEditor.addCommand.mock.calls.at(-1)?.[1] as () => void
+      act(() => { command() })
+    }
+
+    it('double-clicking a word opens the panel with every occurrence in the file', async () => {
+      await renderLoaded()
+      expect(screen.queryByPlaceholderText('Search')).toBeNull()
+
+      mouseDown(2)
+
+      expect(screen.getByPlaceholderText<HTMLInputElement>('Search').value).toBe('needle')
+      expect(screen.getByText('In this file')).toBeTruthy()
+      expect(screen.getByText('3 found')).toBeTruthy()
+      expect(screen.getAllByText('needle(needle)')).toHaveLength(2)
+    })
+
+    it.each([
+      ['a single click', 1, 6, { lineNumber: 1, column: 8 }],
+      ['a double-click outside the text', 2, 3, { lineNumber: 1, column: 8 }],
+      ['a double-click without a position', 2, 6, null],
+    ])('ignores %s', async (_label, detail, type, position) => {
+      await renderLoaded()
+      mouseDown(detail, type, position)
+      expect(screen.queryByPlaceholderText('Search')).toBeNull()
+    })
+
+    it('ignores a double-click on whitespace', async () => {
+      await renderLoaded()
+      fakeEditor.getModel.mockReturnValue({ getWordAtPosition: () => null })
+      mouseDown(2)
+      expect(screen.queryByPlaceholderText('Search')).toBeNull()
+    })
+
+    it('Cmd+F opens the panel seeded with the selection', async () => {
+      await renderLoaded()
+      fakeEditor.getSelection.mockReturnValue({ startLineNumber: 2 })
+      pressCmdF()
+      expect(screen.getByPlaceholderText<HTMLInputElement>('Search').value).toBe('other')
+    })
+
+    it('Cmd+F without a selection opens an empty panel, and keeps the query when already open', async () => {
+      await renderLoaded()
+      fakeEditor.getSelection.mockReturnValue(null)
+      pressCmdF()
+      const input = screen.getByPlaceholderText<HTMLInputElement>('Search')
+      expect(input.value).toBe('')
+      fireEvent.change(input, { target: { value: 'needle' } })
+      pressCmdF()
+      expect(input.value).toBe('needle')
+    })
+
+    it('clicking or stepping to an occurrence reveals and selects it', async () => {
+      await renderLoaded()
+      mouseDown(2)
+
+      fireEvent.click(screen.getByText('const needle = 1'))
+      expect(fakeEditor.revealLineInCenter).toHaveBeenLastCalledWith(1)
+      expect(fakeEditor.setSelection).toHaveBeenLastCalledWith({ startLineNumber: 1, startColumn: 7, endLineNumber: 1, endColumn: 13 })
+      expect(screen.getByText('1/3')).toBeTruthy()
+
+      const input = screen.getByPlaceholderText<HTMLInputElement>('Search')
+      fireEvent.keyDown(input, { key: 'Enter' })
+      expect(fakeEditor.setSelection).toHaveBeenLastCalledWith({ startLineNumber: 3, startColumn: 1, endLineNumber: 3, endColumn: 7 })
+      fireEvent.keyDown(input, { key: 'Enter', shiftKey: true })
+      fireEvent.keyDown(input, { key: 'Enter', shiftKey: true })
+      expect(screen.getByText('3/3')).toBeTruthy()
+    })
+
+    it('stepping backwards with nothing selected goes to the last occurrence', async () => {
+      await renderLoaded()
+      mouseDown(2)
+      fireEvent.keyDown(screen.getByPlaceholderText('Search'), { key: 'Enter', shiftKey: true })
+      expect(screen.getByText('3/3')).toBeTruthy()
+    })
+
+    it('stepping does nothing when there are no occurrences', async () => {
+      await renderLoaded()
+      mouseDown(2)
+      const input = screen.getByPlaceholderText<HTMLInputElement>('Search')
+      fireEvent.change(input, { target: { value: 'absent' } })
+      fireEvent.keyDown(input, { key: 'Enter' })
+      expect(fakeEditor.setSelection).not.toHaveBeenCalled()
+      expect(screen.getByText('No matches')).toBeTruthy()
+    })
+
+    it('opens repo results in other files and leaves out the current file', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true })
+      try {
+        const onOpenLocation = vi.fn()
+        await renderLoaded(onOpenLocation)
+        mouseDown(2)
+        act(() => { vi.advanceTimersByTime(REPO_SEARCH_DEBOUNCE_MS) })
+        act(() => {
+          repoSearch.onEvent?.({
+            type: RepoSearchEventType.Hits,
+            hits: [
+              { filePath: 'src/app.ts', lineNumber: 1, column: 7, preview: 'this file again' },
+              { filePath: 'src/other.ts', lineNumber: 4, column: 2, preview: 'needle in other' },
+            ],
+          })
+          repoSearch.onEvent?.({ type: RepoSearchEventType.Done, tool: RepoSearchTool.GitGrep, truncated: true })
+        })
+
+        expect(screen.queryByText('this file again')).toBeNull()
+        expect(screen.getByText('1 found (stopped at the result limit) · git grep')).toBeTruthy()
+        fireEvent.click(screen.getByText('needle in other'))
+        expect(onOpenLocation).toHaveBeenCalledWith('src/other.ts', 4)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('closing the panel cancels the repo search', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true })
+      try {
+        await renderLoaded()
+        mouseDown(2)
+        act(() => { vi.advanceTimersByTime(REPO_SEARCH_DEBOUNCE_MS) })
+        expect(repoSearch.onEvent).not.toBeNull()
+
+        fireEvent.keyDown(screen.getByPlaceholderText('Search'), { key: 'Escape' })
+
+        expect(screen.queryByPlaceholderText('Search')).toBeNull()
+        expect(repoSearch.onEvent).toBeNull()
+      } finally {
+        vi.useRealTimers()
+      }
     })
   })
 })
