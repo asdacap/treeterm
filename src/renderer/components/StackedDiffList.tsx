@@ -1,9 +1,12 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import React, { useState, useEffect, useRef, useCallback, useMemo, useId } from 'react'
 import type { DiffFile, UncommittedFile, FileDiffContents, ReviewComment, WorkspaceStore } from '../types'
 import { DiffContentKind, FileChangeStatus } from '../types'
 import { FileDiffSection } from './FileDiffSection'
 import { SearchPanel, openInFileBrowser, type InViewHit } from './SearchPanel'
-import { DiffSearchSide, findLinesInDiff, type DiffSearchHit } from '../utils/diffSearch'
+import ContextMenu from './ContextMenu'
+import { useContextMenuStore } from '../store/contextMenu'
+import { useAppStore } from '../store/app'
+import { DiffSearchSide, findLinesInDiff, wordAt, type DiffSearchHit } from '../utils/diffSearch'
 
 interface FileLoadState {
   contents: FileDiffContents | null
@@ -37,21 +40,44 @@ function findSelectedLineElement(section: HTMLElement): HTMLElement | null {
   return null
 }
 
-// The word a double-click selected inside the diff viewer, or null when the
-// double-click was elsewhere (file header, comment input) or selected no word.
-function doubleClickedWord(e: React.MouseEvent): string | null {
+interface DiffContextTarget {
+  filePath: string
+  // The selection, or else the word under the pointer.
+  copyText: string
+  // A single-line selection, or else the word under the pointer; '' when neither.
+  searchText: string
+}
+
+// The word under a viewport point inside the diff viewer's shadow root.
+function wordAtPoint(host: HTMLElement, x: number, y: number): string {
+  const root = host.shadowRoot
+  if (!root) return ''
+  const caret = host.ownerDocument.caretPositionFromPoint(x, y, { shadowRoots: [root] })
+  if (caret?.offsetNode.nodeType !== Node.TEXT_NODE) return ''
+  return wordAt(caret.offsetNode.textContent ?? '', caret.offset)
+}
+
+// What a right-click inside the diff viewer points at, or null when it was
+// elsewhere (file header, comment input) or on no text, keeping the default menu.
+function contextTarget(e: React.MouseEvent): DiffContextTarget | null {
   const path = e.nativeEvent.composedPath()
   const inEditable = path.some(node =>
     node instanceof HTMLElement && node.matches('input, textarea, [contenteditable], .pierre-diff-annotation'))
   if (inEditable) return null
   const host = path.find((node): node is HTMLElement =>
     node instanceof HTMLElement && node.matches(DIFFS_HOST_SELECTOR))
-  if (!host) return null
+  const filePath = path.find((node): node is HTMLElement =>
+    node instanceof HTMLElement && node.dataset.filePath !== undefined)?.dataset.filePath
+  if (!host || filePath === undefined) return null
   // The selection made inside a shadow root is only visible through that root.
   const root = host.shadowRoot as (ShadowRoot & { getSelection?: () => Selection | null }) | null
-  const selection = root?.getSelection?.() ?? host.ownerDocument.getSelection()
-  const word = selection?.toString().trim() ?? ''
-  return word && !/\s/.test(word) ? word : null
+  const selected = (root?.getSelection?.() ?? host.ownerDocument.getSelection())?.toString() ?? ''
+  const word = wordAtPoint(host, e.clientX, e.clientY)
+  const copyText = selected || word
+  if (!copyText) return null
+  const trimmed = selected.trim()
+  const searchText = trimmed && !trimmed.includes('\n') ? trimmed : word
+  return { filePath, copyText, searchText }
 }
 
 function lineText(contents: FileDiffContents, hit: DiffSearchHit): string {
@@ -127,8 +153,19 @@ export function StackedDiffList({
   const [findOpen, setFindOpen] = useState(false)
   const [findQuery, setFindQuery] = useState('')
   const [findFocusNonce, setFindFocusNonce] = useState(0)
+  // The file whose matches are listed first, as "In this file".
+  const [findFile, setFindFile] = useState('')
   const [activeMatch, setActiveMatch] = useState<(SearchMatch & { nonce: number }) | null>(null)
   const matchNonceRef = useRef(0)
+
+  // Right-click menu over the diff: Search and Copy.
+  const menuId = useId()
+  const openContextMenu = useContextMenuStore(s => s.open)
+  const closeContextMenu = useContextMenuStore(s => s.close)
+  const activeMenuId = useContextMenuStore(s => s.activeMenuId)
+  const menuPosition = useContextMenuStore(s => s.position)
+  const clipboard = useAppStore(s => s.clipboard)
+  const [menuTarget, setMenuTarget] = useState<DiffContextTarget>({ filePath: '', copyText: '', searchText: '' })
 
   // Scroll to file when scrollToFile changes.
   //
@@ -245,11 +282,12 @@ export function StackedDiffList({
       if (focused && focused !== document.body && !scope.contains(focused)) return
       e.preventDefault()
       setFindOpen(true)
+      setFindFile(topVisibleFile())
       setFindFocusNonce(n => n + 1)
     }
     document.addEventListener('keydown', onKeyDown, true)
     return () => { document.removeEventListener('keydown', onKeyDown, true) }
-  }, [])
+  })
 
   const searching = findOpen && findQuery.length > 0
 
@@ -264,8 +302,9 @@ export function StackedDiffList({
         found.push({ filePath: file.path, ...hit })
       }
     }
-    return found
-  }, [searching, findQuery, files, loadStates, diffStyle, expandUnchanged, ignoreWhitespace])
+    // The search's own file comes first, then the rest of the diff in order.
+    return [...found.filter(m => m.filePath === findFile), ...found.filter(m => m.filePath !== findFile)]
+  }, [searching, findQuery, findFile, files, loadStates, diffStyle, expandUnchanged, ignoreWhitespace])
 
   const pendingSearch = searching && files.some(f => {
     const state = loadStates.get(f.path)
@@ -348,30 +387,42 @@ export function StackedDiffList({
     }
   }, [])
 
-  const openFind = (query: string): void => {
+  // The first file whose section reaches into the visible part of the list.
+  function topVisibleFile(): string {
+    const container = scrollContainerRef.current
+    const top = container ? container.getBoundingClientRect().top : 0
+    const visible = files.find(f => (sectionRefsRef.current.get(f.path)?.getBoundingClientRect().bottom ?? 0) > top)
+    return (visible ?? files[0])?.path ?? ''
+  }
+
+  const openFind = (query: string, filePath: string): void => {
     setFindOpen(true)
     setFindQuery(query)
+    setFindFile(filePath)
     setActiveMatch(null)
     setFindFocusNonce(n => n + 1)
   }
 
-  const inViewHits: InViewHit[] = matches.map(match => {
+  const toInViewHit = (match: SearchMatch): InViewHit => {
     const contents = loadStates.get(match.filePath)?.contents
     return {
       filePath: match.filePath,
       label: `${match.side === DiffSearchSide.Deletions ? '−' : ''}${String(match.lineNumber)}`,
       preview: contents ? lineText(contents, match) : '',
     }
-  })
+  }
 
   return (
     <div className="stacked-diff-list-wrapper" ref={wrapperRef}>
       <div
         className="stacked-diff-list"
         ref={scrollContainerRef}
-        onDoubleClick={(e) => {
-          const word = doubleClickedWord(e)
-          if (word) openFind(word)
+        onContextMenu={(e) => {
+          const target = contextTarget(e)
+          if (!target) return
+          e.preventDefault()
+          setMenuTarget(target)
+          openContextMenu(menuId, e.clientX, e.clientY, 160, 80)
         }}
       >
         {files.map((file, index) => {
@@ -422,8 +473,10 @@ export function StackedDiffList({
           }}
           focusNonce={findFocusNonce}
           onClose={closeFind}
-          inViewTitle="In diff"
-          inViewHits={inViewHits}
+          inViewSections={[
+            { title: 'In this file', hits: matches.filter(m => m.filePath === findFile).map(toInViewHit) },
+            { title: 'In diff', hits: matches.filter(m => m.filePath !== findFile).map(toInViewHit) },
+          ]}
           activeIndex={activeIndex >= 0 ? activeIndex : null}
           inViewPending={pendingSearch}
           onSelectInView={(index) => {
@@ -436,6 +489,22 @@ export function StackedDiffList({
           onSelectRepo={(hit) => { openInFileBrowser(workspace, hit.filePath, hit.lineNumber) }}
         />
       )}
+      <ContextMenu menuId={menuId} activeMenuId={activeMenuId} position={menuPosition}>
+        {menuTarget.searchText && (
+          <div className="context-menu-item" onClick={() => {
+            closeContextMenu()
+            openFind(menuTarget.searchText, menuTarget.filePath)
+          }}>
+            Search “{menuTarget.searchText}”
+          </div>
+        )}
+        <div className="context-menu-item" onClick={() => {
+          closeContextMenu()
+          clipboard.writeText(menuTarget.copyText)
+        }}>
+          Copy
+        </div>
+      </ContextMenu>
     </div>
   )
 }

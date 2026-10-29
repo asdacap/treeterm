@@ -3200,6 +3200,7 @@ body,
 .file-viewer-with-search {
   flex: 1;
   display: flex;
+  flex-direction: column;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
@@ -3212,6 +3213,7 @@ body,
   overflow: hidden;
   background: var(--bg-primary);
   min-width: 0;
+  min-height: 0;
 }
 
 .file-viewer-header {
@@ -7716,19 +7718,20 @@ body,
 .stacked-diff-list-wrapper {
   flex: 1;
   display: flex;
+  flex-direction: column;
   min-width: 0;
   min-height: 0;
 }
 
-/* Search panel (in-view matches + repo search), shown on the right */
+/* Search panel (in-view matches + repo search), shown along the bottom */
 .search-panel {
-  width: 320px;
+  height: 35%;
+  min-height: 160px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  min-height: 0;
   background: var(--bg-secondary);
-  border-left: 1px solid var(--border-color);
+  border-top: 1px solid var(--border-color);
 }
 
 .search-panel-results {

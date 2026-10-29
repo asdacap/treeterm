@@ -92,7 +92,7 @@ export function FileViewer({
   // Inline comment display zones
   const commentDisplayZonesRef = useRef(new Map<string, { zoneId: string; container: HTMLDivElement }>())
   const [commentDisplayContainers, setCommentDisplayContainers] = useState(new Map<string, { container: HTMLDivElement; comments: ReviewComment[] }>())
-  // Search panel: Cmd/Ctrl+F or double-clicking a word opens it
+  // Search panel: Cmd/Ctrl+F or right-click > Search opens it
   const [search, setSearch] = useState<SearchState>({ status: SearchStatus.Closed })
 
   // Callers rebuild the comments array on every render (they filter a store selection), so its
@@ -187,12 +187,25 @@ export function FileViewer({
       }))
     }
 
-    // Double-clicking a word searches for it
-    editor.onMouseDown((e: { event: { detail: number }; target: { type: number; position?: { lineNumber: number; column: number } | null } }) => {
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-      if (e.event.detail !== 2 || e.target.type !== monaco.editor.MouseTargetType.CONTENT_TEXT || !e.target.position) return
-      const word = editor.getModel()?.getWordAtPosition(e.target.position)
-      if (word) openSearch(word.word)
+    // Right-click > Search, next to Monaco's own Copy: searches for the selection,
+    // or the word under the cursor (right-clicking outside a selection moves the cursor there).
+    editor.addAction({
+      id: 'treeterm.search',
+      label: 'Search',
+      contextMenuGroupId: '9_cutcopypaste',
+      contextMenuOrder: 2,
+      run: () => {
+        const model = editor.getModel()
+        const selection = editor.getSelection()
+        if (!model || !selection) return
+        const selected = model.getValueInRange(selection)
+        if (selected && !selected.includes('\n')) {
+          openSearch(selected)
+          return
+        }
+        const word = model.getWordAtPosition(selection.getPosition())
+        if (word) openSearch(word.word)
+      },
     })
 
     // Cmd/Ctrl+F opens the search panel (seeded with the selection) instead of Monaco's find widget
@@ -566,8 +579,7 @@ export function FileViewer({
         onQueryChange={(query) => { setSearch({ ...s, query, activeIndex: null }) }}
         focusNonce={s.focusNonce}
         onClose={() => { setSearch({ status: SearchStatus.Closed }) }}
-        inViewTitle="In this file"
-        inViewHits={inViewHits}
+        inViewSections={[{ title: 'In this file', hits: inViewHits }]}
         activeIndex={s.activeIndex}
         inViewPending={fileState.loading}
         onSelectInView={select}

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { findLinesInDiff, findInText, createLineMatcher, type DiffSearchOptions } from './diffSearch'
+import { findLinesInDiff, findInText, createLineMatcher, type DiffSearchOptions, wordAt } from './diffSearch'
 import type { FileDiffContents } from '../types'
 import { DiffContentKind } from '../types'
 
@@ -109,5 +109,20 @@ describe('findInText', () => {
 
   it('finds nothing for an empty query', () => {
     expect(findInText('foo', '')).toEqual([])
+  })
+})
+
+describe('wordAt', () => {
+  it.each([
+    ['inside a word', 'const needle = 1', 8, 'needle'],
+    ['at the start of a word', 'const needle = 1', 6, 'needle'],
+    ['at the end of a word', 'const needle = 1', 12, 'needle'],
+    ['at the start of the text', 'foo.bar', 0, 'foo'],
+    ['at the end of the text', 'foo.bar', 7, 'bar'],
+    ['with $ and _', 'x = $el_name;', 7, '$el_name'],
+    ['with non-ASCII letters', 'let café = 1', 6, 'café'],
+    ['on whitespace', 'a   b', 2, ''],
+  ])('finds the word %s', (_label, text, offset, word) => {
+    expect(wordAt(text, offset)).toBe(word)
   })
 })

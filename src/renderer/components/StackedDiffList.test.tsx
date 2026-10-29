@@ -58,6 +58,16 @@ function stubRects(filePath: string, topOf: () => number): void {
   })
 }
 
+const appState = vi.hoisted(() => ({
+  clipboard: { writeText: vi.fn(), readText: vi.fn() },
+  getViewportSize: () => ({ width: 1000, height: 800 }),
+}))
+vi.mock('../store/app', () => {
+  const useAppStore = <T,>(selector: (s: typeof appState) => T): T => selector(appState)
+  useAppStore.getState = () => appState
+  return { useAppStore }
+})
+
 vi.mock('@pierre/diffs/react', () => ({
   MultiFileDiff: (props: Record<string, unknown>) => {
     const { oldFile, selectedLines } = props as {
@@ -109,6 +119,7 @@ import { DiffContentKind, FileChangeStatus, FileStatKind } from '../types'
 import { createStore } from 'zustand/vanilla'
 import { RepoSearchEventType, RepoSearchTool } from '../utils/repoSearch'
 import { REPO_SEARCH_DEBOUNCE_MS } from './SearchPanel'
+import { useContextMenuStore } from '../store/contextMenu'
 
 const addTab = vi.fn()
 const workspace = createStore(() => ({
@@ -485,55 +496,165 @@ describe('StackedDiffList', () => {
       })
     }
 
+    const writeText = appState.clipboard.writeText
+
+    beforeEach(() => {
+      useContextMenuStore.setState({ activeMenuId: null })
+    })
+
     function selectText(text: string): void {
       vi.spyOn(document, 'getSelection').mockReturnValue({ toString: () => text } as Selection)
     }
 
-    it('double-clicking a word in the diff searches for it', async () => {
-      await renderLoaded()
-      selectText('needle')
+    // The text under the pointer, as the browser reports it from inside the viewer's shadow root.
+    function pointAt(text: string, offset: number): void {
+      Object.defineProperty(document, 'caretPositionFromPoint', {
+        configurable: true,
+        value: () => ({ offsetNode: document.createTextNode(text), offset }),
+      })
+    }
 
+    function rightClick(target: Element): boolean {
+      let allowed = true
+      act(() => { allowed = fireEvent.contextMenu(target) })
+      return allowed
+    }
+
+    async function searchFromMenu(label: string): Promise<void> {
       // eslint-disable-next-line @typescript-eslint/require-await -- act needs async to flush promise-based state updates
-      await act(async () => { fireEvent.doubleClick(screen.getByTestId('diff-src/a.ts')) })
+      await act(async () => { fireEvent.click(screen.getByText(label)) })
+    }
+
+    it('right-click > Search on a word searches for it, listing its own file first', async () => {
+      await renderLoaded()
+      selectText('')
+      pointAt('NEEDLE()', 3)
+
+      expect(rightClick(screen.getByTestId('diff-src/b.ts'))).toBe(false)
+      await searchFromMenu('Search “NEEDLE”')
+
+      expect(screen.queryByText('Copy')).toBeNull()
+      const input = screen.getByPlaceholderText<HTMLInputElement>('Search')
+      expect(input.value).toBe('NEEDLE')
+      const titles = screen.getAllByText(/^In (this file|diff)$/).map(el => el.textContent)
+      expect(titles).toEqual(['In this file', 'In diff'])
+      expect(screen.getByText('1 found')).toBeDefined()
+      expect(screen.getByText('No matches')).toBeDefined()
+    })
+
+    it('steps through the clicked file before the rest of the diff', async () => {
+      await renderLoaded()
+      selectText('')
+      pointAt('const needle = 1', 8)
+      rightClick(screen.getByTestId('diff-src/b.ts'))
+      await searchFromMenu('Search “needle”')
 
       const input = screen.getByPlaceholderText<HTMLInputElement>('Search')
-      expect(input.value).toBe('needle')
-      expect(screen.getByText('2 found')).toBeDefined()
-      expect(screen.getByText('const needle = 1')).toBeDefined()
+      fireEvent.keyDown(input, { key: 'Enter' })
+      expect(screen.getByTestId('diff-src/b.ts').dataset.selected).toBe('additions:2')
+      fireEvent.keyDown(input, { key: 'Enter' })
+      expect(screen.getByTestId('diff-src/a.ts').dataset.selected).toBe('additions:2')
+    })
+
+    it('right-click > Search uses a single-line selection over the word under the pointer', async () => {
+      await renderLoaded()
+      selectText(' needle = ')
+      pointAt('const needle = 1', 0)
+      rightClick(screen.getByTestId('diff-src/a.ts'))
+      await searchFromMenu('Search “needle =”')
+      expect(screen.getByPlaceholderText<HTMLInputElement>('Search').value).toBe('needle =')
+    })
+
+    it('right-click > Copy copies the selection, multi-line included', async () => {
+      await renderLoaded()
+      selectText('line one\nline two')
+      pointAt('const needle = 1', 8)
+      rightClick(screen.getByTestId('diff-src/a.ts'))
+
+      expect(screen.getByText('Search “needle”')).toBeDefined()
+      fireEvent.click(screen.getByText('Copy'))
+
+      expect(writeText).toHaveBeenCalledWith('line one\nline two')
+      expect(screen.queryByText('Copy')).toBeNull()
+      expect(screen.queryByPlaceholderText('Search')).toBeNull()
+    })
+
+    it('right-click > Copy without a selection copies the word under the pointer', async () => {
+      await renderLoaded()
+      selectText('')
+      pointAt('const needle = 1', 8)
+      rightClick(screen.getByTestId('diff-src/a.ts'))
+      fireEvent.click(screen.getByText('Copy'))
+      expect(writeText).toHaveBeenCalledWith('needle')
+    })
+
+    it('offers only Copy for a multi-line selection away from any word', async () => {
+      await renderLoaded()
+      selectText('line one\nline two')
+      pointAt('    ', 2)
+      rightClick(screen.getByTestId('diff-src/a.ts'))
+      expect(screen.getByText('Copy')).toBeDefined()
+      expect(screen.queryByText(/^Search/)).toBeNull()
     })
 
     it.each([
-      ['a multi-word selection', 'two words', 'diff-src/a.ts'],
-      ['an empty selection', '  ', 'diff-src/a.ts'],
-    ])('ignores a double-click that selected %s', async (_label, text, testId) => {
+      ['on whitespace', () => { pointAt('a   b', 2) }],
+      ['where the pointer is on no text', () => {
+        Object.defineProperty(document, 'caretPositionFromPoint', {
+          configurable: true,
+          value: () => ({ offsetNode: document.createElement('div'), offset: 0 }),
+        })
+      }],
+      ['where the browser finds no caret', () => {
+        Object.defineProperty(document, 'caretPositionFromPoint', { configurable: true, value: () => null })
+      }],
+    ])('keeps the default menu for a right-click %s with nothing selected', async (_label, point) => {
       await renderLoaded()
-      selectText(text)
-      fireEvent.doubleClick(screen.getByTestId(testId))
-      expect(screen.queryByPlaceholderText('Search')).toBeNull()
+      selectText('')
+      point()
+      expect(rightClick(screen.getByTestId('diff-src/a.ts'))).toBe(true)
+      expect(screen.queryByText('Copy')).toBeNull()
     })
 
-    it('ignores a double-click outside the diff viewer', async () => {
+    it('ignores a right-click outside the diff viewer', async () => {
       await renderLoaded()
       selectText('needle')
-      fireEvent.doubleClick(screen.getAllByText('M')[0]!)
-      expect(screen.queryByPlaceholderText('Search')).toBeNull()
+      expect(rightClick(screen.getAllByText('M')[0]!)).toBe(true)
+      expect(screen.queryByText('Copy')).toBeNull()
     })
 
-    it('ignores a double-click inside an input', async () => {
+    it('ignores a right-click inside an input', async () => {
       await renderLoaded()
       selectText('needle')
       const container = screen.getByTestId('diff-src/a.ts')
       const input = document.createElement('input')
       container.appendChild(input)
-      fireEvent.doubleClick(input)
-      expect(screen.queryByPlaceholderText('Search')).toBeNull()
+      expect(rightClick(input)).toBe(true)
+      expect(screen.queryByText('Copy')).toBeNull()
+    })
+
+    it('Cmd+F lists the topmost visible file first', async () => {
+      await renderLoaded()
+      markVisible()
+      // src/a.ts is scrolled above the list; src/b.ts reaches into it.
+      vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+        // eslint-disable-next-line custom/no-string-literal-comparison -- file paths are data, not an enum
+        const bottom = this instanceof HTMLElement && this.dataset.filePath === 'src/a.ts' ? -10 : 100
+        return { top: 0, bottom, height: 0 } as DOMRect
+      })
+      pressFind()
+      await typeQuery('needle')
+      expect(screen.getByText('NEEDLE()').closest('.search-panel-results')?.firstElementChild?.textContent).toBe('In this file')
+      fireEvent.keyDown(screen.getByPlaceholderText('Search'), { key: 'Enter' })
+      expect(screen.getByTestId('diff-src/b.ts').dataset.selected).toBe('additions:2')
     })
 
     it('clicking an in-diff result highlights that line', async () => {
       await renderLoaded()
       selectText('needle')
-      // eslint-disable-next-line @typescript-eslint/require-await -- act needs async to flush promise-based state updates
-      await act(async () => { fireEvent.doubleClick(screen.getByTestId('diff-src/a.ts')) })
+      pointAt('const needle = 1', 8)
+      rightClick(screen.getByTestId('diff-src/a.ts'))
+      await searchFromMenu('Search “needle”')
 
       fireEvent.click(screen.getByText('NEEDLE()'))
 
@@ -546,7 +667,9 @@ describe('StackedDiffList', () => {
       try {
         await renderLoaded()
         selectText('needle')
-        act(() => { fireEvent.doubleClick(screen.getByTestId('diff-src/a.ts')) })
+        pointAt('needle', 0)
+        rightClick(screen.getByTestId('diff-src/a.ts'))
+        act(() => { fireEvent.click(screen.getByText('Search “needle”')) })
         act(() => { vi.advanceTimersByTime(REPO_SEARCH_DEBOUNCE_MS) })
 
         act(() => {

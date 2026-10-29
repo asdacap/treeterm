@@ -142,3 +142,14 @@ export function findLinesInDiff(
     .filter((row) => matches(row.text))
     .map(({ side, lineNumber }) => ({ side, lineNumber }))
 }
+
+const WORD_CHAR = new RegExp('[\\p{L}\\p{N}_$]', 'u')
+
+// The word around `offset` in `text`, or '' when `offset` sits outside a word.
+export function wordAt(text: string, offset: number): string {
+  let start = offset
+  while (start > 0 && WORD_CHAR.test(text.charAt(start - 1))) start--
+  let end = offset
+  while (end < text.length && WORD_CHAR.test(text.charAt(end))) end++
+  return text.slice(start, end)
+}

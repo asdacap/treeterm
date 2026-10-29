@@ -17,6 +17,7 @@ const fakeEditor = vi.hoisted(() => ({
   onDidScrollChange: vi.fn(),
   onMouseDown: vi.fn(),
   addCommand: vi.fn(),
+  addAction: vi.fn(),
   getModel: vi.fn(),
   getSelection: vi.fn(),
   setSelection: vi.fn(),
@@ -216,24 +217,29 @@ describe('FileViewer', () => {
   describe('search', () => {
     const content = 'const needle = 1\nother line\nneedle(needle)'
 
-    type MouseDownHandler = (e: { event: { detail: number }; target: { type: number; position: { lineNumber: number; column: number } | null } }) => void
+    const cursor = { getPosition: () => ({ lineNumber: 1, column: 8 }) }
+    const getValueInRange = vi.fn()
+    const getWordAtPosition = vi.fn()
 
     async function renderLoaded(onOpenLocation = vi.fn()): Promise<void> {
       filesystem.readFile.mockResolvedValue({
         success: true,
         file: { path: '/repo/src/app.ts', content, size: content.length, language: 'plaintext' },
       })
-      fakeEditor.getModel.mockReturnValue({
-        getWordAtPosition: () => ({ word: 'needle' }),
-        getValueInRange: () => 'other',
-      })
+      getValueInRange.mockReturnValue('')
+      getWordAtPosition.mockReturnValue({ word: 'needle' })
+      fakeEditor.getModel.mockReturnValue({ getWordAtPosition, getValueInRange })
+      fakeEditor.getSelection.mockReturnValue(cursor)
       render(<FileViewer workspace={makeWorkspace()} filePath="/repo/src/app.ts" onOpenLocation={onOpenLocation} />)
       await screen.findByTestId('monaco-editor')
     }
 
-    function mouseDown(detail: number, type = 6, position: { lineNumber: number; column: number } | null = { lineNumber: 1, column: 8 }): void {
-      const handlers = fakeEditor.onMouseDown.mock.calls.map(c => c[0] as MouseDownHandler)
-      act(() => { for (const h of handlers) h({ event: { detail }, target: { type, position } }) })
+    // Right-click > Search
+    function searchFromMenu(): void {
+      const action = fakeEditor.addAction.mock.calls.at(-1)?.[0] as { label: string; contextMenuGroupId: string; run: () => void }
+      expect(action.label).toBe('Search')
+      expect(action.contextMenuGroupId).toBe('9_cutcopypaste')
+      act(() => { action.run() })
     }
 
     function pressCmdF(): void {
@@ -241,38 +247,50 @@ describe('FileViewer', () => {
       act(() => { command() })
     }
 
-    it('double-clicking a word opens the panel with every occurrence in the file', async () => {
+    it('right-click > Search on a word opens the panel with every occurrence in the file', async () => {
       await renderLoaded()
       expect(screen.queryByPlaceholderText('Search')).toBeNull()
 
-      mouseDown(2)
+      searchFromMenu()
 
+      expect(getWordAtPosition).toHaveBeenCalledWith({ lineNumber: 1, column: 8 })
       expect(screen.getByPlaceholderText<HTMLInputElement>('Search').value).toBe('needle')
       expect(screen.getByText('In this file')).toBeTruthy()
       expect(screen.getByText('3 found')).toBeTruthy()
       expect(screen.getAllByText('needle(needle)')).toHaveLength(2)
     })
 
-    it.each([
-      ['a single click', 1, 6, { lineNumber: 1, column: 8 }],
-      ['a double-click outside the text', 2, 3, { lineNumber: 1, column: 8 }],
-      ['a double-click without a position', 2, 6, null],
-    ])('ignores %s', async (_label, detail, type, position) => {
+    it('right-click > Search uses a single-line selection over the word', async () => {
       await renderLoaded()
-      mouseDown(detail, type, position)
+      getValueInRange.mockReturnValue('other line')
+      searchFromMenu()
+      expect(screen.getByPlaceholderText<HTMLInputElement>('Search').value).toBe('other line')
+    })
+
+    it('right-click > Search falls back to the word for a multi-line selection', async () => {
+      await renderLoaded()
+      getValueInRange.mockReturnValue('a\nb')
+      searchFromMenu()
+      expect(screen.getByPlaceholderText<HTMLInputElement>('Search').value).toBe('needle')
+    })
+
+    it('right-click > Search on whitespace does nothing', async () => {
+      await renderLoaded()
+      getWordAtPosition.mockReturnValue(null)
+      searchFromMenu()
       expect(screen.queryByPlaceholderText('Search')).toBeNull()
     })
 
-    it('ignores a double-click on whitespace', async () => {
+    it('right-click > Search without a model does nothing', async () => {
       await renderLoaded()
-      fakeEditor.getModel.mockReturnValue({ getWordAtPosition: () => null })
-      mouseDown(2)
+      fakeEditor.getModel.mockReturnValue(null)
+      searchFromMenu()
       expect(screen.queryByPlaceholderText('Search')).toBeNull()
     })
 
     it('Cmd+F opens the panel seeded with the selection', async () => {
       await renderLoaded()
-      fakeEditor.getSelection.mockReturnValue({ startLineNumber: 2 })
+      getValueInRange.mockReturnValue('other')
       pressCmdF()
       expect(screen.getByPlaceholderText<HTMLInputElement>('Search').value).toBe('other')
     })
@@ -290,7 +308,7 @@ describe('FileViewer', () => {
 
     it('clicking or stepping to an occurrence reveals and selects it', async () => {
       await renderLoaded()
-      mouseDown(2)
+      searchFromMenu()
 
       fireEvent.click(screen.getByText('const needle = 1'))
       expect(fakeEditor.revealLineInCenter).toHaveBeenLastCalledWith(1)
@@ -307,14 +325,14 @@ describe('FileViewer', () => {
 
     it('stepping backwards with nothing selected goes to the last occurrence', async () => {
       await renderLoaded()
-      mouseDown(2)
+      searchFromMenu()
       fireEvent.keyDown(screen.getByPlaceholderText('Search'), { key: 'Enter', shiftKey: true })
       expect(screen.getByText('3/3')).toBeTruthy()
     })
 
     it('stepping does nothing when there are no occurrences', async () => {
       await renderLoaded()
-      mouseDown(2)
+      searchFromMenu()
       const input = screen.getByPlaceholderText<HTMLInputElement>('Search')
       fireEvent.change(input, { target: { value: 'absent' } })
       fireEvent.keyDown(input, { key: 'Enter' })
@@ -327,7 +345,7 @@ describe('FileViewer', () => {
       try {
         const onOpenLocation = vi.fn()
         await renderLoaded(onOpenLocation)
-        mouseDown(2)
+        searchFromMenu()
         act(() => { vi.advanceTimersByTime(REPO_SEARCH_DEBOUNCE_MS) })
         act(() => {
           repoSearch.onEvent?.({
@@ -353,7 +371,7 @@ describe('FileViewer', () => {
       vi.useFakeTimers({ shouldAdvanceTime: true })
       try {
         await renderLoaded()
-        mouseDown(2)
+        searchFromMenu()
         act(() => { vi.advanceTimersByTime(REPO_SEARCH_DEBOUNCE_MS) })
         expect(repoSearch.onEvent).not.toBeNull()
 

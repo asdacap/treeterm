@@ -38,8 +38,7 @@ function renderPanel(props: Partial<React.ComponentProps<typeof SearchPanel>> = 
       onQueryChange={vi.fn()}
       focusNonce={1}
       onClose={vi.fn()}
-      inViewTitle="In this file"
-      inViewHits={[]}
+      inViewSections={[{ title: 'In this file', hits: [] }]}
       activeIndex={null}
       inViewPending={false}
       onSelectInView={vi.fn()}
@@ -79,11 +78,14 @@ describe('SearchPanel', () => {
   it('groups in-view hits by file and marks the active one', () => {
     const onSelectInView = vi.fn()
     renderPanel({
-      inViewHits: [
-        { filePath: 'a.ts', label: '1', preview: 'first' },
-        { filePath: 'a.ts', label: '−4', preview: 'second' },
-        { filePath: 'b.ts', label: '2', preview: 'third' },
-      ],
+      inViewSections: [{
+        title: 'In this file',
+        hits: [
+          { filePath: 'a.ts', label: '1', preview: 'first' },
+          { filePath: 'a.ts', label: '−4', preview: 'second' },
+          { filePath: 'b.ts', label: '2', preview: 'third' },
+        ],
+      }],
       activeIndex: 1,
       onSelectInView,
     })
@@ -94,13 +96,42 @@ describe('SearchPanel', () => {
     expect(onSelectInView).toHaveBeenCalledWith(2)
   })
 
+  it('lists sections in order, numbering hits across them', () => {
+    const onSelectInView = vi.fn()
+    renderPanel({
+      inViewSections: [
+        { title: 'In this file', hits: [{ filePath: 'a.ts', label: '1', preview: 'here' }] },
+        { title: 'In diff', hits: [{ filePath: 'b.ts', label: '2', preview: 'there' }] },
+      ],
+      activeIndex: 1,
+      onSelectInView,
+    })
+    const titles = screen.getAllByText(/^In (this file|diff|repo)$/).map(el => el.textContent)
+    expect(titles).toEqual(['In this file', 'In diff', 'In repo'])
+    expect(screen.getByText('2/2')).toBeTruthy()
+    expect(screen.getByText('there').closest('button')?.className).toContain('active')
+    expect(screen.getByText('here').closest('button')?.className).not.toContain('active')
+    fireEvent.click(screen.getByText('there'))
+    expect(onSelectInView).toHaveBeenCalledWith(1)
+  })
+
+  it('says when one section has no matches', () => {
+    renderPanel({
+      inViewSections: [
+        { title: 'In this file', hits: [] },
+        { title: 'In diff', hits: [{ filePath: 'b.ts', label: '2', preview: 'there' }] },
+      ],
+    })
+    expect(screen.getAllByText('No matches')).toHaveLength(1)
+  })
+
   it('shows a pending count while in-view content is still loading', () => {
     const { rerender } = renderPanel({ inViewPending: true })
     expect(screen.getByText('Searching…')).toBeTruthy()
     rerender(
       <SearchPanel
         workspace={workspace} query="needle" onQueryChange={vi.fn()} focusNonce={1} onClose={vi.fn()}
-        inViewTitle="In diff" inViewHits={[{ filePath: 'a.ts', label: '1', preview: 'x' }]} activeIndex={null}
+        inViewSections={[{ title: 'In diff', hits: [{ filePath: 'a.ts', label: '1', preview: 'x' }] }]} activeIndex={null}
         inViewPending onSelectInView={vi.fn()} onNext={vi.fn()} onPrev={vi.fn()} excludeFilePaths={[]} onSelectRepo={vi.fn()}
       />
     )
@@ -112,7 +143,7 @@ describe('SearchPanel', () => {
     const onPrev = vi.fn()
     const onClose = vi.fn()
     const onQueryChange = vi.fn()
-    renderPanel({ onNext, onPrev, onClose, onQueryChange, inViewHits: [{ filePath: 'a.ts', label: '1', preview: 'x' }] })
+    renderPanel({ onNext, onPrev, onClose, onQueryChange, inViewSections: [{ title: 'In this file', hits: [{ filePath: 'a.ts', label: '1', preview: 'x' }] }] })
     const input = screen.getByPlaceholderText('Search')
     fireEvent.change(input, { target: { value: 'other' } })
     expect(onQueryChange).toHaveBeenCalledWith('other')
@@ -180,7 +211,7 @@ describe('SearchPanel', () => {
     rerender(
       <SearchPanel
         workspace={workspace} query="other" onQueryChange={vi.fn()} focusNonce={1} onClose={vi.fn()}
-        inViewTitle="In this file" inViewHits={[]} activeIndex={null} inViewPending={false}
+        inViewSections={[{ title: 'In this file', hits: [] }]} activeIndex={null} inViewPending={false}
         onSelectInView={vi.fn()} onNext={vi.fn()} onPrev={vi.fn()} excludeFilePaths={[]} onSelectRepo={vi.fn()}
       />
     )

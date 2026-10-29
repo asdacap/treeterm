@@ -30,6 +30,12 @@ export interface InViewHit {
   preview: string
 }
 
+// A titled run of in-view hits. Hit indices count across all sections, in order.
+export interface InViewSection {
+  title: string
+  hits: InViewHit[]
+}
+
 interface SearchPanelProps {
   workspace: WorkspaceStore
   query: string
@@ -37,9 +43,8 @@ interface SearchPanelProps {
   // Bumped whenever the panel is (re)opened so the input refocuses.
   focusNonce: number
   onClose: () => void
-  // Matches in what is on screen (the diff, or the open file), in navigation order.
-  inViewTitle: string
-  inViewHits: InViewHit[]
+  // Matches in what is on screen (the open file, then the rest of the diff), in navigation order.
+  inViewSections: InViewSection[]
   activeIndex: number | null
   // Some of the in-view content is still loading, so the hits may grow.
   inViewPending: boolean
@@ -75,8 +80,7 @@ export function SearchPanel({
   onQueryChange,
   focusNonce,
   onClose,
-  inViewTitle,
-  inViewHits,
+  inViewSections,
   activeIndex,
   inViewPending,
   onSelectInView,
@@ -92,7 +96,7 @@ export function SearchPanel({
     inputRef.current?.select()
   }, [focusNonce])
 
-  const total = inViewHits.length
+  const total = inViewSections.reduce((sum, section) => sum + section.hits.length, 0)
 
   return (
     <div className="search-panel">
@@ -132,23 +136,30 @@ export function SearchPanel({
       </div>
       {query && (
         <div className="search-panel-results">
-          <div className="search-panel-section-title">{inViewTitle}</div>
-          {total === 0 && !inViewPending && <div className="search-panel-note">No matches</div>}
-          {groupByFile(inViewHits).map(group => (
-            <div key={group.filePath} className="search-panel-group">
-              <div className="search-panel-file">{group.filePath}</div>
-              {group.items.map(({ hit, index }) => (
-                <button
-                  key={index}
-                  className={`search-panel-hit ${index === activeIndex ? 'active' : ''}`}
-                  onClick={() => { onSelectInView(index) }}
-                >
-                  <span className="search-panel-hit-label">{hit.label}</span>
-                  <span className="search-panel-hit-preview">{hit.preview}</span>
-                </button>
-              ))}
-            </div>
-          ))}
+          {inViewSections.map((section, sectionIndex) => {
+            const offset = inViewSections.slice(0, sectionIndex).reduce((sum, prev) => sum + prev.hits.length, 0)
+            return (
+              <React.Fragment key={section.title}>
+                <div className="search-panel-section-title">{section.title}</div>
+                {section.hits.length === 0 && !inViewPending && <div className="search-panel-note">No matches</div>}
+                {groupByFile(section.hits).map(group => (
+                  <div key={group.filePath} className="search-panel-group">
+                    <div className="search-panel-file">{group.filePath}</div>
+                    {group.items.map(({ hit, index }) => (
+                      <button
+                        key={index}
+                        className={`search-panel-hit ${offset + index === activeIndex ? 'active' : ''}`}
+                        onClick={() => { onSelectInView(offset + index) }}
+                      >
+                        <span className="search-panel-hit-label">{hit.label}</span>
+                        <span className="search-panel-hit-preview">{hit.preview}</span>
+                      </button>
+                    ))}
+                  </div>
+                ))}
+              </React.Fragment>
+            )
+          })}
           <RepoResults
             key={query}
             workspace={workspace}

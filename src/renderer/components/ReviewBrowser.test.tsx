@@ -74,6 +74,13 @@ vi.mock('../store/contextMenu', async () => {
   }
 })
 
+// StackedDiffList's right-click Copy reads the clipboard from the app store (→ monaco).
+vi.mock('../store/app', () => {
+  const state = { clipboard: { writeText: vi.fn(), readText: vi.fn() } }
+  const useAppStore = <T,>(selector: (s: typeof state) => T): T => selector(state)
+  return { useAppStore }
+})
+
 import ReviewBrowser, { CommitsLoadMoreSentinel, BaseBranchSelector } from './ReviewBrowser'
 
 function fireIntersection(index: number, isIntersecting: boolean) {
