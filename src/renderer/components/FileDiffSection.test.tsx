@@ -289,6 +289,33 @@ describe('FileDiffSection', () => {
     expect(screen.getByTestId('multi-file-diff')).toBeDefined()
   })
 
+  it('follows collapse-all and expand-all commands', () => {
+    const { rerender } = render(
+      <FileDiffSection {...defaultProps} contents={makeContents()} collapseAll={{ collapsed: false, nonce: 0 }} />
+    )
+    expect(screen.getByTestId('multi-file-diff')).toBeDefined()
+
+    rerender(<FileDiffSection {...defaultProps} contents={makeContents()} collapseAll={{ collapsed: true, nonce: 1 }} />)
+    expect(screen.queryByTestId('multi-file-diff')).toBeNull()
+
+    rerender(<FileDiffSection {...defaultProps} contents={makeContents()} collapseAll={{ collapsed: false, nonce: 2 }} />)
+    expect(screen.getByTestId('multi-file-diff')).toBeDefined()
+  })
+
+  it('applies an earlier collapse-all when mounted after it', () => {
+    render(<FileDiffSection {...defaultProps} contents={makeContents()} collapseAll={{ collapsed: true, nonce: 3 }} />)
+    expect(screen.queryByTestId('multi-file-diff')).toBeNull()
+  })
+
+  it('does not re-apply the same collapse-all after a manual toggle', () => {
+    const { rerender } = render(
+      <FileDiffSection {...defaultProps} contents={makeContents()} collapseAll={{ collapsed: true, nonce: 1 }} />
+    )
+    fireEvent.click(screen.getByText('src/app.ts'))
+    rerender(<FileDiffSection {...defaultProps} contents={makeContents()} collapseAll={{ collapsed: true, nonce: 1 }} />)
+    expect(screen.getByTestId('multi-file-diff')).toBeDefined()
+  })
+
   it('auto-collapses when isViewed transitions from false to true', () => {
     const { rerender } = render(
       <FileDiffSection

@@ -7,6 +7,7 @@ export function createMockReviewViewedFilesStore(): ReviewViewedFilesStore {
     getViewedFiles: () => ({}),
     toggleViewedFile: () => {},
     markFilesViewed: () => {},
+    unmarkFilesViewed: () => {},
     reconcileViewedFiles: () => {},
   }))
 }

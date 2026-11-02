@@ -114,6 +114,16 @@ export function filterFilesByDir<T extends DiffFile | UncommittedFile>(
   return files.filter((f) => f.path === dir || f.path.startsWith(dir + '/'))
 }
 
+// Case-insensitive substring match on the file path. An empty query keeps every file.
+export function filterFilesBySearch<T extends DiffFile | UncommittedFile>(
+  files: T[],
+  query: string
+): T[] {
+  const needle = query.trim().toLowerCase()
+  if (!needle) return files
+  return files.filter((f) => f.path.toLowerCase().includes(needle))
+}
+
 // Sum additions and deletions for every file under a node's subtree.
 function getNodeStats(node: TreeNode): { additions: number; deletions: number } {
   if (node.file !== null) {

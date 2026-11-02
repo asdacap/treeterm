@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo, useId } from 'react'
 import type { DiffFile, UncommittedFile, FileDiffContents, ReviewComment, WorkspaceStore } from '../types'
 import { DiffContentKind, FileChangeStatus } from '../types'
-import { FileDiffSection } from './FileDiffSection'
+import { FileDiffSection, type CollapseAllCommand } from './FileDiffSection'
 import { SearchPanel, openInFileBrowser, type InViewHit } from './SearchPanel'
 import ContextMenu from './ContextMenu'
 import { useContextMenuStore } from '../store/contextMenu'
@@ -118,6 +118,9 @@ interface StackedDiffListProps {
   isFileViewed?: (filePath: string) => boolean
   onToggleViewed?: (file: DiffFile | UncommittedFile) => void
   onMarkViewedAbove?: (files: (DiffFile | UncommittedFile)[]) => void
+  // Mark (true) or unmark (false) every listed file as viewed. Enables the
+  // check-all box in the list header.
+  onSetFilesViewed?: (files: (DiffFile | UncommittedFile)[], viewed: boolean) => void
 }
 
 export function StackedDiffList({
@@ -141,8 +144,10 @@ export function StackedDiffList({
   isFileViewed,
   onToggleViewed,
   onMarkViewedAbove,
+  onSetFilesViewed,
 }: StackedDiffListProps): React.JSX.Element {
   const [loadStates, setLoadStates] = useState<Map<string, FileLoadState>>(new Map())
+  const [collapseAll, setCollapseAll] = useState<CollapseAllCommand>({ collapsed: false, nonce: 0 })
   const sectionRefsRef = useRef<Map<string, HTMLElement>>(new Map())
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const wrapperRef = useRef<HTMLDivElement>(null)
@@ -412,8 +417,31 @@ export function StackedDiffList({
     }
   }
 
+  const viewedCount = isFileViewed ? files.filter(f => isFileViewed(f.path)).length : 0
+  const allViewed = files.length > 0 && viewedCount === files.length
+
   return (
     <div className="stacked-diff-list-wrapper" ref={wrapperRef}>
+      <div className="stacked-diff-list-header">
+        {onSetFilesViewed && (
+          <label className="stacked-diff-list-check-all" title="Mark every listed file as viewed">
+            <input
+              type="checkbox"
+              checked={allViewed}
+              disabled={files.length === 0}
+              onChange={() => { onSetFilesViewed(files, !allViewed) }}
+            />
+            {viewedCount}/{files.length} viewed
+          </label>
+        )}
+        <button
+          className="stacked-diff-list-collapse-all"
+          disabled={files.length === 0}
+          onClick={() => { setCollapseAll(prev => ({ collapsed: !prev.collapsed, nonce: prev.nonce + 1 })) }}
+        >
+          {collapseAll.collapsed ? 'Expand all' : 'Collapse all'}
+        </button>
+      </div>
       <div
         className="stacked-diff-list"
         ref={scrollContainerRef}
@@ -458,6 +486,7 @@ export function StackedDiffList({
                 onMarkViewedAbove={onMarkViewedAbove ? () => { onMarkViewedAbove(files.slice(0, index)) } : undefined}
                 isFirstFile={index === 0}
                 searchHit={activeMatch?.filePath === file.path ? activeMatch : null}
+                collapseAll={collapseAll}
               />
             </div>
           )

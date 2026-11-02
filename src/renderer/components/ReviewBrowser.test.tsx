@@ -464,6 +464,7 @@ function makeReviewWorkspace(
     getViewedFiles: () => ({}),
     toggleViewedFile: vi.fn(),
     markFilesViewed: vi.fn(),
+    unmarkFilesViewed: vi.fn(),
     reconcileViewedFiles: vi.fn(),
   }))
   const gitController = createStore<GitControllerState>()(() => ({ refreshGit: vi.fn() } as unknown as GitControllerState))
@@ -596,6 +597,33 @@ describe('ReviewBrowser favourites', () => {
     const list = container.querySelector('.stacked-diff-list') as HTMLElement
     expect(list.scrollTop).toBe(TARGET_OFFSET)
     expect(screen.queryByTestId('file-viewer')).toBeNull()
+  })
+})
+
+describe('ReviewBrowser file filter', () => {
+  it('filters both the file tree and the diff list, and clears', async () => {
+    const files: UncommittedFile[] = [
+      { path: 'src/app.ts', status: FileChangeStatus.Modified, kind: FileStatKind.Text, additions: 1, deletions: 0, staged: false },
+      { path: 'docs/readme.md', status: FileChangeStatus.Modified, kind: FileStatKind.Text, additions: 1, deletions: 0, staged: false },
+    ]
+    const workspace = makeReviewWorkspace([], 'uncommitted', files, {
+      getUncommittedChanges: vi.fn().mockResolvedValue({
+        success: true,
+        changes: { files, totalAdditions: 2, totalDeletions: 0 },
+      }),
+    })
+    const { container } = render(<ReviewBrowser workspace={workspace} tabId="review" isVisible={false} />)
+    await waitFor(() => { expect(container.querySelectorAll('.file-diff-section')).toHaveLength(2) })
+
+    fireEvent.change(screen.getByPlaceholderText('Filter files...'), { target: { value: 'APP' } })
+    expect(container.querySelector('.diff-file-item[title="src/app.ts"]')).not.toBeNull()
+    expect(container.querySelector('.diff-file-item[title="docs/readme.md"]')).toBeNull()
+    expect(Array.from(container.querySelectorAll('.file-diff-section')).map(e => (e as HTMLElement).dataset.filePath))
+      .toEqual(['src/app.ts'])
+    expect(screen.getByText('0/1 viewed')).toBeDefined()
+
+    fireEvent.click(screen.getByTitle('Clear filter'))
+    expect(container.querySelectorAll('.file-diff-section')).toHaveLength(2)
   })
 })
 

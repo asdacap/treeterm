@@ -341,6 +341,66 @@ describe('StackedDiffList', () => {
     expect(onMarkViewedAbove).not.toHaveBeenCalled()
   })
 
+  describe('list header', () => {
+    it('hides the check-all box without onSetFilesViewed', () => {
+      render(<StackedDiffList {...defaultProps} />)
+      expect(screen.queryByText(/viewed$/)).toBeNull()
+    })
+
+    it('marks every listed file viewed when not all are viewed', () => {
+      const onSetFilesViewed = vi.fn()
+      render(
+        <StackedDiffList
+          {...defaultProps}
+          isFileViewed={(p) => [defaultProps.files[0]!.path].includes(p)}
+          onToggleViewed={vi.fn()}
+          onSetFilesViewed={onSetFilesViewed}
+        />
+      )
+      expect(screen.getByText('1/2 viewed')).toBeDefined()
+      const checkbox = screen.getByTitle('Mark every listed file as viewed').querySelector('input')!
+      expect(checkbox.checked).toBe(false)
+      fireEvent.click(checkbox)
+      expect(onSetFilesViewed).toHaveBeenCalledWith(defaultProps.files, true)
+    })
+
+    it('unmarks every listed file when all are viewed', () => {
+      const onSetFilesViewed = vi.fn()
+      render(
+        <StackedDiffList
+          {...defaultProps}
+          isFileViewed={() => true}
+          onToggleViewed={vi.fn()}
+          onSetFilesViewed={onSetFilesViewed}
+        />
+      )
+      const checkbox = screen.getByTitle('Mark every listed file as viewed').querySelector('input')!
+      expect(checkbox.checked).toBe(true)
+      fireEvent.click(checkbox)
+      expect(onSetFilesViewed).toHaveBeenCalledWith(defaultProps.files, false)
+    })
+
+    it('counts zero viewed when isFileViewed is not given', () => {
+      render(<StackedDiffList {...defaultProps} onSetFilesViewed={vi.fn()} />)
+      expect(screen.getByText('0/2 viewed')).toBeDefined()
+    })
+
+    it('disables both controls for an empty list', () => {
+      render(<StackedDiffList {...defaultProps} files={[]} onSetFilesViewed={vi.fn()} />)
+      expect(screen.getByTitle('Mark every listed file as viewed').querySelector('input')!.disabled).toBe(true)
+      expect(screen.getByRole('button', { name: 'Collapse all' }).hasAttribute('disabled')).toBe(true)
+    })
+
+    it('toggles between collapse all and expand all', () => {
+      const { container } = render(<StackedDiffList {...defaultProps} />)
+      expect(container.querySelectorAll('.file-diff-header.collapsed')).toHaveLength(0)
+      fireEvent.click(screen.getByText('Collapse all'))
+      expect(container.querySelectorAll('.file-diff-header.collapsed')).toHaveLength(2)
+      fireEvent.click(screen.getByText('Expand all'))
+      expect(container.querySelectorAll('.file-diff-header.collapsed')).toHaveLength(0)
+    })
+  })
+
   describe('find in diff', () => {
     function contentsWith(modified: string): FileDiffContents {
       return { kind: DiffContentKind.Text, originalContent: 'shared\n', modifiedContent: `shared\n${modified}\n`, language: 'typescript' }

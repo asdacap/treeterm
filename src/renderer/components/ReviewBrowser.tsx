@@ -8,7 +8,7 @@ import { getTabs } from '../types'
 import type { DiffFile, DiffResult, UncommittedFile, UncommittedChanges, ConflictInfo, FileDiffContents, GitLogCommit, WorkspaceStore, WorkspaceGitApi, ReviewState } from '../types'
 import { FileChangeStatus } from '../types'
 import { useFilesystemApi, useGitApi } from '../hooks/useWorkspaceApis'
-import { CommittedDiffFileTree, UncommittedDiffFileTree, sortFilesAsTree, filterFilesByDir } from './DiffFileTree'
+import { CommittedDiffFileTree, UncommittedDiffFileTree, sortFilesAsTree, filterFilesByDir, filterFilesBySearch } from './DiffFileTree'
 import { StackedDiffList } from './StackedDiffList'
 import { DiffToolbar } from './DiffToolbar'
 import { createDiffsWorker } from '../pierre-diffs-config'
@@ -91,6 +91,7 @@ export default function ReviewBrowser({
   const getViewedFiles = useStore(reviewViewedFilesStore, s => s.getViewedFiles)
   const toggleViewedFile = useStore(reviewViewedFilesStore, s => s.toggleViewedFile)
   const markFilesViewed = useStore(reviewViewedFilesStore, s => s.markFilesViewed)
+  const unmarkFilesViewed = useStore(reviewViewedFilesStore, s => s.unmarkFilesViewed)
   const reconcileViewedFiles = useStore(reviewViewedFilesStore, s => s.reconcileViewedFiles)
   const refreshGit = useStore(gitController, s => s.refreshGit)
   const git = useGitApi(workspace)
@@ -129,6 +130,7 @@ export default function ReviewBrowser({
 
   // Directory filter — narrows both panes to a folder; transient (in-memory only)
   const [dirFilter, setDirFilter] = useState<string | null>(null)
+  const [fileSearch, setFileSearch] = useState('')
 
   // Uncommitted changes state
   const [uncommitted, setUncommitted] = useState<UncommittedChanges | null>(null)
@@ -708,10 +710,15 @@ export default function ReviewBrowser({
     }
   }
 
+  // Apply both the directory filter (from the tree context menu) and the
+  // search box. Both the left tree and the right diff list use this.
+  const filterVisibleFiles = <T extends DiffFile | UncommittedFile>(files: T[]): T[] =>
+    filterFilesBySearch(filterFilesByDir(files, dirFilter), fileSearch)
+
   const stagedFiles = uncommitted?.files.filter((f) => f.staged) || []
   const unstagedFiles = uncommitted?.files.filter((f) => !f.staged) || []
-  const filteredStagedFiles = filterFilesByDir(stagedFiles, dirFilter)
-  const filteredUnstagedFiles = filterFilesByDir(unstagedFiles, dirFilter)
+  const filteredStagedFiles = filterVisibleFiles(stagedFiles)
+  const filteredUnstagedFiles = filterVisibleFiles(unstagedFiles)
   const hasUncommitted = uncommitted && uncommitted.files.length > 0
   const hasCommittedChanges = diff && diff.files.length > 0
   const hasConflicts = conflictInfo?.hasConflicts || false
@@ -781,6 +788,14 @@ export default function ReviewBrowser({
 
   const isFileViewed = (filePath: string): boolean => filePath in viewedFiles
 
+  const handleSetFilesViewed = (filesToSet: (DiffFile | UncommittedFile)[], viewed: boolean) => {
+    if (viewed) {
+      markFilesViewed(filesToSet)
+      return
+    }
+    unmarkFilesViewed(filesToSet.map(f => f.path))
+  }
+
   const handleCommentSubmit = (text: string) => {
     if (!commentInput || !currentCommitHash) return
     const filePath = commentInput.filePath
@@ -830,6 +845,23 @@ export default function ReviewBrowser({
       </div>
     )
   }
+
+  const fileSearchBox = (
+    <div className="file-tree-search">
+      <input
+        type="text"
+        className="file-tree-search-input"
+        placeholder="Filter files..."
+        value={fileSearch}
+        onChange={(e) => { setFileSearch(e.target.value) }}
+      />
+      {fileSearch && (
+        <button className="file-tree-search-clear" onClick={() => { setFileSearch('') }} title="Clear filter">
+          {'\u2715'}
+        </button>
+      )}
+    </div>
+  )
 
   const favouritesSection = (
     <FavouriteFileSection
@@ -1149,12 +1181,13 @@ export default function ReviewBrowser({
                     onMouseLeave={handleResizeMouseUp}
                   >
                     <div className="diff-file-list" style={{ width: fileListWidth }}>
-                      {favouritesSection}
+                      {fileSearchBox}
+                  {favouritesSection}
                       {commitDiffLoading ? (
                         <div className="diff-loading">Loading...</div>
                       ) : (
                         <CommittedDiffFileTree
-                          files={filterFilesByDir(commitDiffFiles, dirFilter)}
+                          files={filterVisibleFiles(commitDiffFiles)}
                           selectedFile={activeFile}
                           onSelectFile={handleSelectDiffFile}
                           getStatusIcon={getStatusIcon}
@@ -1174,7 +1207,7 @@ export default function ReviewBrowser({
                       >
                         <StackedDiffList
                           workspace={workspace}
-                          files={sortFilesAsTree(filterFilesByDir(commitDiffFiles, dirFilter))}
+                          files={sortFilesAsTree(filterVisibleFiles(commitDiffFiles))}
                           loadFileContents={loadCommitFileContents}
                           diffStyle={isSplitView ? 'split' : 'unified'}
                           expandUnchanged={!hideUnchangedRegions}
@@ -1189,6 +1222,7 @@ export default function ReviewBrowser({
                           isFileViewed={isFileViewed}
                           onToggleViewed={handleToggleViewed}
                           onMarkViewedAbove={handleMarkViewedAbove}
+                          onSetFilesViewed={handleSetFilesViewed}
                         />
                       </WorkerPoolContextProvider>
                     )}
@@ -1222,8 +1256,8 @@ export default function ReviewBrowser({
                     totalFiles={diff.files.length}
                     dirFilter={dirFilter}
                     onClearDirFilter={() => { setDirFilter(null) }}
-                    onPrevUnviewed={() => { navigateUnviewed(sortFilesAsTree(filterFilesByDir(diff.files, dirFilter)), 'prev') }}
-                    onNextUnviewed={() => { navigateUnviewed(sortFilesAsTree(filterFilesByDir(diff.files, dirFilter)), 'next') }}
+                    onPrevUnviewed={() => { navigateUnviewed(sortFilesAsTree(filterVisibleFiles(diff.files)), 'prev') }}
+                    onNextUnviewed={() => { navigateUnviewed(sortFilesAsTree(filterVisibleFiles(diff.files)), 'next') }}
                     hasUnviewed={committedViewedCount < diff.files.length}
                   />
                 </>
@@ -1236,10 +1270,11 @@ export default function ReviewBrowser({
                 onMouseLeave={handleResizeMouseUp}
               >
                 <div className="diff-file-list" style={{ width: fileListWidth }}>
+                  {fileSearchBox}
                   {favouritesSection}
                   {hasCommittedChanges && (
                     <CommittedDiffFileTree
-                      files={filterFilesByDir(diff.files, dirFilter)}
+                      files={filterVisibleFiles(diff.files)}
                       selectedFile={activeFile}
                       onSelectFile={(path) => { handleSelectDiffFile(path); persistViewState({ selectedFilePath: path }) }}
                       getStatusIcon={getStatusIcon}
@@ -1261,7 +1296,7 @@ export default function ReviewBrowser({
                   >
                     <StackedDiffList
                       workspace={workspace}
-                      files={sortFilesAsTree(filterFilesByDir(diff.files, dirFilter))}
+                      files={sortFilesAsTree(filterVisibleFiles(diff.files))}
                       loadFileContents={loadCommittedFileContents}
                       diffStyle={isSplitView ? 'split' : 'unified'}
                       expandUnchanged={!hideUnchangedRegions}
@@ -1279,6 +1314,7 @@ export default function ReviewBrowser({
                       isFileViewed={isFileViewed}
                       onToggleViewed={handleToggleViewed}
                       onMarkViewedAbove={handleMarkViewedAbove}
+                      onSetFilesViewed={handleSetFilesViewed}
                     />
                   </WorkerPoolContextProvider>
                 ) : (
@@ -1333,6 +1369,7 @@ export default function ReviewBrowser({
                 onMouseLeave={handleResizeMouseUp}
               >
                 <div className="diff-file-list" style={{ width: fileListWidth }}>
+                  {fileSearchBox}
                   {favouritesSection}
                   {filteredStagedFiles.length > 0 && (
                     <>
@@ -1397,6 +1434,7 @@ export default function ReviewBrowser({
                       isFileViewed={isFileViewed}
                       onToggleViewed={handleToggleViewed}
                       onMarkViewedAbove={handleMarkViewedAbove}
+                      onSetFilesViewed={handleSetFilesViewed}
                     />
                   </WorkerPoolContextProvider>
                 ) : (

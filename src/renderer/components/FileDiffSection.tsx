@@ -48,6 +48,13 @@ interface StagingAction {
   disabled: boolean
 }
 
+// Collapse or expand every section. The nonce makes each click a new command,
+// so sections toggled by hand afterwards are not forced back.
+export interface CollapseAllCommand {
+  collapsed: boolean
+  nonce: number
+}
+
 interface FileDiffSectionProps {
   file: DiffFile | UncommittedFile
   contents: FileDiffContents | null
@@ -73,6 +80,8 @@ interface FileDiffSectionProps {
   // Current find match in this file. A new nonce means "navigated here again":
   // the section expands and mounts its viewer so the line can be scrolled to.
   searchHit?: (DiffSearchHit & { nonce: number }) | null
+  // Latest "collapse/expand all" from the list header. Nonce 0 means none yet.
+  collapseAll?: CollapseAllCommand
 }
 
 export function FileDiffSection({
@@ -98,6 +107,7 @@ export function FileDiffSection({
   onMarkViewedAbove,
   isFirstFile,
   searchHit,
+  collapseAll,
 }: FileDiffSectionProps): React.JSX.Element {
   const [collapsed, setCollapsed] = useState(isViewed ?? false)
   const [forceRender, setForceRender] = useState(false)
@@ -125,6 +135,15 @@ export function FileDiffSection({
     if (isViewed) {
       setCollapsed(true)
     }
+  }
+
+  // Starts at 0 so a section mounted after a collapse-all (e.g. the filter
+  // changed) still follows it.
+  const [prevCollapseNonce, setPrevCollapseNonce] = useState(0)
+  if (collapseAll && collapseAll.nonce !== prevCollapseNonce) {
+    setPrevCollapseNonce(collapseAll.nonce)
+    setCollapsed(collapseAll.collapsed)
+    if (!collapseAll.collapsed) setShouldRender(true)
   }
 
   const [prevSearchNonce, setPrevSearchNonce] = useState<number | null>(null)

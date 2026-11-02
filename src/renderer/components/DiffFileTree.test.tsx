@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 
-import { getSortedFilePaths, sortFilesAsTree, filterFilesByDir, CommittedDiffFileTree, UncommittedDiffFileTree } from './DiffFileTree'
+import { getSortedFilePaths, sortFilesAsTree, filterFilesByDir, filterFilesBySearch, CommittedDiffFileTree, UncommittedDiffFileTree } from './DiffFileTree'
 import type { DiffFile, UncommittedFile } from '../types'
 import { FileChangeStatus, FileStatKind } from '../types'
 
@@ -112,6 +112,18 @@ describe('sortFilesAsTree', () => {
 
   it('returns empty array for empty input', () => {
     expect(sortFilesAsTree([])).toEqual([])
+  })
+})
+
+describe('filterFilesBySearch', () => {
+  it('returns all files for a blank query', () => {
+    const files = [makeDiffFile({ path: 'a.ts' })]
+    expect(filterFilesBySearch(files, '  ')).toBe(files)
+  })
+
+  it('keeps files whose path contains the query, case-insensitively', () => {
+    const files = [makeDiffFile({ path: 'src/App.tsx' }), makeDiffFile({ path: 'docs/readme.md' })]
+    expect(filterFilesBySearch(files, ' app ').map(f => f.path)).toEqual(['src/App.tsx'])
   })
 })
 

@@ -98,6 +98,20 @@ describe('markFilesViewed', () => {
   })
 })
 
+describe('unmarkFilesViewed', () => {
+  it('removes only the given paths', () => {
+    const { store, metadata } = setup({ 'a.ts': { additions: 1, deletions: 1 }, 'b.ts': { additions: 2, deletions: 2 } })
+    store.unmarkFilesViewed(['a.ts', 'missing.ts'])
+    expect(Object.keys(parseViewedFiles(metadata))).toEqual(['b.ts'])
+  })
+
+  it('does not write when none of the paths are viewed', () => {
+    const { store, updateMetadata } = setup({ 'a.ts': { additions: 1, deletions: 1 } })
+    store.unmarkFilesViewed(['b.ts'])
+    expect(updateMetadata).not.toHaveBeenCalled()
+  })
+})
+
 describe('reconcileViewedFiles', () => {
   it('drops entries whose stats changed', () => {
     const { store, metadata } = setup({ 'a.ts': { additions: 1, deletions: 1 } })

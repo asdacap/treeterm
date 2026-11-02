@@ -7723,6 +7723,40 @@ body,
   min-height: 0;
 }
 
+.stacked-diff-list-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--border-color);
+  font-size: 12px;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.stacked-diff-list-check-all {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.stacked-diff-list-collapse-all {
+  margin-left: auto;
+  padding: 2px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.stacked-diff-list-collapse-all:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 /* Search panel (in-view matches + repo search), shown along the bottom */
 .search-panel {
   height: 35%;

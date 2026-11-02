@@ -29,6 +29,7 @@ export interface ReviewViewedFilesState {
   getViewedFiles: () => Record<string, ViewedFileStats>
   toggleViewedFile: (file: ViewedFileEntry) => void
   markFilesViewed: (files: ViewedFileEntry[]) => void
+  unmarkFilesViewed: (paths: string[]) => void
   /**
    * Drop entries whose diff stats no longer match (the file changed since it was
    * marked viewed). Entries absent from `files` are preserved — they belong to a
@@ -88,6 +89,14 @@ export function createReviewViewedFilesStore(deps: ReviewViewedFilesDeps): Revie
       }
       if (!changed) return
       persist(next, 'markFilesViewed')
+    },
+
+    unmarkFilesViewed: (paths: string[]): void => {
+      const viewed = parseViewedFiles(deps.getMetadata())
+      const drop = new Set(paths)
+      const next = Object.fromEntries(Object.entries(viewed).filter(([path]) => !drop.has(path)))
+      if (Object.keys(next).length === Object.keys(viewed).length) return
+      persist(next, 'unmarkFilesViewed')
     },
 
     reconcileViewedFiles: (files: ViewedFileEntry[]): void => {
