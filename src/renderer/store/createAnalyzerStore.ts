@@ -11,7 +11,7 @@ import type { LlmApi, Settings, PtyEvent } from '../types'
 import { PtyAttachKind, PtyEventType } from '../../shared/ipc-types'
 import { DisposableStore, thenRegisterOrDispose, toDisposable } from '../../shared/lifecycle'
 import type { Tty } from './createTtyStore'
-import { createIdleDetector, idleTimeoutMs } from '../utils/idleDetector'
+import { createIdleDetector, idleTimeoutMs, type IdleDetector } from '../utils/idleDetector'
 
 export interface AnalyzerDeps {
   getSettings: () => Settings
@@ -108,6 +108,7 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
   // Internal closure state — not part of Zustand state
   let terminal: Terminal | null = null
   let ownTty: Tty | null = null
+  let detector: IdleDetector | null = null
   let lastConfiguration = configurationIdentity()
   let pollInterval: ReturnType<typeof setInterval> | null = null
   let titleTimer: ReturnType<typeof setTimeout> | null = null
@@ -156,6 +157,11 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
       return { action: 'reuse', result: hit.result }
     }
     return { action: 'analyze' }
+  }
+
+  function rememberResult(identity: string, result: AnalyzerResult): void {
+    cache.push({ buffer: identity, result })
+    if (cache.length > CACHE_SIZE) cache.shift()
   }
 
   function extractBuffer(): string | null {
@@ -260,6 +266,13 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
       if (extractBuffer() !== buffer || configurationIdentity() !== requestConfiguration) {
         pendingAnalyze = pendingAnalyze || configurationIdentity() !== requestConfiguration
         console.debug('[terminal-analyzer] discarding stale response')
+        // Still a valid answer for the screen it was asked about: if the screen returns
+        // there, the re-check below reuses it instead of asking again.
+        if ('state' in result) rememberResult(identity, { state: result.state, reason: result.reason })
+        // The screen moved while we waited, and the burst it is in may end back on the
+        // requested screen — a blip that fires no edge, leaving this classification
+        // unapplied for good. Make that burst's quiet edge re-check regardless.
+        if (!pendingAnalyze) detector?.requestIdleEdge()
         history.push({ timestamp: Date.now(), kind: 'analyzer', model: providerSettings.model, bufferText: buffer, response: JSON.stringify(result), error: '[discarded]', systemPrompt, durationMs })
         if (history.length > MAX_HISTORY) history.shift()
         inFlightBuffer = null
@@ -273,10 +286,7 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
 
       if ('state' in result) {
         console.debug('[terminal-analyzer] state set:', result.state, 'reason:', result.reason)
-        cache.push({ buffer: identity, result: { state: result.state, reason: result.reason } })
-        if (cache.length > CACHE_SIZE) {
-          cache.shift()
-        }
+        rememberResult(identity, { state: result.state, reason: result.reason })
         inFlightBuffer = null
         store.setState({ analyzing: false })
         updateAiState(result.state, result.reason)
@@ -471,7 +481,7 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
       // late attach from a previous cycle sees the *new* owner (not disposed) and
       // clobbers the current TTY with its own already-disposed handle.
       const owner = streamOwner = new DisposableStore()
-      const detector = createIdleDetector({
+      const activeDetector = detector = createIdleDetector({
         initialSnapshot: `${configurationIdentity()}\0${extractBuffer() ?? ''}`,
         idleTimeoutMs: () => idleTimeoutMs(deps.getSettings(), deps.hasUnreadAttention()),
         onActivity: () => {
@@ -480,10 +490,13 @@ export function createAnalyzerStore(tabId: string, deps: AnalyzerDeps): Analyzer
         },
         onIdle: () => { void analyze() },
       })
-      owner.add(toDisposable(detector.destroy))
+      owner.add(toDisposable(() => {
+        activeDetector.destroy()
+        if (detector === activeDetector) detector = null
+      }))
       const updateViewport = (): void => {
         if (owner.isDisposed) return
-        detector.processSnapshot(`${configurationIdentity()}\0${extractBuffer() ?? ''}`)
+        activeDetector.processSnapshot(`${configurationIdentity()}\0${extractBuffer() ?? ''}`)
       }
 
       running = true

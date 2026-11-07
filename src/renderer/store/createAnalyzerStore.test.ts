@@ -355,6 +355,45 @@ describe('createAnalyzerStore', () => {
     vi.useRealTimers()
   })
 
+  it('applies a response discarded during a blip once the screen returns to what was classified', async () => {
+    vi.useFakeTimers()
+    const mock = makeMockTty()
+    const calls: Array<(value: any) => void> = []
+    deps = makeDeps({
+      llm: {
+        analyzeTerminal: vi.fn().mockImplementation(() => new Promise(r => { calls.push(r) })),
+        generateTitle: vi.fn().mockResolvedValue({ title: '', description: '', branchName: '' }),
+      } as unknown as LlmApi,
+      openTtyStream: makeTtyStreamMock(mock, []),
+    })
+
+    const store = createAnalyzerStore('tab-1', deps)
+    store.getState().start('pty-1')
+    await vi.advanceTimersByTimeAsync(0)
+
+    mock.emitData('$ done')
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(deps.llm.analyzeTerminal).toHaveBeenCalledTimes(1)
+
+    // A spinner frame is on screen when the response lands, so it is discarded...
+    mock.emitData('\x1b[2K\rspinner')
+    await vi.advanceTimersByTimeAsync(50)
+    calls[0]!({ state: ActivityState.Idle, reason: 'prompt visible' })
+    await vi.advanceTimersByTimeAsync(50)
+    expect(store.getState().getHistory()[0]?.error).toBe('[discarded]')
+
+    // ...and the screen goes back to the classified one: a blip, which fires no idle edge.
+    mock.emitData('\x1b[2K\r$ done')
+    await vi.advanceTimersByTimeAsync(1000)
+
+    expect(store.getState().reason).toBe('prompt visible')
+    // Reused from cache, not asked again.
+    expect(deps.llm.analyzeTerminal).toHaveBeenCalledTimes(1)
+
+    store.getState().stop()
+    vi.useRealTimers()
+  })
+
   it('queues pending analyze when request is in-flight and drains after completion', async () => {
     vi.useFakeTimers()
     const mock = makeMockTty()

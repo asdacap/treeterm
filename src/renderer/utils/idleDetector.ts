@@ -26,6 +26,13 @@ export interface IdleDetectorDeps {
 
 export interface IdleDetector {
   processSnapshot: (snapshot: string) => void
+  /**
+   * Make the next quiet edge call onIdle even if the burst ends back on its starting screen.
+   * For a consumer that dropped an idle edge's work (a stale response) and relies on the
+   * next edge to redo it: a blip back to that screen would otherwise fire nothing. With no
+   * burst running, onIdle fires immediately.
+   */
+  requestIdleEdge: () => void
   destroy: () => void
 }
 
@@ -50,6 +57,8 @@ export function createIdleDetector(deps: IdleDetectorDeps): IdleDetector {
   let burstBaseline = deps.initialSnapshot
   let burstStartedAt = 0
   let reported = false
+  let forceEdge = false
+  let lastTimeout = deps.idleTimeoutMs()
 
   const report = (snapshot: string): void => {
     reported = true
@@ -68,17 +77,31 @@ export function createIdleDetector(deps: IdleDetectorDeps): IdleDetector {
     }
     lastSnapshot = snapshot
     // Captured at arming so the edge reports the timeout that actually elapsed.
-    const timeout = deps.idleTimeoutMs()
+    const timeout = lastTimeout = deps.idleTimeoutMs()
     idleTimerId = setTimeout(() => {
       idleTimerId = null
       const wasSettled = settled
       settled = true
+      const forced = forceEdge
+      forceEdge = false
       if (!reported) {
-        if (lastSnapshot === burstBaseline) return
-        if (wasSettled) report(lastSnapshot)
+        if (lastSnapshot === burstBaseline) {
+          // A blip is not activity, but a forced edge still owes its consumer an onIdle.
+          if (!forced) return
+        } else if (wasSettled) {
+          report(lastSnapshot)
+        }
       }
       deps.onIdle({ snapshot: lastSnapshot, idleTimeoutMs: timeout })
     }, timeout)
+  }
+
+  const requestIdleEdge = (): void => {
+    if (idleTimerId) {
+      forceEdge = true
+      return
+    }
+    deps.onIdle({ snapshot: lastSnapshot, idleTimeoutMs: lastTimeout })
   }
 
   const destroy = (): void => {
@@ -86,7 +109,8 @@ export function createIdleDetector(deps: IdleDetectorDeps): IdleDetector {
       clearTimeout(idleTimerId)
       idleTimerId = null
     }
+    forceEdge = false
   }
 
-  return { processSnapshot, destroy }
+  return { processSnapshot, requestIdleEdge, destroy }
 }

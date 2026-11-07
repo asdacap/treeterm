@@ -177,6 +177,29 @@ describe('createIdleDetector', () => {
     vi.advanceTimersByTime(5000)
     expect(h.onIdle).not.toHaveBeenCalled()
   })
+
+  it('a requested edge fires onIdle for a blip back to the starting screen, without activity', () => {
+    const h = setup()
+    settle(h)
+    h.detector.processSnapshot('spinner')
+    h.detector.requestIdleEdge()
+    h.detector.processSnapshot('boot')
+    vi.advanceTimersByTime(500)
+    expect(h.onActivity).not.toHaveBeenCalled()
+    expect(h.onIdle).toHaveBeenCalledExactlyOnceWith({ snapshot: 'boot', idleTimeoutMs: 500 })
+    // One-shot: the next blip is silent again.
+    h.detector.processSnapshot('spinner')
+    h.detector.processSnapshot('boot')
+    vi.advanceTimersByTime(500)
+    expect(h.onIdle).toHaveBeenCalledTimes(1)
+  })
+
+  it('a requested edge with no burst running fires onIdle immediately', () => {
+    const h = setup()
+    settle(h)
+    h.detector.requestIdleEdge()
+    expect(h.onIdle).toHaveBeenCalledExactlyOnceWith({ snapshot: 'boot', idleTimeoutMs: 500 })
+  })
 })
 
 describe('idleTimeoutMs', () => {
