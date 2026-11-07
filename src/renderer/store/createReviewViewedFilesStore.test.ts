@@ -169,3 +169,23 @@ describe('getViewedFiles', () => {
     expect(store.getViewedFiles()).toEqual({ 'a.ts': { additions: 7, deletions: 8 } })
   })
 })
+
+describe('unknown viewed-file stats', () => {
+  it('stores an unknown-stats file as viewed without counts', () => {
+    const { store, metadata } = setup()
+    store.toggleViewedFile({ path: 'gen/a.ts', kind: FileStatKind.Unknown })
+    expect(parseViewedFiles(metadata)['gen/a.ts']).toEqual({ kind: FileStatKind.Unknown })
+  })
+
+  it('keeps the viewed mark while counts remain unknown', () => {
+    const { store, updateMetadata } = setup({ 'gen/a.ts': { kind: FileStatKind.Unknown } })
+    store.reconcileViewedFiles([{ path: 'gen/a.ts', kind: FileStatKind.Unknown }])
+    expect(updateMetadata).not.toHaveBeenCalled()
+  })
+
+  it('drops the viewed mark once real counts arrive', () => {
+    const { store, metadata } = setup({ 'gen/a.ts': { kind: FileStatKind.Unknown } })
+    store.reconcileViewedFiles([{ path: 'gen/a.ts', kind: FileStatKind.Text, additions: 3, deletions: 0 }])
+    expect(parseViewedFiles(metadata)).toEqual({})
+  })
+})

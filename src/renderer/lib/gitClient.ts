@@ -29,6 +29,7 @@ import { isBinaryContent, isImagePath } from '../../shared/fileContentKind'
 import { resolveHomedir } from './homedir'
 import { withTimeout } from './withTimeout'
 import { MAX_READ_FILE_BYTES } from './fileLimits'
+import { coalesceByKey, mapWithConcurrency } from './concurrency'
 
 // Backstop only — the daemon enforces the exec timeout, so this fires only if the result event
 // is never delivered to the renderer.
@@ -446,6 +447,80 @@ export function createGitApi(exec: ExecApi, filesystem: FilesystemApi, connectio
   // API implementation
   // -----------------------------------------------------------------------
 
+  // Bounds for getUncommittedChanges' per-file git calls. Each untracked file
+  // needs its own `git diff --no-index` to get line counts; firing them all at
+  // once on a worktree with thousands of untracked files (e.g. on NFS) floods
+  // the daemon, and every process blows past the exec timeout together.
+  const UNCOMMITTED_STAT_CONCURRENCY = 8
+  const MAX_UNTRACKED_FILES_WITH_STATS = 200
+
+  async function loadUncommittedChanges(repoPath: string): Promise<IpcResult<{ changes: UncommittedChanges }>> {
+    try {
+      // `--untracked-files=all` is required, not a nicety: git's default
+      // (`normal`) collapses a wholly-untracked directory into one `dir/` entry.
+      // That entry is a directory, so it has no blob to diff against and cannot
+      // be read as a file — the review pane renders it as an empty diff and the
+      // tree shows a nameless row. Listing every untracked file individually is
+      // what makes new files inside new directories reviewable at all.
+      const statusResult = await git(repoPath, ['status', '--porcelain', '--untracked-files=all'])
+      if (statusResult.exitCode !== 0) throw interpretError(statusResult)
+
+      const status = parseStatus(statusResult.stdout)
+
+      const stagedStatResult = await git(repoPath, ['diff', '--cached', '--numstat'])
+      if (stagedStatResult.exitCode !== 0) throw interpretError(stagedStatResult)
+      const stagedStatMap = parseNumstat(stagedStatResult.stdout, new Set(status.map(entry => entry.path)))
+
+      const unstagedStatResult = await git(repoPath, ['diff', '--numstat'])
+      if (unstagedStatResult.exitCode !== 0) throw interpretError(unstagedStatResult)
+      const unstagedStatMap = parseNumstat(unstagedStatResult.stdout, new Set(status.map(entry => entry.path)))
+
+      // `git diff` omits untracked files. Diff each against /dev/null; exit 1
+      // means they differ, while exit codes above 1 are errors. Past the cap,
+      // untracked files are listed without stats rather than spawning a git
+      // process per file.
+      const untracked = status.filter((entry) => entry.status === FileChangeStatus.Untracked)
+      const untrackedStatsSkipped = untracked.length > MAX_UNTRACKED_FILES_WITH_STATS
+      const untrackedStatMap = new Map<string, ParsedNumstat>()
+      if (!untrackedStatsSkipped) {
+        await mapWithConcurrency(untracked, UNCOMMITTED_STAT_CONCURRENCY, async (entry) => {
+          const result = await git(repoPath, ['diff', '--numstat', '--no-index', '--', '/dev/null', entry.path])
+          if (result.exitCode > 1) throw interpretError(result)
+          const line = result.stdout.trim().split('\n').filter(Boolean)[0]
+          if (line) untrackedStatMap.set(entry.path, parseNumstatCounts(line))
+        })
+      }
+
+      const files: UncommittedFile[] = await mapWithConcurrency(status, UNCOMMITTED_STAT_CONCURRENCY, async (entry) => {
+        const isUntracked = entry.status === FileChangeStatus.Untracked
+        if (isUntracked && untrackedStatsSkipped) {
+          return { ...entry, kind: FileStatKind.Unknown as const }
+        }
+        const statMap = isUntracked
+          ? untrackedStatMap
+          : entry.staged ? stagedStatMap : unstagedStatMap
+        const parsed = statMap.get(entry.path) ?? { kind: FileStatKind.Text as const, additions: 0, deletions: 0 }
+        const args = isUntracked
+          ? ['diff', '--stat', '--no-index']
+          : entry.staged ? ['diff', '--cached', '--stat'] : ['diff', '--stat']
+        const stats = await fileStats(repoPath, parsed, args, entry, isUntracked)
+        return { ...entry, ...stats }
+      })
+
+      const totalAdditions = files.reduce((sum, file) => sum + (file.kind === FileStatKind.Text ? file.additions : 0), 0)
+      const totalDeletions = files.reduce((sum, file) => sum + (file.kind === FileStatKind.Text ? file.deletions : 0), 0)
+
+      return { success: true, changes: { files, totalAdditions, totalDeletions } }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  }
+
+  // Review refreshes on mount, on tab focus and after every stage/commit; a
+  // slow repo must not accumulate overlapping scans, so concurrent requests
+  // for the same repo share one follow-up run.
+  const coalescedUncommittedChanges = coalesceByKey(loadUncommittedChanges)
+
   return {
     // ----- getInfo -----
     async getInfo(dirPath: string): Promise<GitInfo> {
@@ -819,61 +894,7 @@ export function createGitApi(exec: ExecApi, filesystem: FilesystemApi, connectio
     },
 
     // ----- getUncommittedChanges -----
-    async getUncommittedChanges(repoPath: string): Promise<IpcResult<{ changes: UncommittedChanges }>> {
-      try {
-        // `--untracked-files=all` is required, not a nicety: git's default
-        // (`normal`) collapses a wholly-untracked directory into one `dir/` entry.
-        // That entry is a directory, so it has no blob to diff against and cannot
-        // be read as a file — the review pane renders it as an empty diff and the
-        // tree shows a nameless row. Listing every untracked file individually is
-        // what makes new files inside new directories reviewable at all.
-        const statusResult = await git(repoPath, ['status', '--porcelain', '--untracked-files=all'])
-        if (statusResult.exitCode !== 0) throw interpretError(statusResult)
-
-        const status = parseStatus(statusResult.stdout)
-
-        const stagedStatResult = await git(repoPath, ['diff', '--cached', '--numstat'])
-        if (stagedStatResult.exitCode !== 0) throw interpretError(stagedStatResult)
-        const stagedStatMap = parseNumstat(stagedStatResult.stdout, new Set(status.map(entry => entry.path)))
-
-        const unstagedStatResult = await git(repoPath, ['diff', '--numstat'])
-        if (unstagedStatResult.exitCode !== 0) throw interpretError(unstagedStatResult)
-        const unstagedStatMap = parseNumstat(unstagedStatResult.stdout, new Set(status.map(entry => entry.path)))
-
-        // `git diff` omits untracked files. Diff each against /dev/null; exit 1
-        // means they differ, while exit codes above 1 are errors.
-        const untrackedStatMap = new Map<string, ParsedNumstat>()
-        await Promise.all(
-          status
-            .filter((entry) => entry.status === FileChangeStatus.Untracked)
-            .map(async (entry) => {
-              const result = await git(repoPath, ['diff', '--numstat', '--no-index', '--', '/dev/null', entry.path])
-              if (result.exitCode > 1) throw interpretError(result)
-              const line = result.stdout.trim().split('\n').filter(Boolean)[0]
-              if (line) untrackedStatMap.set(entry.path, parseNumstatCounts(line))
-            })
-        )
-
-        const files: UncommittedFile[] = await Promise.all(status.map(async (entry) => {
-          const statMap = entry.status === FileChangeStatus.Untracked
-            ? untrackedStatMap
-            : entry.staged ? stagedStatMap : unstagedStatMap
-          const parsed = statMap.get(entry.path) ?? { kind: FileStatKind.Text as const, additions: 0, deletions: 0 }
-          const args = entry.status === FileChangeStatus.Untracked
-            ? ['diff', '--stat', '--no-index']
-            : entry.staged ? ['diff', '--cached', '--stat'] : ['diff', '--stat']
-          const stats = await fileStats(repoPath, parsed, args, entry, entry.status === FileChangeStatus.Untracked)
-          return { ...entry, ...stats }
-        }))
-
-        const totalAdditions = files.reduce((sum, file) => sum + (file.kind === FileStatKind.Text ? file.additions : 0), 0)
-        const totalDeletions = files.reduce((sum, file) => sum + (file.kind === FileStatKind.Text ? file.deletions : 0), 0)
-
-        return { success: true, changes: { files, totalAdditions, totalDeletions } }
-      } catch (error) {
-        return { success: false, error: error instanceof Error ? error.message : String(error) }
-      }
-    },
+    getUncommittedChanges: coalescedUncommittedChanges,
 
     // ----- getUncommittedFileDiff -----
     async getUncommittedFileDiff(

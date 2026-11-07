@@ -16,11 +16,16 @@ function viewedStats(file: ViewedFileEntry): ViewedFileStats {
   if ('kind' in file && file.kind === FileStatKind.Binary) {
     return { kind: FileStatKind.Binary, byteChange: file.byteChange }
   }
+  if ('kind' in file && file.kind === FileStatKind.Unknown) {
+    return { kind: FileStatKind.Unknown }
+  }
   const text = { additions: file.additions, deletions: file.deletions }
   return 'kind' in file ? { kind: FileStatKind.Text, ...text } : text
 }
 
 function statsMatch(file: ViewedFileEntry, stats: ViewedFileStats): boolean {
+  // No counts to compare against: keep the viewed mark rather than dropping it on every refresh.
+  if ('kind' in file && file.kind === FileStatKind.Unknown) return true
   if ('kind' in file && file.kind === FileStatKind.Binary) return 'kind' in stats && stats.kind === FileStatKind.Binary && file.byteChange === stats.byteChange
   return 'additions' in file && 'additions' in stats && file.additions === stats.additions && file.deletions === stats.deletions
 }

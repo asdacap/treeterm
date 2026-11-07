@@ -310,12 +310,15 @@ export interface BranchInfo {
 export enum FileStatKind {
   Text = 'text',
   Binary = 'binary',
+  /** Counts were not computed (too many untracked files to diff individually). */
+  Unknown = 'unknown',
 }
 
 /** A binary change has a signed net byte delta, never line counts. */
 export type FileChangeStats =
   | { kind: FileStatKind.Text; additions: number; deletions: number }
   | { kind: FileStatKind.Binary; byteChange: number }
+  | { kind: FileStatKind.Unknown }
 
 export type DiffFile = {
   path: string

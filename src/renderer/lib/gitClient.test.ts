@@ -927,6 +927,82 @@ describe('createGitApi', () => {
       }
     })
 
+    // One `git diff --no-index` per untracked file, all at once, flooded the
+    // daemon on a worktree with thousands of untracked files over NFS.
+    it('skips per-file stats past the untracked file cap instead of spawning a git per file', async () => {
+      const exec = createMockExec()
+      const fs = createMockFilesystem()
+      const paths = Array.from({ length: 201 }, (_, i) => `gen/f${String(i)}.ts`)
+      autoComplete(exec, [
+        { stdout: paths.map((path) => `?? ${path}`).join('\n') + '\n' },
+        { stdout: '' },
+        { stdout: '' },
+      ])
+
+      const git = createGitApi(exec, fs, 'conn-1')
+      const result = await git.getUncommittedChanges('/repo')
+
+      expect(exec.start).toHaveBeenCalledTimes(3)
+      expect(result.success).toBe(true)
+      if (result.success) {
+        expect(result.changes.files).toHaveLength(201)
+        expect(result.changes.files.every((file) => file.kind === FileStatKind.Unknown)).toBe(true)
+        expect(result.changes.totalAdditions).toBe(0)
+      }
+    })
+
+    it('runs at most 8 untracked line counts at a time', async () => {
+      const exec = createMockExec()
+      const fs = createMockFilesystem()
+      const paths = Array.from({ length: 20 }, (_, i) => `n${String(i)}.ts`)
+      let active = 0
+      let peak = 0
+      let callIndex = 0
+      const origStart = exec.start as ReturnType<typeof vi.fn>
+      // eslint-disable-next-line @typescript-eslint/no-misused-promises
+      origStart.mockImplementation(() => {
+        callIndex++
+        const execId = `exec-${String(callIndex)}`
+        const index = callIndex
+        active++
+        peak = Math.max(peak, active)
+        setTimeout(() => {
+          active--
+          if (index === 1) exec._complete(execId, paths.map((path) => `?? ${path}`).join('\n') + '\n', 0)
+          else if (index <= 3) exec._complete(execId, '', 0)
+          else exec._complete(execId, '1\t0\t/dev/null => x\n', 1)
+        })
+        return Promise.resolve({ success: true, execId })
+      })
+
+      const git = createGitApi(exec, fs, 'conn-1')
+      const result = await git.getUncommittedChanges('/repo')
+
+      expect(result.success).toBe(true)
+      expect(exec.start).toHaveBeenCalledTimes(23)
+      expect(peak).toBe(8)
+    })
+
+    it('coalesces overlapping requests for the same repo into one follow-up scan', async () => {
+      const exec = createMockExec()
+      const fs = createMockFilesystem()
+      autoComplete(exec, [
+        { stdout: 'M  a.ts' }, { stdout: '1\t0\ta.ts' }, { stdout: '' },
+        { stdout: 'M  a.ts' }, { stdout: '2\t0\ta.ts' }, { stdout: '' },
+      ])
+
+      const git = createGitApi(exec, fs, 'conn-1')
+      const first = git.getUncommittedChanges('/repo')
+      const second = git.getUncommittedChanges('/repo')
+      const third = git.getUncommittedChanges('/repo')
+      const [r1, r2, r3] = await Promise.all([first, second, third])
+
+      expect(exec.start).toHaveBeenCalledTimes(6)
+      expect(r1.success && r1.changes.totalAdditions).toBe(1)
+      expect(r2.success && r2.changes.totalAdditions).toBe(2)
+      expect(r3).toBe(r2)
+    })
+
     it('counts a binary untracked file as zero changed lines', async () => {
       const exec = createMockExec()
       const fs = createMockFilesystem()
