@@ -7,6 +7,8 @@ import { useStore } from 'zustand'
 import type { EditorState, ReviewComment, WorkspaceStore } from '../types'
 import { EditorStatus, EditorViewMode } from '../types'
 import { useFilesystemApi, useExecApi } from '../hooks/useWorkspaceApis'
+import { maxReadBytesFor } from '../lib/fileLimits'
+import { formatMegabytes } from '../../shared/formatBytes'
 import { monacoNavigationBridge } from '../monaco-config'
 import { searchDefinition } from '../utils/definitionSearch'
 import { detectMonacoLanguage } from '../utils/detectMonacoLanguage'
@@ -53,6 +55,36 @@ type SearchState =
   | { status: SearchStatus.Closed }
   | { status: SearchStatus.Open; query: string; focusNonce: number; activeIndex: number | null }
 
+enum FileErrorKind {
+  Failed = 'failed',
+  /** Over the transfer budget: `size` lets the user raise the budget to admit it. */
+  TooLarge = 'too-large',
+}
+
+type FileError =
+  | { kind: FileErrorKind.Failed; message: string }
+  | { kind: FileErrorKind.TooLarge; message: string; size: number }
+
+/** `onOpenAnyway` re-reads the file with a budget of the given byte count. */
+function renderFileError(error: FileError, onOpenAnyway: (bytes: number) => void): React.ReactNode {
+  const views: Record<FileErrorKind, () => React.ReactNode> = {
+    [FileErrorKind.Failed]: () => <div className="file-viewer-error">{error.message}</div>,
+    [FileErrorKind.TooLarge]: () => error.kind === FileErrorKind.TooLarge && (
+      <div className="file-viewer-error">
+        <div>{error.message}</div>
+        <button
+          className="file-viewer-open-btn file-viewer-override-btn"
+          onClick={() => { onOpenAnyway(error.size) }}
+          title="Load the whole file despite the size limit"
+        >
+          Open anyway ({formatMegabytes(error.size)})
+        </button>
+      </div>
+    ),
+  }
+  return views[error.kind]()
+}
+
 interface FileState {
   /**
    * The path `content` was read from. Until it matches the `filePath` prop the new file is
@@ -63,7 +95,7 @@ interface FileState {
   content: string
   language: string
   loading: boolean
-  error: string | null
+  error: FileError | null
 }
 
 export function FileViewer({
@@ -107,6 +139,9 @@ export function FileViewer({
   const [commentDisplayContainers, setCommentDisplayContainers] = useState(new Map<string, { container: HTMLDivElement; comments: ReviewComment[] }>())
   // Search panel: Cmd/Ctrl+F or right-click > Search opens it
   const [search, setSearch] = useState<SearchState>({ status: SearchStatus.Closed })
+  // Bytes the user agreed to pull down for an oversize file ("Open anyway"). The read takes the
+  // larger of this and the default budget; it resets with the path, so the override is per file.
+  const [raisedBudget, setRaisedBudget] = useState(0)
 
   // Callers rebuild the comments array on every render (they filter a store selection), so its
   // identity is useless as an effect dependency — the view-zone effect below would re-run forever,
@@ -125,6 +160,7 @@ export function FileViewer({
   const [prevFilePath, setPrevFilePath] = useState(filePath)
   const [prevHasLineClick, setPrevHasLineClick] = useState(!!onLineClick)
   if (filePath !== prevFilePath || !!onLineClick !== prevHasLineClick) {
+    if (filePath !== prevFilePath) setRaisedBudget(0)
     setPrevFilePath(filePath)
     setPrevHasLineClick(!!onLineClick)
     if (!filePath) {
@@ -137,12 +173,17 @@ export function FileViewer({
 
   useEffect(() => {
     if (!filePath) return
+    // A superseded read must not land: an oversize file opened anyway can still be streaming
+    // after the user has moved on, and its result would replace the next file's.
+    let cancelled = false
+    const maxBytes = Math.max(maxReadBytesFor(filePath), raisedBudget)
 
     const loadFile = async () => {
       setFileState((prev) => ({ ...prev, loading: true, error: null }))
 
       try {
-        const result = await filesystem.readFile(filePath)
+        const result = await filesystem.readFile(filePath, maxBytes)
+        if (cancelled) return
 
         if (result.success) {
           setFileState({
@@ -161,22 +202,26 @@ export function FileViewer({
             content: '',
             language: 'plaintext',
             loading: false,
-            error: result.error || 'Failed to load file'
+            error: 'tooLarge' in result
+              ? { kind: FileErrorKind.TooLarge, message: result.error, size: result.size }
+              : { kind: FileErrorKind.Failed, message: result.error || 'Failed to load file' }
           })
         }
       } catch (err) {
+        if (cancelled) return
         setFileState({
           path: filePath,
           content: '',
           language: 'plaintext',
           loading: false,
-          error: `Error loading file: ${err instanceof Error ? err.message : String(err)}`
+          error: { kind: FileErrorKind.Failed, message: `Error loading file: ${err instanceof Error ? err.message : String(err)}` }
         })
       }
     }
 
     void loadFile()
-  }, [wsData.path, filePath, filesystem])
+    return () => { cancelled = true }
+  }, [wsData.path, filePath, filesystem, raisedBudget])
 
   const handleEditorMount: OnMount = useCallback((editor, monaco) => {
     editorRef.current = editor
@@ -465,7 +510,7 @@ export function FileViewer({
     if (fileState.error) {
       return (
         <div className="file-viewer">
-          <div className="file-viewer-error">{fileState.error}</div>
+          {renderFileError(fileState.error, setRaisedBudget)}
         </div>
       )
     }

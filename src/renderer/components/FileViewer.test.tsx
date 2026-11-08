@@ -7,6 +7,7 @@ import type { WorkspaceFilesystemApi, WorkspaceStore } from '../types'
 import { FileViewer } from './FileViewer'
 import { REPO_SEARCH_DEBOUNCE_MS } from './SearchPanel'
 import { RepoSearchEventType, RepoSearchTool } from '../utils/repoSearch'
+import { MAX_READ_FILE_BYTES } from '../lib/fileLimits'
 
 const filesystem = vi.hoisted(() => ({ readFile: vi.fn() }))
 
@@ -190,6 +191,111 @@ describe('FileViewer', () => {
     // The model's bytes are not handed on as a notes.txt model (modelFormat would throw).
     expect(screen.getByText('Loading...')).toBeTruthy()
     expect(screen.queryByTestId('model-viewer')).toBeNull()
+  })
+
+  describe('read failures', () => {
+    const OVERSIZE = Math.round(1.4 * 1024 * 1024)
+
+    function tooLarge(): unknown {
+      return { success: false, error: 'File too large to open (1.4MB, limit 1.0MB)', tooLarge: true, size: OVERSIZE }
+    }
+
+    it('reads with the default budget for the file kind', async () => {
+      filesystem.readFile.mockResolvedValue({
+        success: true,
+        file: { path: '/repo/a.ts', content: 'const a = 1', size: 11, language: 'typescript' },
+      })
+
+      render(<FileViewer workspace={makeWorkspace()} onOpenLocation={vi.fn()} filePath="a.ts" />)
+
+      await screen.findByTestId('monaco-editor')
+      expect(filesystem.readFile).toHaveBeenCalledWith('a.ts', MAX_READ_FILE_BYTES)
+    })
+
+    it('offers to open an oversize file anyway, re-reading with a budget that admits it', async () => {
+      filesystem.readFile.mockResolvedValueOnce(tooLarge())
+      filesystem.readFile.mockResolvedValueOnce({
+        success: true,
+        file: { path: '/repo/big.log', content: 'lots of log', size: OVERSIZE, language: 'plaintext' },
+      })
+
+      render(<FileViewer workspace={makeWorkspace()} onOpenLocation={vi.fn()} filePath="big.log" />)
+
+      expect(await screen.findByText('File too large to open (1.4MB, limit 1.0MB)')).toBeTruthy()
+      fireEvent.click(screen.getByText('Open anyway (1.4MB)'))
+
+      expect(await screen.findByTestId('monaco-editor')).toBeTruthy()
+      expect(filesystem.readFile).toHaveBeenLastCalledWith('big.log', OVERSIZE)
+    })
+
+    it('drops the raised budget when another file is selected', async () => {
+      filesystem.readFile.mockResolvedValueOnce(tooLarge())
+      filesystem.readFile.mockResolvedValueOnce({
+        success: true,
+        file: { path: '/repo/big.log', content: 'lots of log', size: OVERSIZE, language: 'plaintext' },
+      })
+      const workspace = makeWorkspace()
+      const { rerender } = render(<FileViewer workspace={workspace} onOpenLocation={vi.fn()} filePath="big.log" />)
+      fireEvent.click(await screen.findByText('Open anyway (1.4MB)'))
+      await screen.findByTestId('monaco-editor')
+      filesystem.readFile.mockResolvedValueOnce(tooLarge())
+
+      rerender(<FileViewer workspace={workspace} onOpenLocation={vi.fn()} filePath="other.log" />)
+
+      expect(await screen.findByText('Open anyway (1.4MB)')).toBeTruthy()
+      expect(filesystem.readFile).toHaveBeenLastCalledWith('other.log', MAX_READ_FILE_BYTES)
+    })
+
+    it('shows other failures without an override', async () => {
+      filesystem.readFile.mockResolvedValue({ success: false, error: 'Permission denied' })
+
+      render(<FileViewer workspace={makeWorkspace()} onOpenLocation={vi.fn()} filePath="secret.txt" />)
+
+      expect(await screen.findByText('Permission denied')).toBeTruthy()
+      expect(screen.queryByText(/Open anyway/)).toBeNull()
+    })
+
+    it('falls back to a generic message when a failure carries none', async () => {
+      filesystem.readFile.mockResolvedValue({ success: false, error: '' })
+
+      render(<FileViewer workspace={makeWorkspace()} onOpenLocation={vi.fn()} filePath="a.txt" />)
+
+      expect(await screen.findByText('Failed to load file')).toBeTruthy()
+    })
+
+    it('shows a thrown read error', async () => {
+      filesystem.readFile.mockRejectedValue(new Error('Not connected to daemon'))
+
+      render(<FileViewer workspace={makeWorkspace()} onOpenLocation={vi.fn()} filePath="a.txt" />)
+
+      expect(await screen.findByText('Error loading file: Not connected to daemon')).toBeTruthy()
+    })
+
+    it('discards a superseded read that lands after the next file', async () => {
+      let resolveSlow: (value: unknown) => void = () => {}
+      let rejectSlow: (err: Error) => void = () => {}
+      filesystem.readFile.mockReturnValueOnce(new Promise((resolve) => { resolveSlow = resolve }))
+      filesystem.readFile.mockReturnValueOnce(new Promise((_resolve, reject) => { rejectSlow = reject }))
+      filesystem.readFile.mockResolvedValueOnce({
+        success: true,
+        file: { path: '/repo/c.ts', content: 'const c = 3', size: 11, language: 'typescript' },
+      })
+      const workspace = makeWorkspace()
+      const { rerender } = render(<FileViewer workspace={workspace} onOpenLocation={vi.fn()} filePath="a.ts" />)
+      rerender(<FileViewer workspace={workspace} onOpenLocation={vi.fn()} filePath="b.ts" />)
+      rerender(<FileViewer workspace={workspace} onOpenLocation={vi.fn()} filePath="c.ts" />)
+      expect(await screen.findByText('typescript')).toBeTruthy()
+
+      await act(async () => {
+        resolveSlow({ success: false, error: 'stale failure' })
+        rejectSlow(new Error('stale throw'))
+        await Promise.resolve()
+      })
+
+      expect(screen.queryByText('stale failure')).toBeNull()
+      expect(screen.queryByText(/stale throw/)).toBeNull()
+      expect(screen.getByTestId('monaco-editor')).toBeTruthy()
+    })
   })
 
   it('offers no download for a text file, whose bytes were decoded on read', async () => {

@@ -923,7 +923,7 @@ describe('GrpcDaemonClient', () => {
       })
 
       const result = await client.readFile('/ws', '/big.bin', 1024 * 1024)
-      expect(result).toMatchObject({ success: false, error: 'File too large to open (4.8MB, limit 1.0MB)' })
+      expect(result).toEqual({ success: false, error: 'File too large to open (4.8MB, limit 1.0MB)', tooLarge: true, size: 5_000_000 })
       expect(cancel).toHaveBeenCalled()
     })
 

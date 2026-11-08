@@ -35,8 +35,8 @@ import type {
   ReasoningEffort
 } from '../../shared/types'
 export { FileChangeStatus }
-import type { PtyAttachKind, PtyEvent, ExecEvent, IpcResult, FsWriteFileResult, FileWatchEvent } from '../../shared/ipc-types'
-export type { PtyEvent, ExecEvent, IpcResult, FsWriteFileResult, FileWatchEvent }
+import type { PtyAttachKind, PtyEvent, ExecEvent, IpcResult, FsWriteFileResult, FsReadFileResult, FileWatchEvent } from '../../shared/ipc-types'
+export type { PtyEvent, ExecEvent, IpcResult, FsWriteFileResult, FsReadFileResult, FileWatchEvent }
 
 export type {
   SandboxConfig,
@@ -267,7 +267,7 @@ export interface FileContents {
 export interface FilesystemApi {
   readDirectory: (workspacePath: string, dirPath: string) => Promise<IpcResult<{ contents: DirectoryContents }>>
   /** `maxBytes` caps the transfer; oversize files fail on the stream header. */
-  readFile: (workspacePath: string, filePath: string, maxBytes: number) => Promise<IpcResult<{ file: FileContents }>>
+  readFile: (workspacePath: string, filePath: string, maxBytes: number) => Promise<FsReadFileResult>
   writeFile: (workspacePath: string, filePath: string, content: string, expectedSha256?: string) => Promise<FsWriteFileResult>
   deleteFile: (workspacePath: string, filePath: string) => Promise<IpcResult>
   searchFiles: (workspacePath: string, query: string) => Promise<IpcResult<{ entries: FileEntry[] }>>
@@ -279,7 +279,8 @@ export interface FilesystemApi {
 /** Workspace-scoped FilesystemApi with path pre-bound */
 export interface WorkspaceFilesystemApi {
   readDirectory: (dirPath: string) => Promise<IpcResult<{ contents: DirectoryContents }>>
-  readFile: (filePath: string) => Promise<IpcResult<{ file: FileContents }>>
+  /** `maxBytes` caps the transfer — `maxReadBytesFor` gives the default for a path. */
+  readFile: (filePath: string, maxBytes: number) => Promise<FsReadFileResult>
   writeFile: (filePath: string, content: string, expectedSha256?: string) => Promise<FsWriteFileResult>
   searchFiles: (query: string) => Promise<IpcResult<{ entries: FileEntry[] }>>
 }

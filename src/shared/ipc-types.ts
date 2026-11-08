@@ -14,6 +14,12 @@ export type IpcResult<T = Record<never, never>> = IpcOk<T> | IpcErr
  */
 export type FsWriteFileResult = IpcResult | { success: false; error: string; conflict: true }
 
+/**
+ * ReadFile result. `tooLarge: true` marks a file over the caller's transfer budget — nothing
+ * was transferred. `size` is the file's size, so the caller can re-read with a budget that admits it.
+ */
+export type FsReadFileResult = IpcResult<{ file: FileContents }> | { success: false; error: string; tooLarge: true; size: number }
+
 import type {
   SandboxConfig,
   Settings,
@@ -130,7 +136,7 @@ export interface IpcRequests {
   }
   fsReadFile: {
     params: [connectionId: string, workspacePath: string, filePath: string, maxBytes: number]
-    result: IpcResult<{ file: FileContents }>
+    result: FsReadFileResult
   }
   fsWriteFile: {
     params: [connectionId: string, workspacePath: string, filePath: string, content: string, expectedSha256?: string]

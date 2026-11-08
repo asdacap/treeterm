@@ -4,6 +4,7 @@ import { useAppStore } from '../store/app'
 import { generateReviewPrompt, buildPromptForComments } from '../utils/reviewPrompt'
 import type { ReviewComment, FilesystemState, WorkspaceStore } from '../types'
 import { useFilesystemApi } from '../hooks/useWorkspaceApis'
+import { maxReadBytesFor } from '../lib/fileLimits'
 
 interface CommentsListProps {
   workspace: WorkspaceStore
@@ -82,7 +83,7 @@ export default function CommentsList({
       await Promise.all(
         missing.map(async (filePath) => {
           try {
-            const result = await filesystem.readFile(filePath)
+            const result = await filesystem.readFile(filePath, maxReadBytesFor(filePath))
             if (result.success) {
               newContents.set(filePath, result.file.content)
             }

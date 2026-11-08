@@ -36,9 +36,10 @@ import {
   type PtyEvent,
   type IpcResult,
   type FsWriteFileResult,
+  type FsReadFileResult,
   type FileWatchEvent
 } from '../shared/ipc-types'
-import type { FileContents } from '../renderer/types'
+import { formatMegabytes } from '../shared/formatBytes'
 import type {
   SandboxConfig,
   TTYSessionInfo,
@@ -210,10 +211,6 @@ export const UNARY_DEADLINE_MS = 30_000
 
 function unaryOptions(): Partial<grpc.CallOptions> {
   return { deadline: Date.now() + UNARY_DEADLINE_MS }
-}
-
-function formatMegabytes(bytes: number): string {
-  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`
 }
 
 export class GrpcDaemonClient {
@@ -707,7 +704,7 @@ export class GrpcDaemonClient {
   /** `maxBytes` is the caller's transfer budget. The daemon streams without a size
    *  ceiling, so the header — which always precedes the data chunks — is where an
    *  oversize file is rejected, before any content crosses the wire. */
-  async readFile(workspacePath: string, filePath: string, maxBytes: number): Promise<IpcResult<{ file: FileContents }>> {
+  async readFile(workspacePath: string, filePath: string, maxBytes: number): Promise<FsReadFileResult> {
     if (!this.client) throw new Error('Not connected to daemon')
     const client = this.client
 
@@ -717,7 +714,7 @@ export class GrpcDaemonClient {
       let fileMetadata: { path: string; size: number; language: string } | null = null
       // stream.cancel() surfaces as a CANCELLED 'error'; we have already settled.
       let settled = false
-      const settle = (result: IpcResult<{ file: FileContents }>): void => {
+      const settle = (result: FsReadFileResult): void => {
         settled = true
         resolve(result)
       }
@@ -729,7 +726,7 @@ export class GrpcDaemonClient {
           if (size > maxBytes) {
             // Settle before cancelling: cancel raises a CANCELLED 'error', and on a
             // synchronous transport that lands before we would have marked settled.
-            settle({ success: false as const, error: `File too large to open (${formatMegabytes(size)}, limit ${formatMegabytes(maxBytes)})` })
+            settle({ success: false, error: `File too large to open (${formatMegabytes(size)}, limit ${formatMegabytes(maxBytes)})`, tooLarge: true, size })
             stream.cancel()
             return
           }

@@ -6,6 +6,7 @@ import { useStore } from 'zustand'
 import type { EditorState, WorkspaceStore } from '../types'
 import { EditorStatus, EditorViewMode } from '../types'
 import { useFilesystemApi, useExecApi } from '../hooks/useWorkspaceApis'
+import { maxReadBytesFor } from '../lib/fileLimits'
 import { monacoNavigationBridge } from '../monaco-config'
 import { searchDefinition } from '../utils/definitionSearch'
 import { detectMonacoLanguage } from '../utils/detectMonacoLanguage'
@@ -50,7 +51,7 @@ export function FileEditor({ workspace, tabId }: FileEditorProps): React.JSX.Ele
       }))
 
       try {
-        const result = await filesystem.readFile(state.filePath)
+        const result = await filesystem.readFile(state.filePath, maxReadBytesFor(state.filePath))
 
         if (result.success) {
           const language = detectMonacoLanguage(state.filePath)

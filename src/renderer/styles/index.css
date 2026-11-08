@@ -4194,6 +4194,11 @@ body,
   border-color: var(--accent);
 }
 
+/* "Open anyway" under the too-large error */
+.file-viewer-override-btn {
+  margin-top: 12px;
+}
+
 .file-viewer-toggle-btn {
   padding: 4px 10px;
   border: 1px solid var(--border-color);
