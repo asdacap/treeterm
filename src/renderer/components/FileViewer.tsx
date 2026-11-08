@@ -1,5 +1,5 @@
 /* eslint-disable custom/no-string-literal-comparison -- TODO: migrate existing string-literal comparisons to enums */
-import React, { useState, useEffect, useRef, useCallback } from 'react'
+import React, { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react'
 import { createPortal } from 'react-dom'
 import Editor, { OnMount } from '@monaco-editor/react'
 import type { editor } from 'monaco-editor'
@@ -11,12 +11,18 @@ import { monacoNavigationBridge } from '../monaco-config'
 import { searchDefinition } from '../utils/definitionSearch'
 import { detectMonacoLanguage } from '../utils/detectMonacoLanguage'
 import { MarkdownPreview } from './MarkdownPreview'
-import { imageMimeType, isBinaryContent } from '../../shared/fileContentKind'
+import { Download } from 'lucide-react'
+import { IMAGE_LANGUAGE, MODEL_LANGUAGE, imageMimeType, isBinaryContent, modelFormat, modelMimeType } from '../../shared/fileContentKind'
+import { base64ToBytes } from '../utils/base64'
+import { downloadBytes } from '../utils/downloadFile'
 import { CommentInput } from './CommentInput'
 import { CommentDisplay } from './CommentDisplay'
 import { SearchPanel, type InViewHit } from './SearchPanel'
 import { findInText } from '../utils/diffSearch'
 import { toWorkspaceRelative } from '../utils/repoSearch'
+
+// three.js is large; it loads the first time a model is opened.
+const ModelViewer = lazy(() => import('./ModelViewer'))
 
 interface FileViewerProps {
   workspace: WorkspaceStore
@@ -48,6 +54,12 @@ type SearchState =
   | { status: SearchStatus.Open; query: string; focusNonce: number; activeIndex: number | null }
 
 interface FileState {
+  /**
+   * The path `content` was read from. Until it matches the `filePath` prop the new file is
+   * still loading: the previous file's content must not render under the new path, where it
+   * would be taken for the new file's kind (a model's bytes handed to another format's parser).
+   */
+  path: string | null
   content: string
   language: string
   loading: boolean
@@ -75,6 +87,7 @@ export function FileViewer({
   const filesystem = useFilesystemApi(workspace)
   const execApi = useExecApi(workspace)
   const [fileState, setFileState] = useState<FileState>({
+    path: null,
     content: '',
     language: 'plaintext',
     loading: false,
@@ -115,7 +128,7 @@ export function FileViewer({
     setPrevFilePath(filePath)
     setPrevHasLineClick(!!onLineClick)
     if (!filePath) {
-      setFileState({ content: '', language: 'plaintext', loading: false, error: null })
+      setFileState({ path: null, content: '', language: 'plaintext', loading: false, error: null })
     }
     setViewMode(onLineClick ? 'source' : 'preview')
     setScrollRestoredFor(null)
@@ -133,13 +146,18 @@ export function FileViewer({
 
         if (result.success) {
           setFileState({
+            path: filePath,
             content: result.file.content,
-            language: result.file.language === 'image' ? 'image' : detectMonacoLanguage(filePath),
+            // Raw-bytes files (base64 content) keep the kind main tagged them with.
+            language: result.file.language === IMAGE_LANGUAGE || result.file.language === MODEL_LANGUAGE
+              ? result.file.language
+              : detectMonacoLanguage(filePath),
             loading: false,
             error: null
           })
         } else {
           setFileState({
+            path: filePath,
             content: '',
             language: 'plaintext',
             loading: false,
@@ -148,6 +166,7 @@ export function FileViewer({
         }
       } catch (err) {
         setFileState({
+          path: filePath,
           content: '',
           language: 'plaintext',
           loading: false,
@@ -419,9 +438,11 @@ export function FileViewer({
     })
   }, [filePath, fileState, addTab])
 
-  const isImage = fileState.language === 'image'
-  const isBinary = !isImage && isBinaryContent(fileState.content)
-  const searchable = !!filePath && !fileState.loading && !fileState.error && !isImage && !isBinary
+  const isImage = fileState.language === IMAGE_LANGUAGE
+  const isModel = fileState.language === MODEL_LANGUAGE
+  const isBinary = !isImage && !isModel && isBinaryContent(fileState.content)
+  const pending = fileState.loading || fileState.path !== filePath
+  const searchable = !!filePath && !pending && !fileState.error && !isImage && !isModel && !isBinary
   const relativePath = filePath ? toWorkspaceRelative(wsData.path, filePath) : ''
 
   const renderViewer = (): React.JSX.Element => {
@@ -433,7 +454,7 @@ export function FileViewer({
       )
     }
 
-    if (fileState.loading) {
+    if (pending) {
       return (
         <div className="file-viewer">
           <div className="file-viewer-placeholder">Loading...</div>
@@ -451,6 +472,11 @@ export function FileViewer({
 
     const fileName = filePath.split('/').pop() || filePath
     const isMarkdown = fileState.language === 'markdown'
+    // Only raw-bytes reads hold the file's exact bytes; text was decoded on the way in.
+    const handleDownload = (): void => {
+      const mimeType = isImage ? imageMimeType(filePath) : modelMimeType(modelFormat(filePath))
+      downloadBytes(fileName, base64ToBytes(fileState.content), mimeType)
+    }
 
     return (
       <div className="file-viewer">
@@ -466,7 +492,16 @@ export function FileViewer({
                 {viewMode === 'preview' ? '</> Source' : 'Preview'}
               </button>
             )}
-            {!isImage && !isBinary && (
+            {(isImage || isModel) && (
+              <button
+                className="file-viewer-open-btn"
+                onClick={handleDownload}
+                title="Save a copy of this file to your computer"
+              >
+                <Download size={11} /> Download
+              </button>
+            )}
+            {!isImage && !isModel && !isBinary && (
               <button
                 className="file-viewer-open-btn"
                 onClick={handleOpenInTab}
@@ -475,7 +510,7 @@ export function FileViewer({
                 ⇗ Open in Tab
               </button>
             )}
-            <span className="file-viewer-language">{isBinary ? 'binary' : fileState.language}</span>
+            <span className="file-viewer-language">{isBinary ? 'binary' : isModel ? modelFormat(filePath) : fileState.language}</span>
           </div>
         </div>
         <div className="file-viewer-content">
@@ -486,6 +521,10 @@ export function FileViewer({
                 alt={fileName}
               />
             </div>
+          ) : isModel ? (
+            <Suspense fallback={<div className="file-viewer-placeholder">Loading 3D viewer…</div>}>
+              <ModelViewer base64={fileState.content} format={modelFormat(filePath)} />
+            </Suspense>
           ) : isBinary ? (
             <div className="file-viewer-placeholder">Binary file — not shown as text</div>
           ) : isMarkdown && viewMode === 'preview' ? (
@@ -581,7 +620,7 @@ export function FileViewer({
         onClose={() => { setSearch({ status: SearchStatus.Closed }) }}
         inViewSections={[{ title: 'In this file', hits: inViewHits }]}
         activeIndex={s.activeIndex}
-        inViewPending={fileState.loading}
+        inViewPending={pending}
         onSelectInView={select}
         onNext={() => { step(1) }}
         onPrev={() => { step(-1) }}

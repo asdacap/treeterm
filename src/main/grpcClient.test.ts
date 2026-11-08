@@ -1269,6 +1269,29 @@ describe('GrpcDaemonClient', () => {
         expect(result.file.content).toBe(imageData.toString('base64'))
       }
     })
+
+    it('returns base64 content and language=model for 3D model files', async () => {
+      // A binary STL: NUL bytes that a UTF-8 decode would not survive intact.
+      const modelData = Buffer.from([0x00, 0xff, 0x80, 0x01])
+      mockClientInstance.readFile.mockImplementation(() => {
+        const handlers: Record<string, (...args: any[]) => void> = {}
+        const stream = {
+          on: (event: string, handler: (...args: any[]) => void) => { handlers[event] = handler; return stream },
+        }
+        setTimeout(() => {
+          handlers['data']!({ header: { path: '/ws/part.stl', size: 4, language: 'plaintext' } })
+          handlers['data']!({ data: { data: modelData } })
+          handlers['data']!({ end: { success: true } })
+        }, 0)
+        return stream
+      })
+      const result = await client.readFile('/ws', '/ws/part.stl', 1024 * 1024)
+      expect(result.success).toBe(true)
+      if (result.success) {
+        expect(result.file.language).toBe('model')
+        expect(result.file.content).toBe(modelData.toString('base64'))
+      }
+    })
   })
 
   describe('execStream', () => {

@@ -1608,6 +1608,35 @@ describe('createGitApi', () => {
       })
     })
 
+    it('diffs a working tree 3D model as text, decoding the base64 main sends it as', async () => {
+      const exec = createMockExec()
+      const fs = createMockFilesystem({
+        readFile: vi.fn().mockResolvedValue({ success: true, file: { content: btoa('v 0 0 1\n') } }),
+      })
+      autoComplete(exec, [{ stdout: 'v 0 0 0\n' }])
+
+      const git = createGitApi(exec, fs, 'conn-1')
+      const result = await git.getUncommittedFileContentsForDiff('/repo', 'mesh.obj', false)
+
+      expect(result).toEqual({
+        success: true,
+        contents: { kind: DiffContentKind.Text, originalContent: 'v 0 0 0\n', modifiedContent: 'v 0 0 1\n', language: 'plaintext' },
+      })
+    })
+
+    it('reports a binary 3D model in the working tree as binary', async () => {
+      const exec = createMockExec()
+      const fs = createMockFilesystem({
+        readFile: vi.fn().mockResolvedValue({ success: true, file: { content: btoa('stl\0\0') } }),
+      })
+      autoComplete(exec, [{ stdout: 'stl\0\x01' }])
+
+      const git = createGitApi(exec, fs, 'conn-1')
+      const result = await git.getUncommittedFileContentsForDiff('/repo', 'part.stl', false)
+
+      expect(result).toEqual({ success: true, contents: { kind: DiffContentKind.Binary } })
+    })
+
     it('reports binary content without returning it as text', async () => {
       const exec = createMockExec()
       const fs = createMockFilesystem()

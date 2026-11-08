@@ -25,7 +25,8 @@ import type {
 import { DEFAULT_EXEC_TIMEOUT_MS, ExecEventType, type IpcResult } from '../../shared/ipc-types'
 import { FileChangeStatus } from '../../shared/types'
 import { DiffContentKind, FileStatKind } from '../types'
-import { isBinaryContent, isImagePath } from '../../shared/fileContentKind'
+import { isBinaryContent, isImagePath, isRawBytesPath } from '../../shared/fileContentKind'
+import { decodeBase64Utf8 } from '../utils/base64'
 import { resolveHomedir } from './homedir'
 import { withTimeout } from './withTimeout'
 import { MAX_READ_FILE_BYTES } from './fileLimits'
@@ -367,10 +368,14 @@ export function createGitApi(exec: ExecApi, filesystem: FilesystemApi, connectio
   /** A side that does not exist (added/deleted file) reads as empty. */
   async function readDiffSide(repoPath: string, filePath: string, side: DiffSide, encoding: DiffSideEncoding): Promise<string> {
     if (side.kind === DiffSideKind.WorkingTree) {
-      // Main base64-encodes image files itself.
+      // Main base64-encodes raw-bytes files (images, 3D models) itself. Models still
+      // diff as text, so a text side decodes them back to what `git show` would print.
       try {
         const fileResult = await filesystem.readFile(repoPath, filePath, MAX_READ_FILE_BYTES)
-        return fileResult.success ? fileResult.file.content : ''
+        if (!fileResult.success) return ''
+        return encoding === DiffSideEncoding.Text && isRawBytesPath(filePath)
+          ? decodeBase64Utf8(fileResult.file.content)
+          : fileResult.file.content
       } catch {
         // File might not exist in working tree (deleted)
         return ''

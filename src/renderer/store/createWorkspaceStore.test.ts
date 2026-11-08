@@ -11,6 +11,7 @@ import { WorkspaceStatus } from '../../shared/types'
 import { makeWorkspace } from '../../shared/test-fixtures/workspace'
 import { expectNoDisposableLeaks } from '../../shared/test-fixtures/disposableLeaks'
 import { toDisposable } from '../../shared/lifecycle'
+import { MAX_READ_FILE_BYTES, MAX_READ_MODEL_BYTES } from '../lib/fileLimits'
 import { createTtyStore } from './createTtyStore'
 import type { TtyTerminalDeps } from './createTtyStore'
 
@@ -1063,6 +1064,15 @@ describe('createWorkspaceStore', () => {
       const store = createWorkspaceStore(makeWorkspace({ path: '/repo' }), deps)
       await store.getState().filesystemApi.readDirectory('/src')
       expect(deps.filesystem.readDirectory).toHaveBeenCalledWith('/repo', '/src')
+    })
+
+    it('readFile delegates with workspace.path and the budget for the file kind', async () => {
+      const deps = makeFsDeps()
+      const store = createWorkspaceStore(makeWorkspace({ path: '/repo' }), deps)
+      await store.getState().filesystemApi.readFile('/repo/main.ts')
+      await store.getState().filesystemApi.readFile('/repo/part.stl')
+      expect(deps.filesystem.readFile).toHaveBeenCalledWith('/repo', '/repo/main.ts', MAX_READ_FILE_BYTES)
+      expect(deps.filesystem.readFile).toHaveBeenCalledWith('/repo', '/repo/part.stl', MAX_READ_MODEL_BYTES)
     })
 
     it('writeFile delegates with workspace.path', async () => {

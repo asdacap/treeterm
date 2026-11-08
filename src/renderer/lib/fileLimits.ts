@@ -1,3 +1,5 @@
+import { isModelPath } from '../../shared/fileContentKind'
+
 /**
  * How many bytes the renderer is willing to pull down for a single file read.
  *
@@ -9,3 +11,11 @@
  * cap: a file can be too large to poll-watch yet still be readable, and vice versa.
  */
 export const MAX_READ_FILE_BYTES = 1024 * 1024 // 1MB
+
+/** 3D models (meshes for printing, scanned point clouds) routinely run to tens of megabytes. */
+export const MAX_READ_MODEL_BYTES = 64 * 1024 * 1024 // 64MB
+
+/** The transfer budget for opening `filePath` in a viewer. */
+export function maxReadBytesFor(filePath: string): number {
+  return isModelPath(filePath) ? MAX_READ_MODEL_BYTES : MAX_READ_FILE_BYTES
+}

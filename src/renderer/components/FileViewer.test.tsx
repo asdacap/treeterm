@@ -63,6 +63,16 @@ function MockEditor({
 
 vi.mock('@monaco-editor/react', () => ({ default: MockEditor }))
 
+// The real viewer needs WebGL; this stands in for the lazily loaded module.
+vi.mock('./ModelViewer', () => ({
+  default: ({ base64, format }: { base64: string; format: string }) => (
+    <div data-testid="model-viewer" data-base64={base64} data-format={format} />
+  ),
+}))
+
+const download = vi.hoisted(() => ({ downloadBytes: vi.fn() }))
+vi.mock('../utils/downloadFile', () => download)
+
 // The repo search is driven by hand: the test grabs the onEvent callback.
 const repoSearch = vi.hoisted(() => ({
   onEvent: null as ((event: unknown) => void) | null,
@@ -132,6 +142,66 @@ describe('FileViewer', () => {
 
     const img = await screen.findByAltText('logo.jpg')
     expect(img.getAttribute('src')).toBe('data:image/jpeg;base64,AAEC')
+  })
+
+  it('downloads an image as its exact bytes', async () => {
+    filesystem.readFile.mockResolvedValue({
+      success: true,
+      file: { path: '/repo/logo.jpg', content: 'AAEC', size: 3, language: 'image' },
+    })
+
+    render(<FileViewer workspace={makeWorkspace()} onOpenLocation={vi.fn()} filePath="assets/logo.jpg" />)
+    fireEvent.click(await screen.findByText('Download'))
+
+    expect(download.downloadBytes).toHaveBeenCalledWith('logo.jpg', new Uint8Array([0, 1, 2]), 'image/jpeg')
+  })
+
+  it('shows a 3D model in the model viewer, with download instead of open-in-tab', async () => {
+    filesystem.readFile.mockResolvedValue({
+      success: true,
+      file: { path: '/repo/parts/bracket.stl', content: 'AP8=', size: 2, language: 'model' },
+    })
+
+    render(<FileViewer workspace={makeWorkspace()} onOpenLocation={vi.fn()} filePath="parts/bracket.stl" />)
+
+    const viewer = await screen.findByTestId('model-viewer')
+    expect(viewer.getAttribute('data-base64')).toBe('AP8=')
+    expect(viewer.getAttribute('data-format')).toBe('stl')
+    expect(screen.getByText('stl', { selector: '.file-viewer-language' })).toBeTruthy()
+    expect(screen.queryByText('⇗ Open in Tab')).toBeNull()
+    expect(screen.queryByTestId('monaco-editor')).toBeNull()
+
+    fireEvent.click(screen.getByText('Download'))
+    expect(download.downloadBytes).toHaveBeenCalledWith('bracket.stl', new Uint8Array([0, 255]), 'model/stl')
+  })
+
+  it('never renders the previous file under a newly selected path', async () => {
+    filesystem.readFile.mockResolvedValueOnce({
+      success: true,
+      file: { path: '/repo/part.stl', content: 'AP8=', size: 2, language: 'model' },
+    })
+    const workspace = makeWorkspace()
+    const { rerender } = render(<FileViewer workspace={workspace} onOpenLocation={vi.fn()} filePath="part.stl" />)
+    await screen.findByTestId('model-viewer')
+    filesystem.readFile.mockReturnValueOnce(new Promise(() => {}))
+
+    rerender(<FileViewer workspace={workspace} onOpenLocation={vi.fn()} filePath="notes.txt" />)
+
+    // The model's bytes are not handed on as a notes.txt model (modelFormat would throw).
+    expect(screen.getByText('Loading...')).toBeTruthy()
+    expect(screen.queryByTestId('model-viewer')).toBeNull()
+  })
+
+  it('offers no download for a text file, whose bytes were decoded on read', async () => {
+    filesystem.readFile.mockResolvedValue({
+      success: true,
+      file: { path: '/repo/a.ts', content: 'const a = 1', size: 11, language: 'typescript' },
+    })
+
+    render(<FileViewer workspace={makeWorkspace()} onOpenLocation={vi.fn()} filePath="a.ts" />)
+
+    expect(await screen.findByText('⇗ Open in Tab')).toBeTruthy()
+    expect(screen.queryByText('Download')).toBeNull()
   })
 
   describe('scroll restoration', () => {

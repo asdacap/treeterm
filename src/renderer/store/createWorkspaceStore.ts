@@ -5,7 +5,7 @@ import type { Workspace, AppRef, AppRegistryApi, AppState, GitApi, FilesystemApi
 import type { SetActivityTabState } from './activityState'
 import type { WorktreeRegistryApi } from '../lib/worktreeRegistry'
 import { buildEntryFromWorkspace } from '../lib/worktreeRegistry'
-import { MAX_READ_FILE_BYTES } from '../lib/fileLimits'
+import { maxReadBytesFor } from '../lib/fileLimits'
 import { PtyAttachKind, PtyEventType } from '../../shared/ipc-types'
 import { getTabs, isAiHarnessState, isIdleDetectorDisabled } from '../types'
 import type { TerminalEngine } from '../terminal/engine'
@@ -741,7 +741,7 @@ export function createWorkspaceStore(
 
     filesystemApi: {
       readDirectory: (dirPath) => deps.filesystem.readDirectory(workspace.path, dirPath),
-      readFile: (filePath) => deps.filesystem.readFile(workspace.path, filePath, MAX_READ_FILE_BYTES),
+      readFile: (filePath) => deps.filesystem.readFile(workspace.path, filePath, maxReadBytesFor(filePath)),
       writeFile: (filePath, content, expectedSha256) => deps.filesystem.writeFile(workspace.path, filePath, content, expectedSha256),
       searchFiles: (query) => deps.filesystem.searchFiles(workspace.path, query),
     },

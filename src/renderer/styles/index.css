@@ -4227,6 +4227,84 @@ body,
   object-fit: contain;
 }
 
+.file-viewer-open-btn svg,
+.file-viewer-toggle-btn svg {
+  vertical-align: -2px;
+}
+
+.file-viewer-toggle-btn.active {
+  background: var(--bg-active);
+  border-color: var(--accent);
+}
+
+/* 3D Model Viewer */
+.model-viewer {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.model-viewer-canvas {
+  position: absolute;
+  inset: 0;
+}
+
+.model-viewer-canvas canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.model-viewer-toolbar {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  gap: 6px;
+}
+
+.model-viewer-stats,
+.model-viewer-hint {
+  position: absolute;
+  bottom: 8px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 11px;
+  pointer-events: none;
+}
+
+.model-viewer-stats {
+  left: 8px;
+}
+
+.model-viewer-warning {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  max-width: 50%;
+  padding: 4px 8px;
+  border: 1px solid #d29922;
+  border-radius: 4px;
+  background: var(--bg-secondary);
+  color: #d29922;
+  font-size: 11px;
+}
+
+.model-viewer-hint {
+  right: 8px;
+}
+
+.model-viewer .file-viewer-error {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 /* Markdown Preview */
 .markdown-preview {
   padding: 20px;

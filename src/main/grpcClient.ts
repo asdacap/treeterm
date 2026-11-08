@@ -45,7 +45,7 @@ import type {
   WorkspaceRef,
   Session
 } from '../shared/types'
-import { isImagePath } from '../shared/fileContentKind'
+import { isRawBytesPath, readLanguage } from '../shared/fileContentKind'
 
 // Alias for backward compat
 type CreateSessionConfig = {
@@ -740,14 +740,13 @@ export class GrpcDaemonClient {
           if (!chunk.end.success) {
             settle({ success: false as const, error: chunk.end.error ?? 'Unknown error' })
           } else if (fileMetadata) {
-            const isImage = isImagePath(fileMetadata.path)
             settle({
               success: true,
               file: {
                 path: fileMetadata.path,
-                content: isImage ? Buffer.concat(chunks).toString('base64') : Buffer.concat(chunks).toString('utf-8'),
+                content: Buffer.concat(chunks).toString(isRawBytesPath(fileMetadata.path) ? 'base64' : 'utf-8'),
                 size: fileMetadata.size,
-                language: isImage ? 'image' : fileMetadata.language
+                language: readLanguage(fileMetadata.path, fileMetadata.language)
               }
             })
           }
