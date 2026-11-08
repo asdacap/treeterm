@@ -8,7 +8,7 @@ function makeComment(overrides: Partial<ReviewComment> = {}): ReviewComment {
     filePath: 'src/foo.ts',
     lineNumber: 10,
     text: 'fix this',
-    commitHash: 'abc123',
+    commitHash: 'abc123', lineCommitHash: null,
     createdAt: Date.now(),
     isOutdated: false,
     addressed: false,

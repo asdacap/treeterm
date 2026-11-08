@@ -311,6 +311,7 @@ export function createWorkspaceStore(
   })
 
   const reviewComments = createReviewCommentStore({
+    getLineCommits: (filePath) => deps.git.getLineCommits(workspace.path, filePath),
     getMetadata: () => store.getState().metadata,
     updateMetadata: (key, value, reason) => { store.getState().updateMetadata(key, value, reason); },
   })
@@ -728,6 +729,7 @@ export function createWorkspaceStore(
       getFileContentsForDiff: (parentBranch, filePath) => deps.git.getFileContentsForDiff(workspace.path, parentBranch, filePath),
       getUncommittedFileContentsForDiff: (filePath, staged) => deps.git.getUncommittedFileContentsForDiff(workspace.path, filePath, staged),
       getHeadCommitHash: () => deps.git.getHeadCommitHash(workspace.path),
+      getLineCommits: (filePath) => deps.git.getLineCommits(workspace.path, filePath),
       getLog: (parentBranch, skip, limit) => deps.git.getLog(workspace.path, parentBranch, skip, limit),
       getCommitDiff: (commitHash) => deps.git.getCommitDiff(workspace.path, commitHash),
       getCommitFileDiff: (commitHash, filePath) => deps.git.getCommitFileDiff(workspace.path, commitHash, filePath),

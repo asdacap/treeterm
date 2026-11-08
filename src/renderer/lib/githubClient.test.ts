@@ -337,7 +337,7 @@ describe('createGitHubApi', () => {
   function makeComment(overrides: Partial<ReviewComment> = {}): ReviewComment {
     return {
       id: 'c1', filePath: 'src/a.ts', lineNumber: 10, text: 'fix this',
-      commitHash: null, createdAt: 1, isOutdated: false, addressed: false,
+      commitHash: null, lineCommitHash: null, createdAt: 1, isOutdated: false, addressed: false,
       side: 'modified', ...overrides,
     }
   }

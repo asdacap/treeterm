@@ -23,7 +23,7 @@ vi.mock('../hooks/useWorkspaceApis', () => ({
 function makeComment(overrides: Partial<ReviewComment> = {}): ReviewComment {
   return {
     id: 'c1', filePath: 'src/foo.ts', lineNumber: 3, text: 'comment',
-    commitHash: null, createdAt: 1, isOutdated: false, addressed: false,
+    commitHash: null, lineCommitHash: null, createdAt: 1, isOutdated: false, addressed: false,
     side: 'modified', ...overrides,
   }
 }

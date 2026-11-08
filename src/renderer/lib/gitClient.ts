@@ -85,6 +85,7 @@ export interface GitApi {
   getFileContentsForDiff: (worktreePath: string, parentBranch: string, filePath: string) => Promise<IpcResult<{ contents: FileDiffContents }>>
   getUncommittedFileContentsForDiff: (repoPath: string, filePath: string, staged: boolean) => Promise<IpcResult<{ contents: FileDiffContents }>>
   getHeadCommitHash: (repoPath: string) => Promise<IpcResult<{ hash: string }>>
+  getLineCommits: (repoPath: string, filePath: string) => Promise<IpcResult<{ lineCommits: string[] }>>
   getLog: (repoPath: string, parentBranch: string | null, skip: number, limit: number) => Promise<IpcResult<{ result: GitLogResult }>>
   getCommitDiff: (repoPath: string, commitHash: string) => Promise<IpcResult<{ files: DiffFile[] }>>
   getCommitFileDiff: (repoPath: string, commitHash: string, filePath: string) => Promise<IpcResult<{ contents: FileDiffContents }>>
@@ -276,6 +277,19 @@ function parseNameStatuses(stdout: string): Map<string, { status: FileChangeStat
     })
   }
   return statuses
+}
+
+const BLAME_HEADER = /^([0-9a-f]{40}) \d+ (\d+)/
+
+/** Map each final line number of `git blame --porcelain` output to its commit hash. */
+export function parseBlamePorcelain(stdout: string): string[] {
+  const lineCommits: string[] = []
+  for (const line of stdout.split('\n')) {
+    const [, hash, finalLine] = BLAME_HEADER.exec(line) ?? []
+    if (hash === undefined || finalLine === undefined) continue
+    lineCommits[Number(finalLine) - 1] = hash
+  }
+  return lineCommits
 }
 
 function interpretError(result: ExecResult): Error {
@@ -1027,6 +1041,23 @@ export function createGitApi(exec: ExecApi, filesystem: FilesystemApi, connectio
         const result = await git(repoPath, ['rev-parse', 'HEAD'])
         if (result.exitCode !== 0) throw interpretError(result)
         return { success: true, hash: result.stdout.trim() }
+      } catch (error) {
+        return { success: false, error: error instanceof Error ? error.message : String(error) }
+      }
+    },
+
+    // ----- getLineCommits -----
+    // `git blame` of the working-tree file: index i holds the hash of the commit that last
+    // changed line i+1 (all zeros while the line is uncommitted). A path git does not know
+    // has no lines rather than being an error.
+    async getLineCommits(repoPath: string, filePath: string): Promise<IpcResult<{ lineCommits: string[] }>> {
+      try {
+        const result = await git(repoPath, ['blame', '--porcelain', '--', filePath])
+        if (result.exitCode !== 0) {
+          if (result.stderr.toLowerCase().includes('no such path')) return { success: true, lineCommits: [] }
+          throw interpretError(result)
+        }
+        return { success: true, lineCommits: parseBlamePorcelain(result.stdout) }
       } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : String(error) }
       }

@@ -848,6 +848,38 @@ describe('createGitApi', () => {
     })
   })
 
+  describe('getLineCommits', () => {
+    const h1 = 'a'.repeat(40)
+    const h2 = 'b'.repeat(40)
+    const porcelain = [
+      `${h1} 1 1 2`, 'author A', 'summary s', 'filename f.ts', '\tline one',
+      `${h1} 2 2`, '\tline two',
+      `${h2} 7 3 1`, 'previous ' + h1 + ' f.ts', 'filename f.ts', '\tline three',
+    ].join('\n')
+
+    it('maps each line to the commit that last changed it', async () => {
+      const exec = createMockExec()
+      autoComplete(exec, [{ stdout: porcelain }])
+      const git = createGitApi(exec, createMockFilesystem(), 'conn-1')
+      expect(await git.getLineCommits('/repo', 'f.ts')).toEqual({ success: true, lineCommits: [h1, h1, h2] })
+    })
+
+    it('returns no lines for a path git does not know', async () => {
+      const exec = createMockExec()
+      autoComplete(exec, [{ stderr: "fatal: no such path 'f.ts' in HEAD", exitCode: 128 }])
+      const git = createGitApi(exec, createMockFilesystem(), 'conn-1')
+      expect(await git.getLineCommits('/repo', 'f.ts')).toEqual({ success: true, lineCommits: [] })
+    })
+
+    it('returns failure on other errors', async () => {
+      const exec = createMockExec()
+      autoComplete(exec, [{ stderr: 'not a git repository', exitCode: 128 }])
+      const git = createGitApi(exec, createMockFilesystem(), 'conn-1')
+      const result = await git.getLineCommits('/repo', 'f.ts')
+      expect(result.success).toBe(false)
+    })
+  })
+
   describe('getUncommittedChanges', () => {
     it('returns files with add/delete stats', async () => {
       const exec = createMockExec()

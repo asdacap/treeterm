@@ -630,12 +630,14 @@ describe('createWorkspaceStore', () => {
   })
 
   describe('review comments', () => {
-    it('addReviewComment adds a comment to metadata', () => {
+    it('addReviewComment adds a comment to metadata with the blamed line commit', async () => {
       const deps = makeHandleDeps()
+      const getLineCommits = vi.fn().mockResolvedValue({ success: true, lineCommits: Array<string>(10).fill('L') })
+      deps.git = { getLineCommits } as unknown as WorkspaceStoreDeps['git']
       const ws = makeWorkspace({ id: 'ws-1', metadata: {} })
       const store = createWorkspaceStore(ws, deps)
 
-      store.getState().reviewComments.getState().addReviewComment({
+      await store.getState().reviewComments.getState().addReviewComment({
         filePath: 'test.ts',
         lineNumber: 10,
         text: 'Fix this',
@@ -650,6 +652,7 @@ describe('createWorkspaceStore', () => {
       expect(comments).toHaveLength(1)
       expect(comments[0]!.text).toBe('Fix this')
       expect(comments[0]!.filePath).toBe('test.ts')
+      expect(getLineCommits).toHaveBeenCalledWith(ws.path, 'test.ts')
       expect(comments[0]!.id).toBeDefined()
       expect(comments[0]!.createdAt).toBeDefined()
     })
@@ -686,7 +689,7 @@ describe('createWorkspaceStore', () => {
       expect(comments[0]!.addressed).toBe(true)
     })
 
-    it('updateOutdatedReviewComments marks comments with different hash as outdated', () => {
+    it('updateOutdatedReviewComments marks comments with different hash as outdated', async () => {
       const deps = makeHandleDeps()
       const existingComments = JSON.stringify([
         { id: 'c1', filePath: 'a.ts', lineNumber: 1, text: 'A', commitHash: 'old', createdAt: 1, isOutdated: false, addressed: false, side: 'modified' },
@@ -695,7 +698,7 @@ describe('createWorkspaceStore', () => {
       const ws = makeWorkspace({ id: 'ws-1', metadata: { reviewComments: existingComments } })
       const store = createWorkspaceStore(ws, deps)
 
-      store.getState().reviewComments.getState().updateOutdatedReviewComments('new')
+      await store.getState().reviewComments.getState().updateOutdatedReviewComments('new')
 
       const wsState = store.getState().workspace
       const comments = JSON.parse(wsState.metadata.reviewComments!) as TestComment[]
@@ -703,7 +706,7 @@ describe('createWorkspaceStore', () => {
       expect(comments[1]!.isOutdated).toBe(false)
     })
 
-    it('updateOutdatedReviewComments never marks null-commitHash comments as outdated', () => {
+    it('updateOutdatedReviewComments never marks null-commitHash comments as outdated', async () => {
       const deps = makeHandleDeps()
       const existingComments = JSON.stringify([
         { id: 'c1', filePath: 'a.ts', lineNumber: 1, text: 'A', commitHash: null, createdAt: 1, isOutdated: false, addressed: false, side: 'modified' }
@@ -711,7 +714,7 @@ describe('createWorkspaceStore', () => {
       const ws = makeWorkspace({ id: 'ws-1', metadata: { reviewComments: existingComments } })
       const store = createWorkspaceStore(ws, deps)
 
-      store.getState().reviewComments.getState().updateOutdatedReviewComments('any-hash')
+      await store.getState().reviewComments.getState().updateOutdatedReviewComments('any-hash')
 
       const wsState = store.getState().workspace
       const comments = JSON.parse(wsState.metadata.reviewComments!) as TestComment[]

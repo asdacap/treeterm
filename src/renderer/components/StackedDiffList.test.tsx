@@ -220,8 +220,8 @@ describe('StackedDiffList', () => {
 
   it('filters comments per file', () => {
     const reviews: ReviewComment[] = [
-      { id: '1', filePath: 'src/a.ts', lineNumber: 1, text: 'comment-a', commitHash: null, createdAt: Date.now(), isOutdated: false, addressed: false, side: 'modified' },
-      { id: '2', filePath: 'src/b.ts', lineNumber: 2, text: 'comment-b', commitHash: null, createdAt: Date.now(), isOutdated: false, addressed: false, side: 'modified' },
+      { id: '1', filePath: 'src/a.ts', lineNumber: 1, text: 'comment-a', commitHash: null, lineCommitHash: null, createdAt: Date.now(), isOutdated: false, addressed: false, side: 'modified' },
+      { id: '2', filePath: 'src/b.ts', lineNumber: 2, text: 'comment-b', commitHash: null, lineCommitHash: null, createdAt: Date.now(), isOutdated: false, addressed: false, side: 'modified' },
     ]
     render(<StackedDiffList {...defaultProps} reviews={reviews} />)
     // Component renders but comments are passed to FileDiffSection internally

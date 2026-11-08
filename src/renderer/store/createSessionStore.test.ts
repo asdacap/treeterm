@@ -65,6 +65,7 @@ function makeDeps(overrides?: Partial<SessionDeps>): SessionDeps {
       getFileContentsForDiff: vi.fn().mockResolvedValue({ success: true }),
       getUncommittedFileContentsForDiff: vi.fn().mockResolvedValue({ success: true }),
       getHeadCommitHash: vi.fn().mockResolvedValue({ success: true, hash: 'abc123' }),
+      getLineCommits: vi.fn().mockResolvedValue({ success: true, lineCommits: [] }),
       getLog: vi.fn().mockResolvedValue({ success: true, result: { commits: [], hasMore: false } }),
       getCommitDiff: vi.fn().mockResolvedValue({ success: true, files: [] }),
       getCommitFileDiff: vi.fn().mockResolvedValue({ success: true, contents: null }),

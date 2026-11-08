@@ -5,7 +5,7 @@ import { createStore } from 'zustand/vanilla'
 import { ParentReviewCommentsButton } from './ParentReviewCommentsButton'
 
 function makeComment(id: string, addressed: boolean) {
-  return { id, filePath: 'a.ts', lineNumber: 1, text: 't', commitHash: null, createdAt: 1, isOutdated: false, addressed, side: 'modified' }
+  return { id, filePath: 'a.ts', lineNumber: 1, text: 't', commitHash: null, lineCommitHash: null, createdAt: 1, isOutdated: false, addressed, side: 'modified' }
 }
 
 function makeStores(opts: {

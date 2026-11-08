@@ -355,7 +355,7 @@ export default function ReviewBrowser({
       const hashResult = await git.getHeadCommitHash()
       if (hashResult.success && hashResult.hash) {
         setCurrentCommitHash(hashResult.hash)
-        updateOutdatedReviewComments(hashResult.hash)
+        await updateOutdatedReviewComments(hashResult.hash)
       }
     } catch (error) {
       console.error('Failed to load reviews:', error)
@@ -796,12 +796,14 @@ export default function ReviewBrowser({
     unmarkFilesViewed(filesToSet.map(f => f.path))
   }
 
-  const handleCommentSubmit = (text: string) => {
+  const handleCommentSubmit = (text: string) => { void submitComment(text) }
+
+  const submitComment = async (text: string) => {
     if (!commentInput || !currentCommitHash) return
     const filePath = commentInput.filePath
 
     try {
-      addReviewComment({
+      await addReviewComment({
         filePath,
         lineNumber: commentInput.lineNumber,
         text,

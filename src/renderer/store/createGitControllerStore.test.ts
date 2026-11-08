@@ -592,7 +592,7 @@ describe('createGitControllerStore', () => {
 
   describe('pushReviewCommentsToGitHub', () => {
     const comment = {
-      id: 'c1', filePath: 'a.ts', lineNumber: 1, text: 'fix', commitHash: null,
+      id: 'c1', filePath: 'a.ts', lineNumber: 1, text: 'fix', commitHash: null, lineCommitHash: null,
       createdAt: 1, isOutdated: false, addressed: false, side: 'modified' as const,
     }
 

@@ -396,6 +396,11 @@ export interface ReviewComment {
   lineNumber: number
   text: string
   commitHash: string | null
+  /** Commit that last changed the commented line when the comment was made (`git blame`;
+   *  all zeros if uncommitted). The comment goes outdated only when the line's blame moves.
+   *  Null when the line is not tracked: original-side comments, non-git files, or comments
+   *  saved before this field existed — those fall back to comparing `commitHash` with HEAD. */
+  lineCommitHash: string | null
   createdAt: number
   isOutdated: boolean
   addressed: boolean
@@ -463,6 +468,7 @@ export interface GitApi {
   getFileContentsForDiff: (worktreePath: string, parentBranch: string, filePath: string) => Promise<IpcResult<{ contents: FileDiffContents }>>
   getUncommittedFileContentsForDiff: (repoPath: string, filePath: string, staged: boolean) => Promise<IpcResult<{ contents: FileDiffContents }>>
   getHeadCommitHash: (repoPath: string) => Promise<IpcResult<{ hash: string }>>
+  getLineCommits: (repoPath: string, filePath: string) => Promise<IpcResult<{ lineCommits: string[] }>>
   getLog: (repoPath: string, parentBranch: string | null, skip: number, limit: number) => Promise<IpcResult<{ result: GitLogResult }>>
   getCommitDiff: (repoPath: string, commitHash: string) => Promise<IpcResult<{ files: DiffFile[] }>>
   getCommitFileDiff: (repoPath: string, commitHash: string, filePath: string) => Promise<IpcResult<{ contents: FileDiffContents }>>
@@ -598,6 +604,7 @@ export interface WorkspaceGitApi {
   getFileContentsForDiff: (parentBranch: string, filePath: string) => Promise<IpcResult<{ contents: FileDiffContents }>>
   getUncommittedFileContentsForDiff: (filePath: string, staged: boolean) => Promise<IpcResult<{ contents: FileDiffContents }>>
   getHeadCommitHash: () => Promise<IpcResult<{ hash: string }>>
+  getLineCommits: (filePath: string) => Promise<IpcResult<{ lineCommits: string[] }>>
   getLog: (parentBranch: string | null, skip: number, limit: number) => Promise<IpcResult<{ result: GitLogResult }>>
   getCommitDiff: (commitHash: string) => Promise<IpcResult<{ files: DiffFile[] }>>
   getCommitFileDiff: (commitHash: string, filePath: string) => Promise<IpcResult<{ contents: FileDiffContents }>>

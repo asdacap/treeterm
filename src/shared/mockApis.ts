@@ -13,7 +13,7 @@ export function createMockGitApi(): WorkspaceGitApi {
     getUncommittedFileDiff: vi.fn(), stageFile: vi.fn(), unstageFile: vi.fn(),
     stageAll: vi.fn(), unstageAll: vi.fn(), commitStaged: vi.fn(),
     getFileContentsForDiff: vi.fn(), getUncommittedFileContentsForDiff: vi.fn(),
-    getHeadCommitHash: vi.fn(), getLog: vi.fn(), getCommitDiff: vi.fn(),
+    getHeadCommitHash: vi.fn(), getLineCommits: vi.fn(), getLog: vi.fn(), getCommitDiff: vi.fn(),
     getCommitFileDiff: vi.fn(), fetch: vi.fn(), pull: vi.fn(), getBehindCount: vi.fn(),
     isAncestor: vi.fn(),
   }

@@ -107,7 +107,7 @@ function FilesystemBrowserContent({
       const hashResult = await git.getHeadCommitHash()
       if (hashResult.success && hashResult.hash) {
         setCurrentCommitHash(hashResult.hash)
-        updateOutdatedReviewComments(hashResult.hash)
+        await updateOutdatedReviewComments(hashResult.hash)
       }
     }
     void updateOutdated()
@@ -124,18 +124,25 @@ function FilesystemBrowserContent({
     setCommentInput({ lineNumber })
   }
 
-  const handleCommentSubmit = (text: string) => {
+  const handleCommentSubmit = (text: string) => { void submitComment(text) }
+
+  const submitComment = async (text: string) => {
     if (!commentInput || !state.selectedPath) return
-    addReviewComment({
-      filePath: state.selectedPath,
-      lineNumber: commentInput.lineNumber,
-      text,
-      commitHash: currentCommitHash,
-      isOutdated: false,
-      addressed: false,
-      side: 'modified'
-    })
-    setCommentInput(null)
+    try {
+      await addReviewComment({
+        filePath: state.selectedPath,
+        lineNumber: commentInput.lineNumber,
+        text,
+        commitHash: currentCommitHash,
+        isOutdated: false,
+        addressed: false,
+        side: 'modified'
+      })
+      setCommentInput(null)
+    } catch (error) {
+      console.error('Failed to add comment:', error)
+      alert(`Failed to add comment: ${error instanceof Error ? error.message : 'Unknown error'}`)
+    }
   }
 
   const handleCommentDelete = (commentId: string) => {
