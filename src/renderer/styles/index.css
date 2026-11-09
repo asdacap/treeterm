@@ -4194,6 +4194,22 @@ body,
   border-color: var(--accent);
 }
 
+/* Download in flight */
+.file-viewer-open-btn:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+/* A failed download, beside its retry button */
+.file-viewer-download-error {
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #f14c4c;
+  font-size: 11px;
+}
+
 /* "Open anyway" under the too-large error */
 .file-viewer-override-btn {
   margin-top: 12px;

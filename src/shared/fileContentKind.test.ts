@@ -9,7 +9,6 @@ import {
   isModelPath,
   isRawBytesPath,
   modelFormat,
-  modelMimeType,
   readLanguage,
 } from './fileContentKind'
 
@@ -42,11 +41,6 @@ describe('fileContentKind', () => {
     expect(modelFormat('print.3mf')).toBe(ModelFormat.ThreeMf)
     expect(modelFormat('scene.gltf')).toBe(ModelFormat.Gltf)
     expect(() => modelFormat('notes.txt')).toThrow('Not a 3D model file: notes.txt')
-  })
-
-  it('maps model formats to mime types', () => {
-    expect(modelMimeType(ModelFormat.Stl)).toBe('model/stl')
-    expect(modelMimeType(ModelFormat.Glb)).toBe('model/gltf-binary')
   })
 
   it('reads images and models as raw bytes, everything else as text', () => {

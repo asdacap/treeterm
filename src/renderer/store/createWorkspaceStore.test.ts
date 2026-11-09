@@ -1052,6 +1052,7 @@ describe('createWorkspaceStore', () => {
         filesystem: {
           readDirectory: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue([]),
           readFile: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue('content'),
+          readFileBytes: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue({ success: true, bytes: new Uint8Array() }),
           writeFile: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue(undefined),
           searchFiles: vi.fn<(...args: any[]) => Promise<any>>().mockResolvedValue([]),
         } as unknown as WorkspaceStoreDeps['filesystem'],
@@ -1070,6 +1071,13 @@ describe('createWorkspaceStore', () => {
       const store = createWorkspaceStore(makeWorkspace({ path: '/repo' }), deps)
       await store.getState().filesystemApi.readFile('/repo/main.ts', 1234)
       expect(deps.filesystem.readFile).toHaveBeenCalledWith('/repo', '/repo/main.ts', 1234)
+    })
+
+    it('readFileBytes delegates with workspace.path and the caller\'s budget', async () => {
+      const deps = makeFsDeps()
+      const store = createWorkspaceStore(makeWorkspace({ path: '/repo' }), deps)
+      await store.getState().filesystemApi.readFileBytes('/repo/app.bin', 1234)
+      expect(deps.filesystem.readFileBytes).toHaveBeenCalledWith('/repo', '/repo/app.bin', 1234)
     })
 
     it('writeFile delegates with workspace.path', async () => {

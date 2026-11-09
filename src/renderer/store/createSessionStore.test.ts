@@ -78,6 +78,7 @@ function makeDeps(overrides?: Partial<SessionDeps>): SessionDeps {
     filesystem: {
       readDirectory: vi.fn().mockResolvedValue({ success: true }),
       readFile: vi.fn().mockResolvedValue({ success: true }),
+      readFileBytes: vi.fn(),
       writeFile: vi.fn().mockResolvedValue({ success: true }),
       deleteFile: vi.fn().mockResolvedValue({ success: true }),
       searchFiles: vi.fn().mockResolvedValue({ success: true }),

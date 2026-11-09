@@ -496,6 +496,7 @@ function makeReviewWorkspace(
       },
     })),
     readFile: vi.fn(),
+    readFileBytes: vi.fn(),
     writeFile: vi.fn(),
     searchFiles: vi.fn(),
   }

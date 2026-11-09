@@ -28,15 +28,6 @@ const MODEL_FORMATS: Record<string, ModelFormat> = {
   gltf: ModelFormat.Gltf,
 }
 
-const MODEL_MIME_TYPES: Record<ModelFormat, string> = {
-  [ModelFormat.Stl]: 'model/stl',
-  [ModelFormat.Obj]: 'model/obj',
-  [ModelFormat.Ply]: 'application/ply',
-  [ModelFormat.ThreeMf]: 'model/3mf',
-  [ModelFormat.Glb]: 'model/gltf-binary',
-  [ModelFormat.Gltf]: 'model/gltf+json',
-}
-
 /** `FileContents.language` of a file read as an image (its content is base64). */
 export const IMAGE_LANGUAGE = 'image'
 /** `FileContents.language` of a file read as a 3D model (its content is base64). */
@@ -66,10 +57,6 @@ export function modelFormat(filePath: string): ModelFormat {
   const format = MODEL_FORMATS[extensionOf(filePath)]
   if (format === undefined) throw new Error(`Not a 3D model file: ${filePath}`)
   return format
-}
-
-export function modelMimeType(format: ModelFormat): string {
-  return MODEL_MIME_TYPES[format]
 }
 
 /**

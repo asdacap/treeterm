@@ -27,7 +27,7 @@ export function createMockGitHubApi(): WorkspaceGitHubApi {
 
 export function createMockFilesystemApi(): WorkspaceFilesystemApi {
   return {
-    readDirectory: vi.fn(), readFile: vi.fn(), writeFile: vi.fn(), searchFiles: vi.fn(),
+    readDirectory: vi.fn(), readFile: vi.fn(), readFileBytes: vi.fn(), writeFile: vi.fn(), searchFiles: vi.fn(),
   }
 }
 

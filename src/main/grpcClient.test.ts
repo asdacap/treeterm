@@ -1008,10 +1008,64 @@ describe('GrpcDaemonClient', () => {
       expect(result.success).toBe(false)
     })
 
+    function mockReadStream(chunks: unknown[]): { cancel: ReturnType<typeof vi.fn> } {
+      const cancel = vi.fn<() => void>()
+      mockClientInstance.readFile.mockImplementation(() => {
+        const stream = {
+          cancel,
+          on: (event: string, handler: (data: unknown) => void) => {
+            if (event === 'data') {
+              setTimeout(() => { for (const chunk of chunks) handler(chunk) }, 0)
+            }
+            return stream
+          }
+        }
+        return stream
+      })
+      return { cancel }
+    }
+
+    it('readFileBytes resolves with the exact bytes, even ones no UTF-8 decode would keep', async () => {
+      // A NUL, a lone continuation byte and an invalid lead byte, split across chunks.
+      mockReadStream([
+        { header: { path: '/ws/app.bin', size: 4, language: 'plaintext' } },
+        { data: { data: Buffer.from([0x00, 0x80]) } },
+        { data: { data: Buffer.from([0xff, 0x41]) } },
+        { end: { success: true } }
+      ])
+
+      const result = await client.readFileBytes('/ws', '/ws/app.bin', 1024 * 1024)
+
+      expect(result).toEqual({ success: true, bytes: new Uint8Array([0x00, 0x80, 0xff, 0x41]) })
+      if (!result.success) return
+      // Its own buffer, sized to the file, rather than a view into Node's shared pool.
+      expect(result.bytes.byteOffset).toBe(0)
+      expect(result.bytes.buffer.byteLength).toBe(4)
+    })
+
+    it('readFileBytes keeps the budget: an oversize file fails on the header, cancelling the stream', async () => {
+      const { cancel } = mockReadStream([
+        { header: { path: '/ws/big.bin', size: 5_000_000, language: 'plaintext' } },
+        { data: { data: Buffer.from('never used') } },
+      ])
+
+      const result = await client.readFileBytes('/ws', '/ws/big.bin', 1024 * 1024)
+
+      expect(result).toEqual({ success: false, error: 'File too large to open (4.8MB, limit 1.0MB)', tooLarge: true, size: 5_000_000 })
+      expect(cancel).toHaveBeenCalled()
+    })
+
+    it('readFileBytes passes on a failed read', async () => {
+      mockReadStream([{ end: { success: false, error: 'not found' } }])
+      const result = await client.readFileBytes('/ws', '/ws/missing.bin', 1024 * 1024)
+      expect(result).toEqual({ success: false, error: 'not found' })
+    })
+
     it('filesystem methods throw when not connected', async () => {
       client.disconnect()
       await expect(client.readDirectory('/ws', '.')).rejects.toThrow('Not connected')
       await expect(client.readFile('/ws', '/f', 1024 * 1024)).rejects.toThrow('Not connected')
+      await expect(client.readFileBytes('/ws', '/f', 1024 * 1024)).rejects.toThrow('Not connected')
       await expect(client.writeFile('/ws', '/f', 'c')).rejects.toThrow('Not connected')
       await expect(client.searchFiles('/ws', 'q')).rejects.toThrow('Not connected')
     })

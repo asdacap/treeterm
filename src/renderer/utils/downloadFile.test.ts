@@ -27,13 +27,13 @@ describe('downloadBytes', () => {
       clicked.push(this)
     })
 
-    downloadBytes('part.stl', new Uint8Array([0, 1, 255]), 'model/stl')
+    downloadBytes('part.stl', new Uint8Array([0, 1, 255]))
 
     expect(clicked).toHaveLength(1)
     expect(clicked[0]!.download).toBe('part.stl')
     expect(clicked[0]!.href).toBe('blob:treeterm/1')
     const blob = createObjectURL.mock.calls[0]![0]
-    expect(blob.type).toBe('model/stl')
+    expect(blob.type).toBe('application/octet-stream')
     expect(Array.from(new Uint8Array(await readBlob(blob)))).toEqual([0, 1, 255])
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:treeterm/1')
   })

@@ -50,6 +50,14 @@ describe('IpcClient', () => {
       expect(result).toEqual({ success: true, content: 'hello' })
     })
 
+    it('fsReadFileBytes calls ipcRenderer.invoke with correct channel and args', async () => {
+      const bytes = new Uint8Array([0, 255])
+      mockInvoke.mockResolvedValue({ success: true, bytes })
+      const result = await client.fsReadFileBytes('local', '/ws', '/app.bin', 1024 * 1024)
+      expect(mockInvoke).toHaveBeenCalledWith('fs:readFileBytes', 'local', '/ws', '/app.bin', 1024 * 1024)
+      expect(result).toEqual({ success: true, bytes })
+    })
+
     it('settingsLoad calls ipcRenderer.invoke with correct channel', async () => {
       mockInvoke.mockResolvedValue({ theme: 'dark' })
       const result = await client.settingsLoad()

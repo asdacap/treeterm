@@ -565,6 +565,10 @@ server.onFsReadFile((connectionId, workspacePath, filePath, maxBytes) => {
   return getClientForConnection(connectionId).readFile(workspacePath, filePath, maxBytes)
 })
 
+server.onFsReadFileBytes((connectionId, workspacePath, filePath, maxBytes) => {
+  return getClientForConnection(connectionId).readFileBytes(workspacePath, filePath, maxBytes)
+})
+
 server.onFsWriteFile((connectionId, workspacePath, filePath, content, expectedSha256) => {
   return getClientForConnection(connectionId).writeFile(workspacePath, filePath, content, expectedSha256)
 })

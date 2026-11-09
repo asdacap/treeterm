@@ -13,10 +13,8 @@ import { monacoNavigationBridge } from '../monaco-config'
 import { searchDefinition } from '../utils/definitionSearch'
 import { detectMonacoLanguage } from '../utils/detectMonacoLanguage'
 import { MarkdownPreview } from './MarkdownPreview'
-import { Download } from 'lucide-react'
-import { IMAGE_LANGUAGE, MODEL_LANGUAGE, imageMimeType, isBinaryContent, modelFormat, modelMimeType } from '../../shared/fileContentKind'
-import { base64ToBytes } from '../utils/base64'
-import { downloadBytes } from '../utils/downloadFile'
+import { IMAGE_LANGUAGE, MODEL_LANGUAGE, imageMimeType, isBinaryContent, modelFormat } from '../../shared/fileContentKind'
+import { FileDownloadButton } from './FileDownloadButton'
 import { CommentInput } from './CommentInput'
 import { CommentDisplay } from './CommentDisplay'
 import { SearchPanel, type InViewHit } from './SearchPanel'
@@ -83,6 +81,11 @@ function renderFileError(error: FileError, onOpenAnyway: (bytes: number) => void
     ),
   }
   return views[error.kind]()
+}
+
+/** The transfer budget for reading `filePath`: the default for its kind, or more if the user opened it anyway. */
+function readBudget(filePath: string, raisedBudget: number): number {
+  return Math.max(maxReadBytesFor(filePath), raisedBudget)
 }
 
 interface FileState {
@@ -176,7 +179,7 @@ export function FileViewer({
     // A superseded read must not land: an oversize file opened anyway can still be streaming
     // after the user has moved on, and its result would replace the next file's.
     let cancelled = false
-    const maxBytes = Math.max(maxReadBytesFor(filePath), raisedBudget)
+    const maxBytes = readBudget(filePath, raisedBudget)
 
     const loadFile = async () => {
       setFileState((prev) => ({ ...prev, loading: true, error: null }))
@@ -517,11 +520,6 @@ export function FileViewer({
 
     const fileName = filePath.split('/').pop() || filePath
     const isMarkdown = fileState.language === 'markdown'
-    // Only raw-bytes reads hold the file's exact bytes; text was decoded on the way in.
-    const handleDownload = (): void => {
-      const mimeType = isImage ? imageMimeType(filePath) : modelMimeType(modelFormat(filePath))
-      downloadBytes(fileName, base64ToBytes(fileState.content), mimeType)
-    }
 
     return (
       <div className="file-viewer">
@@ -537,15 +535,11 @@ export function FileViewer({
                 {viewMode === 'preview' ? '</> Source' : 'Preview'}
               </button>
             )}
-            {(isImage || isModel) && (
-              <button
-                className="file-viewer-open-btn"
-                onClick={handleDownload}
-                title="Save a copy of this file to your computer"
-              >
-                <Download size={11} /> Download
-              </button>
-            )}
+            <FileDownloadButton
+              filesystem={filesystem}
+              filePath={filePath}
+              maxBytes={readBudget(filePath, raisedBudget)}
+            />
             {!isImage && !isModel && !isBinary && (
               <button
                 className="file-viewer-open-btn"

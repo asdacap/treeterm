@@ -224,6 +224,7 @@ function createMockFilesystem(files: Record<string, string>): FilesystemApi {
       }
       return Promise.resolve({ success: false, error: 'File not found' })
     }),
+    readFileBytes: vi.fn(),
     writeFile: vi.fn(),
     searchFiles: vi.fn(),
     deleteFile: vi.fn(),
@@ -274,6 +275,7 @@ describe('createRunActionsApi', () => {
     const filesystem: FilesystemApi = {
       readDirectory: vi.fn(),
       readFile: vi.fn().mockRejectedValue(new Error('read error')),
+      readFileBytes: vi.fn(),
       writeFile: vi.fn(),
       searchFiles: vi.fn(),
     deleteFile: vi.fn(),

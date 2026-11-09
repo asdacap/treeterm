@@ -15,10 +15,16 @@ export type IpcResult<T = Record<never, never>> = IpcOk<T> | IpcErr
 export type FsWriteFileResult = IpcResult | { success: false; error: string; conflict: true }
 
 /**
- * ReadFile result. `tooLarge: true` marks a file over the caller's transfer budget — nothing
- * was transferred. `size` is the file's size, so the caller can re-read with a budget that admits it.
+ * A read over the caller's transfer budget — nothing was transferred. `size` is the file's
+ * size, so the caller can re-read with a budget that admits it.
  */
-export type FsReadFileResult = IpcResult<{ file: FileContents }> | { success: false; error: string; tooLarge: true; size: number }
+export type FsReadFileTooLarge = { success: false; error: string; tooLarge: true; size: number }
+
+/** ReadFile result: the content decoded for display (text as UTF-8, images and models as base64). */
+export type FsReadFileResult = IpcResult<{ file: FileContents }> | FsReadFileTooLarge
+
+/** ReadFileBytes result: the file's exact bytes, undecoded — what a saved copy needs. */
+export type FsReadFileBytesResult = IpcResult<{ bytes: Uint8Array<ArrayBuffer> }> | FsReadFileTooLarge
 
 import type {
   SandboxConfig,
@@ -137,6 +143,10 @@ export interface IpcRequests {
   fsReadFile: {
     params: [connectionId: string, workspacePath: string, filePath: string, maxBytes: number]
     result: FsReadFileResult
+  }
+  fsReadFileBytes: {
+    params: [connectionId: string, workspacePath: string, filePath: string, maxBytes: number]
+    result: FsReadFileBytesResult
   }
   fsWriteFile: {
     params: [connectionId: string, workspacePath: string, filePath: string, content: string, expectedSha256?: string]

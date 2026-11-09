@@ -75,6 +75,18 @@ describe('IpcServer', () => {
       expect(result).toEqual({ success: true })
     })
 
+    it('onFsReadFileBytes registers on fs:readFileBytes and forwards args and result', async () => {
+      const bytes = new Uint8Array([0, 255])
+      const handler = vi.fn<(...args: any[]) => Promise<unknown>>().mockResolvedValue({ success: true, bytes })
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
+      server.onFsReadFileBytes(handler as any)
+      expect(mockHandle).toHaveBeenCalledWith('fs:readFileBytes', expect.any(Function))
+      const wrapper = mockHandle.mock.calls[0]![1] as (...args: any[]) => Promise<unknown>
+      const result = await wrapper({}, 'local', '/ws', '/app.bin', 1024)
+      expect(handler).toHaveBeenCalledWith('local', '/ws', '/app.bin', 1024)
+      expect(result).toEqual({ success: true, bytes })
+    })
+
     it('onAppGetWindowUuid registers handler on app:getWindowUuid channel', () => {
       const handler = vi.fn<(...args: any[]) => any>()
       server.onAppGetWindowUuid(handler)

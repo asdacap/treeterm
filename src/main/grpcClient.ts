@@ -35,8 +35,11 @@ import {
   FileWatchEventType,
   type PtyEvent,
   type IpcResult,
+  type IpcErr,
   type FsWriteFileResult,
   type FsReadFileResult,
+  type FsReadFileBytesResult,
+  type FsReadFileTooLarge,
   type FileWatchEvent
 } from '../shared/ipc-types'
 import { formatMegabytes } from '../shared/formatBytes'
@@ -62,6 +65,12 @@ type CreateSessionConfig = {
 }
 
 type DisconnectListener = () => void
+
+/** A ReadFile stream collected whole: the daemon's header fields plus the raw bytes. */
+type FileBufferResult =
+  | { success: true; path: string; size: number; language: string; bytes: Buffer }
+  | IpcErr
+  | FsReadFileTooLarge
 
 const PROTO_ATTACH_KIND: Record<PtyAttachKind, ProtoPtyAttachKind> = {
   [PtyAttachKind.Background]: ProtoPtyAttachKind.PTY_ATTACH_KIND_BACKGROUND,
@@ -701,10 +710,33 @@ export class GrpcDaemonClient {
     })
   }
 
+  /** The file decoded for display: base64 for raw-bytes paths (images, models), UTF-8 text otherwise. */
+  async readFile(workspacePath: string, filePath: string, maxBytes: number): Promise<FsReadFileResult> {
+    const read = await this.readFileBuffer(workspacePath, filePath, maxBytes)
+    if (!read.success) return read
+    return {
+      success: true,
+      file: {
+        path: read.path,
+        content: read.bytes.toString(isRawBytesPath(read.path) ? 'base64' : 'utf-8'),
+        size: read.size,
+        language: readLanguage(read.path, read.language)
+      }
+    }
+  }
+
+  /** The file's exact bytes, whatever its kind. */
+  async readFileBytes(workspacePath: string, filePath: string, maxBytes: number): Promise<FsReadFileBytesResult> {
+    const read = await this.readFileBuffer(workspacePath, filePath, maxBytes)
+    if (!read.success) return read
+    // A copy: its own exactly-sized ArrayBuffer, not a view into Node's shared pool.
+    return { success: true, bytes: new Uint8Array(read.bytes) }
+  }
+
   /** `maxBytes` is the caller's transfer budget. The daemon streams without a size
    *  ceiling, so the header — which always precedes the data chunks — is where an
    *  oversize file is rejected, before any content crosses the wire. */
-  async readFile(workspacePath: string, filePath: string, maxBytes: number): Promise<FsReadFileResult> {
+  private async readFileBuffer(workspacePath: string, filePath: string, maxBytes: number): Promise<FileBufferResult> {
     if (!this.client) throw new Error('Not connected to daemon')
     const client = this.client
 
@@ -714,7 +746,7 @@ export class GrpcDaemonClient {
       let fileMetadata: { path: string; size: number; language: string } | null = null
       // stream.cancel() surfaces as a CANCELLED 'error'; we have already settled.
       let settled = false
-      const settle = (result: FsReadFileResult): void => {
+      const settle = (result: FileBufferResult): void => {
         settled = true
         resolve(result)
       }
@@ -737,15 +769,7 @@ export class GrpcDaemonClient {
           if (!chunk.end.success) {
             settle({ success: false as const, error: chunk.end.error ?? 'Unknown error' })
           } else if (fileMetadata) {
-            settle({
-              success: true,
-              file: {
-                path: fileMetadata.path,
-                content: Buffer.concat(chunks).toString(isRawBytesPath(fileMetadata.path) ? 'base64' : 'utf-8'),
-                size: fileMetadata.size,
-                language: readLanguage(fileMetadata.path, fileMetadata.language)
-              }
-            })
+            settle({ success: true, ...fileMetadata, bytes: Buffer.concat(chunks) })
           }
         }
       })

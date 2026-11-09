@@ -7,9 +7,9 @@ import type { WorkspaceFilesystemApi, WorkspaceStore } from '../types'
 import { FileViewer } from './FileViewer'
 import { REPO_SEARCH_DEBOUNCE_MS } from './SearchPanel'
 import { RepoSearchEventType, RepoSearchTool } from '../utils/repoSearch'
-import { MAX_READ_FILE_BYTES } from '../lib/fileLimits'
+import { MAX_READ_FILE_BYTES, MAX_READ_MODEL_BYTES } from '../lib/fileLimits'
 
-const filesystem = vi.hoisted(() => ({ readFile: vi.fn() }))
+const filesystem = vi.hoisted(() => ({ readFile: vi.fn(), readFileBytes: vi.fn() }))
 
 // A stand-in for the Monaco editor instance, recording the scroll calls the component makes.
 const fakeEditor = vi.hoisted(() => ({
@@ -150,11 +150,13 @@ describe('FileViewer', () => {
       success: true,
       file: { path: '/repo/logo.jpg', content: 'AAEC', size: 3, language: 'image' },
     })
+    filesystem.readFileBytes.mockResolvedValue({ success: true, bytes: new Uint8Array([0, 1, 2]) })
 
     render(<FileViewer workspace={makeWorkspace()} onOpenLocation={vi.fn()} filePath="assets/logo.jpg" />)
     fireEvent.click(await screen.findByText('Download'))
 
-    expect(download.downloadBytes).toHaveBeenCalledWith('logo.jpg', new Uint8Array([0, 1, 2]), 'image/jpeg')
+    await waitFor(() => { expect(download.downloadBytes).toHaveBeenCalledWith('logo.jpg', new Uint8Array([0, 1, 2])) })
+    expect(filesystem.readFileBytes).toHaveBeenCalledWith('assets/logo.jpg', MAX_READ_FILE_BYTES)
   })
 
   it('shows a 3D model in the model viewer, with download instead of open-in-tab', async () => {
@@ -172,8 +174,10 @@ describe('FileViewer', () => {
     expect(screen.queryByText('⇗ Open in Tab')).toBeNull()
     expect(screen.queryByTestId('monaco-editor')).toBeNull()
 
+    filesystem.readFileBytes.mockResolvedValue({ success: true, bytes: new Uint8Array([0, 255]) })
     fireEvent.click(screen.getByText('Download'))
-    expect(download.downloadBytes).toHaveBeenCalledWith('bracket.stl', new Uint8Array([0, 255]), 'model/stl')
+    await waitFor(() => { expect(download.downloadBytes).toHaveBeenCalledWith('bracket.stl', new Uint8Array([0, 255])) })
+    expect(filesystem.readFileBytes).toHaveBeenCalledWith('parts/bracket.stl', MAX_READ_MODEL_BYTES)
   })
 
   it('never renders the previous file under a newly selected path', async () => {
@@ -226,6 +230,11 @@ describe('FileViewer', () => {
 
       expect(await screen.findByTestId('monaco-editor')).toBeTruthy()
       expect(filesystem.readFile).toHaveBeenLastCalledWith('big.log', OVERSIZE)
+
+      // Downloading it reads under the same raised budget.
+      filesystem.readFileBytes.mockResolvedValue({ success: true, bytes: new Uint8Array([1]) })
+      fireEvent.click(screen.getByText('Download'))
+      await waitFor(() => { expect(filesystem.readFileBytes).toHaveBeenCalledWith('big.log', OVERSIZE) })
     })
 
     it('drops the raised budget when another file is selected', async () => {
@@ -298,16 +307,34 @@ describe('FileViewer', () => {
     })
   })
 
-  it('offers no download for a text file, whose bytes were decoded on read', async () => {
+  it('downloads a text file alongside open-in-tab', async () => {
     filesystem.readFile.mockResolvedValue({
       success: true,
-      file: { path: '/repo/a.ts', content: 'const a = 1', size: 11, language: 'typescript' },
+      file: { path: '/repo/src/a.ts', content: 'const a = 1', size: 11, language: 'typescript' },
     })
+    filesystem.readFileBytes.mockResolvedValue({ success: true, bytes: new Uint8Array([0x63]) })
 
-    render(<FileViewer workspace={makeWorkspace()} onOpenLocation={vi.fn()} filePath="a.ts" />)
+    render(<FileViewer workspace={makeWorkspace()} onOpenLocation={vi.fn()} filePath="src/a.ts" />)
 
     expect(await screen.findByText('⇗ Open in Tab')).toBeTruthy()
-    expect(screen.queryByText('Download')).toBeNull()
+    fireEvent.click(screen.getByText('Download'))
+    await waitFor(() => { expect(download.downloadBytes).toHaveBeenCalledWith('a.ts', new Uint8Array([0x63])) })
+    expect(filesystem.readFileBytes).toHaveBeenCalledWith('src/a.ts', MAX_READ_FILE_BYTES)
+  })
+
+  it('downloads a binary file as its raw bytes, not the text it was decoded to', async () => {
+    filesystem.readFile.mockResolvedValue({
+      success: true,
+      file: { path: '/repo/app.bin', content: 'ELF\0\uFFFD', size: 5, language: 'plaintext' },
+    })
+    const raw = new Uint8Array([0x45, 0x4c, 0x46, 0x00, 0xff])
+    filesystem.readFileBytes.mockResolvedValue({ success: true, bytes: raw })
+
+    render(<FileViewer workspace={makeWorkspace()} onOpenLocation={vi.fn()} filePath="app.bin" />)
+
+    expect(await screen.findByText('Binary file — not shown as text')).toBeTruthy()
+    fireEvent.click(screen.getByText('Download'))
+    await waitFor(() => { expect(download.downloadBytes).toHaveBeenCalledWith('app.bin', raw) })
   })
 
   describe('scroll restoration', () => {

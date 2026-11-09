@@ -16,6 +16,7 @@ const CHANNELS = {
   settingsSave: 'settings:save',
   fsReadDirectory: 'fs:readDirectory',
   fsReadFile: 'fs:readFile',
+  fsReadFileBytes: 'fs:readFileBytes',
   fsWriteFile: 'fs:writeFile',
   fsDeleteFile: 'fs:deleteFile',
   fsSearchFiles: 'fs:searchFiles',
@@ -130,6 +131,10 @@ export class IpcClient {
 
   fsReadFile(...args: IpcRequests['fsReadFile']['params']): Promise<IpcRequests['fsReadFile']['result']> {
     return ipcRenderer.invoke(CHANNELS.fsReadFile, ...args)
+  }
+
+  fsReadFileBytes(...args: IpcRequests['fsReadFileBytes']['params']): Promise<IpcRequests['fsReadFileBytes']['result']> {
+    return ipcRenderer.invoke(CHANNELS.fsReadFileBytes, ...args)
   }
 
   fsWriteFile(...args: IpcRequests['fsWriteFile']['params']): Promise<IpcRequests['fsWriteFile']['result']> {
