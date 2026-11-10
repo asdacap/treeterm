@@ -83,7 +83,7 @@ export default function WorkspaceSettings({ workspace, applications }: Workspace
           ))}
         </select>
         <span className="settings-hint">
-          The default application to open when creating child workspaces. If not set, inherits from parent or uses the global default.
+          The default application to open when creating child workspaces. If not set, inherits from the nearest ancestor that sets one, or uses the global default.
         </span>
       </div>
 

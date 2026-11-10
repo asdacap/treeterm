@@ -20,6 +20,7 @@ import type { SetActivityTabState } from './activityState'
 import type { WorkspaceTrafficRecorder } from './createTrafficMeterStore'
 import type { SessionLock } from '../../shared/types'
 import { defaultWorktreeSettings, parseWorkspaceFile, toStoredWorkspaceFile } from '../../shared/workspaceFile'
+import { getInheritedDefaultApplicationIds } from '../../shared/workspaceSettings'
 import type { WorktreeRegistryApi } from '../lib/worktreeRegistry'
 
 export enum WorkspaceEntryStatus {
@@ -170,15 +171,16 @@ function getNameFromPath(path: string): string {
 
 function getDefaultAppForWorktree(
   deps: SessionDeps,
-  settings?: WorktreeSettings,
-  parentSettings?: WorktreeSettings
+  settings: WorktreeSettings | undefined,
+  parent: Workspace | undefined,
+  lookupWorkspace: (id: string) => Workspace | undefined
 ): Application | null | undefined {
-  if (settings?.defaultApplicationId) {
-    const app = deps.appRegistry.get(settings.defaultApplicationId)
-    if (app) return app
-  }
-  if (parentSettings?.defaultApplicationId) {
-    const app = deps.appRegistry.get(parentSettings.defaultApplicationId)
+  const candidateIds = [
+    ...(settings?.defaultApplicationId ? [settings.defaultApplicationId] : []),
+    ...(parent ? getInheritedDefaultApplicationIds(parent, lookupWorkspace) : []),
+  ]
+  for (const candidateId of candidateIds) {
+    const app = deps.appRegistry.get(candidateId)
     if (app) return app
   }
   const globalSettings = deps.getSettings()
@@ -906,6 +908,11 @@ export function createSessionStore(
     enqueueContentSync(id)
   }
 
+  function lookupWorkspace(id: string): Workspace | undefined {
+    const entry = store.getState().workspaces.get(id)
+    return entry && (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError) ? entry.data : undefined
+  }
+
   function makeHandleDeps(workspaceId: string): WorkspaceStoreDeps {
     return {
       appRegistry: deps.appRegistry,
@@ -930,10 +937,7 @@ export function createSessionStore(
       closeAndCleanWorkspace: (id) => store.getState().closeAndCleanWorkspace(id),
       quickForkWorkspace: (id) => store.getState().quickForkWorkspace(id),
       refreshGitInfo: (id) => store.getState().refreshGitInfo(id),
-      lookupWorkspace: (id) => {
-        const entry = store.getState().workspaces.get(id)
-        return entry && (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError) ? entry.data : undefined
-      },
+      lookupWorkspace,
       lookupWorkspaceStore: (id) => {
         const entry = store.getState().workspaces.get(id)
         return entry && (entry.status === WorkspaceEntryStatus.Loaded || entry.status === WorkspaceEntryStatus.OperationError) ? entry.store : undefined
@@ -1022,11 +1026,7 @@ export function createSessionStore(
         // Build workspace data and store only on success
         const appStates: Record<string, AppState> = {}
         let activeTabId: string | undefined = undefined
-        const currentParentEntry = store.getState().workspaces.get(parentId)
-        const parentSettings = currentParentEntry && (currentParentEntry.status === WorkspaceEntryStatus.Loaded || currentParentEntry.status === WorkspaceEntryStatus.OperationError)
-          ? currentParentEntry.data.settings
-          : undefined
-        const defaultApp = getDefaultAppForWorktree(deps, options.settings, parentSettings)
+        const defaultApp = getDefaultAppForWorktree(deps, options.settings, lookupWorkspace(parentId), lookupWorkspace)
         if (defaultApp) {
           const tabId = generateTabId()
           appStates[tabId] = {
@@ -1101,8 +1101,7 @@ export function createSessionStore(
     const appStates: Record<string, AppState> = {}
     let activeTabId: string | undefined = undefined
 
-    const parentSettings = parentEntry && parentEntry.status === WorkspaceEntryStatus.Loaded ? parentEntry.data.settings : undefined
-    const defaultApp = getDefaultAppForWorktree(deps, options.settings, parentSettings)
+    const defaultApp = getDefaultAppForWorktree(deps, options.settings, parent, lookupWorkspace)
     if (defaultApp) {
       const tabId = generateTabId()
       appStates[tabId] = {
@@ -1484,7 +1483,7 @@ export function createSessionStore(
         let activeTabId: string | undefined = undefined
 
         if (!options?.skipDefaultTabs) {
-          const defaultApp = getDefaultAppForWorktree(deps, options?.settings, undefined)
+          const defaultApp = getDefaultAppForWorktree(deps, options?.settings, undefined, lookupWorkspace)
           if (defaultApp) {
             const tabId = generateTabId()
             appStates[tabId] = {

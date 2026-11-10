@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react'
 import { useStore } from 'zustand'
 import type { WorktreeInfo, BranchInfo, WorktreeSettings, WorkspaceStore, GitHubPrListItem } from '../types'
 import { useAppStore } from '../store/app'
+import { getInheritedDefaultApplicationIds } from '../../shared/workspaceSettings'
 import { useGitApi, useGitHubApi, useWorktreeRegistryApi } from '../hooks/useWorkspaceApis'
 import type { WorkspaceGitHubApi } from '../types'
 import type { WorktreeRegistryApi, WorktreeRegistryEntry } from '../lib/worktreeRegistry'
@@ -40,7 +41,7 @@ export default function CreateChildDialog({
   initialMode
 }: CreateChildDialogProps) {
   const parentWsData = useStore(parentWorkspace, s => s.workspace)
-  const parentDefaultAppId = useStore(parentWorkspace, s => s.workspace.settings.defaultApplicationId)
+  const lookupWorkspace = useStore(parentWorkspace, s => s.lookupWorkspace)
   const git = useGitApi(parentWorkspace)
   const github = useGitHubApi(parentWorkspace)
   const worktreeRegistry = useWorktreeRegistryApi(parentWorkspace)
@@ -75,9 +76,9 @@ export default function CreateChildDialog({
   const applications = useAppStore((s) => s.applications)
 
   // Get inherited app name
-  const inheritedApp = parentDefaultAppId
-    ? applications.get(parentDefaultAppId) ?? null
-    : null
+  const inheritedApp = getInheritedDefaultApplicationIds(parentWsData, lookupWorkspace)
+    .map(appId => applications.get(appId))
+    .find(app => app !== undefined)
 
   // Get available apps
   const availableApps = Array.from(applications.values()).filter(app => app.showInNewTabMenu)

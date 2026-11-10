@@ -1111,6 +1111,44 @@ describe('createSessionStore', () => {
       await flushPromises()
     })
 
+    it('inherits a changed default application from a distant ancestor', async () => {
+      const originalApp = makeFakeApp({ id: 'original-app' })
+      const updatedApp = makeFakeApp({ id: 'updated-app' })
+      vi.mocked(deps.appRegistry.get).mockImplementation((id: string) => {
+        if (id === 'original-app') return originalApp
+        if (id === 'updated-app') return updatedApp
+        return undefined
+      })
+
+      const loadedChildOf = (parentId: string) => {
+        const entry = Array.from(store.getState().workspaces.values()).find(
+          (candidate) => candidate.status === WorkspaceEntryStatus.Loaded && candidate.data.parentId === parentId
+        )
+        if (entry?.status !== WorkspaceEntryStatus.Loaded) throw new Error(`No loaded child of ${parentId}`)
+        return entry
+      }
+
+      // A sets the default; B and C leave it unset.
+      const aId = store.getState().addWorkspace('/a', { settings: { defaultApplicationId: 'original-app' } })
+      await flushPromises()
+      store.getState().addChildWorkspace(aId, 'b', false)
+      await flushPromises()
+      const b = loadedChildOf(aId)
+      store.getState().addChildWorkspace(b.data.id, 'c', false)
+      await flushPromises()
+      const c = loadedChildOf(b.data.id)
+      expect(Object.values(c.data.appStates)[0]?.applicationId).toBe('original-app')
+
+      const aEntry = store.getState().workspaces.get(aId)
+      if (aEntry?.status !== WorkspaceEntryStatus.Loaded) throw new Error('A did not load')
+      aEntry.store.getState().updateSettings({ defaultApplicationId: 'updated-app' })
+
+      store.getState().addChildWorkspace(c.data.id, 'd', false)
+      await flushPromises()
+      const d = loadedChildOf(c.data.id)
+      expect(Object.values(d.data.appStates)[0]?.applicationId).toBe('updated-app')
+    })
+
     it('uses current parent settings when they change during child creation', async () => {
       const originalApp = makeFakeApp({ id: 'original-app' })
       const updatedApp = makeFakeApp({ id: 'updated-app' })
