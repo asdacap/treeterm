@@ -7,7 +7,7 @@ import type { WorkspaceFilesystemApi, WorkspaceStore } from '../types'
 import { FileViewer } from './FileViewer'
 import { REPO_SEARCH_DEBOUNCE_MS } from './SearchPanel'
 import { RepoSearchEventType, RepoSearchTool } from '../utils/repoSearch'
-import { MAX_READ_FILE_BYTES, MAX_READ_MODEL_BYTES } from '../lib/fileLimits'
+import { MAX_READ_FILE_BYTES, MAX_READ_MODEL_BYTES, MAX_READ_PDF_BYTES } from '../lib/fileLimits'
 
 const filesystem = vi.hoisted(() => ({ readFile: vi.fn(), readFileBytes: vi.fn() }))
 
@@ -68,6 +68,13 @@ vi.mock('@monaco-editor/react', () => ({ default: MockEditor }))
 vi.mock('./ModelViewer', () => ({
   default: ({ base64, format }: { base64: string; format: string }) => (
     <div data-testid="model-viewer" data-base64={base64} data-format={format} />
+  ),
+}))
+
+// jsdom cannot host Chromium's PDF viewer; this records what the file viewer hands it.
+vi.mock('./PdfViewer', () => ({
+  PdfViewer: ({ base64, fileName }: { base64: string; fileName: string }) => (
+    <div data-testid="pdf-viewer" data-base64={base64} data-file-name={fileName} />
   ),
 }))
 
@@ -178,6 +185,30 @@ describe('FileViewer', () => {
     fireEvent.click(screen.getByText('Download'))
     await waitFor(() => { expect(download.downloadBytes).toHaveBeenCalledWith('bracket.stl', new Uint8Array([0, 255])) })
     expect(filesystem.readFileBytes).toHaveBeenCalledWith('parts/bracket.stl', MAX_READ_MODEL_BYTES)
+  })
+
+  it('shows a PDF in the PDF viewer, with download instead of open-in-tab', async () => {
+    filesystem.readFile.mockResolvedValue({
+      success: true,
+      // The NUL a PDF's binary streams carry must not demote it to the binary placeholder.
+      file: { path: '/repo/docs/manual.pdf', content: 'JVBERgA=', size: 5, language: 'pdf' },
+    })
+
+    render(<FileViewer workspace={makeWorkspace()} onOpenLocation={vi.fn()} filePath="docs/manual.pdf" />)
+
+    const viewer = await screen.findByTestId('pdf-viewer')
+    expect(viewer.getAttribute('data-base64')).toBe('JVBERgA=')
+    expect(viewer.getAttribute('data-file-name')).toBe('manual.pdf')
+    expect(filesystem.readFile).toHaveBeenCalledWith('docs/manual.pdf', MAX_READ_PDF_BYTES)
+    expect(screen.getByText('pdf', { selector: '.file-viewer-language' })).toBeTruthy()
+    expect(screen.queryByText('⇗ Open in Tab')).toBeNull()
+    expect(screen.queryByText('Binary file — not shown as text')).toBeNull()
+    expect(screen.queryByTestId('monaco-editor')).toBeNull()
+
+    filesystem.readFileBytes.mockResolvedValue({ success: true, bytes: new Uint8Array([0x25, 0x50]) })
+    fireEvent.click(screen.getByText('Download'))
+    await waitFor(() => { expect(download.downloadBytes).toHaveBeenCalledWith('manual.pdf', new Uint8Array([0x25, 0x50])) })
+    expect(filesystem.readFileBytes).toHaveBeenCalledWith('docs/manual.pdf', MAX_READ_PDF_BYTES)
   })
 
   it('never renders the previous file under a newly selected path', async () => {

@@ -3,10 +3,12 @@ import {
   IMAGE_LANGUAGE,
   MODEL_LANGUAGE,
   ModelFormat,
+  PDF_LANGUAGE,
   imageMimeType,
   isBinaryContent,
   isImagePath,
   isModelPath,
+  isPdfPath,
   isRawBytesPath,
   modelFormat,
   readLanguage,
@@ -43,15 +45,22 @@ describe('fileContentKind', () => {
     expect(() => modelFormat('notes.txt')).toThrow('Not a 3D model file: notes.txt')
   })
 
-  it('reads images and models as raw bytes, everything else as text', () => {
+  it('recognises PDFs case-insensitively', () => {
+    expect(isPdfPath('docs/Manual.PDF')).toBe(true)
+    expect(isPdfPath('docs/manual.pdf.txt')).toBe(false)
+  })
+
+  it('reads images, models and PDFs as raw bytes, everything else as text', () => {
     expect(isRawBytesPath('logo.png')).toBe(true)
     expect(isRawBytesPath('part.stl')).toBe(true)
+    expect(isRawBytesPath('manual.pdf')).toBe(true)
     expect(isRawBytesPath('main.ts')).toBe(false)
   })
 
   it('tags raw-bytes reads by kind and keeps the daemon language otherwise', () => {
     expect(readLanguage('logo.png', 'plaintext')).toBe(IMAGE_LANGUAGE)
     expect(readLanguage('part.stl', 'plaintext')).toBe(MODEL_LANGUAGE)
+    expect(readLanguage('manual.pdf', 'plaintext')).toBe(PDF_LANGUAGE)
     expect(readLanguage('main.ts', 'typescript')).toBe('typescript')
   })
 

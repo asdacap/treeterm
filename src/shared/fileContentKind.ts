@@ -32,6 +32,8 @@ const MODEL_FORMATS: Record<string, ModelFormat> = {
 export const IMAGE_LANGUAGE = 'image'
 /** `FileContents.language` of a file read as a 3D model (its content is base64). */
 export const MODEL_LANGUAGE = 'model'
+/** `FileContents.language` of a file read as a PDF (its content is base64). */
+export const PDF_LANGUAGE = 'pdf'
 
 function extensionOf(filePath: string): string {
   return filePath.split('.').pop()?.toLowerCase() ?? ''
@@ -59,18 +61,26 @@ export function modelFormat(filePath: string): ModelFormat {
   return format
 }
 
+const PDF_EXTENSION = 'pdf'
+
+/** PDFs are recognised by extension; their bytes travel base64-encoded. */
+export function isPdfPath(filePath: string): boolean {
+  return extensionOf(filePath) === PDF_EXTENSION
+}
+
 /**
  * Files the renderer draws from their raw bytes. A read sends these base64-encoded,
  * since decoding them as UTF-8 text would mangle the bytes.
  */
 export function isRawBytesPath(filePath: string): boolean {
-  return isImagePath(filePath) || isModelPath(filePath)
+  return isImagePath(filePath) || isModelPath(filePath) || isPdfPath(filePath)
 }
 
 /** The `FileContents.language` a read reports: raw-bytes files are tagged by kind. */
 export function readLanguage(filePath: string, daemonLanguage: string): string {
   if (isImagePath(filePath)) return IMAGE_LANGUAGE
   if (isModelPath(filePath)) return MODEL_LANGUAGE
+  if (isPdfPath(filePath)) return PDF_LANGUAGE
   return daemonLanguage
 }
 

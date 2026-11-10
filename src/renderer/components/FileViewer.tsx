@@ -13,8 +13,9 @@ import { monacoNavigationBridge } from '../monaco-config'
 import { searchDefinition } from '../utils/definitionSearch'
 import { detectMonacoLanguage } from '../utils/detectMonacoLanguage'
 import { MarkdownPreview } from './MarkdownPreview'
-import { IMAGE_LANGUAGE, MODEL_LANGUAGE, imageMimeType, isBinaryContent, modelFormat } from '../../shared/fileContentKind'
+import { IMAGE_LANGUAGE, MODEL_LANGUAGE, PDF_LANGUAGE, imageMimeType, isBinaryContent, modelFormat } from '../../shared/fileContentKind'
 import { FileDownloadButton } from './FileDownloadButton'
+import { PdfViewer } from './PdfViewer'
 import { CommentInput } from './CommentInput'
 import { CommentDisplay } from './CommentDisplay'
 import { SearchPanel, type InViewHit } from './SearchPanel'
@@ -193,7 +194,7 @@ export function FileViewer({
             path: filePath,
             content: result.file.content,
             // Raw-bytes files (base64 content) keep the kind main tagged them with.
-            language: result.file.language === IMAGE_LANGUAGE || result.file.language === MODEL_LANGUAGE
+            language: [IMAGE_LANGUAGE, MODEL_LANGUAGE, PDF_LANGUAGE].includes(result.file.language)
               ? result.file.language
               : detectMonacoLanguage(filePath),
             loading: false,
@@ -488,9 +489,10 @@ export function FileViewer({
 
   const isImage = fileState.language === IMAGE_LANGUAGE
   const isModel = fileState.language === MODEL_LANGUAGE
-  const isBinary = !isImage && !isModel && isBinaryContent(fileState.content)
+  const isPdf = fileState.language === PDF_LANGUAGE
+  const isBinary = !isImage && !isModel && !isPdf && isBinaryContent(fileState.content)
   const pending = fileState.loading || fileState.path !== filePath
-  const searchable = !!filePath && !pending && !fileState.error && !isImage && !isModel && !isBinary
+  const searchable = !!filePath && !pending && !fileState.error && !isImage && !isModel && !isPdf && !isBinary
   const relativePath = filePath ? toWorkspaceRelative(wsData.path, filePath) : ''
 
   const renderViewer = (): React.JSX.Element => {
@@ -540,7 +542,7 @@ export function FileViewer({
               filePath={filePath}
               maxBytes={readBudget(filePath, raisedBudget)}
             />
-            {!isImage && !isModel && !isBinary && (
+            {!isImage && !isModel && !isPdf && !isBinary && (
               <button
                 className="file-viewer-open-btn"
                 onClick={handleOpenInTab}
@@ -564,6 +566,8 @@ export function FileViewer({
             <Suspense fallback={<div className="file-viewer-placeholder">Loading 3D viewer…</div>}>
               <ModelViewer base64={fileState.content} format={modelFormat(filePath)} />
             </Suspense>
+          ) : isPdf ? (
+            <PdfViewer base64={fileState.content} fileName={fileName} />
           ) : isBinary ? (
             <div className="file-viewer-placeholder">Binary file — not shown as text</div>
           ) : isMarkdown && viewMode === 'preview' ? (

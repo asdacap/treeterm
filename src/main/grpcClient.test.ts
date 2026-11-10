@@ -1346,6 +1346,29 @@ describe('GrpcDaemonClient', () => {
         expect(result.file.content).toBe(modelData.toString('base64'))
       }
     })
+
+    it('returns base64 content and language=pdf for PDF files', async () => {
+      // A PDF's compressed streams are arbitrary bytes that a UTF-8 decode would mangle.
+      const pdfData = Buffer.from([0x25, 0x50, 0x44, 0x46, 0x00, 0xe2, 0xff])
+      mockClientInstance.readFile.mockImplementation(() => {
+        const handlers: Record<string, (...args: any[]) => void> = {}
+        const stream = {
+          on: (event: string, handler: (...args: any[]) => void) => { handlers[event] = handler; return stream },
+        }
+        setTimeout(() => {
+          handlers['data']!({ header: { path: '/ws/manual.pdf', size: 7, language: 'plaintext' } })
+          handlers['data']!({ data: { data: pdfData } })
+          handlers['data']!({ end: { success: true } })
+        }, 0)
+        return stream
+      })
+      const result = await client.readFile('/ws', '/ws/manual.pdf', 1024 * 1024)
+      expect(result.success).toBe(true)
+      if (result.success) {
+        expect(result.file.language).toBe('pdf')
+        expect(result.file.content).toBe(pdfData.toString('base64'))
+      }
+    })
   })
 
   describe('execStream', () => {
