@@ -26,8 +26,14 @@ hex.workspace = true
 indexmap = { version = "2", features = ["serde"] }
 uuid = { version = "1", features = ["v4"] }
 regex = "1"
+# OpenAI-compatible chat completions (the Electron app used the OpenAI SDK over fetch).
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "stream", "http2"] }
+url = "2"
+httpdate = "1"
 
 [dev-dependencies]
+# The analyzer tests drive it with the real idle detector, as the GPUI model does.
+treeterm-term.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 
