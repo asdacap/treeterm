@@ -17,6 +17,7 @@ mod review_metadata;
 pub mod run_actions;
 pub mod session_store;
 pub mod settings_store;
+pub mod system_monitor;
 pub mod terminal;
 pub mod text_editor;
 pub mod web_app;

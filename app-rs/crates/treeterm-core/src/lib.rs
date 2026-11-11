@@ -31,6 +31,7 @@ pub mod rt;
 pub mod run_actions;
 pub mod search;
 pub mod settings;
+pub mod system_monitor;
 pub mod transport;
 pub mod tree;
 pub mod wire;

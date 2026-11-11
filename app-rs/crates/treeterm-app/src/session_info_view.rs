@@ -18,6 +18,7 @@ use crate::theme::colors;
 enum Tab {
     Log(OutputKind),
     PortForwards,
+    Monitor,
 }
 
 pub struct SessionInfoView {
@@ -28,6 +29,8 @@ pub struct SessionInfoView {
     remote_host: Entity<InputState>,
     remote_port: Entity<InputState>,
     save_forward: bool,
+    /// Polls only while the Monitor tab is shown.
+    monitor: Option<(Entity<treeterm_model::system_monitor::SystemMonitor>, Subscription)>,
     _observe: [Subscription; 2],
 }
 
@@ -70,6 +73,7 @@ impl SessionInfoView {
             info,
             tab: if remote { Tab::Log(OutputKind::Bootstrap) } else { Tab::Log(OutputKind::Daemon) },
             save_forward: true,
+            monitor: None,
             _observe: observe,
         }
     }
@@ -170,6 +174,127 @@ impl SessionInfoView {
     }
 }
 
+/// A row of usage bars for the last samples, newest on the right.
+fn sparkline(samples: Vec<f64>) -> impl IntoElement {
+    let mut row = h_flex().h(px(40.)).items_end().gap(px(1.));
+    for value in samples {
+        row = row.child(
+            div()
+                .w(px(4.))
+                .h(px((value.clamp(1., 100.) * 0.4) as f32))
+                .bg(rgb(treeterm_core::system_monitor::utilization_color(value))),
+        );
+    }
+    row
+}
+
+fn bytes(n: u64) -> String {
+    const GIB: f64 = 1024. * 1024. * 1024.;
+    format!("{:.1} GiB", n as f64 / GIB)
+}
+
+impl SessionInfoView {
+    /// CPU, memory, load, uptime, disks and the busiest processes (`SystemMonitor`).
+    fn monitor_view(&mut self, state: &Option<ConnState>, cx: &mut Context<Self>) -> AnyElement {
+        use treeterm_core::system_monitor::utilization_color;
+        use treeterm_model::system_monitor::{Metrics, SystemMonitor};
+        let c = colors(cx);
+        let (secondary, error, border) = (c.text_secondary, c.error, c.border);
+        let Some(ConnState::Connected(session)) = state else {
+            self.monitor = None;
+            return div().p_3().text_sm().text_color(secondary).child("Not connected").into_any_element();
+        };
+        if self.monitor.is_none() {
+            let exec = session.read(cx).connection().exec_client();
+            let monitor = cx.new(|cx| SystemMonitor::new(exec, cx));
+            let observe = cx.observe(&monitor, |_, _, cx| cx.notify());
+            self.monitor = Some((monitor, observe));
+        }
+        let Some((monitor, _)) = &self.monitor else {
+            return div().into_any_element();
+        };
+        let monitor = monitor.clone();
+        let (metrics, cpu, memory) = {
+            let m = monitor.read(cx);
+            (m.metrics().clone(), m.cpu_history().samples().collect::<Vec<f64>>(), m.memory_history().samples().collect::<Vec<f64>>())
+        };
+        let m = match metrics {
+            Metrics::Loading => return div().p_3().text_sm().text_color(secondary).child("Collecting…").into_any_element(),
+            Metrics::Failed(message) => return div().p_3().text_sm().text_color(error).child(message).into_any_element(),
+            Metrics::Loaded(m) => m,
+        };
+        let stat = move |label: &str, value: String, color: Option<u32>| {
+            v_flex()
+                .gap_1()
+                .child(div().text_xs().text_color(secondary).child(label.to_owned()))
+                .child(div().text_lg().when_some(color, |d, color| d.text_color(rgb(color))).child(value))
+        };
+        let mut disks = v_flex().gap_1();
+        for disk in &m.disks {
+            disks = disks.child(
+                h_flex()
+                    .gap_2()
+                    .text_sm()
+                    .child(div().w(px(200.)).truncate().child(disk.mount_point.clone()))
+                    .child(div().text_color(rgb(utilization_color(disk.usage_percent))).child(format!("{:.0}%", disk.usage_percent)))
+                    .child(div().text_color(secondary).child(format!("{} / {}", bytes(disk.used_bytes), bytes(disk.total_bytes)))),
+            );
+        }
+        let mut processes = v_flex().gap_1();
+        for (i, process) in m.processes.iter().enumerate() {
+            let (kill, pid) = (monitor.clone(), process.pid);
+            processes = processes.child(
+                h_flex()
+                    .gap_2()
+                    .text_sm()
+                    .items_center()
+                    .child(div().w(px(70.)).text_color(secondary).child(process.pid.to_string()))
+                    .child(div().w(px(60.)).child(format!("{:.1}%", process.cpu_percent)))
+                    .child(div().w(px(60.)).text_color(secondary).child(format!("{:.1}%", process.mem_percent)))
+                    .child(div().flex_1().min_w_0().truncate().child(process.command.clone()))
+                    .child(Button::new(SharedString::from(format!("kill-{i}"))).xsmall().ghost().label("Kill").on_click(
+                        move |_, _, cx| kill.update(cx, |m, cx| m.kill(pid, "TERM", cx)),
+                    )),
+            );
+        }
+        v_flex()
+            .id("monitor")
+            .size_full()
+            .overflow_y_scroll()
+            .p_3()
+            .gap_4()
+            .child(
+                h_flex()
+                    .gap_6()
+                    .child(stat("CPU", format!("{:.1}% · {} cores", m.cpu.usage_percent, m.cpu.core_count), Some(utilization_color(m.cpu.usage_percent))))
+                    .child(stat(
+                        "Memory",
+                        format!("{:.0}% · {} / {}", m.memory.usage_percent, bytes(m.memory.used_bytes), bytes(m.memory.total_bytes)),
+                        Some(utilization_color(m.memory.usage_percent)),
+                    ))
+                    .child(stat("Load", format!("{:.2} {:.2} {:.2}", m.load_average[0], m.load_average[1], m.load_average[2]), None))
+                    .child(stat("Uptime", m.uptime.clone(), None)),
+            )
+            .child(
+                h_flex()
+                    .gap_6()
+                    .child(v_flex().gap_1().child(div().text_xs().text_color(secondary).child("CPU history")).child(sparkline(cpu)))
+                    .child(v_flex().gap_1().child(div().text_xs().text_color(secondary).child("Memory history")).child(sparkline(memory))),
+            )
+            .child(v_flex().gap_1().child(div().text_xs().text_color(secondary).child("Disks")).child(disks))
+            .child(
+                v_flex()
+                    .gap_1()
+                    .pt_2()
+                    .border_t_1()
+                    .border_color(border)
+                    .child(div().text_xs().text_color(secondary).child("Top processes (PID · CPU · MEM · command)"))
+                    .child(processes),
+            )
+            .into_any_element()
+    }
+}
+
 impl Render for SessionInfoView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let c = colors(cx);
@@ -212,9 +337,10 @@ impl Render for SessionInfoView {
                 (Tab::Log(OutputKind::Tunnel), "Tunnel"),
                 (Tab::Log(OutputKind::Daemon), "Daemon"),
                 (Tab::PortForwards, "Port Forwards"),
+                (Tab::Monitor, "Monitor"),
             ]
         } else {
-            vec![(Tab::Log(OutputKind::Daemon), "Daemon")]
+            vec![(Tab::Log(OutputKind::Daemon), "Daemon"), (Tab::Monitor, "Monitor")]
         };
         let mut tab_bar = h_flex().px_2().py_1().gap_1().border_b_1().border_color(border);
         for (tab, label) in tabs {
@@ -226,8 +352,15 @@ impl Render for SessionInfoView {
             })));
         }
         let body = match self.tab {
-            Tab::Log(kind) => self.log_view(kind, cx),
-            Tab::PortForwards => self.forwards_view(remote, cx),
+            Tab::Log(kind) => {
+                self.monitor = None;
+                self.log_view(kind, cx)
+            }
+            Tab::PortForwards => {
+                self.monitor = None;
+                self.forwards_view(remote, cx)
+            }
+            Tab::Monitor => self.monitor_view(&state, cx),
         };
         v_flex()
             .flex_1()
