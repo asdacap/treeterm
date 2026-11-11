@@ -35,6 +35,7 @@ pub mod transport;
 pub mod tree;
 pub mod wire;
 pub mod workspace_io;
+pub mod worktree_hierarchy;
 pub mod worktree_registry;
 
 #[cfg(test)]
