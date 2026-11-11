@@ -1,37 +1,13 @@
 //! SessionStore against a real in-process daemon.
 
 use std::collections::HashSet;
-use std::time::Duration;
 
-use gpui_kit::{AppContext as _, Entity, TestAppContext};
-use treeterm_core::daemon::DaemonConnection;
-use treeterm_core::rt::Rt;
+use gpui_kit::{AppContext as _, TestAppContext};
 use treeterm_model::session_store::{SessionState, SessionStore, WorkspaceEntry};
 use treeterm_proto::treeterm::WorkspaceRef;
-use treeterm_testkit::TestDaemon;
 
-struct Harness {
-    _tokio: tokio::runtime::Runtime,
-    daemon: TestDaemon,
-    conn: DaemonConnection,
-}
-
-fn harness() -> Harness {
-    let tokio = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(2)
-        .enable_all()
-        .build()
-        .unwrap();
-    let daemon = {
-        let _enter = tokio.enter();
-        TestDaemon::start()
-    };
-    let rt = Rt::new(tokio.handle().clone());
-    let conn = futures::executor::block_on(DaemonConnection::open(&rt, daemon.socket_path()))
-        .unwrap()
-        .unwrap();
-    Harness { _tokio: tokio, daemon, conn }
-}
+mod common;
+use common::{Harness, harness, wait_until};
 
 fn body(name: &str, parent: Option<&str>) -> String {
     let mut json = serde_json::json!({
@@ -54,19 +30,6 @@ fn publish(h: &Harness, ids: &[&str]) {
         .unwrap();
 }
 
-/// Daemon events arrive from tokio threads in real time; pump the GPUI test scheduler
-/// until `done` holds.
-fn wait_until(cx: &mut TestAppContext, store: &Entity<SessionStore>, done: impl Fn(&SessionStore) -> bool) {
-    for _ in 0..500 {
-        cx.run_until_parked();
-        if store.read_with(cx, |s, _| done(s)) {
-            return;
-        }
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    panic!("condition not reached");
-}
-
 #[gpui_kit::test]
 fn mirrors_refs_and_loads_workspace_bodies(cx: &mut TestAppContext) {
     cx.executor().allow_parking();
@@ -76,7 +39,7 @@ fn mirrors_refs_and_loads_workspace_bodies(cx: &mut TestAppContext) {
     publish(&h, &["child", "root", "broken"]);
 
     let conn = h.conn.clone();
-    let store = cx.new(|cx| SessionStore::new(conn, "client-a".into(), cx));
+    let store = cx.new(|cx| SessionStore::new(conn, "client-a".into(), Default::default(), cx));
     wait_until(cx, &store, |s| {
         matches!(s.state(), SessionState::Live(_))
             && matches!(s.workspace("root"), WorkspaceEntry::Loaded(_))
@@ -110,7 +73,7 @@ fn follows_ref_removal_and_body_changes(cx: &mut TestAppContext) {
     publish(&h, &["a", "b"]);
 
     let conn = h.conn.clone();
-    let store = cx.new(|cx| SessionStore::new(conn, "client-a".into(), cx));
+    let store = cx.new(|cx| SessionStore::new(conn, "client-a".into(), Default::default(), cx));
     wait_until(cx, &store, |s| {
         matches!(s.state(), SessionState::Live(_)) && matches!(s.workspace("a"), WorkspaceEntry::Loaded(_))
     });

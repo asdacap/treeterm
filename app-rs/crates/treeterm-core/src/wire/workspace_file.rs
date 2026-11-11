@@ -10,6 +10,8 @@
 
 use std::collections::BTreeMap;
 
+use indexmap::IndexMap;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -53,7 +55,8 @@ pub struct WorkspaceFile {
     pub is_worktree: bool,
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     pub is_detached: Option<bool>,
-    pub app_states: BTreeMap<String, AppState>,
+    /// In file order: tab order falls back to it where the layout does not decide.
+    pub app_states: IndexMap<String, AppState>,
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     pub active_tab_id: Option<String>,
     pub metadata: BTreeMap<String, String>,

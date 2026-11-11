@@ -9,6 +9,7 @@ description = "TreeTerm app logic without UI: daemon client, connections, wire f
 [dependencies]
 treeterm-proto.workspace = true
 tokio.workspace = true
+tokio-stream.workspace = true
 tonic.workspace = true
 tower.workspace = true
 hyper-util.workspace = true
@@ -19,6 +20,7 @@ thiserror.workspace = true
 libc.workspace = true
 tracing.workspace = true
 dirs = "6"
+indexmap = { version = "2", features = ["serde"] }
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]

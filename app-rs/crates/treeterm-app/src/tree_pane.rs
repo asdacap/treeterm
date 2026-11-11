@@ -44,7 +44,7 @@ impl TreePane {
         cx.notify();
     }
 
-    fn select(&mut self, id: String, cx: &mut Context<Self>) {
+    pub fn select(&mut self, id: String, cx: &mut Context<Self>) {
         self.selected = Selection::Workspace(id.clone());
         cx.emit(WorkspaceSelected(id));
         cx.notify();

@@ -1,13 +1,15 @@
 //! Typed access to one daemon over gRPC.
 
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use futures::{Stream, StreamExt, TryFutureExt};
 use treeterm_proto::treeterm::{
-    FileWatchEvent, Session, SessionWatchEvent, SessionWatchRequest, UpdateSessionRequest,
-    WatchFileRequest, WorkspaceRef,
+    CreatePtyRequest, Empty, FileWatchEvent, KillPtyRequest, PtySessionInfo, Session,
+    SessionWatchEvent, SessionWatchRequest, UpdateSessionRequest, WatchFileRequest, WorkspaceRef,
 };
 
+use crate::pty::{AttachKind, CreatePty, PtyAttachment};
 use crate::rt::{Fut, Rt, Sub, TaskLost};
 use crate::transport::{ConnectError, DaemonClient, connect_unix, daemon_client};
 
@@ -19,6 +21,22 @@ pub enum ApiError {
     TaskLost(#[from] TaskLost),
     #[error("daemon protocol violation: {0}")]
     Protocol(&'static str),
+    #[error("daemon did not answer within {}s", .0.as_secs())]
+    DeadlineExceeded(Duration),
+}
+
+/// Unary calls fail after this long instead of hanging on a wedged daemon. Streams have no
+/// deadline: they are meant to stay open.
+pub const UNARY_DEADLINE: Duration = Duration::from_secs(30);
+
+/// Run a unary call with [`UNARY_DEADLINE`].
+async fn unary<T>(
+    call: impl Future<Output = Result<tonic::Response<T>, tonic::Status>>,
+) -> Result<T, ApiError> {
+    match tokio::time::timeout(UNARY_DEADLINE, call).await {
+        Ok(response) => Ok(response?.into_inner()),
+        Err(_elapsed) => Err(ApiError::DeadlineExceeded(UNARY_DEADLINE)),
+    }
 }
 
 impl From<tonic::Status> for ApiError {
@@ -74,10 +92,51 @@ impl DaemonConnection {
             expected_version,
             workspace_refs,
         };
+        self.rt
+            .run(async move { unary(client.update_session(request)).await })
+    }
+
+    /// Start a PTY (or, for a known `handle`, find the live one) and return its id.
+    pub fn create_pty(&self, params: CreatePty) -> Fut<Result<String, ApiError>> {
+        let mut client = self.main.clone();
+        let request = CreatePtyRequest {
+            cwd: params.cwd,
+            env: params.env,
+            cols: params.size.map(|(cols, _)| i32::from(cols)),
+            rows: params.size.map(|(_, rows)| i32::from(rows)),
+            sandbox: None,
+            startup_command: params.startup_command,
+            handle: params.handle,
+        };
         self.rt.run(async move {
-            let response = client.update_session(request).await?;
-            Ok(response.into_inner())
+            unary(client.create_pty(request))
+                .await
+                .map(|response| response.session_id)
         })
+    }
+
+    /// Destroy a PTY. This is close, not detach: every attachment sees it exit.
+    pub fn kill_pty(&self, session_id: &str) -> Fut<Result<(), ApiError>> {
+        let mut client = self.main.clone();
+        let request = KillPtyRequest {
+            session_id: session_id.to_owned(),
+        };
+        self.rt
+            .run(async move { unary(client.kill_pty(request)).await.map(|Empty {}| ()) })
+    }
+
+    pub fn list_pty_sessions(&self) -> Fut<Result<Vec<PtySessionInfo>, ApiError>> {
+        let mut client = self.main.clone();
+        self.rt.run(async move {
+            unary(client.list_pty_sessions(Empty {}))
+                .await
+                .map(|response| response.sessions)
+        })
+    }
+
+    /// Attach to a PTY. See [`crate::pty`].
+    pub fn attach_pty(&self, session_id: &str, kind: AttachKind) -> PtyAttachment {
+        crate::pty::attach(&self.rt, self.main.clone(), session_id, kind)
     }
 
     pub fn socket_path(&self) -> &Path {

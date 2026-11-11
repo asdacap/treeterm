@@ -13,10 +13,17 @@ path = "src/main.rs"
 [dependencies]
 treeterm-core.workspace = true
 treeterm-model.workspace = true
+treeterm-term.workspace = true
 gpui-kit = { workspace = true, features = ["component", "assets"] }
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+serde_json = { workspace = true, optional = true }
+futures = { workspace = true, optional = true }
+
+[features]
+# Debug-only control socket (TREETERM_AUTOMATION_SOCKET) for e2e tests and screenshots.
+automation = ["dep:serde_json", "dep:futures", "gpui-kit/test-support"]
 
 [lints]
 workspace = true

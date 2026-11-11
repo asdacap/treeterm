@@ -1,7 +1,10 @@
 //! Root store: starts (or finds) the local daemon and owns the connected session.
 
+use std::rc::Rc;
+
 use gpui_kit::{AppContext as _, Context, Entity, Task};
 use treeterm_core::daemon::DaemonConnection;
+use treeterm_core::settings::Settings;
 use treeterm_core::local_daemon::{LocalDaemonSpec, ensure_running};
 use treeterm_core::rt::Rt;
 
@@ -15,6 +18,7 @@ pub enum AppState {
 
 pub struct AppStore {
     state: AppState,
+    settings: Rc<Settings>,
     /// Identifies this process to the daemon (`sender_id`, `listener_id`), so it can skip
     /// echoes of its own session updates. One per process: windows share stores.
     client_id: String,
@@ -22,7 +26,7 @@ pub struct AppStore {
 }
 
 impl AppStore {
-    pub fn new(rt: Rt, spec: LocalDaemonSpec, cx: &mut Context<Self>) -> Self {
+    pub fn new(rt: Rt, spec: LocalDaemonSpec, settings: Settings, cx: &mut Context<Self>) -> Self {
         let connect = rt.run({
             let rt = rt.clone();
             async move {
@@ -46,6 +50,7 @@ impl AppStore {
         });
         Self {
             state: AppState::StartingDaemon,
+            settings: Rc::new(settings),
             client_id: uuid::Uuid::new_v4().to_string(),
             _start: start,
         }
@@ -59,7 +64,8 @@ impl AppStore {
         self.state = match result {
             Ok(conn) => {
                 let client_id = self.client_id.clone();
-                let session = cx.new(|cx| SessionStore::new(conn, client_id, cx));
+                let settings = self.settings.clone();
+                let session = cx.new(|cx| SessionStore::new(conn, client_id, settings, cx));
                 cx.observe(&session, |_, _, cx| cx.notify()).detach();
                 AppState::Connected(session)
             }

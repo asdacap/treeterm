@@ -60,7 +60,8 @@ A single-process Rust/GPUI replacement for `src/main`, `src/preload` and `src/re
 | Crate | Responsibility |
 |-------|---------------|
 | `treeterm-core` | No UI. Daemon client (tonic over the Unix socket), local daemon start-up, paths shared with Electron, wire formats mirroring the Zod schemas, pure logic (tree ordering, …). `rt` bridges tokio to any executor: `Fut`/`Sub` cancel their work when dropped. |
-| `treeterm-model` | Stores as GPUI entities (`AppStore`, `SessionStore`, …). **All business logic lives here**, testable headlessly with `TestAppContext`. |
+| `treeterm-term` | No UI. Terminal emulation on `alacritty_terminal`: `TermCore` fed from the daemon's PTY stream (the daemon owns the size; query answers gated on focus and replay), key/mouse encoding matching xterm.js, viewport queries, fit, idle detector. |
+| `treeterm-model` | Stores as GPUI entities (`AppStore`, `SessionStore`, `TerminalModel`, …). **All business logic lives here**, testable headlessly with `TestAppContext`. |
 | `treeterm-app` | GPUI Kit views only: render model entities, dispatch to them. No logic. |
 | `treeterm-testkit` | A real daemon in-process (`treeterm_daemon::serve`) on a temp socket, for contract and model tests. |
 
@@ -70,6 +71,7 @@ Rules carry over from the TS codebase, translated:
 - Dropping a `Task`/`Fut`/`Sub` cancels it. Something must own every store entity — an observation does not keep it alive. `Drop` never kills a daemon resource (unmount is not close).
 - Fail loudly: no `let _ =` / `.ok()` on results; `unused_must_use` and `let_underscore_must_use` are denied.
 - Run `npm run test:app-rs` (and `cargo clippy --workspace --all-targets` in `app-rs/`) when changing it.
+- To see the app: build with `cargo build -p treeterm-app --features automation` and run it with an isolated `HOME`, a short `TREETERM_SOCKET_PATH`, `TREETERM_DAEMON_DIR=<repo>/daemon-rs/target/debug` and `TREETERM_AUTOMATION_SOCKET=<path>`. The socket takes line commands (`state`, `select <ws>`, `tab <ws> <tab>`, `type <text>`, `key <keystroke>`, `screenshot <png>`; see `treeterm-app/src/automation.rs`). Screenshots render offscreen, so no screen-recording permission is needed. Kill the daemon it started via the pid in `<HOME>/.treeterm/daemon.pid` afterwards.
 
 ## Adding New Operations
 

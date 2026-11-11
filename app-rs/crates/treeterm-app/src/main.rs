@@ -1,7 +1,11 @@
 //! TreeTerm native app: one process, one UI, talking gRPC to the TreeTerm daemon.
 
 mod app_view;
+#[cfg(feature = "automation")]
+mod automation;
 mod daemon_binary;
+mod terminal_element;
+mod terminal_view;
 mod theme;
 mod tree_pane;
 
@@ -14,6 +18,16 @@ use treeterm_core::rt::Rt;
 use treeterm_model::app_store::AppStore;
 
 use crate::app_view::AppView;
+
+/// Whether the window counts as the focused window, which decides whether its focused
+/// terminal may write. Automation drives a window that is usually behind other apps.
+pub fn window_counts_as_active(window: &gpui_kit::Window) -> bool {
+    window.is_window_active() || cfg!(feature = "automation") && automation_enabled()
+}
+
+fn automation_enabled() -> bool {
+    std::env::var_os("TREETERM_AUTOMATION_SOCKET").is_some()
+}
 
 fn local_daemon_spec() -> Result<LocalDaemonSpec, paths::PathError> {
     let env: paths::Env<'_> = &process_env;
@@ -46,11 +60,24 @@ fn main() {
         .build()
         .expect("start the I/O runtime");
     let rt = Rt::new(tokio.handle().clone());
+    let settings = match paths::user_data_dir().map_err(|e| e.to_string()).and_then(|dir| {
+        treeterm_core::settings::load(&dir).map_err(|e| e.to_string())
+    }) {
+        Ok(settings) => settings,
+        Err(error) => {
+            // Same fallback as Electron, but said out loud.
+            tracing::error!(%error, "settings unreadable; using defaults");
+            treeterm_core::settings::Settings::default()
+        }
+    };
 
+    #[cfg(feature = "automation")]
+    let rt_for_automation = rt.clone();
     gpui_kit::application().run(move |cx| {
         gpui_kit::init(cx);
         theme::install(cx);
-        let store = cx.new(|cx| AppStore::new(rt, spec, cx));
+        terminal_view::bind_keys(cx);
+        let store = cx.new(|cx| AppStore::new(rt, spec, settings, cx));
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
                 None,
@@ -65,8 +92,15 @@ fn main() {
             }),
             ..WindowOptions::default()
         };
-        gpui_kit::open_window(options, cx, |_, cx| cx.new(|cx| AppView::new(store, cx)))
-            .expect("open the main window");
+        let (window, view) =
+            gpui_kit::open_window(options, cx, |_, cx| cx.new(|cx| AppView::new(store, cx)))
+                .expect("open the main window");
+        #[cfg(feature = "automation")]
+        if let Ok(path) = std::env::var("TREETERM_AUTOMATION_SOCKET") {
+            automation::start(path.into(), window, view, &rt_for_automation, cx);
+        }
+        #[cfg(not(feature = "automation"))]
+        drop((window, view));
         cx.activate(true);
     });
     drop(tokio);

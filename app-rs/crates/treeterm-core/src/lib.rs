@@ -7,7 +7,9 @@
 pub mod daemon;
 pub mod local_daemon;
 pub mod paths;
+pub mod pty;
 pub mod rt;
+pub mod settings;
 pub mod transport;
 pub mod tree;
 pub mod wire;

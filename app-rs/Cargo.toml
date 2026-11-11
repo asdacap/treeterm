@@ -4,6 +4,7 @@
 resolver = "2"
 members = [
     "crates/treeterm-core",
+    "crates/treeterm-term",
     "crates/treeterm-model",
     "crates/treeterm-app",
     "crates/treeterm-testkit",
@@ -19,6 +20,7 @@ publish = false
 treeterm-proto = { path = "../daemon-rs/crates/treeterm-proto" }
 treeterm-daemon = { path = "../daemon-rs/crates/treeterm-daemon" }
 treeterm-core = { path = "crates/treeterm-core" }
+treeterm-term = { path = "crates/treeterm-term" }
 treeterm-model = { path = "crates/treeterm-model" }
 treeterm-testkit = { path = "crates/treeterm-testkit" }
 

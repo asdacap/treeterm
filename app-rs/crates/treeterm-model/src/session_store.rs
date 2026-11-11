@@ -8,14 +8,20 @@
 //! (ref publishing with version CAS, body CAS writes, locks) is ported on top of it.
 
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 
 use futures::StreamExt;
-use gpui_kit::{Context, Task};
+use gpui_kit::{AppContext as _, Context, Entity, Task};
 use treeterm_core::daemon::{ApiError, DaemonConnection};
+use treeterm_core::settings::Settings;
 use treeterm_core::tree::{self, TreeNode, TreeRow};
 use treeterm_core::wire::workspace_file::{WorkspaceFile, parse_workspace_file};
 use treeterm_proto::treeterm::file_watch_event::State as FileState;
 use treeterm_proto::treeterm::{FileWatchEvent, Session, SessionWatchEvent, WorkspaceRef};
+use treeterm_term::fit::WidthLimit;
+use treeterm_term::palette::{DEFAULT_BACKGROUND, SANDBOX_BACKGROUND};
+
+use crate::terminal::{TerminalModel, TerminalOptions};
 
 pub enum SessionState {
     /// Waiting for the first SessionWatch event.
@@ -33,19 +39,36 @@ pub enum WorkspaceEntry {
 
 struct WorkspaceSlot {
     entry: WorkspaceEntry,
+    /// Terminal tabs that have been shown, by tab id. They outlive their views, so a tab
+    /// switch keeps scrollback and attachment; they go when the tab or workspace goes.
+    terminals: HashMap<String, Entity<TerminalModel>>,
     /// Dropping it cancels the file watch.
     _watch: Task<()>,
 }
 
+/// What a tab shows when it is a terminal-kind tab.
+pub enum TabTerminal {
+    Live(Entity<TerminalModel>),
+    /// The tab's state has no PTY yet (Electron is still creating it, or creation failed).
+    NoPty,
+    NotATerminal,
+}
+
 pub struct SessionStore {
     conn: DaemonConnection,
+    settings: Rc<Settings>,
     state: SessionState,
     workspaces: HashMap<String, WorkspaceSlot>,
     _session_watch: Task<()>,
 }
 
 impl SessionStore {
-    pub fn new(conn: DaemonConnection, client_id: String, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        conn: DaemonConnection,
+        client_id: String,
+        settings: Rc<Settings>,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let mut events = conn.watch_session(&client_id);
         let session_watch = cx.spawn(async move |this, cx| {
             while let Some(event) = events.next().await {
@@ -64,6 +87,7 @@ impl SessionStore {
         });
         Self {
             conn,
+            settings,
             state: SessionState::Waiting,
             workspaces: HashMap::new(),
             _session_watch: session_watch,
@@ -148,6 +172,7 @@ impl SessionStore {
                 r.id.clone(),
                 WorkspaceSlot {
                     entry: WorkspaceEntry::Loading,
+                    terminals: HashMap::new(),
                     _watch: watch,
                 },
             );
@@ -178,8 +203,67 @@ impl SessionStore {
         let Some(slot) = self.workspaces.get_mut(id) else {
             return;
         };
+        // A closed tab's terminal detaches (the PTY is the closer's to kill). So does one
+        // whose tab now points at another PTY.
+        if let WorkspaceEntry::Loaded(file) = &entry {
+            slot.terminals.retain(|tab_id, terminal| {
+                file.app_states
+                    .get(tab_id)
+                    .and_then(|tab| tab.state["ptyId"].as_str())
+                    .is_some_and(|pty| pty == terminal.read(cx).pty_id())
+            });
+        }
         slot.entry = entry;
         cx.notify();
+    }
+
+    /// Whether a terminal model with this id is still held for some tab.
+    pub fn has_terminal(&self, entity_id: gpui_kit::EntityId) -> bool {
+        self.workspaces
+            .values()
+            .any(|slot| slot.terminals.values().any(|t| t.entity_id() == entity_id))
+    }
+
+    /// The terminal behind a tab, attached on first use.
+    pub fn terminal(&mut self, workspace_id: &str, tab_id: &str, cx: &mut Context<Self>) -> TabTerminal {
+        let Some(slot) = self.workspaces.get_mut(workspace_id) else {
+            return TabTerminal::NotATerminal;
+        };
+        let WorkspaceEntry::Loaded(file) = &slot.entry else {
+            return TabTerminal::NotATerminal;
+        };
+        let Some(tab) = file.app_states.get(tab_id) else {
+            return TabTerminal::NotATerminal;
+        };
+        // Electron's `isTerminalState`: a `ptyId` key that is a string or null.
+        let pty_id = match tab.state.get("ptyId") {
+            Some(serde_json::Value::String(id)) => id.clone(),
+            Some(serde_json::Value::Null) => return TabTerminal::NoPty,
+            Some(_) | None => return TabTerminal::NotATerminal,
+        };
+        if let Some(terminal) = slot.terminals.get(tab_id) {
+            return TabTerminal::Live(terminal.clone());
+        }
+        let state = &tab.state;
+        let sandboxed = state["sandbox"]["enabled"].as_bool().unwrap_or(false);
+        let settings = &self.settings;
+        let options = TerminalOptions {
+            pty_id,
+            background: if sandboxed { SANDBOX_BACKGROUND } else { DEFAULT_BACKGROUND },
+            settings: settings.terminal.clone(),
+            keep_on_exit: state["keepOnExit"].as_bool().unwrap_or(false),
+            width_limit: if state["widthLimitDisabled"].as_bool().unwrap_or(false) {
+                WidthLimit::Off
+            } else {
+                WidthLimit::Capped(settings.terminal.max_cols)
+            },
+            idle_timeout: (!state["idleDetectorDisabled"].as_bool().unwrap_or(false))
+                .then_some(settings.analyzer.idle_debounce),
+        };
+        let conn = self.conn.clone();
+        let terminal = cx.new(|cx| TerminalModel::new(conn, options, cx));
+        slot.terminals.insert(tab_id.to_owned(), terminal.clone());
+        TabTerminal::Live(terminal)
     }
 }
 

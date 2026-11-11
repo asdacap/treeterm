@@ -7,6 +7,7 @@ use gpui_kit::{App, Global, Hsla, rgb};
 pub struct Colors {
     pub bg_primary: Hsla,
     pub bg_secondary: Hsla,
+    pub bg_tertiary: Hsla,
     pub bg_hover: Hsla,
     pub bg_active: Hsla,
     pub text_primary: Hsla,
@@ -23,6 +24,7 @@ impl Colors {
         Self {
             bg_primary: rgb(0x1e1e1e).into(),
             bg_secondary: rgb(0x252526).into(),
+            bg_tertiary: rgb(0x2d2d2d).into(),
             bg_hover: rgb(0x3c3c3c).into(),
             bg_active: rgb(0x094771).into(),
             text_primary: rgb(0xcccccc).into(),
