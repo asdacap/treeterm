@@ -71,6 +71,15 @@ impl SessionSlot {
     }
 }
 
+/// Something the windows should react to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AppEvent {
+    /// A workspace was marked unread: ding if sound is on.
+    Attention { workspace: String },
+}
+
+impl gpui_kit::EventEmitter<AppEvent> for AppStore {}
+
 pub struct AppStore {
     /// The LLM client every session's analyzers share (`None` if it could not be built).
     llm: Option<crate::analyzer::LlmService>,
@@ -234,6 +243,9 @@ impl AppStore {
                 let events = cx.subscribe(&session, move |store, session, event: &SessionEvent, cx| match event {
                     SessionEvent::Failed(reason) => store.on_session_failed(&owned, session, reason, cx),
                     SessionEvent::WorkspaceRemoved(_) => {}
+                    SessionEvent::AttentionRecorded(workspace) => {
+                        cx.emit(AppEvent::Attention { workspace: workspace.clone() });
+                    }
                 });
                 let Some(slot) = self.sessions.get_mut(&id) else {
                     return;

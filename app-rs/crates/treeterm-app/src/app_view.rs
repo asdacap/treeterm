@@ -65,9 +65,20 @@ impl AppView {
         store: Entity<AppStore>,
         keybindings: Entity<KeybindingStore>,
         settings: Entity<treeterm_model::settings_store::SettingsStore>,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
         cx.observe(&store, |view, store, cx| view.sync(&store, cx)).detach();
+        // The attention ding (`playDing`): the system bell, when sound is on.
+        cx.subscribe_in(&store, window, |view, _, event: &treeterm_model::app_store::AppEvent, window, cx| match event {
+            treeterm_model::app_store::AppEvent::Attention { .. } => {
+                if view.settings.read(cx).settings().notifications.sound_enabled {
+                    window.play_system_bell();
+                }
+            }
+        })
+        .detach();
+        cx.observe(&settings, |_, _, cx| cx.notify()).detach();
         cx.observe(&keybindings, |_, _, cx| cx.notify()).detach();
         let mut view = Self {
             keybindings,
@@ -130,9 +141,11 @@ impl AppView {
             cx.notify();
         })
         .detach();
+        let viewed = session.clone();
         let selection = cx.subscribe(&tree, move |view, _, WorkspaceSelected(workspace), cx| {
             view.info = None;
             view.activate_session(&id, cx);
+            viewed.update(cx, |s, cx| s.set_viewed_workspace(Some(workspace.clone()), cx));
             if let Some(connected) = view.sessions.get_mut(&id) {
                 connected.active = ActiveView::Workspace(workspace.clone());
                 connected.focus_pending = true;
@@ -159,6 +172,7 @@ impl AppView {
         for (other, connected) in &self.sessions {
             if other != id {
                 connected.tree.update(cx, |tree, cx| tree.clear_selection(cx));
+                connected.session.update(cx, |s, cx| s.set_viewed_workspace(None, cx));
             }
         }
     }
@@ -274,6 +288,23 @@ impl AppView {
                     .text_xs()
                     .text_color(secondary)
                     .child("SESSIONS")
+                    .child(div().flex_1())
+                    .child({
+                        let on = self.settings.read(cx).settings().notifications.sound_enabled;
+                        div()
+                            .id("sound-toggle")
+                            .px_1()
+                            .mr_2()
+                            .rounded_sm()
+                            .cursor_pointer()
+                            .hover(move |d| d.bg(hover))
+                            .child(if on { "🔔" } else { "🔕" })
+                            .on_click(cx.listener(move |view, _, _, cx| {
+                                view.settings.update(cx, |store, cx| {
+                                    store.update(|s| s.notifications.sound_enabled = !on, cx)
+                                });
+                            }))
+                    })
                     .child(
                         div()
                             .id("connect-ssh")
@@ -294,6 +325,10 @@ impl AppView {
     /// Open a pending session pane, or drop one whose session is gone.
     fn sync_info(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(id) = self.info_pending.take() {
+            // A session pane shows no workspace: none is being viewed.
+            for connected in self.sessions.values() {
+                connected.session.update(cx, |s, cx| s.set_viewed_workspace(None, cx));
+            }
             let app = self.store.clone();
             self.info = Some(cx.new(|cx| crate::session_info_view::SessionInfoView::new(app, id, window, cx)));
         }

@@ -715,3 +715,73 @@ fn an_ai_harness_tab_is_classified_by_its_analyzer(cx: &mut TestAppContext) {
     let analyzer = workspace.read_with(cx, |w, _| w.analyzer(&tab)).unwrap();
     assert_eq!(analyzer.read_with(cx, |a, _| a.analyzer().reason().to_owned()), "asks to write config.toml");
 }
+
+#[gpui_kit::test]
+fn finished_work_in_an_unviewed_workspace_is_marked_unread_until_viewed(cx: &mut TestAppContext) {
+    use treeterm_model::session_store::SessionEvent;
+    use treeterm_model::workspace_store::ActivityState;
+    cx.executor().allow_parking();
+    let h = harness();
+    std::fs::write(h.daemon.workspaces_dir().join("a.json"), body("a", None)).unwrap();
+    std::fs::write(h.daemon.workspaces_dir().join("b.json"), body("b", None)).unwrap();
+    publish(&h, &["a", "b"]);
+    let mut settings = treeterm_core::settings::Settings::default();
+    settings.terminal_analyzer.idle_debounce = std::time::Duration::from_millis(300);
+    let conn = h.conn.clone();
+    let settings_store = cx.new(|_| SettingsStore::in_memory(settings));
+    let store = cx.new(|cx| SessionStore::new(conn, "client-a".into(), settings_store, None, cx));
+    let recorded = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let sink = recorded.clone();
+    cx.update(|cx| {
+        cx.subscribe(&store, move |_, event: &SessionEvent, _| {
+            if let SessionEvent::AttentionRecorded(id) = event {
+                sink.borrow_mut().push(id.clone());
+            }
+        })
+        .detach()
+    });
+    wait_until(cx, &store, |s| loaded(s, "a") && loaded(s, "b"));
+    store.update(cx, |s, cx| s.set_viewed_workspace(Some("a".into()), cx));
+    let b = store.read_with(cx, |s, _| ws(s, "b"));
+    let tab = b.update(cx, |w, cx| w.add_tab("terminal", cx)).unwrap();
+    wait_until_app(cx, &b, |w, _| matches!(w.tab_content(&tab), Some(TabContent::Terminal(_))));
+    let Some(TabContent::Terminal(terminal)) = b.read_with(cx, |w, _| w.tab_content(&tab)) else {
+        unreachable!()
+    };
+    // Let the shell print its prompt and that first burst settle (not reported as work).
+    wait_until_app(cx, &terminal, |t, _| !t.screen_text().trim().is_empty());
+    for _ in 0..50 {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        cx.executor().advance_clock(std::time::Duration::from_millis(100));
+        cx.run_until_parked();
+    }
+    terminal.update(cx, |t, cx| {
+        t.set_focused(true, cx);
+        t.write_input(b"echo attention-check\r", cx);
+    });
+    for _ in 0..300 {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        cx.executor().advance_clock(std::time::Duration::from_millis(100));
+        cx.run_until_parked();
+        if !recorded.borrow().is_empty() {
+            break;
+        }
+    }
+    // A short burst goes Working → Idle within one update; the transitions show it.
+    let went_through_working = b.read_with(cx, |w, _| {
+        w.activity_states().transitions(&tab).iter().any(|t| t.to == ActivityState::Working)
+    });
+    assert!(went_through_working, "the command's output never counted as work");
+    assert_eq!(*recorded.borrow(), vec!["b".to_owned()]);
+    assert!(b.read_with(cx, |w, _| w.has_unread_attention()));
+    wait_for_disk(cx, || file_on_disk(&h, "b")["metadata"]["workspaceAttention"].is_string());
+
+    // Viewing it marks it read.
+    store.update(cx, |s, cx| s.set_viewed_workspace(Some("b".into()), cx));
+    wait_until_app(cx, &b, |w, _| !w.has_unread_attention());
+    wait_for_disk(cx, || {
+        let raw = file_on_disk(&h, "b")["metadata"]["workspaceAttention"].as_str().map(str::to_owned);
+        raw.and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+            .is_some_and(|a| a["revision"] == a["acknowledgedRevision"])
+    });
+}

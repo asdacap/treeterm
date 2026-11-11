@@ -12,7 +12,10 @@ use gpui_kit::{AppContext as _, Context, Entity, EventEmitter, Subscription, Tas
 use serde_json::Value;
 use treeterm_core::activity::{ActivityStates, TransitionDetail};
 use treeterm_core::analyzer::idle_timeout as analyzer_idle_timeout;
-use treeterm_core::attention::has_unread_workspace_attention;
+use treeterm_core::attention::{
+    ActiveView as AttentionView, AttentionAction, AttentionMutation, AttentionSyncState, AttentionTracker,
+    ObservedSession, ObservedWorkspace, SessionStatus, apply_attention_mutations, has_unread_workspace_attention,
+};
 use treeterm_core::daemon::DaemonConnection;
 use treeterm_core::pty::CreatePty;
 use treeterm_core::settings::Settings;
@@ -36,6 +39,8 @@ pub struct Workspace {
 pub enum WorkspaceEvent {
     /// The body changed locally and must be persisted.
     Changed,
+    /// Work finished while the workspace was not shown: it was marked unread.
+    AttentionRecorded,
 }
 
 impl EventEmitter<WorkspaceEvent> for WorkspaceStore {}
@@ -134,6 +139,17 @@ pub struct WorkspaceStore {
     parent_branch: Option<String>,
     /// Per-tab activity and its transitions; runtime only (`activityState` store).
     activity: ActivityStates,
+    /// Bumped whenever a tab's activity changes; attention compares it.
+    activity_version: u64,
+    /// Unread-marker edits not yet seen in a watched body; re-applied over bodies from
+    /// other writers until they are (`AttentionSyncState`).
+    attention: AttentionSyncState,
+    /// When to mark unread and acknowledge (`workspaceAttentionCoordinator`). Runs on every
+    /// activity change as it happens: observers are coalesced, and a short burst goes
+    /// Working → Idle within one update.
+    attention_tracker: AttentionTracker,
+    /// The window shows this workspace.
+    viewed: bool,
     /// Runs AI-harness analyzers; `None` leaves them off (tests, no LLM client).
     llm: Option<LlmService>,
     _git_refresh: Option<Task<()>>,
@@ -176,6 +192,10 @@ impl WorkspaceStore {
             tabs: HashMap::new(),
             parent_branch: None,
             activity: ActivityStates::default(),
+            activity_version: 0,
+            attention: AttentionSyncState::default(),
+            attention_tracker: AttentionTracker::default(),
+            viewed: false,
             llm,
             _git_refresh: None,
         };
@@ -276,7 +296,97 @@ impl WorkspaceStore {
     fn set_activity(&mut self, tab_id: &str, state: ActivityState, detail: TransitionDetail, cx: &mut Context<Self>) {
         if self.activity.get(tab_id) != Some(state) {
             self.activity.set_tab_state(tab_id, state, detail, std::time::SystemTime::now());
+            self.activity_version += 1;
+            self.observe_attention(true, cx);
             cx.notify();
+        }
+    }
+
+    /// The window starts or stops showing this workspace; shown, it is marked read.
+    pub fn set_viewed(&mut self, viewed: bool, cx: &mut Context<Self>) {
+        if self.viewed != viewed {
+            self.viewed = viewed;
+            self.observe_attention(false, cx);
+        }
+    }
+
+    /// Run the attention tracker over the current state and apply what it decides.
+    fn observe_attention(&mut self, activity_changed: bool, cx: &mut Context<Self>) {
+        let observed = [ObservedWorkspace {
+            id: &self.workspace.id,
+            tab_ids: self.workspace.file.app_states.keys().map(String::as_str).collect(),
+            metadata: &self.workspace.file.metadata,
+        }];
+        let view = if self.viewed {
+            AttentionView::Workspace { session_id: "", workspace_id: &self.workspace.id }
+        } else {
+            AttentionView::Other
+        };
+        let session = ObservedSession { session_id: "", status: SessionStatus::Ready(&observed) };
+        let actions = match self.attention_tracker.observe(session, &self.activity, view, activity_changed) {
+            Ok(actions) => actions,
+            Err(error) => return tracing::warn!(%error, workspace = %self.workspace.id, "attention"),
+        };
+        for action in actions {
+            match action {
+                AttentionAction::Record { .. } => {
+                    self.record_attention(cx);
+                    cx.emit(WorkspaceEvent::AttentionRecorded);
+                }
+                AttentionAction::Acknowledge { revision, .. } => self.acknowledge_attention(&revision, cx),
+            }
+        }
+    }
+
+    pub fn activity_version(&self) -> u64 {
+        self.activity_version
+    }
+
+    /// The workspace carries an unread attention marker.
+    pub fn has_unread_attention(&self) -> bool {
+        match has_unread_workspace_attention(&self.workspace.file.metadata) {
+            Ok(unread) => unread,
+            Err(error) => {
+                tracing::warn!(%error, workspace = %self.workspace.id, "unreadable attention metadata");
+                false
+            }
+        }
+    }
+
+    /// Mark unread with a fresh revision (`recordWorkspaceAttention`).
+    pub fn record_attention(&mut self, cx: &mut Context<Self>) {
+        self.queue_attention(AttentionMutation::record(), cx);
+    }
+
+    /// Mark read if `revision` is still the current one (`acknowledgeWorkspaceAttention`).
+    pub fn acknowledge_attention(&mut self, revision: &str, cx: &mut Context<Self>) {
+        self.queue_attention(AttentionMutation::acknowledge(revision), cx);
+    }
+
+    fn queue_attention(&mut self, mutation: AttentionMutation, cx: &mut Context<Self>) {
+        if !self.attention.queue(mutation) {
+            return;
+        }
+        if self.reapply_attention() {
+            self.sync_idle_timeouts(cx);
+            self.changed(cx);
+        }
+    }
+
+    /// Lay the pending attention edits over the current metadata; whether it changed.
+    fn reapply_attention(&mut self) -> bool {
+        let metadata = &self.workspace.file.metadata;
+        match apply_attention_mutations(metadata, self.attention.mutations()) {
+            Ok(std::borrow::Cow::Borrowed(_)) => false,
+            Ok(std::borrow::Cow::Owned(updated)) if updated == *metadata => false,
+            Ok(std::borrow::Cow::Owned(updated)) => {
+                self.workspace.file.metadata = updated;
+                true
+            }
+            Err(error) => {
+                tracing::error!(%error, workspace = %self.workspace.id, "cannot apply attention");
+                false
+            }
         }
     }
 
@@ -633,6 +743,12 @@ impl WorkspaceStore {
     fn dispose_tab(&mut self, tab_id: &str) {
         self.tabs.remove(tab_id);
         self.activity.remove_tab_state(tab_id);
+        self.activity_version += 1;
+    }
+
+    /// Re-baseline attention after tabs came or went (state removal is not completion).
+    fn tabs_changed(&mut self, cx: &mut Context<Self>) {
+        self.observe_attention(false, cx);
     }
 
     /// Add a tab running `application_id` and make it active. Returns the tab id, or `None`
@@ -656,6 +772,7 @@ impl WorkspaceStore {
             },
         );
         self.workspace.file.active_tab_id = Some(tab_id.clone());
+        self.tabs_changed(cx);
         self.changed(cx);
         self.init_tab(&tab_id, cx);
         Some(tab_id)
@@ -703,6 +820,7 @@ impl WorkspaceStore {
             },
         );
         self.workspace.file.active_tab_id = Some(tab_id.clone());
+        self.tabs_changed(cx);
         self.changed(cx);
         self.init_tab(&tab_id, cx);
         Some(tab_id)
@@ -757,6 +875,7 @@ impl WorkspaceStore {
                 .map(|(id, _)| id.clone());
             file.active_tab_id = next;
         }
+        self.tabs_changed(cx);
         self.changed(cx);
     }
 
@@ -866,12 +985,22 @@ impl WorkspaceStore {
         for tab_id in &moved {
             self.dispose_tab(tab_id);
         }
+        // Attention edits the incoming body already carries are done; the rest go on top
+        // of it and are written again.
+        if let Err(error) = self.attention.reconcile_write(&file.metadata, "") {
+            tracing::warn!(%error, "unreadable attention metadata in an incoming body");
+        }
         self.workspace.file = file;
         let tab_ids: Vec<String> = self.workspace.file.app_states.keys().cloned().collect();
         for tab_id in tab_ids {
             self.init_tab(&tab_id, cx);
         }
+        let rewrite = self.attention.has_pending() && self.reapply_attention();
+        self.observe_attention(false, cx);
         self.sync_idle_timeouts(cx);
+        if rewrite {
+            self.changed(cx);
+        }
         cx.notify();
     }
 

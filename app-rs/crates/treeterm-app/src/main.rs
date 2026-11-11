@@ -157,7 +157,7 @@ fn main() {
         .detach();
         let (window, view) = gpui_kit::open_window(options, cx, {
             let (keybindings, settings) = (keybindings.clone(), settings.clone());
-            |_, cx| cx.new(|cx| AppView::new(store, keybindings, settings, cx))
+            |window, cx| cx.new(|cx| AppView::new(store, keybindings, settings, window, cx))
         })
         .expect("open the main window");
         intercept_shortcuts(keybindings, view.clone(), cx);

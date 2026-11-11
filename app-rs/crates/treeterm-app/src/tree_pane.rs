@@ -149,6 +149,9 @@ impl Render for TreePane {
                     is_worktree: session
                         .workspace_store(&row.id)
                         .is_some_and(|w| w.read(cx).file().is_worktree),
+                    unread: session
+                        .workspace_store(&row.id)
+                        .is_some_and(|w| w.read(cx).has_unread_attention()),
                     label: session
                         .entry(&row.id)
                         .map_or(Label::Loading, |entry| Label::of(entry, cx)),
@@ -220,7 +223,7 @@ impl Render for TreePane {
 
 impl TreePane {
     fn render_row(&self, row: RowData, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        let RowData { id, depth, has_children, label, is_worktree, activity } = row;
+        let RowData { id, depth, has_children, label, is_worktree, unread, activity } = row;
         let busy = activity != treeterm_model::workspace_store::ActivityState::Idle;
         let c = colors(cx);
         let (label, label_color): (SharedString, _) = match label {
@@ -267,6 +270,8 @@ impl TreePane {
                     })),
             )
             .child(div().flex_1().truncate().text_color(label_color).child(label.clone()))
+            // "New activity — open workspace to mark as read".
+            .when(unread, |row| row.child(div().text_xs().text_color(c.accent).child("●")))
             .when(busy, |row| {
                 row.child(
                     div()
@@ -334,6 +339,8 @@ impl TreePane {
 struct RowData {
     id: String,
     is_worktree: bool,
+    /// Background work finished while the workspace was not shown.
+    unread: bool,
     activity: treeterm_model::workspace_store::ActivityState,
     depth: usize,
     has_children: bool,

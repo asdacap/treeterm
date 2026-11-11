@@ -191,6 +191,9 @@ impl GitCleanup {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionEvent {
     WorkspaceRemoved(String),
+    /// Background work in a workspace that is not being viewed finished: it was marked
+    /// unread (ding, if sound is on).
+    AttentionRecorded(String),
     /// The session watch failed or ended: this store's connection is gone.
     Failed(String),
 }
@@ -334,6 +337,8 @@ pub struct SessionStore {
     ref_sync_retry_on_next_event: bool,
     ops: VecDeque<QueuedOp>,
     op_runner: Option<Task<()>>,
+    /// The workspace this session's window shows, if any.
+    viewed: Option<String>,
     disposed: bool,
     _session_watch: Task<()>,
 }
@@ -388,6 +393,7 @@ impl SessionStore {
             ref_sync_retry_on_next_event: false,
             ops: VecDeque::new(),
             op_runner: None,
+            viewed: None,
             disposed: false,
             _session_watch: session_watch,
         }
@@ -748,14 +754,35 @@ impl SessionStore {
         let owned = id.clone();
         let subscription = cx.subscribe(&store, move |session, _, event: &WorkspaceEvent, cx| match event {
             WorkspaceEvent::Changed => session.enqueue_content_sync(&owned, cx),
+            WorkspaceEvent::AttentionRecorded => cx.emit(SessionEvent::AttentionRecorded(owned.clone())),
         });
+        let viewed = self.viewed.as_deref() == Some(id.as_str());
         self.store_events.insert(id, subscription);
+        store.update(cx, |w, cx| w.set_viewed(viewed, cx));
         cx.observe(&store, |session, _, cx| {
             session.refresh_parent_branches(cx);
             cx.notify();
         })
         .detach();
         store
+    }
+
+    /// The window now shows `workspace` of this session (or none of its workspaces):
+    /// a viewed unread workspace is acknowledged.
+    pub fn set_viewed_workspace(&mut self, workspace: Option<String>, cx: &mut Context<Self>) {
+        if self.viewed == workspace {
+            return;
+        }
+        self.viewed = workspace;
+        let stores: Vec<(String, Entity<WorkspaceStore>)> = self
+            .entries
+            .iter()
+            .filter_map(|(id, entry)| entry.store().map(|s| (id.clone(), s.clone())))
+            .collect();
+        for (id, store) in stores {
+            let viewed = self.viewed.as_deref() == Some(id.as_str());
+            store.update(cx, |w, cx| w.set_viewed(viewed, cx));
+        }
     }
 
     /// Tell every child workspace its parent's current branch (its Review base).
