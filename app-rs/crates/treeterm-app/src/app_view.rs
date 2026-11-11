@@ -606,6 +606,27 @@ impl Render for AppView {
         let sidebar = self.sidebar(cx);
         let info = self.info.clone();
         let collapsed = self.sidebar_collapsed && cfg!(target_os = "macos");
+        // Native webviews draw above GPUI: hide those of every workspace pane not on screen
+        // (the shown one manages its own in `workspace_pane`).
+        let on_screen = if info.is_none() { self.active.clone() } else { None };
+        let hidden: Vec<Entity<crate::browser_view::BrowserView>> = self
+            .sessions
+            .iter()
+            .filter(|(id, _)| on_screen.as_ref() != Some(*id))
+            .flat_map(|(_, connected)| connected.browser_views.values().cloned().collect::<Vec<_>>())
+            .collect();
+        let hidden_files: Vec<Entity<crate::file_browser_view::FileBrowserView>> = self
+            .sessions
+            .iter()
+            .filter(|(id, _)| on_screen.as_ref() != Some(*id))
+            .flat_map(|(_, connected)| connected.file_views.values().cloned().collect::<Vec<_>>())
+            .collect();
+        for view in hidden {
+            view.update(cx, |v, cx| v.set_shown(false, cx));
+        }
+        for view in hidden_files {
+            view.update(cx, |v, cx| v.set_shown(false, cx));
+        }
         let pane = match (info, self.current_mut()) {
             (Some(info), _) => info.into_any_element(),
             (None, current) => match current {
@@ -1905,11 +1926,15 @@ fn workspace_pane(
                     .clone();
                 div().size_full().child(view).into_any_element()
             }
-            Some(TabContent::Browser { url }) => {
+            Some(TabContent::Browser { url, home }) => {
+                // Page memory: the tab reopens on the page it last showed (`path`).
+                let memory = (workspace.downgrade(), tab_id.clone());
                 let view = connected
                     .browser_views
                     .entry((id.clone(), tab_id.clone()))
-                    .or_insert_with(|| cx.new(|_| crate::browser_view::BrowserView::new(url)))
+                    .or_insert_with(|| {
+                        cx.new(|_| crate::browser_view::BrowserView::new(url).remember_pages_in(memory.0, memory.1, home))
+                    })
                     .clone();
                 div().size_full().child(view).into_any_element()
             }

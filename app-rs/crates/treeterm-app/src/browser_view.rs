@@ -97,8 +97,6 @@ impl BrowserView {
 
     /// Remember the page shown in the tab's state (`path`), as Electron's page memory does,
     /// so the tab reopens there. `home` is the start page Home goes back to.
-    // For `app_view.rs`, which builds the tabs' views.
-    #[allow(dead_code)]
     pub fn remember_pages_in(mut self, workspace: WeakEntity<WorkspaceStore>, tab_id: String, home: String) -> Self {
         self.memory = Some((workspace, tab_id));
         self.url = home;

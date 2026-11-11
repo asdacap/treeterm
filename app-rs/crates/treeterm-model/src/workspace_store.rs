@@ -103,8 +103,9 @@ pub enum TabContent {
     Files(Entity<crate::file_browser::FileBrowser>),
     Editor(Entity<crate::text_editor::TextEditor>),
     Review(Entity<crate::review::ReviewModel>),
-    /// A web page; the view owns the native webview.
-    Browser { url: String },
+    /// A web page; the view owns the native webview. `url` opens the page remembered in the
+    /// tab's state; `home` is the instance's start page.
+    Browser { url: String, home: String },
     /// The tab's PTY is being created.
     StartingTerminal,
     Failed(String),
@@ -142,7 +143,7 @@ enum TabRef {
         model: Entity<crate::review::ReviewModel>,
         _events: Subscription,
     },
-    Browser { url: String },
+    Browser { url: String, home: String },
     Tool(crate::tool_tabs::ToolTab),
 }
 
@@ -282,7 +283,7 @@ impl WorkspaceStore {
             Some(TabRef::Files { model, .. }) => TabContent::Files(model.clone()),
             Some(TabRef::Editor { model, .. }) => TabContent::Editor(model.clone()),
             Some(TabRef::Review { model, .. }) => TabContent::Review(model.clone()),
-            Some(TabRef::Browser { url }) => TabContent::Browser { url: url.clone() },
+            Some(TabRef::Browser { url, home }) => TabContent::Browser { url: url.clone(), home: home.clone() },
             Some(TabRef::Tool(tool)) => tool.content(),
             None => TabContent::NotPorted(tab.application_id.clone()),
         })
@@ -678,7 +679,7 @@ impl WorkspaceStore {
             AppKind::Browser { url } => {
                 let path = tab.state.get("path").and_then(Value::as_str).unwrap_or_default();
                 let full = format!("{}{}", url.trim_end_matches('/'), if path.is_empty() || path.starts_with('/') { path.to_owned() } else { format!("/{path}") });
-                self.tabs.insert(tab_id.to_owned(), TabRef::Browser { url: full });
+                self.tabs.insert(tab_id.to_owned(), TabRef::Browser { url: full, home: url.clone() });
             }
             AppKind::Review => {
                 let base = match (tab.state.get("baseBranchOverride").and_then(Value::as_str), &self.parent_branch) {
