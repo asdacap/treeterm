@@ -60,7 +60,7 @@ fn output_text(events: &[PtyEvent]) -> String {
     String::from_utf8_lossy(&bytes).into_owned()
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn attach_replays_then_streams_live_output_and_takes_input() {
     let daemon = TestDaemon::start();
     let conn = DaemonConnection::open(&rt(), daemon.socket_path()).await.unwrap().unwrap();
@@ -82,7 +82,7 @@ async fn attach_replays_then_streams_live_output_and_takes_input() {
     .await;
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_resize_request_is_echoed_with_the_applied_size() {
     let daemon = TestDaemon::start();
     let conn = DaemonConnection::open(&rt(), daemon.socket_path()).await.unwrap().unwrap();
@@ -102,7 +102,7 @@ async fn a_resize_request_is_echoed_with_the_applied_size() {
     conn.kill_pty(&pty).await.unwrap().unwrap();
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn the_same_handle_returns_the_live_pty() {
     let daemon = TestDaemon::start();
     let conn = DaemonConnection::open(&rt(), daemon.socket_path()).await.unwrap().unwrap();
@@ -117,7 +117,7 @@ async fn the_same_handle_returns_the_live_pty() {
     conn.kill_pty(&first).await.unwrap().unwrap();
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn attaching_to_an_unknown_pty_ends_the_stream() {
     let daemon = TestDaemon::start();
     let conn = DaemonConnection::open(&rt(), daemon.socket_path()).await.unwrap().unwrap();

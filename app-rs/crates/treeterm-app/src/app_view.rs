@@ -30,7 +30,7 @@ enum Body {
     StartingDaemon,
     Reconnecting { attempt: u32, last_error: SharedString },
     Failed(SharedString),
-    Connected(Connected),
+    Connected(Box<Connected>),
 }
 
 /// Per-window state for a connected session.
@@ -102,7 +102,7 @@ impl AppView {
                 {
                     return;
                 }
-                Body::Connected(self.connect(session, cx))
+                Body::Connected(Box::new(self.connect(session, cx)))
             }
         };
         cx.notify();
