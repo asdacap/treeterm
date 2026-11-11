@@ -873,7 +873,7 @@ fn workspace_pane(connected: &mut Connected, window: &mut Window, cx: &mut Conte
                 v_flex()
                     .size_full()
                     .child(div().flex_1().min_h_0().child(view))
-                    .child(terminal_status_bar(&workspace, tab_id, cx))
+                    .child(terminal_status_bar(&workspace, connected.session.read(cx).git_controller(&id).cloned(), tab_id, cx))
                     .into_any_element()
             }
             Some(TabContent::Files(model)) => {
@@ -1018,7 +1018,7 @@ fn web_app_tab(
                 v_flex()
                     .size_full()
                     .child(div().flex_1().min_h_0().child(view))
-                    .child(terminal_status_bar(workspace, tab_id, cx))
+                    .child(terminal_status_bar(workspace, None, tab_id, cx))
                     .into_any_element()
             }
             None => centered(div().text_color(secondary).child("The server starts once a port is found…")),
@@ -1065,6 +1065,7 @@ fn web_app_tab(
 /// Port of `TerminalStatusBar.tsx`; both switches persist in the tab's state.
 fn terminal_status_bar(
     workspace: &Entity<treeterm_model::workspace_store::WorkspaceStore>,
+    git: Option<Entity<treeterm_model::git_controller::GitController>>,
     tab_id: &str,
     cx: &mut Context<AppView>,
 ) -> AnyElement {
@@ -1083,6 +1084,24 @@ fn terminal_status_bar(
     let (idle_ws, idle_tab) = (workspace.clone(), tab_id.to_owned());
     let (width_ws, width_tab) = (workspace.clone(), tab_id.to_owned());
     let (approve_ws, approve_tab) = (workspace.clone(), tab_id.to_owned());
+    // AI-harness prompts (`PromptCommitButton`, `PromptRebaseButton`).
+    let prompts: Vec<(&'static str, String)> = match (&analysis, &git) {
+        (Some(_), Some(git)) => {
+            use treeterm_core::git_status::{ParentConflicts, WorkingTree};
+            let status = git.read(cx).status().clone();
+            let file = store.file();
+            let mut prompts = Vec::new();
+            let conflicting = status.parent_conflicts == ParentConflicts::Conflicting;
+            if status.working_tree == WorkingTree::Dirty && !conflicting {
+                prompts.push(("Prompt Commit", "commit".to_owned()));
+            }
+            if let (true, Some(branch), Some(parent)) = (conflicting, file.git_branch.as_deref(), store.parent_branch()) {
+                prompts.push(("Prompt Rebase", format!("rebase local branch {branch} onto {parent}")));
+            }
+            prompts
+        }
+        (Some(_), None) | (None, _) => Vec::new(),
+    };
     let (badge_state, analyzing, reason, auto_approve) = match analysis {
         Some((state, analyzing, reason, auto_approve)) => (state, analyzing, Some(reason), Some(auto_approve)),
         None => (activity, false, None, None),
@@ -1110,6 +1129,20 @@ fn terminal_status_bar(
         .when_some(reason.filter(|r| !r.is_empty()), |bar, reason| {
             bar.child(div().max_w(px(360.)).truncate().text_color(gpui_kit::rgb(0x858585)).child(reason))
         })
+        .children(prompts.into_iter().map(|(label, text)| {
+            use gpui_kit::component::button::{Button, ButtonVariants as _};
+            let target = workspace.clone();
+            Button::new(SharedString::from(format!("{label}-{tab_id}")))
+                .xsmall()
+                .ghost()
+                .label(label)
+                .on_click(move |_, window, cx| {
+                    if let Err(error) = target.update(cx, |w, cx| w.prompt_harness(&text, cx)) {
+                        use gpui_kit::component::WindowExt as _;
+                        window.push_notification(error, cx);
+                    }
+                })
+        }))
         .when_some(auto_approve, |bar, checked| {
             bar.child(
                 Switch::new(SharedString::from(format!("approve-switch-{tab_id}")))

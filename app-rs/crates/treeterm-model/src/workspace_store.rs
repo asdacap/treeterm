@@ -360,6 +360,11 @@ impl WorkspaceStore {
         cx.notify();
     }
 
+    /// The parent workspace's branch, when known (Review's base, the rebase prompt).
+    pub fn parent_branch(&self) -> Option<&str> {
+        self.parent_branch.as_deref()
+    }
+
     /// `settings.terminal.maxCols`, the width the "col limit" switch caps at.
     pub fn max_cols(&self) -> u16 {
         self.settings.terminal.max_cols
