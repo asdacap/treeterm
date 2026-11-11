@@ -79,6 +79,52 @@ fn get_login_shell() -> String {
     std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string())
 }
 
+/// `execve` does not search `PATH` (as `execvp` did): resolve a bare shell name here.
+fn resolve_on_path(program: &str) -> String {
+    if program.contains('/') {
+        return program.to_owned();
+    }
+    std::env::var_os("PATH")
+        .and_then(|path| {
+            std::env::split_paths(&path)
+                .map(|dir| dir.join(program))
+                .find(|candidate| candidate.is_file())
+        })
+        .map_or_else(|| program.to_owned(), |found| found.to_string_lossy().into_owned())
+}
+
+/// The child's environment as `KEY=VALUE` C strings: the daemon's own, with `overrides` and
+/// then `TERM=xterm-256color` on top. Entries that cannot be C strings (an interior NUL) are
+/// dropped. Built before `forkpty`: between fork and exec the child of a multi-threaded
+/// process may only make async-signal-safe calls, and `std::env::set_var` takes a lock and
+/// allocates (a deadlocked child then holds every inherited descriptor, e.g. the pipes of
+/// git commands running at the same time, which never see EOF).
+fn child_environment(
+    base: impl Iterator<Item = (std::ffi::OsString, std::ffi::OsString)>,
+    overrides: &HashMap<String, String>,
+) -> Vec<CString> {
+    use std::os::unix::ffi::OsStrExt;
+    let mut merged: Vec<(Vec<u8>, Vec<u8>)> = base
+        .map(|(k, v)| (k.as_bytes().to_vec(), v.as_bytes().to_vec()))
+        .collect();
+    let mut set = |key: &[u8], value: &[u8]| match merged.iter_mut().find(|(k, _)| k == key) {
+        Some(entry) => entry.1 = value.to_vec(),
+        None => merged.push((key.to_vec(), value.to_vec())),
+    };
+    for (k, v) in overrides {
+        set(k.as_bytes(), v.as_bytes());
+    }
+    set(b"TERM", b"xterm-256color");
+    merged
+        .into_iter()
+        .filter_map(|(mut entry, value)| {
+            entry.push(b'=');
+            entry.extend_from_slice(&value);
+            CString::new(entry).ok()
+        })
+        .collect()
+}
+
 impl PtyManager {
     pub fn new() -> Self {
         Self {
@@ -123,7 +169,17 @@ impl PtyManager {
             self.counter.fetch_add(1, Ordering::Relaxed) + 1
         );
 
+        // Everything the child needs, prepared before the fork (see `child_environment`).
+        let envp_owned = child_environment(std::env::vars_os(), &env);
+        let c_cwd = CString::new(cwd.as_str()).map_err(|_| format!("invalid working directory: {cwd:?}"))?;
+        let c_shell = CString::new(resolve_on_path(&get_login_shell())).map_err(|_| "invalid login shell path".to_owned())?;
+        let c_arg = CString::new("-l").map_err(|_| "invalid shell argument".to_owned())?;
+
         let (master_fd, child_pid) = unsafe {
+            // Raw pointers stay inside this block (the future must stay `Send`).
+            let mut envp: Vec<*const libc::c_char> = envp_owned.iter().map(|e| e.as_ptr()).collect();
+            envp.push(std::ptr::null());
+            let argv = [c_shell.as_ptr(), c_arg.as_ptr(), std::ptr::null()];
             let mut master: libc::c_int = 0;
             let mut ws = libc::winsize {
                 ws_row: rows,
@@ -141,20 +197,10 @@ impl PtyManager {
                 return Err(format!("forkpty failed: {}", std::io::Error::last_os_error()));
             }
             if pid == 0 {
-                // Child process
-                for (k, v) in &env {
-                    std::env::set_var(k, v);
-                }
-                std::env::set_var("TERM", "xterm-256color");
-                let _ = std::env::set_current_dir(&cwd);
-
-                let shell = get_login_shell();
-                let c_shell = CString::new(shell).unwrap();
-                let c_arg = CString::new("-l").unwrap();
-                libc::execvp(
-                    c_shell.as_ptr(),
-                    [c_shell.as_ptr(), c_arg.as_ptr(), std::ptr::null()].as_ptr(),
-                );
+                // Child: async-signal-safe calls only. A missing directory leaves the shell
+                // in the daemon's (as before).
+                libc::chdir(c_cwd.as_ptr());
+                libc::execve(c_shell.as_ptr(), argv.as_ptr(), envp.as_ptr());
                 libc::_exit(1);
             }
             (master, pid)
@@ -758,6 +804,36 @@ fn chrono_now_millis() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bare_shell_names_are_found_on_path() {
+        assert_eq!(resolve_on_path("/bin/zsh"), "/bin/zsh");
+        assert!(resolve_on_path("sh").ends_with("/sh"));
+        assert_eq!(resolve_on_path("definitely-not-a-shell-xyz"), "definitely-not-a-shell-xyz");
+    }
+
+    #[test]
+    fn the_child_environment_overrides_and_sets_term() {
+        let base = vec![
+            ("PATH".into(), "/bin".into()),
+            ("TERM".into(), "dumb".into()),
+            ("KEEP".into(), "1".into()),
+        ];
+        let mut overrides = HashMap::new();
+        overrides.insert("PATH".to_owned(), "/usr/bin".to_owned());
+        overrides.insert("NEW".to_owned(), "x".to_owned());
+        overrides.insert("BAD".to_owned(), "a\0b".to_owned());
+        let env: Vec<String> = child_environment(base.into_iter(), &overrides)
+            .into_iter()
+            .map(|c| c.into_string().unwrap())
+            .collect();
+        assert!(env.contains(&"PATH=/usr/bin".to_owned()));
+        assert!(env.contains(&"TERM=xterm-256color".to_owned()));
+        assert!(env.contains(&"KEEP=1".to_owned()));
+        assert!(env.contains(&"NEW=x".to_owned()));
+        assert!(!env.iter().any(|e| e.starts_with("BAD=")), "an interior NUL cannot be passed");
+        assert_eq!(env.iter().filter(|e| e.starts_with("PATH=")).count(), 1);
+    }
 
     #[test]
     fn get_login_shell_returns_nonempty() {

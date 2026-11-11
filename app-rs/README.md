@@ -110,5 +110,9 @@ Not yet:
   skips them, failing the merge or losing new files with the deleted worktree).
 - Daemon fix: each gRPC connection now gets its own id, so the session lock actually excludes
   other connections (it was shared by all connections before).
+- Daemon fix: a PTY's child process is fork-safe (environment, cwd and argv built before
+  `forkpty`; the child only calls `chdir` + `execve`). Before, `std::env::set_var` in the
+  child of the multi-threaded daemon could deadlock it, and the stuck child kept other
+  commands' pipes open (a git command started at the same time never finished).
 - The attention ding is the system bell (Electron synthesised an 880 Hz tone).
 - The analyzer reads the tab's own terminal; Electron attached a second, headless one.
