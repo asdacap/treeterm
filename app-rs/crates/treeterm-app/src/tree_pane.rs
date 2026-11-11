@@ -152,6 +152,10 @@ impl Render for TreePane {
                     unread: session
                         .workspace_store(&row.id)
                         .is_some_and(|w| w.read(cx).has_unread_attention()),
+                    favourite: session.workspace_store(&row.id).is_some_and(|w| w.read(cx).is_favourite()),
+                    has_parent: session
+                        .workspace_store(&row.id)
+                        .is_some_and(|w| w.read(cx).file().parent_id.as_deref().is_some_and(|p| !p.is_empty())),
                     pr: session.git_controller(&row.id).and_then(|git| {
                         let status = git.read(cx).status();
                         match &status.pull_request {
@@ -232,7 +236,7 @@ impl Render for TreePane {
 
 impl TreePane {
     fn render_row(&self, row: RowData, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        let RowData { id, depth, has_children, label, is_worktree, unread, pr, activity } = row;
+        let RowData { id, depth, has_children, label, is_worktree, unread, favourite, has_parent, pr, activity } = row;
         let busy = activity != treeterm_model::workspace_store::ActivityState::Idle;
         let c = colors(cx);
         let (label, label_color): (SharedString, _) = match label {
@@ -290,6 +294,7 @@ impl TreePane {
                 row.child(div().text_xs().text_color(c.accent).child(format!("#{number}")))
                     .when(!mark.is_empty(), |row| row.child(div().text_xs().text_color(gpui_kit::rgb(color)).child(mark)))
             })
+            .when(favourite, |row| row.child(div().text_xs().text_color(gpui_kit::rgb(0xe5c07b)).child("★")))
             .child(div().flex_1().truncate().text_color(label_color).child(label.clone()))
             // "New activity — open workspace to mark as read".
             .when(unread, |row| row.child(div().text_xs().text_color(c.accent).child("●")))
@@ -302,7 +307,7 @@ impl TreePane {
                         .bg(gpui_kit::rgb(activity.color())),
                 )
             })
-            .context_menu(move |menu, _window, _cx| {
+            .context_menu(move |menu, _window, cx| {
                 let (session, id, label) = (session.clone(), menu_id.clone(), label.clone());
                 let (child_session, child_parent, child_label, pane) =
                     (session.clone(), id.clone(), label.clone(), pane.clone());
@@ -321,6 +326,29 @@ impl TreePane {
                     );
                 }))
                 .separator();
+                let store = session.read(cx).workspace_store(&id).cloned();
+                let menu = match store.clone() {
+                    Some(store) => menu.item(
+                        PopupMenuItem::new(if favourite { "Unmark as Favourite" } else { "Mark as Favourite" })
+                            .on_click(move |_, _, cx| store.update(cx, |w, cx| w.toggle_favourite(cx))),
+                    ),
+                    None => menu,
+                };
+                let menu = match (store, has_parent) {
+                    (Some(store), true) => {
+                        let relabel = |menu: gpui_kit::component::menu::PopupMenu, text: &'static str, branch: bool| {
+                            let store = store.clone();
+                            menu.item(PopupMenuItem::new(text).on_click(move |_, window, cx| {
+                                if let Err(error) = store.update(cx, |w, cx| w.refresh_labels(branch, cx)) {
+                                    window.push_notification(error, cx);
+                                }
+                            }))
+                        };
+                        let menu = relabel(menu, "Refresh Title & Description", false);
+                        relabel(menu, "Refresh Branch Name", true).separator()
+                    }
+                    (Some(_), false) | (None, _) => menu.separator(),
+                };
                 let menu = {
                     let (session, id) = (session.clone(), id.clone());
                     menu.item(PopupMenuItem::new("Quick fork").on_click(move |_, _, cx| {
@@ -362,6 +390,9 @@ struct RowData {
     is_worktree: bool,
     /// Background work finished while the workspace was not shown.
     unread: bool,
+    favourite: bool,
+    /// A child worktree (it has a parent): its title and branch can be re-suggested.
+    has_parent: bool,
     /// The PR's number and what it needs (`PrIndicators`).
     pr: Option<(u64, treeterm_model::git_controller::PrSignal)>,
     activity: treeterm_model::workspace_store::ActivityState,

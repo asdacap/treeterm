@@ -248,6 +248,30 @@ impl WorkspaceStore {
         }
     }
 
+    /// Re-consult the LLM through the workspace's first AI-harness tab
+    /// (`refreshTitleAndDescription` / `refreshBranchName`). Fails without one.
+    pub fn refresh_labels(&mut self, branch: bool, cx: &mut Context<Self>) -> Result<(), String> {
+        let analyzer = self
+            .workspace
+            .file
+            .app_states
+            .keys()
+            .find_map(|tab| self.analyzer(tab))
+            .ok_or_else(|| "No AI Harness tab in this workspace".to_owned())?;
+        analyzer.update(cx, |a, cx| {
+            if branch {
+                a.refresh_branch_name(cx);
+            } else {
+                a.refresh_title_and_description(cx);
+            }
+        });
+        Ok(())
+    }
+
+    pub fn is_favourite(&self) -> bool {
+        self.workspace.file.metadata.get("isFavourite").map(String::as_str) == Some("true")
+    }
+
     /// The status bar's "Auto-approve safe" switch, persisted per tab.
     pub fn set_auto_approve(&mut self, tab_id: &str, enabled: bool, cx: &mut Context<Self>) {
         self.update_tab_state(

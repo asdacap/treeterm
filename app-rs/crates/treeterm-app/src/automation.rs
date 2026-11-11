@@ -138,8 +138,9 @@ fn handle(line: &str, window: AnyWindowHandle, view: &Entity<AppView>, cx: &mut 
                 window.dispatch_action(action, cx);
                 Ok(json!({ "ok": true }))
             }
-            "click" => {
-                // `click <x> <y>` in window points (screenshot pixels / scale factor).
+            "click" | "rclick" => {
+                // `click <x> <y>` in window points (screenshot pixels / scale factor);
+                // `rclick` uses the right button (context menus).
                 let mut coords = rest.split_whitespace().map(str::parse::<f32>);
                 let (Some(Ok(x)), Some(Ok(y))) = (coords.next(), coords.next()) else {
                     return Err("usage: click <x> <y>".to_owned());
@@ -150,7 +151,7 @@ fn handle(line: &str, window: AnyWindowHandle, view: &Entity<AppView>, cx: &mut 
                     gpui_kit::PlatformInput::MouseMove(gpui_kit::MouseMoveEvent { position, pressed_button: None, modifiers }),
                     cx,
                 );
-                let button = gpui_kit::MouseButton::Left;
+                let button = if command == "rclick" { gpui_kit::MouseButton::Right } else { gpui_kit::MouseButton::Left };
                 window.dispatch_event(
                     gpui_kit::PlatformInput::MouseDown(gpui_kit::MouseDownEvent {
                         button,

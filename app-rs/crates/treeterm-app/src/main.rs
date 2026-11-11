@@ -181,6 +181,8 @@ fn main() {
                 cx,
             ))),
             window_min_size: Some(size(px(800.), px(600.))),
+            // Matches the .desktop file, so Linux launchers show the right icon.
+            app_id: Some("treeterm".to_owned()),
             titlebar: Some(TitlebarOptions {
                 title: Some("TreeTerm".into()),
                 appears_transparent: true,

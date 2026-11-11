@@ -352,8 +352,47 @@ impl AppView {
                             })),
                     ),
             )
+            .children(self.favourites(cx))
             .child(div().id("sessions").flex_1().overflow_y_scroll().child(list))
             .into_any_element()
+    }
+
+    /// Favourite workspaces of every connected session (`FavouritesPanel`); none, no panel.
+    fn favourites(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let c = colors(cx);
+        let (secondary, hover, star) = (c.text_secondary, c.bg_hover, gpui_kit::rgb(0xe5c07b));
+        let mut rows = Vec::new();
+        for connected in self.sessions.values() {
+            let session = connected.session.read(cx);
+            for id in session.workspace_ids() {
+                let Some(store) = session.workspace_store(id) else { continue };
+                let workspace = store.read(cx);
+                if workspace.is_favourite() {
+                    rows.push((id.clone(), workspace.file().display_name().to_owned(), connected.tree.clone()));
+                }
+            }
+        }
+        if rows.is_empty() {
+            return None;
+        }
+        let mut panel = v_flex()
+            .pb_2()
+            .child(h_flex().px_3().pb_1().gap_1().text_xs().text_color(secondary).child(div().text_color(star).child("★")).child("FAVOURITES"));
+        for (id, name, tree) in rows {
+            panel = panel.child(
+                div()
+                    .id(SharedString::from(format!("fav-{id}")))
+                    .px_3()
+                    .py(px(2.))
+                    .text_sm()
+                    .truncate()
+                    .cursor_pointer()
+                    .hover(move |d| d.bg(hover))
+                    .child(name)
+                    .on_click(move |_, _, cx| tree.update(cx, |tree, cx| tree.select(id.clone(), cx))),
+            );
+        }
+        Some(panel.into_any_element())
     }
 
     /// Open a pending session pane, or drop one whose session is gone.
