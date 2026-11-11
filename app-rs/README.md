@@ -101,6 +101,13 @@ Done (tested against a real in-process daemon unless noted):
   Worktrees (worktree registry shared with Electron), upstream warning before forking,
   force-unlock of a held session lock; session pane with logs, port forwards and a system
   monitor.
+- **Tool tabs:** GitHub PR details (reviews, checks, unresolved threads), review comments
+  (prompt the harness, push to GitHub), analyzer history and system-prompt debugger (from
+  the activity badge's right-click menu), Chat, TTY list with orphan kill, workspace
+  settings (also from the tree's Settings item), SSH upload (ssh sessions only; not yet run
+  against a real host).
+- **Traffic:** download rate per connection (session header) and per workspace (PTY output,
+  workspace header), counted at the daemon socket.
 - **CLI:** `treeterm [dir]`, `treeterm ssh user@host[:port]`, `treeterm shutdown-daemon`.
 - **Packaging (M9):** `cargo run -p xtask -- dist` (macOS `.app` + zip verified; Linux
   tarball and the Nix package untested).
@@ -110,7 +117,7 @@ Done (tested against a real in-process daemon unless noted):
 
 Not yet:
 
-- 3D model viewer (needs three.js bundled into a webview page), traffic badge (byte counter), session renaming, JSON debug view.
+- 3D model viewer (needs three.js bundled into a webview page), session renaming, JSON debug view.
 - Linux build verification (CI jobs added, not yet run) and a real SSH host test.
 - Parity sweep sign-off and cut-over (M10): remove `src/main`, `src/preload`,
   `src/renderer` once the checklist in the plan passes.
