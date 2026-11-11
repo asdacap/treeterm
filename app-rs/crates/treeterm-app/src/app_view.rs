@@ -40,6 +40,8 @@ struct Connected {
     active: ActiveView,
     /// Views of terminal models, by model, so focus and IME state survive re-renders.
     terminal_views: HashMap<EntityId, Entity<TerminalView>>,
+    /// Views of Files tabs, by model.
+    file_views: HashMap<EntityId, Entity<crate::file_browser_view::FileBrowserView>>,
     /// Focus the shown terminal on the next render (after a workspace or tab switch).
     focus_pending: bool,
     _selection: Subscription,
@@ -120,6 +122,7 @@ impl AppView {
             tree,
             active: ActiveView::Nothing,
             terminal_views: HashMap::new(),
+            file_views: HashMap::new(),
             focus_pending: false,
             _selection: selection,
         }
@@ -461,6 +464,14 @@ fn workspace_pane(connected: &mut Connected, window: &mut Window, cx: &mut Conte
                     .child(terminal_status_bar(&workspace, tab_id, cx))
                     .into_any_element()
             }
+            Some(TabContent::Files(model)) => {
+                let view = connected
+                    .file_views
+                    .entry(model.entity_id())
+                    .or_insert_with(|| cx.new(|cx| crate::file_browser_view::FileBrowserView::new(model.clone(), cx)))
+                    .clone();
+                div().size_full().child(view).into_any_element()
+            }
             Some(TabContent::StartingTerminal) => {
                 centered(div().text_color(secondary).child("Starting terminal…"))
             }
@@ -638,12 +649,16 @@ impl AppView {
         }
     }
 
-    pub fn automation_new_tab(&mut self, workspace: &str, cx: &mut Context<Self>) -> Option<String> {
+    pub fn automation_new_tab(&mut self, workspace: &str, app: &str, cx: &mut Context<Self>) -> Option<String> {
         let Body::Connected(connected) = &mut self.body else {
             return None;
         };
         let store = connected.session.read(cx).workspace_store(workspace).cloned()?;
-        let app = connected.session.read(cx).registry().default_app()?.id.clone();
+        let app = if app.is_empty() {
+            connected.session.read(cx).registry().default_app()?.id.clone()
+        } else {
+            app.to_owned()
+        };
         connected.focus_pending = true;
         store.update(cx, |w, cx| w.add_tab(&app, cx))
     }
@@ -662,6 +677,21 @@ impl AppView {
         let id = connected.session.update(cx, |s, cx| s.open_workspace(path, cx));
         connected.tree.update(cx, |tree, cx| tree.select(id.clone(), cx));
         Some(id)
+    }
+
+    /// Open `path` in the active workspace's active Files tab.
+    pub fn automation_open_file(&mut self, path: &str, cx: &mut Context<Self>) -> bool {
+        let Some(store) = self.active_store(cx) else {
+            return false;
+        };
+        let Some(active) = store.read(cx).file().active_tab_id.clone() else {
+            return false;
+        };
+        let Some(TabContent::Files(model)) = store.read(cx).tab_content(&active) else {
+            return false;
+        };
+        model.update(cx, |m, cx| m.open(path, false, cx));
+        true
     }
 
     pub fn automation_close_tab(&mut self, workspace: &str, tab: &str, cx: &mut Context<Self>) {

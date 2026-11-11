@@ -14,7 +14,7 @@ path = "src/main.rs"
 treeterm-core.workspace = true
 treeterm-model.workspace = true
 treeterm-term.workspace = true
-gpui-kit = { workspace = true, features = ["component", "assets"] }
+gpui-kit = { workspace = true, features = ["component", "assets", "tree-sitter-languages"] }
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true

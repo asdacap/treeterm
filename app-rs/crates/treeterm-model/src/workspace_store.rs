@@ -83,6 +83,7 @@ impl ActivityState {
 /// What a tab shows.
 pub enum TabContent {
     Terminal(Entity<TerminalModel>),
+    Files(Entity<crate::file_browser::FileBrowser>),
     /// The tab's PTY is being created.
     StartingTerminal,
     Failed(String),
@@ -93,6 +94,10 @@ pub enum TabContent {
 /// Runtime state of one tab; never persisted.
 enum TabRef {
     Terminal(TerminalTab),
+    Files {
+        model: Entity<crate::file_browser::FileBrowser>,
+        _events: Subscription,
+    },
 }
 
 enum TerminalTab {
@@ -175,6 +180,7 @@ impl WorkspaceStore {
             Some(TabRef::Terminal(TerminalTab::Attached { model, .. })) => TabContent::Terminal(model.clone()),
             Some(TabRef::Terminal(TerminalTab::Creating { .. })) => TabContent::StartingTerminal,
             Some(TabRef::Terminal(TerminalTab::Failed(error))) => TabContent::Failed(error.clone()),
+            Some(TabRef::Files { model, .. }) => TabContent::Files(model.clone()),
             None => TabContent::NotPorted(tab.application_id.clone()),
         })
     }
@@ -257,7 +263,7 @@ impl WorkspaceStore {
     pub fn terminals(&self) -> impl Iterator<Item = &Entity<TerminalModel>> {
         self.tabs.values().filter_map(|tab| match tab {
             TabRef::Terminal(TerminalTab::Attached { model, .. }) => Some(model),
-            TabRef::Terminal(TerminalTab::Creating { .. } | TerminalTab::Failed(_)) => None,
+            TabRef::Terminal(TerminalTab::Creating { .. } | TerminalTab::Failed(_)) | TabRef::Files { .. } => None,
         })
     }
 
@@ -281,6 +287,29 @@ impl WorkspaceStore {
         };
         let startup_command = app.startup_command(&self.workspace.path);
         match &app.kind {
+            AppKind::Files => {
+                let fs = self.conn.fs_client();
+                let root = self.workspace.path.clone();
+                let state = tab.state.clone();
+                let model = cx.new(|cx| crate::file_browser::FileBrowser::new(fs, root, &state, cx));
+                let owned_tab = tab_id.to_owned();
+                let events = cx.subscribe(&model, move |store, _, event: &crate::file_browser::FileBrowserEvent, cx| {
+                    let crate::file_browser::FileBrowserEvent::StateChanged(next) = event;
+                    let next = next.clone();
+                    store.update_tab_state(
+                        &owned_tab,
+                        |state| {
+                            if let (Value::Object(state), Value::Object(next)) = (state, next) {
+                                for (key, value) in next {
+                                    state.insert(key, value);
+                                }
+                            }
+                        },
+                        cx,
+                    );
+                });
+                self.tabs.insert(tab_id.to_owned(), TabRef::Files { model, _events: events });
+            }
             AppKind::Terminal { .. } | AppKind::AiHarness { .. } | AppKind::CustomRunner { .. } => {
                 let terminal = match tab.state.get("ptyId") {
                     Some(Value::String(pty_id)) => self.attach_terminal(tab_id, pty_id.clone(), cx),
@@ -472,7 +501,7 @@ impl WorkspaceStore {
                 // Its creation finds the tab gone and kills the PTY (`on_pty_created`).
                 tracing::debug!(%handle, "tab closed while its PTY was starting");
             }
-            Some(TabRef::Terminal(TerminalTab::Failed(_))) | None => {}
+            Some(TabRef::Terminal(TerminalTab::Failed(_)) | TabRef::Files { .. }) | None => {}
         }
         self.dispose_tab(tab_id);
 
@@ -628,7 +657,7 @@ impl WorkspaceStore {
                     model.update(cx, |model, cx| model.kill(cx));
                 }
                 // A PTY still starting is killed by its creation finding the tab gone.
-                TabRef::Terminal(TerminalTab::Creating { .. } | TerminalTab::Failed(_)) => {}
+                TabRef::Terminal(TerminalTab::Creating { .. } | TerminalTab::Failed(_)) | TabRef::Files { .. } => {}
             }
         }
     }

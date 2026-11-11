@@ -5,6 +5,7 @@ mod child_dialog;
 #[cfg(feature = "automation")]
 mod automation;
 mod daemon_binary;
+mod file_browser_view;
 mod keybinding_overlay;
 mod menus;
 mod settings_view;

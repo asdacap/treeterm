@@ -22,6 +22,18 @@ pub enum AppKind {
     },
     /// A command template run in a PTY (`{{workspace_path}}` expanded at start).
     CustomRunner { command_template: String },
+    /// The file browser (`filesystem`).
+    Files,
+}
+
+impl AppKind {
+    /// Whether tabs of this application run in a PTY.
+    pub fn is_terminal(&self) -> bool {
+        match self {
+            AppKind::Terminal { .. } | AppKind::AiHarness { .. } | AppKind::CustomRunner { .. } => true,
+            AppKind::Files => false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -48,6 +60,7 @@ impl AppDef {
                 "idleDetectorDisabled": false,
                 "widthLimitDisabled": false,
             }),
+            AppKind::Files => json!({ "selectedPath": null, "expandedDirs": [] }),
             AppKind::AiHarness {
                 keep_on_exit,
                 enable_sandbox,
@@ -73,6 +86,7 @@ impl AppDef {
             AppKind::CustomRunner { command_template } => {
                 Some(command_template.replace("{{workspace_path}}", workspace_path))
             }
+            AppKind::Files => None,
         }
     }
 
@@ -80,7 +94,7 @@ impl AppDef {
     pub fn background(&self) -> Option<&str> {
         match &self.kind {
             AppKind::AiHarness { background, .. } => Some(background),
-            AppKind::Terminal { .. } | AppKind::CustomRunner { .. } => None,
+            AppKind::Terminal { .. } | AppKind::CustomRunner { .. } | AppKind::Files => None,
         }
     }
 }
@@ -107,6 +121,15 @@ impl AppRegistry {
             terminal("terminal", true),
             // The Electron app's alternate terminal frontend; natively it is the same terminal.
             terminal("ghostty-terminal", false),
+            AppDef {
+                id: "filesystem".to_owned(),
+                name: "Files".to_owned(),
+                icon: "\u{1F4C2}".to_owned(),
+                kind: AppKind::Files,
+                can_close: true,
+                show_in_new_tab_menu: true,
+                is_default: true,
+            },
         ];
         for instance in &settings.terminal.instances {
             apps.push(AppDef {
@@ -236,6 +259,6 @@ mod tests {
         assert!(registry.get("ghostty-terminal").is_some());
         let menu: Vec<_> = registry.new_tab_menu().map(|app| app.id.as_str()).collect();
         // Electron's default settings carry one AI harness ("Claude").
-        assert_eq!(menu, vec!["terminal", "aiharness-claude"]);
+        assert_eq!(menu, vec!["terminal", "filesystem", "aiharness-claude"]);
     }
 }

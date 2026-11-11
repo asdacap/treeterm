@@ -104,7 +104,8 @@ fn handle(line: &str, window: AnyWindowHandle, view: &Entity<AppView>, cx: &mut 
                 Ok(json!({ "ok": true }))
             }
             "newtab" => {
-                let tab = view.update(cx, |view, cx| view.automation_new_tab(rest, cx));
+                let (workspace, app) = rest.split_once(' ').unwrap_or((rest, ""));
+                let tab = view.update(cx, |view, cx| view.automation_new_tab(workspace, app, cx));
                 Ok(json!({ "ok": tab.is_some(), "tab": tab }))
             }
             "closetab" => {
@@ -121,6 +122,10 @@ fn handle(line: &str, window: AnyWindowHandle, view: &Entity<AppView>, cx: &mut 
                 let on_created: crate::child_dialog::OnCreated = std::rc::Rc::new(|_, _, _| {});
                 crate::child_dialog::open(session, rest.to_owned(), "parent".into(), on_created, window, cx);
                 Ok(json!({ "ok": true }))
+            }
+            "fileopen" => {
+                let ok = view.update(cx, |view, cx| view.automation_open_file(rest, cx));
+                Ok(json!({ "ok": ok }))
             }
             "focus" => {
                 // Re-run focus sync: focus the shown terminal again.
