@@ -856,6 +856,12 @@ impl ReviewView {
             .into_any_element()
     }
 
+    /// `.diff-empty` inside `.diff-content` (a flex row): sized to its text, so it sits at the
+    /// left of the diff area; 20px padding, the body's 16px text, secondary colour.
+    fn empty(text: &'static str, color: gpui_kit::Hsla) -> AnyElement {
+        div().flex_shrink_0().p(px(20.)).text_size(px(16.)).text_color(color).child(text).into_any_element()
+    }
+
     /// `.diff-content`: the file list, the divider and the diff.
     fn content_row(&mut self, list: AnyElement, right: AnyElement, cx: &mut Context<Self>) -> AnyElement {
         let c = colors(cx);
@@ -1007,7 +1013,7 @@ impl ReviewView {
         let right = if has_changes {
             self.stacked(&committed.patch, &shown, &viewed, true, window, cx)
         } else {
-            Self::message("No committed changes to show", secondary, 20.)
+            Self::empty("No committed changes to show", secondary)
         };
         column.child(self.content_row(list, right, cx)).into_any_element()
     }
@@ -1077,7 +1083,7 @@ impl ReviewView {
         let right = if has_changes {
             self.stacked(&uncommitted.patch, &shown_all, &viewed, true, window, cx)
         } else {
-            Self::message("No uncommitted changes", secondary, 20.)
+            Self::empty("No uncommitted changes", secondary)
         };
         column = column.child(self.content_row(list.into_any_element(), right, cx));
         if uncommitted.has_staged() {
@@ -1171,7 +1177,7 @@ impl ReviewView {
             (model.selected_commit().cloned(), model.loading_more_commits(), model.overview().more_commits)
         };
         let pane = if commits.is_empty() {
-            Self::message("No commits on this branch", secondary, 20.)
+            Self::empty("No commits on this branch", secondary)
         } else {
             let mut list = v_flex().id("commits-list").track_scroll(&self.commits_scroll).max_h(px(160.)).overflow_y_scroll();
             for commit in &commits {
