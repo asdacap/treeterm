@@ -15,6 +15,7 @@ use treeterm_model::workspace_store::{ActivityStyle as _, TabContent};
 
 use crate::terminal_view::TerminalView;
 use crate::theme::colors;
+use gpui_kit::assets::IconName;
 use crate::tree_pane::{TreePane, WorkspaceSelected};
 
 pub struct AppView {
@@ -39,6 +40,18 @@ pub struct AppView {
     open_on_start: Option<String>,
     /// The sidebar is a narrow rail of workspace initials (`CollapsedSessionPanel`).
     sidebar_collapsed: bool,
+    /// Dragged on the divider, 150–400px (`App.tsx` `treeWidth`).
+    sidebar_width: f32,
+}
+
+/// Dragging the sidebar divider.
+#[derive(Clone)]
+struct SidebarResize;
+
+impl Render for SidebarResize {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        gpui_kit::Empty
+    }
 }
 
 /// Per-window state for a connected session.
@@ -64,9 +77,25 @@ struct Connected {
     web_app_shell: std::collections::HashSet<(String, String)>,
     /// Views of tool tabs (GitHub, Comments, Chat, …).
     tool_views: crate::tool_views::ToolViews,
+    /// The header's in-place name or description editor.
+    header_edit: Option<HeaderEdit>,
+    /// The branch badge reads "Copied!" for 1.5s after a click (`BranchBadge`).
+    branch_copied: Option<(String, gpui_kit::Task<()>)>,
     /// Focus the shown terminal on the next render (after a workspace or tab switch).
     focus_pending: bool,
     _selection: Subscription,
+}
+
+/// What the workspace header is editing in place (`workspace-edit-input` / `-textarea`).
+enum HeaderEdit {
+    Name { input: Entity<gpui_kit::component::input::InputState>, _save: Subscription },
+    Description { input: Entity<gpui_kit::component::input::TextareaState>, _save: Subscription },
+}
+
+#[derive(Clone, Copy)]
+enum HeaderField {
+    Name,
+    Description,
 }
 
 enum ActiveView {
@@ -108,6 +137,7 @@ impl AppView {
             info_pending: None,
             open_on_start: None,
             sidebar_collapsed: false,
+            sidebar_width: 250.,
         };
         view.sync(&store, cx);
         view
@@ -214,6 +244,8 @@ impl AppView {
             web_app_shell: std::collections::HashSet::new(),
             run_actions: HashMap::new(),
             traffic_badges: HashMap::new(),
+            header_edit: None,
+            branch_copied: None,
             tool_views: crate::tool_views::ToolViews::new(self.settings.clone()),
             focus_pending: false,
             _selection: selection,
@@ -316,7 +348,8 @@ impl AppView {
             return self.rail(cx);
         }
         let c = colors(cx);
-        let (bg, secondary, error, hover, border) = (c.bg_secondary, c.text_secondary, c.error, c.bg_hover, c.border);
+        let (bg, secondary, error, hover, border, fg) =
+            (c.bg_secondary, c.text_secondary, c.error, c.bg_hover, c.border, c.text_primary);
         let names = self.names.read(cx);
         let slots: Vec<(ConnectionId, String, ConnState, bool)> = self
             .store
@@ -325,7 +358,7 @@ impl AppView {
             .map(|slot| (slot.id.clone(), names.name(&slot.target), slot.state.clone(), slot.is_local()))
             .collect();
         let mut list = v_flex().w_full();
-        for (id, name, state, local) in slots {
+        for (index, (id, name, state, local)) in slots.into_iter().enumerate() {
             let banner = |text: String, color| div().px_3().py_1().text_xs().text_color(color).child(text);
             let button = |label: &'static str, key: String| {
                 gpui_kit::component::button::Button::new(SharedString::from(key)).label(label).xsmall()
@@ -396,67 +429,57 @@ impl AppView {
                         .into_any_element()
                 }
             };
-            list = list.child(div().pb_2().child(section));
+            list = list.child(div().when(index > 0, |d| d.mt(px(12.))).child(section));
         }
+        let on = self.settings.read(cx).settings().notifications.sound_enabled;
+        let tip = |text: &'static str| move |window: &mut Window, cx: &mut App| gpui_kit::component::tooltip::Tooltip::new(text).build(window, cx);
         v_flex()
             .h_full()
-            .w(px(250.))
+            .w(px(self.sidebar_width))
             .flex_shrink_0()
             .bg(bg)
-            .border_r_1()
-            .border_color(border)
             // macOS traffic lights sit over the top 38px, as in Electron's `.tree-pane-content`.
             .pt(px(38.))
             .child(
+                // `.tree-header`: sound toggle, "SESSIONS", Connect to SSH, collapse.
                 h_flex()
-                    .px_3()
-                    .pb_2()
+                    .px(px(16.))
+                    .py(px(12.))
                     .justify_between()
-                    .text_xs()
-                    .text_color(secondary)
-                    .child("SESSIONS")
-                    .child(div().flex_1())
+                    .items_center()
+                    .border_b_1()
+                    .border_color(border)
                     .child(
-                        div()
-                            .id("collapse-sidebar")
-                            .px_1()
-                            .mr_2()
-                            .rounded_sm()
-                            .cursor_pointer()
-                            .hover(move |d| d.bg(hover))
-                            .child("«")
-                            .on_click(cx.listener(|view, _, _, cx| {
-                                view.sidebar_collapsed = true;
-                                cx.notify();
-                            })),
-                    )
-                    .child({
-                        let on = self.settings.read(cx).settings().notifications.sound_enabled;
-                        div()
-                            .id("sound-toggle")
-                            .px_1()
-                            .mr_2()
-                            .rounded_sm()
-                            .cursor_pointer()
-                            .hover(move |d| d.bg(hover))
-                            .child(if on { "🔔" } else { "🔕" })
+                        crate::ui::icon_button("sound-toggle", cx)
+                            .tooltip(tip(if on { "Mute workspace attention sound" } else { "Unmute workspace attention sound" }))
+                            .child(crate::ui::icon(if on { IconName::Volume2 } else { IconName::VolumeX }, 14., fg))
                             .on_click(cx.listener(move |view, _, _, cx| {
                                 view.settings.update(cx, |store, cx| {
                                     store.update(|s| s.notifications.sound_enabled = !on, cx)
                                 });
-                            }))
-                    })
-                    .child(
-                        div()
-                            .id("connect-ssh")
-                            .px_1()
-                            .rounded_sm()
-                            .cursor_pointer()
-                            .hover(move |d| d.bg(hover))
-                            .child("⇄ SSH")
-                            .on_click(cx.listener(|view, _, window, cx| {
-                                crate::connection_picker::open(view.store.clone(), window, cx);
                             })),
+                    )
+                    .child(crate::ui::caps_title("Sessions", cx))
+                    .child(
+                        h_flex()
+                            .gap(px(4.))
+                            .child(
+                                crate::ui::icon_button("connect-ssh", cx)
+                                    .tooltip(tip("Connect to SSH"))
+                                    .child(crate::ui::icon(IconName::Monitor, 14., fg))
+                                    .on_click(cx.listener(|view, _, window, cx| {
+                                        crate::connection_picker::open(view.store.clone(), window, cx);
+                                    })),
+                            )
+                            .child(
+                                crate::ui::icon_button("collapse-sidebar", cx)
+                                    .tooltip(tip("Collapse sidebar"))
+                                    .child(crate::ui::icon(IconName::PanelLeftClose, 14., fg))
+                                    .on_click(cx.listener(|view, _, _, cx| {
+                                        view.sidebar_collapsed = true;
+                                        cx.notify();
+                                    })),
+                            ),
                     ),
             )
             .children(self.favourites(cx))
@@ -538,7 +561,8 @@ impl AppView {
 impl Render for AppView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let c = colors(cx);
-        let (bg, fg, secondary, error) = (c.bg_primary, c.text_primary, c.text_secondary, c.error);
+        let (bg, fg, secondary, error, border, accent) =
+            (c.bg_primary, c.text_primary, c.text_secondary, c.error, c.border, c.accent);
         self.sync_info(window, cx);
         let sidebar = self.sidebar(cx);
         let info = self.info.clone();
@@ -595,7 +619,31 @@ impl Render for AppView {
             .min_w_0()
             .child(pane)
             .when_some(merge, |d, (session, output)| d.child(merge_panel(session, output, cx)));
-        let content = h_flex().size_full().child(sidebar).child(pane).into_any_element();
+        // `.divider`: 4px, accent while hovered or dragged.
+        let divider = (!self.sidebar_collapsed).then(|| {
+            div()
+                .id("sidebar-divider")
+                .w(px(4.))
+                .h_full()
+                .flex_shrink_0()
+                .bg(border)
+                .hover(move |d| d.bg(accent))
+                .cursor_col_resize()
+                .on_drag(SidebarResize, |drag, _, _, cx| cx.new(|_| drag.clone()))
+        });
+        let content = h_flex()
+            .size_full()
+            .child(sidebar)
+            .children(divider)
+            .child(pane)
+            .on_drag_move(cx.listener(|view, event: &gpui_kit::DragMoveEvent<SidebarResize>, _, cx| {
+                let width = f32::from(event.event.position.x).clamp(150., 400.);
+                if (width - view.sidebar_width).abs() >= 1. {
+                    view.sidebar_width = width;
+                    cx.notify();
+                }
+            }))
+            .into_any_element();
         if window.focused(cx).is_none() {
             window.focus(&self.focus, cx);
         }
@@ -604,6 +652,9 @@ impl Render for AppView {
             .track_focus(&self.focus)
             .bg(bg)
             .text_color(fg)
+            // Chromium's `line-height: normal` for the system font: text boxes as tall as
+            // Electron's (GPUI's default is about 1.6).
+            .line_height(gpui_kit::relative(1.2))
             .on_action(|_: &crate::menus::Minimize, window, _| window.minimize_window())
             .on_action(cx.listener(|view, _: &crate::menus::OpenSettings, window, cx| {
                 crate::settings_view::open(view.settings.clone(), window, cx);
@@ -638,6 +689,79 @@ impl AppView {
         }
         crate::active_processes_view::confirm_close(unmerged, window, cx);
         false
+    }
+
+    /// Edit the active workspace's name or description in place; Enter or blur saves.
+    fn edit_header(&mut self, field: HeaderField, window: &mut Window, cx: &mut Context<Self>) {
+        use gpui_kit::component::input::{InputEvent, InputState, TextareaState};
+        let Some(store) = self.active_store(cx) else { return };
+        let edit = match field {
+            HeaderField::Name => {
+                let text = store.read(cx).file().display_name().to_owned();
+                let input = cx.new(|cx| InputState::new(window, cx).default_value(text));
+                input.update(cx, |input, cx| input.focus(window, cx));
+                let save = cx.subscribe(&input, move |view, input, event: &InputEvent, cx| match event {
+                    InputEvent::PressEnter { .. } | InputEvent::Blur => {
+                        let text = input.read(cx).value().to_string();
+                        if let Some(connected) = view.current_mut() {
+                            connected.header_edit = None;
+                        }
+                        store.update(cx, |w, cx| w.set_display_name(&text, cx));
+                        cx.notify();
+                    }
+                    InputEvent::Change | InputEvent::Focus => {}
+                });
+                HeaderEdit::Name { input, _save: save }
+            }
+            HeaderField::Description => {
+                let text = store.read(cx).file().metadata.get("description").cloned().unwrap_or_default();
+                let input = cx.new(|cx| {
+                    TextareaState::new(window, cx)
+                        .rows(1)
+                        .submit_on_enter(true)
+                        .placeholder("Add a description...")
+                        .default_value(text)
+                });
+                input.update(cx, |input, cx| input.focus(window, cx));
+                let save = cx.subscribe(&input, move |view, input, event: &InputEvent, cx| match event {
+                    InputEvent::PressEnter { .. } | InputEvent::Blur => {
+                        let text = input.read(cx).value().to_string();
+                        if let Some(connected) = view.current_mut() {
+                            connected.header_edit = None;
+                        }
+                        store.update(cx, |w, cx| w.set_description(&text, cx));
+                        cx.notify();
+                    }
+                    InputEvent::Change | InputEvent::Focus => {}
+                });
+                HeaderEdit::Description { input, _save: save }
+            }
+        };
+        if let Some(connected) = self.current_mut() {
+            connected.header_edit = Some(edit);
+        }
+        cx.notify();
+    }
+
+    /// The branch badge: copy the name and read "Copied!" for 1.5s.
+    fn copy_branch(&mut self, branch: String, cx: &mut Context<Self>) {
+        cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(branch.clone()));
+        let executor = cx.background_executor().clone();
+        let reset = cx.spawn(async move |view, cx| {
+            executor.timer(std::time::Duration::from_millis(1500)).await;
+            match view.update(cx, |view, cx| {
+                if let Some(connected) = view.current_mut() {
+                    connected.branch_copied = None;
+                }
+                cx.notify();
+            }) {
+                Ok(()) | Err(_) => {}
+            }
+        });
+        if let Some(connected) = self.current_mut() {
+            connected.branch_copied = Some((branch, reset));
+        }
+        cx.notify();
     }
 
     /// The active workspace's store, if it is loaded.
@@ -742,18 +866,16 @@ impl AppView {
 }
 
 /// `MergeAbandonButton` for a child worktree: "Review & Merge" (opens Review), or "Abandon"
-/// when its branch has nothing to merge; the menu has the merge and abandon variants.
+/// when its branch has nothing to merge, split from a chevron with the other choices.
 fn merge_menu(
     connected: &Connected,
     workspace: &Entity<treeterm_model::workspace_store::WorkspaceStore>,
     workspace_id: &str,
     cx: &mut Context<AppView>,
 ) -> Option<AnyElement> {
-    use gpui_kit::component::Sizable as _;
-    use gpui_kit::component::button::{Button, ButtonVariants as _};
-    use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
+    use gpui_kit::component::menu::DropdownMenu as _;
     use treeterm_core::git_status::ParentDiff;
-    use treeterm_model::session_store::{AfterMerge, RemoveMode};
+    use treeterm_model::session_store::RemoveMode;
     let file = workspace.read(cx).file().clone();
     if !file.is_worktree || file.parent_id.as_deref().is_none_or(str::is_empty) {
         return None;
@@ -765,50 +887,71 @@ fn merge_menu(
         .is_some_and(|git| git.read(cx).status().parent_diff == ParentDiff::Clean);
     let (session, ws, id, label): (_, _, String, SharedString) =
         (connected.session.clone(), workspace.clone(), workspace_id.to_owned(), file.display_name().to_owned().into());
-    Some(
-        Button::new(SharedString::from(format!("merge-{workspace_id}")))
-            .xsmall()
-            .ghost()
-            .label(if clean { "Abandon ▾" } else { "Review & Merge ▾" })
-            .dropdown_menu(move |menu, _window, _cx| {
-                let review = ws.clone();
-                let merge = |menu: gpui_kit::component::menu::PopupMenu, text: &'static str, squash: bool, after: AfterMerge| {
-                    let (session, id, label) = (session.clone(), id.clone(), label.clone());
-                    menu.item(PopupMenuItem::new(text).on_click(move |_, window, cx| {
-                        crate::tree_pane::confirm_merge(session.clone(), id.clone(), label.clone(), squash, after, window, cx)
-                    }))
-                };
-                let remove = |menu: gpui_kit::component::menu::PopupMenu, text: &'static str, mode: RemoveMode| {
-                    let (session, id, label) = (session.clone(), id.clone(), label.clone());
-                    menu.item(PopupMenuItem::new(text).on_click(move |_, window, cx| {
-                        crate::tree_pane::confirm_remove(session.clone(), id.clone(), label.clone(), mode, window, cx)
-                    }))
-                };
-                let menu = menu.item(PopupMenuItem::new("Open Review").on_click(move |_, _, cx| {
-                    review.update(cx, |w, cx| {
-                        let existing = w
-                            .file()
-                            .app_states
-                            .iter()
-                            .find(|(_, tab)| tab.application_id == "review")
-                            .map(|(id, _)| id.clone());
-                        match existing {
-                            Some(tab) => w.set_active_tab(&tab, cx),
-                            None => {
-                                w.add_tab("review", cx);
-                            }
-                        }
-                    });
-                }));
-                let menu = merge(menu.separator(), "Merge into parent and remove…", false, AfterMerge::Remove);
-                let menu = merge(menu, "Squash-merge into parent and remove…", true, AfterMerge::Remove);
-                let menu = merge(menu, "Merge into parent, keep workspace…", false, AfterMerge::Keep);
-                let menu = remove(menu.separator(), "Abandon (delete worktree and branch)…", RemoveMode::DeleteWorktreeAndBranch);
-                let menu = remove(menu, "Abandon, keep branch…", RemoveMode::KeepBranch);
-                remove(menu, "Abandon, keep worktree and branch…", RemoveMode::KeepWorktreeAndBranch)
+    let accent = colors(cx).accent;
+    // `.workspace-action-btn-merge`: accent fill, white text.
+    let merge_style = move |button: gpui_kit::Stateful<gpui_kit::Div>| {
+        button.bg(accent).border_color(accent).text_color(gpui_kit::white())
+    };
+    let remove = {
+        let (session, id, label) = (session.clone(), id.clone(), label.clone());
+        move |mode: RemoveMode, window: &mut Window, cx: &mut App| {
+            crate::tree_pane::confirm_remove(session.clone(), id.clone(), label.clone(), mode, window, cx)
+        }
+    };
+    let (main_ws, main_remove) = (ws.clone(), remove.clone());
+    let main = merge_style(crate::ui::action_button(SharedString::from(format!("merge-{workspace_id}")), cx))
+        .rounded_r(px(0.))
+        .tooltip(move |window, cx| {
+            gpui_kit::component::tooltip::Tooltip::new(if clean {
+                "Abandon: No changes to merge — delete worktree and branch"
+            } else {
+                "Review & Merge: Review changes and merge this workspace"
             })
-            .into_any_element(),
+            .build(window, cx)
+        })
+        .child(if clean { "Abandon" } else { "Review & Merge" })
+        .on_click(move |_, window, cx| {
+            if clean {
+                main_remove(RemoveMode::DeleteWorktreeAndBranch, window, cx);
+            } else {
+                open_review(&main_ws, cx);
+            }
+        });
+    let chevron = crate::ui::Trigger::new(
+        merge_style(crate::ui::action_button(SharedString::from(format!("merge-more-{workspace_id}")), cx))
+            .ml(px(1.))
+            .px(px(4.))
+            .rounded_l(px(0.))
+            .child(crate::ui::icon(IconName::ChevronDown, 14., gpui_kit::white())),
     )
+    .dropdown_menu_with_anchor(gpui_kit::Anchor::TopRight, move |menu, _window, _cx| {
+        let menu = if clean {
+            let review = ws.clone();
+            menu.item(crate::ui::menu_item_with_hint("Review & Merge", "Review changes and merge").on_click(move |_, _, cx| open_review(&review, cx)))
+        } else {
+            let abandon = remove.clone();
+            menu.item(crate::ui::menu_item_with_hint("Abandon", "Delete worktree and branch").on_click(move |_, window, cx| {
+                abandon(RemoveMode::DeleteWorktreeAndBranch, window, cx)
+            }))
+        };
+        let (keep_branch, keep_both) = (remove.clone(), remove.clone());
+        menu.item(crate::ui::menu_item_with_hint("Abandon (Keep Branch)", "Delete worktree, keep branch").on_click(move |_, window, cx| {
+            keep_branch(RemoveMode::KeepBranch, window, cx)
+        }))
+        .item(crate::ui::menu_item_with_hint("Abandon (Keep Both)", "Keep worktree and branch").on_click(move |_, window, cx| {
+            keep_both(RemoveMode::KeepWorktreeAndBranch, window, cx)
+        }))
+    });
+    Some(h_flex().child(main).child(chevron).into_any_element())
+}
+
+/// Show the workspace's Review tab, opening one if it has none.
+fn open_review(workspace: &Entity<treeterm_model::workspace_store::WorkspaceStore>, cx: &mut App) {
+    workspace.update(cx, |w, cx| {
+        if w.open_or_focus_tab("review", cx).is_none() {
+            tracing::error!("the review application is not registered");
+        }
+    });
 }
 
 /// "▶ Run" (`RunActionDropdown`): the workspace's detected actions by source, then the
@@ -834,8 +977,6 @@ fn run_menu(
     workspace_id: &str,
     cx: &mut Context<AppView>,
 ) -> AnyElement {
-    use gpui_kit::component::Sizable as _;
-    use gpui_kit::component::button::{Button, ButtonVariants as _};
     use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
     use treeterm_model::run_actions::{Detection, RunActions};
     let conn = connected.session.read(cx).connection().clone();
@@ -854,13 +995,16 @@ fn run_menu(
         .collect();
     let error = model.read(cx).error().map(str::to_owned);
     let (menu_model, menu_workspace) = (model.clone(), workspace.clone());
+    let fg = colors(cx).text_primary;
     h_flex()
         .gap_1()
         .child(
-            Button::new(SharedString::from(format!("run-{workspace_id}")))
-                .xsmall()
-                .ghost()
-                .label("▶ Run")
+            crate::ui::Trigger::new(
+                crate::ui::action_button(SharedString::from(format!("run-{workspace_id}")), cx)
+                    .tooltip(|window, cx| gpui_kit::component::tooltip::Tooltip::new("Run an action").build(window, cx))
+                    .child("▶ Run")
+                    .child(crate::ui::icon(IconName::ChevronDown, 12., fg)),
+            )
                 .dropdown_menu(move |menu, _window, cx| {
                     let mut menu = menu;
                     let detection = menu_model.read(cx).detection().clone();
@@ -904,79 +1048,162 @@ fn run_menu(
         .into_any_element()
 }
 
-/// The header's git status button (`GitStatusButton`), behind count and PR link.
+/// The header's git buttons: status (`GitStatusButton`), pull (`GitPullButton`) and, for a
+/// child worktree on a branch, the GitHub pair (`GitHubButton`).
 fn git_status_items(
     controller: &Entity<treeterm_model::git_controller::GitController>,
+    workspace: &Entity<treeterm_model::workspace_store::WorkspaceStore>,
+    github: bool,
     cx: &mut Context<AppView>,
 ) -> Vec<AnyElement> {
+    use gpui_kit::component::Sizable as _;
     use treeterm_core::git_status::{ParentConflicts, PullRequest, WorkingTree};
+    use treeterm_model::git_controller::PullState;
     let c = colors(cx);
-    let hover = c.bg_hover;
     let (status, refreshing, failures) = {
         let git = controller.read(cx);
-        (git.status().clone(), git.is_refreshing(), git.failures().len())
+        (git.status().clone(), git.is_refreshing(), git.failures().to_vec())
     };
-    let (label, color): (&str, gpui_kit::Hsla) = if refreshing {
-        ("◌ Checking…", c.text_secondary)
+    let spinner = |size: f32, color: gpui_kit::Hsla| {
+        Spinner::new()
+            .icon(gpui_kit::component::Icon::new(IconName::LoaderCircle))
+            .with_size(px(size))
+            .color(color)
+            .into_any_element()
+    };
+    // (icon, label, tooltip, colour, border) as `.workspace-action-btn-git-*` colour them.
+    let (icon, label, title, color, border): (AnyElement, &str, String, gpui_kit::Hsla, gpui_kit::Hsla) = if refreshing {
+        (spinner(14., c.text_primary), "Checking...", "Checking git status...".into(), c.text_primary, c.border)
     } else if status.parent_conflicts == ParentConflicts::Conflicting {
-        ("⚠ Conflicts", gpui_kit::rgb(0xff9800).into())
+        let red = gpui_kit::rgb(0xcf3536);
+        (crate::ui::icon(IconName::TriangleAlert, 14., red).into_any_element(), "Conflicts", "Merge conflicts with parent".into(), red.into(), gpui_kit::rgba(0xcf353666).into())
     } else if status.working_tree == WorkingTree::Dirty {
-        ("● Uncommitted", gpui_kit::rgb(0xe2c08d).into())
+        let amber = gpui_kit::rgb(0xd29922);
+        (crate::ui::icon(IconName::CircleDot, 14., amber).into_any_element(), "Uncommitted", "Uncommitted changes".into(), amber.into(), gpui_kit::rgba(0xd2992266).into())
     } else {
-        ("✓ Clean", gpui_kit::rgb(0x4caf50).into())
+        let green = gpui_kit::rgb(0x2ea043);
+        (crate::ui::icon(IconName::Check, 14., green).into_any_element(), "Clean", "Working tree clean".into(), green.into(), gpui_kit::rgba(0x2ea04366).into())
     };
+    let title = if failures.is_empty() { title } else { format!("{title}\n{}", failures.join("\n")) };
     let refresh = controller.clone();
     let mut items = vec![
-        div()
-            .id("git-status")
-            .px_2()
-            .rounded_sm()
-            .text_sm()
+        crate::ui::action_button("git-status", cx)
             .text_color(color)
-            .cursor_pointer()
-            .hover(move |d| d.bg(hover))
-            .child(if failures > 0 { format!("{label} ({failures} check{} failed)", if failures > 1 { "s" } else { "" }) } else { label.to_owned() })
+            .border_color(border)
+            .tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(title.clone()).build(window, cx))
+            .child(icon)
+            .child(label)
             .on_click(move |_, _, cx| refresh.update(cx, |git, cx| git.refresh(cx)))
             .into_any_element(),
     ];
-    // `GitPullButton`: behind upstream → pull.
+    // `.workspace-action-btn-pull`: accent fill while behind upstream.
     let pull_state = controller.read(cx).pull_state().clone();
-    if status.behind_count > 0 || pull_state != treeterm_model::git_controller::PullState::Idle {
-        use treeterm_model::git_controller::PullState;
+    if status.behind_count > 0 {
         let pull = controller.clone();
-        let (label, color) = match &pull_state {
-            PullState::Pulling => ("◌ Pulling…".to_owned(), c.text_secondary),
-            PullState::Failed(error) => (format!("⚠ {error}"), c.error),
-            PullState::Idle => (format!("↓ Pull ({} behind)", status.behind_count), c.text_secondary),
+        let behind = status.behind_count;
+        let title = match &pull_state {
+            PullState::Failed(error) => error.clone(),
+            PullState::Idle | PullState::Pulling => format!("Pull {behind} commit{} from remote", if behind > 1 { "s" } else { "" }),
         };
+        let accent = c.accent;
         items.push(
-            div()
-                .id("git-pull")
-                .px_2()
-                .rounded_sm()
-                .text_sm()
-                .text_color(color)
-                .cursor_pointer()
-                .hover(move |d| d.bg(hover))
-                .child(label)
+            crate::ui::action_button("git-pull", cx)
+                .bg(accent)
+                .border_color(accent)
+                .text_color(gpui_kit::white())
+                .tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(title.clone()).build(window, cx))
+                .child(match pull_state {
+                    PullState::Pulling => spinner(14., gpui_kit::white()),
+                    PullState::Idle | PullState::Failed(_) => crate::ui::icon(IconName::ArrowDownToLine, 14., gpui_kit::white()).into_any_element(),
+                })
+                .child(
+                    h_flex()
+                        .gap(px(3.))
+                        .child("Pull")
+                        .child(div().text_size(px(10.)).font_weight(gpui_kit::FontWeight::SEMIBOLD).child(behind.to_string())),
+                )
                 .on_click(move |_, _, cx| pull.update(cx, |git, cx| git.pull(cx)))
                 .into_any_element(),
         );
     }
-    if let PullRequest::Found(pr) = &status.pull_request {
-        let url = pr.url.clone();
-        let unresolved = pr.unresolved_count();
+    if github {
+        let (pr, unresolved) = match &status.pull_request {
+            PullRequest::Found(pr) => (true, pr.unresolved_count()),
+            PullRequest::None => (false, 0),
+        };
+        // `.workspace-action-btn-github` (green) with a PR, `-github-comments` (amber) with
+        // unresolved threads.
+        let tint: Option<(u32, u32)> = if unresolved > 0 {
+            Some((0xd29922, 0xd2992226))
+        } else if pr {
+            Some((0x238636, 0x23863626))
+        } else {
+            None
+        };
+        let style = move |button: gpui_kit::Stateful<gpui_kit::Div>| match tint {
+            Some((fg, bg)) => button.text_color(gpui_kit::rgb(fg)).border_color(gpui_kit::rgb(fg)).bg(gpui_kit::rgba(bg)),
+            None => button,
+        };
+        let label = if unresolved > 0 {
+            format!("Address {unresolved} comment{}", if unresolved == 1 { "" } else { "s" })
+        } else if pr {
+            "Open PR".to_owned()
+        } else {
+            "Create PR".to_owned()
+        };
+        let main_title = if unresolved > 0 { label.clone() } else if pr { "Open GitHub PR".into() } else { "Create GitHub PR".into() };
+        let browser_title = if pr { "Open GitHub PR in browser" } else { "Open create PR page in browser" };
+        let fg = match tint {
+            Some((fg, _)) => gpui_kit::rgb(fg).into(),
+            None => c.text_primary,
+        };
+        let open = {
+            let controller = controller.clone();
+            move |window: &mut Window, cx: &mut App| {
+                let task = controller.update(cx, |git, cx| git.open_github(cx));
+                let handle = window.window_handle();
+                cx.spawn(async move |cx| match task.await {
+                    Ok(url) => cx.update(|cx| cx.open_url(&url)),
+                    Err(error) => match handle.update(cx, |_, window, cx| {
+                        use gpui_kit::component::WindowExt as _;
+                        window.push_notification(error, cx);
+                    }) {
+                        Ok(()) | Err(_) => {}
+                    },
+                })
+                .detach();
+            }
+        };
+        let (main_open, comments_ws) = (open.clone(), workspace.clone());
         items.push(
-            div()
-                .id("pr-link")
-                .px_2()
-                .rounded_sm()
-                .text_sm()
-                .text_color(c.accent)
-                .cursor_pointer()
-                .hover(move |d| d.bg(hover))
-                .child(if unresolved > 0 { format!("PR #{} · {unresolved} unresolved", pr.number) } else { format!("PR #{}", pr.number) })
-                .on_click(move |_, _, cx| cx.open_url(&url))
+            h_flex()
+                .child(
+                    style(crate::ui::action_button("github-main", cx))
+                        .rounded_r(px(0.))
+                        .tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(main_title.clone()).build(window, cx))
+                        .child(crate::ui::icon(IconName::Github, 14., fg))
+                        .child(label)
+                        .on_click(move |_, window, cx| {
+                            if unresolved > 0 {
+                                comments_ws.update(cx, |w, cx| {
+                                    if w.open_or_focus_tab("github", cx).is_none() {
+                                        tracing::error!("the github application is not registered");
+                                    }
+                                });
+                            } else {
+                                main_open(window, cx);
+                            }
+                        }),
+                )
+                .child(
+                    style(crate::ui::action_button("github-browser", cx))
+                        .ml(px(1.))
+                        .px(px(6.))
+                        .rounded_l(px(0.))
+                        .tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(browser_title).build(window, cx))
+                        .child(crate::ui::icon(IconName::ExternalLink, 14., fg))
+                        .on_click(move |_, window, cx| open(window, cx)),
+                )
                 .into_any_element(),
         );
     }
@@ -1061,6 +1288,209 @@ fn centered(child: impl IntoElement) -> AnyElement {
 
 /// The active workspace: header, tab strip and the active tab. Terminal tabs are live;
 /// other application kinds arrive in later milestones.
+/// `.workspace-header`: the name (editable) with its refresh button and actions, then the
+/// description row; 8px 16px padding on the secondary background.
+fn workspace_header(
+    connected: &mut Connected,
+    workspace: &Entity<treeterm_model::workspace_store::WorkspaceStore>,
+    id: &str,
+    header_inset: gpui_kit::Pixels,
+    operation_error: Option<String>,
+    cx: &mut Context<AppView>,
+) -> AnyElement {
+    use gpui_kit::component::Sizable as _;
+    let c = colors(cx);
+    let (secondary, primary, border, bg, accent, error) =
+        (c.text_secondary, c.text_primary, c.border, c.bg_secondary, c.accent, c.error);
+    let file = workspace.read(cx).file().clone();
+    let root = file.parent_id.as_deref().is_none_or(str::is_empty);
+    let description = file.metadata.get("description").cloned().filter(|d| !d.is_empty());
+    let tip = |text: &'static str| move |window: &mut Window, cx: &mut App| gpui_kit::component::tooltip::Tooltip::new(text).build(window, cx);
+    // `.workspace-edit-btn`: a bare ✎ (13px, 11px beside the description).
+    let edit_button = |id: &'static str, size: f32, title: &'static str, field: HeaderField, cx: &mut Context<AppView>| {
+        div()
+            .id(id)
+            .px(px(4.))
+            .py(px(2.))
+            .flex_shrink_0()
+            .cursor_pointer()
+            .text_size(px(size))
+            .text_color(secondary)
+            .hover(move |d| d.text_color(primary))
+            .tooltip(tip(title))
+            .child("✎")
+            .on_click(cx.listener(move |view, _, window, cx| view.edit_header(field, window, cx)))
+    };
+    let escape = cx.listener(|view, event: &gpui_kit::KeyDownEvent, _, cx| {
+        if event.keystroke.key == "escape" {
+            if let Some(connected) = view.current_mut() {
+                connected.header_edit = None;
+            }
+            cx.notify();
+        }
+    });
+    let (name_edit, description_edit) = match &connected.header_edit {
+        Some(HeaderEdit::Name { input, .. }) => (Some(input.clone()), None),
+        Some(HeaderEdit::Description { input, .. }) => (None, Some(input.clone())),
+        None => (None, None),
+    };
+
+    let mut top = h_flex().h(px(24.)).gap(px(4.)).items_center();
+    top = match name_edit {
+        Some(input) => top.child(
+            div()
+                .w(px(240.))
+                .on_key_down(escape)
+                .child(gpui_kit::component::input::Input::new(&input).xsmall()),
+        ),
+        None => {
+            let refresh = workspace.clone();
+            top.child(
+                div()
+                    .min_w_0()
+                    .truncate()
+                    .text_size(px(crate::ui::BODY))
+                    .font_weight(gpui_kit::FontWeight::MEDIUM)
+                    .text_color(primary)
+                    .child(file.display_name().to_owned()),
+            )
+            .child(edit_button("edit-name", 13., "Edit name", HeaderField::Name, cx))
+            .child(
+                div()
+                    .id("refresh-title")
+                    .px(px(4.))
+                    .py(px(2.))
+                    .flex_shrink_0()
+                    .cursor_pointer()
+                    .tooltip(tip("Refresh title & description"))
+                    .child(crate::ui::icon(IconName::RefreshCw, 12., secondary))
+                    .on_click(move |_, window, cx| {
+                        if let Err(error) = refresh.update(cx, |w, cx| w.refresh_labels(false, cx)) {
+                            use gpui_kit::component::WindowExt as _;
+                            window.push_notification(error, cx);
+                        }
+                    }),
+            )
+        }
+    };
+
+    // `.workspace-actions`, right-aligned, 8px apart.
+    let mut actions = h_flex().ml_auto().gap(px(8.)).items_center().flex_shrink_0();
+    actions = actions.child(traffic_badge(connected, workspace, id, cx));
+    if let Some(branch) = file.git_branch.clone() {
+        let copied = connected.branch_copied.as_ref().is_some_and(|(b, _)| *b == branch);
+        let (fg, badge_bg): (gpui_kit::Hsla, gpui_kit::Hsla) = if copied {
+            (gpui_kit::rgb(0x2ea043).into(), gpui_kit::rgba(0x00b45033).into())
+        } else {
+            (accent, gpui_kit::rgba(0x0078d426).into())
+        };
+        let (copy, path, rename_ws) = (branch.clone(), workspace.read(cx).workspace().path.clone(), workspace.clone());
+        let can_rename = file.is_worktree && !root;
+        use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
+        actions = actions.child(
+            crate::ui::pill(if copied { "Copied!".to_owned() } else { branch }, fg, badge_bg)
+                .id("branch-badge")
+                .cursor_pointer()
+                .tooltip(tip("Copy branch name"))
+                .on_click(cx.listener(move |view, _, _, cx| view.copy_branch(copy.clone(), cx)))
+                .context_menu(move |menu, _, _| {
+                    let path = path.clone();
+                    let menu = menu.item(PopupMenuItem::new("Copy worktree path").on_click(move |_, _, cx| {
+                        cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(path.clone()));
+                    }));
+                    if can_rename {
+                        let ws = rename_ws.clone();
+                        menu.item(PopupMenuItem::new("Auto-rename branch").on_click(move |_, window, cx| {
+                            if let Err(error) = ws.update(cx, |w, cx| w.refresh_labels(true, cx)) {
+                                use gpui_kit::component::WindowExt as _;
+                                window.push_notification(error, cx);
+                            }
+                        }))
+                    } else {
+                        menu
+                    }
+                }),
+        );
+    }
+    if file.is_git_repo
+        && let Some(controller) = connected.session.read(cx).git_controller(id).cloned()
+    {
+        let github = file.is_worktree && !root && file.git_branch.is_some();
+        actions = actions.children(git_status_items(&controller, workspace, github, cx));
+    }
+    actions = actions.child(run_menu(connected, workspace, id, cx));
+    actions = actions.children(merge_menu(connected, workspace, id, cx));
+    if root && file.is_git_repo {
+        let review = workspace.clone();
+        actions = actions.child(
+            crate::ui::action_button("open-review", cx)
+                .tooltip(tip("Review changes and commit history"))
+                .child("Review")
+                .on_click(move |_, _, cx| open_review(&review, cx)),
+        );
+    }
+    if root {
+        let (session, ws_id, label) = (connected.session.clone(), id.to_owned(), SharedString::from(file.display_name().to_owned()));
+        actions = actions.child(
+            crate::ui::action_button("close-workspace", cx)
+                .px(px(6.))
+                .text_color(secondary)
+                .tooltip(tip("Close workspace"))
+                .child(crate::ui::icon(IconName::X, 14., secondary))
+                .on_click(move |_, window, cx| {
+                    crate::tree_pane::confirm_remove(
+                        session.clone(),
+                        ws_id.clone(),
+                        label.clone(),
+                        treeterm_model::session_store::RemoveMode::KeepWorktreeAndBranch,
+                        window,
+                        cx,
+                    )
+                }),
+        );
+    }
+    top = top.child(actions);
+
+    // `.workspace-header-description-row`: 11px secondary text.
+    let mut description_row = h_flex().min_h(px(18.)).items_center().text_size(px(crate::ui::SMALL)).text_color(secondary);
+    description_row = match (description_edit, description) {
+        (Some(input), _) => description_row.child(
+            div().w_full().on_key_down(escape_description(cx)).child(gpui_kit::component::input::Textarea::new(&input).xsmall()),
+        ),
+        (None, Some(text)) => description_row
+            .child(div().min_w_0().child(text))
+            .child(edit_button("edit-description", 11., "Edit description", HeaderField::Description, cx)),
+        (None, None) => description_row
+            .child(div().italic().opacity(0.5).child("no description"))
+            .child(edit_button("add-description", 11., "Add description", HeaderField::Description, cx)),
+    };
+
+    v_flex()
+        .flex_shrink_0()
+        .gap(px(4.))
+        .pl(header_inset)
+        .pr(px(16.))
+        .py(px(8.))
+        .bg(bg)
+        .border_b_1()
+        .border_color(border)
+        .child(top)
+        .child(description_row)
+        .when_some(operation_error, |d, message| d.child(div().text_size(px(crate::ui::SMALL)).text_color(error).child(format!("⚠ {message}"))))
+        .into_any_element()
+}
+
+fn escape_description(cx: &mut Context<AppView>) -> impl Fn(&gpui_kit::KeyDownEvent, &mut Window, &mut App) + 'static {
+    cx.listener(|view, event: &gpui_kit::KeyDownEvent, _, cx| {
+        if event.keystroke.key == "escape" {
+            if let Some(connected) = view.current_mut() {
+                connected.header_edit = None;
+            }
+            cx.notify();
+        }
+    })
+}
+
 fn workspace_pane(
     connected: &mut Connected,
     header_inset: gpui_kit::Pixels,
@@ -1108,13 +1538,12 @@ fn workspace_pane(
         Some(WorkspaceEntry::OperationError { error, .. }) => Some(error.clone()),
         Some(_) | None => None,
     };
-    let (path, file) = {
-        let ws = workspace.read(cx).workspace();
-        (ws.path.clone(), ws.file.clone())
-    };
+    let file = workspace.read(cx).workspace().file.clone();
     let active = file.active_tab_id.clone().filter(|tab| file.app_states.contains_key(tab));
 
-    let mut tabs = h_flex().h(px(32.)).bg(tab_bar_bg).border_b_1().border_color(border);
+    // flex-layout's tab strip (`flexlayout-overrides.css`): 33px plus a 1px rule, tabs 31px
+    // high from a 2px inset, rounded on top, 4px apart.
+    let mut strip = h_flex().h_full().pt(px(2.)).px(px(4.)).gap(px(4.)).items_end();
     let registry = connected.session.read(cx).registry().clone();
     let order = treeterm_core::layout::order_tabs(
         file.app_states.keys(),
@@ -1122,47 +1551,53 @@ fn workspace_pane(
     );
     for (tab_id, tab) in order.iter().filter_map(|id| file.app_states.get_key_value(id)) {
         let is_active = active.as_deref() == Some(tab_id.as_str());
+        let app = registry.get(&tab.application_id);
         // Tabs of applications the native app lacks (or that cannot close) keep no close button.
-        let closable = registry.get(&tab.application_id).is_some_and(|app| app.can_close);
+        let closable = app.is_some_and(|app| app.can_close);
+        let app_icon = app.map(|app| app.icon.clone()).unwrap_or_default();
         let select = (workspace.clone(), tab_id.clone());
         let close = (workspace.clone(), tab_id.clone());
-        tabs = tabs.child(
+        let group = SharedString::from(format!("tab-group-{tab_id}"));
+        let text = if is_active { primary } else { secondary };
+        let activity = workspace.read(cx).activity(tab_id);
+        strip = strip.child(
             h_flex()
                 .id(SharedString::from(format!("tab-{tab_id}")))
-                .h_full()
-                .pl_3()
-                .pr_1()
-                .gap_1()
+                .group(group.clone())
+                .h(px(31.))
+                .px(px(12.))
+                .gap(px(3.6))
                 .items_center()
-                .text_sm()
-                .border_r_1()
-                .border_color(border)
-                .when(is_active, |d| d.bg(active_bg).text_color(primary))
-                .when(!is_active, |d| d.text_color(secondary).hover(move |s| s.bg(hover)))
+                .rounded_t(px(4.))
+                .text_size(px(12.))
+                .text_color(text)
+                .when(is_active, |d| d.bg(active_bg))
+                .when(!is_active, |d| d.hover(move |s| s.bg(hover).text_color(primary)))
                 .cursor_pointer()
-                .when_some(
-                    Some(workspace.read(cx).activity(tab_id))
-                        .filter(|state| *state != treeterm_model::workspace_store::ActivityState::Idle),
-                    |d, state| {
-                        d.child(div().text_xs().flex_shrink_0().text_color(gpui_kit::rgb(state.color())).child(state.icon()))
-                    },
-                )
-                .child(tab.title.clone())
-                .when(!closable, |d| d.pr_2())
-                .when(closable, |d| d.child(
-                    div()
-                        .id(SharedString::from(format!("tab-close-{tab_id}")))
-                        .px_1()
-                        .rounded_sm()
-                        .text_color(secondary)
-                        .hover(move |s| s.bg(hover).text_color(primary))
-                        .child("×")
-                        .on_click(cx.listener(move |_, _, _, cx| {
-                            cx.stop_propagation();
-                            let (workspace, tab) = &close;
-                            workspace.update(cx, |w, cx| w.remove_tab(tab, cx));
-                        })),
-                ))
+                .child(div().flex_shrink_0().mr(px(6.)).child(app_icon))
+                .child(div().whitespace_nowrap().child(tab.title.clone()))
+                .child(div().ml(px(4.)).flex_shrink_0().child(crate::ui::activity_glyph(activity, 10., text)))
+                .when(closable && is_active, |d| {
+                    d.child(
+                        div()
+                            .id(SharedString::from(format!("tab-close-{tab_id}")))
+                            .size(px(13.))
+                            .flex_shrink_0()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded(px(4.))
+                            .invisible()
+                            .group_hover(group.clone(), |d| d.visible())
+                            .hover(move |s| s.bg(hover))
+                            .child(crate::ui::icon(IconName::X, 11., secondary))
+                            .on_click(cx.listener(move |_, _, _, cx| {
+                                cx.stop_propagation();
+                                let (workspace, tab) = &close;
+                                workspace.update(cx, |w, cx| w.remove_tab(tab, cx));
+                            })),
+                    )
+                })
                 .on_click(cx.listener(move |view, _, _, cx| {
                     let (workspace, tab) = &select;
                     workspace.update(cx, |w, cx| w.set_active_tab(tab, cx));
@@ -1173,20 +1608,23 @@ fn workspace_pane(
                 })),
         );
     }
-    // "+" opens the new-tab menu: every application offered for new tabs.
+    // "+" (`flexlayout-new-tab-btn`) opens the new-tab menu: every application offered.
     let menu_apps: Vec<(String, String, String)> = registry
         .new_tab_menu_for(workspace.read(cx).is_remote())
         .map(|app| (app.id.clone(), app.name.clone(), app.icon.clone()))
         .collect();
     if !menu_apps.is_empty() {
-        use gpui_kit::component::button::{Button, ButtonVariants as _};
         use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
         let target = workspace.clone();
         let view_entity = cx.entity();
-        tabs = tabs.child(
-            Button::new("new-tab")
-                .ghost()
-                .label("+")
+        strip = strip.child(
+            div().h(px(31.)).pl(px(5.)).flex().items_center().child(
+                crate::ui::Trigger::new(
+                    crate::ui::item_action("new-tab", cx)
+                        .text_size(px(16.))
+                        .tooltip(|window, cx| gpui_kit::component::tooltip::Tooltip::new("New tab").build(window, cx))
+                        .child("+"),
+                )
                 .dropdown_menu(move |mut menu, _window, _cx| {
                     for (id, name, icon) in &menu_apps {
                         let (target, view, id) = (target.clone(), view_entity.clone(), id.clone());
@@ -1199,30 +1637,19 @@ fn workspace_pane(
                     }
                     menu
                 }),
+            ),
         );
     }
-
-    let header = h_flex()
-        .h(px(38.))
-        .pl(header_inset)
-        .gap_3()
-        .items_center()
+    let tabs = h_flex()
+        .h(px(34.))
+        .flex_shrink_0()
+        .px(px(2.))
+        .bg(tab_bar_bg)
         .border_b_1()
         .border_color(border)
-        .child(div().child(file.display_name().to_owned()))
-        .child(div().text_sm().text_color(secondary).child(path))
-        .when_some(file.git_branch.clone(), |d, branch| {
-            d.child(div().text_sm().text_color(secondary).child(format!("⎇ {branch}")))
-        })
-        .when_some(connected.session.read(cx).git_controller(&id).cloned(), |d, controller| {
-            d.children(git_status_items(&controller, cx))
-        })
-        .child(traffic_badge(connected, &workspace, &id, cx))
-        .child(run_menu(connected, &workspace, &id, cx))
-        .children(merge_menu(connected, &workspace, &id, cx))
-        .when_some(operation_error, |d, error| {
-            d.child(div().text_sm().text_color(colors(cx).error).child(format!("⚠ {error}")))
-        });
+        .child(strip);
+
+    let header = workspace_header(connected, &workspace, &id, header_inset, operation_error, cx);
 
     let content: AnyElement = match &active {
         None => centered(div().text_color(secondary).child("No tabs")),
@@ -1237,10 +1664,16 @@ fn workspace_pane(
                     let focus = view.read(cx).focus_handle().clone();
                     window.focus(&focus, cx);
                 }
+                let prompts = workspace
+                    .read(cx)
+                    .analyzer(tab_id)
+                    .is_some()
+                    .then(|| harness_prompt_buttons(&connected.session, &id, cx))
+                    .flatten();
                 v_flex()
                     .size_full()
-                    .child(div().flex_1().min_h_0().child(view))
-                    .child(terminal_status_bar(&workspace, connected.session.read(cx).git_controller(&id).cloned(), tab_id, cx))
+                    .child(div().relative().flex_1().min_h_0().child(view).children(prompts))
+                    .child(terminal_status_bar(&workspace, tab_id, cx))
                     .into_any_element()
             }
             Some(TabContent::Files(model)) => {
@@ -1399,7 +1832,7 @@ fn web_app_tab(
                 v_flex()
                     .size_full()
                     .child(div().flex_1().min_h_0().child(view))
-                    .child(terminal_status_bar(workspace, None, tab_id, cx))
+                    .child(terminal_status_bar(workspace, tab_id, cx))
                     .into_any_element()
             }
             None => centered(div().text_color(secondary).child("The server starts once a port is found…")),
@@ -1444,14 +1877,51 @@ fn web_app_tab(
 
 /// The bar under a terminal: activity badge, idle-detector and width-limit switches.
 /// Port of `TerminalStatusBar.tsx`; both switches persist in the tab's state.
+/// The AI harness's floating prompt buttons (`.review-comments-button`), stacked above the
+/// terminal's two circle buttons (16px margin + 2 × (32px + 8px gap)).
+fn harness_prompt_buttons(session: &Entity<SessionStore>, workspace_id: &str, cx: &mut Context<AppView>) -> Option<AnyElement> {
+    let prompts = treeterm_model::harness_prompts::harness_prompts(session.read(cx), workspace_id, cx);
+    if prompts.is_empty() {
+        return None;
+    }
+    let mut column = v_flex().absolute().right(px(16.)).bottom(px(96.)).gap(px(8.)).items_end();
+    for (index, prompt) in prompts.into_iter().enumerate() {
+        let (session, id, title) = (session.clone(), workspace_id.to_owned(), prompt.title());
+        column = column.child(
+            div()
+                .id(("harness-prompt", index))
+                .px(px(16.))
+                .py(px(8.))
+                .rounded(px(6.))
+                .border_1()
+                .border_color(gpui_kit::rgb(0xcc8800))
+                .bg(gpui_kit::rgb(0xf0a000))
+                .text_color(gpui_kit::rgb(0x1e1e1e))
+                .text_size(px(13.))
+                .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                .whitespace_nowrap()
+                .opacity(0.9)
+                .cursor_pointer()
+                .hover(|d| d.bg(gpui_kit::rgb(0xffb820)).border_color(gpui_kit::rgb(0xf0a000)).opacity(1.))
+                .tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(title).build(window, cx))
+                .child(prompt.label())
+                .on_click(move |_, window, cx| {
+                    if let Err(error) = treeterm_model::harness_prompts::send(&prompt, &session, &id, cx) {
+                        use gpui_kit::component::WindowExt as _;
+                        window.push_notification(error, cx);
+                    }
+                }),
+        );
+    }
+    Some(column.into_any_element())
+}
+
 fn terminal_status_bar(
     workspace: &Entity<treeterm_model::workspace_store::WorkspaceStore>,
-    git: Option<Entity<treeterm_model::git_controller::GitController>>,
     tab_id: &str,
     cx: &mut Context<AppView>,
 ) -> AnyElement {
     use gpui_kit::component::Sizable as _;
-    use gpui_kit::component::switch::Switch;
     let store = workspace.read(cx);
     let activity = store.activity(tab_id);
     // AI-harness tabs: the analyzer's state, whether it is classifying, and why.
@@ -1465,24 +1935,6 @@ fn terminal_status_bar(
     let (idle_ws, idle_tab) = (workspace.clone(), tab_id.to_owned());
     let (width_ws, width_tab) = (workspace.clone(), tab_id.to_owned());
     let (approve_ws, approve_tab) = (workspace.clone(), tab_id.to_owned());
-    // AI-harness prompts (`PromptCommitButton`, `PromptRebaseButton`).
-    let prompts: Vec<(&'static str, String)> = match (&analysis, &git) {
-        (Some(_), Some(git)) => {
-            use treeterm_core::git_status::{ParentConflicts, WorkingTree};
-            let status = git.read(cx).status().clone();
-            let file = store.file();
-            let mut prompts = Vec::new();
-            let conflicting = status.parent_conflicts == ParentConflicts::Conflicting;
-            if status.working_tree == WorkingTree::Dirty && !conflicting {
-                prompts.push(("Prompt Commit", "commit".to_owned()));
-            }
-            if let (true, Some(branch), Some(parent)) = (conflicting, file.git_branch.as_deref(), store.parent_branch()) {
-                prompts.push(("Prompt Rebase", format!("rebase local branch {branch} onto {parent}")));
-            }
-            prompts
-        }
-        (Some(_), None) | (None, _) => Vec::new(),
-    };
     // Right-click on the badge: the debug menu (`ActivityStateBadge`).
     let (debug_ws, debug_tab) = (workspace.clone(), tab_id.to_owned());
     let debug_menu = move |menu: gpui_kit::component::menu::PopupMenu, _: &mut Window, _: &mut gpui_kit::Context<gpui_kit::component::menu::PopupMenu>| {
@@ -1500,11 +1952,12 @@ fn terminal_status_bar(
         Some((state, analyzing, reason, auto_approve)) => (state, analyzing, Some(reason), Some(auto_approve)),
         None => (activity, false, None, None),
     };
+    // `.terminal-status-bar`: 28px, 8px padding, 12px apart.
     h_flex()
         .h(px(28.))
         .flex_shrink_0()
-        .px_2()
-        .gap_3()
+        .px(px(8.))
+        .gap(px(12.))
         .items_center()
         .bg(gpui_kit::rgb(0x1e1e1e))
         .border_t_1()
@@ -1512,63 +1965,45 @@ fn terminal_status_bar(
         .text_size(px(11.))
         .child({
             use gpui_kit::component::menu::ContextMenuExt as _;
+            // `.activity-state-badge`; the analyzer's reason is its tooltip.
+            let reason = reason.filter(|r| !r.is_empty());
             div()
                 .id(SharedString::from(format!("activity-badge-{tab_id}")))
-                .px_2()
+                .flex()
+                .items_center()
+                .px(px(8.))
                 .py(px(2.))
                 .rounded(px(12.))
                 .bg(gpui_kit::rgb(badge_state.color()))
                 .opacity(0.8)
                 .text_color(gpui_kit::white())
-                .child(if analyzing { format!("{} …", badge_state.label()) } else { badge_state.label().to_owned() })
+                .when(analyzing, |d| {
+                    d.child(
+                        div().mr(px(4.)).child(
+                            Spinner::new()
+                                .icon(gpui_kit::component::Icon::new(IconName::LoaderCircle))
+                                .with_size(px(9.))
+                                .color(gpui_kit::white()),
+                        ),
+                    )
+                })
+                .child(badge_state.label())
+                .when_some(reason, |d, reason| {
+                    d.tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(reason.clone()).build(window, cx))
+                })
                 .context_menu(debug_menu)
         })
-        .when_some(reason.filter(|r| !r.is_empty()), |bar, reason| {
-            bar.child(div().max_w(px(360.)).truncate().text_color(gpui_kit::rgb(0x858585)).child(reason))
-        })
-        .children(prompts.into_iter().map(|(label, text)| {
-            use gpui_kit::component::button::{Button, ButtonVariants as _};
-            let target = workspace.clone();
-            Button::new(SharedString::from(format!("{label}-{tab_id}")))
-                .xsmall()
-                .ghost()
-                .label(label)
-                .on_click(move |_, window, cx| {
-                    if let Err(error) = target.update(cx, |w, cx| w.prompt_harness(&text, cx)) {
-                        use gpui_kit::component::WindowExt as _;
-                        window.push_notification(error, cx);
-                    }
-                })
-        }))
         .when_some(auto_approve, |bar, checked| {
-            bar.child(
-                Switch::new(SharedString::from(format!("approve-switch-{tab_id}")))
-                    .checked(checked)
-                    .label("Auto-approve safe")
-                    .xsmall()
-                    .on_click(move |checked, _, cx| {
-                        approve_ws.update(cx, |w, cx| w.set_auto_approve(&approve_tab, *checked, cx));
-                    }),
-            )
+            bar.child(crate::ui::toggle(SharedString::from(format!("approve-switch-{tab_id}")), checked, "Auto-approve safe", move |checked, _, cx| {
+                approve_ws.update(cx, |w, cx| w.set_auto_approve(&approve_tab, checked, cx));
+            }))
         })
-        .child(
-            Switch::new(SharedString::from(format!("idle-switch-{tab_id}")))
-                .checked(idle_enabled)
-                .label("Idle detector")
-                .xsmall()
-                .on_click(move |checked, _, cx| {
-                    idle_ws.update(cx, |w, cx| w.set_idle_detector_enabled(&idle_tab, *checked, cx));
-                }),
-        )
-        .child(
-            Switch::new(SharedString::from(format!("width-switch-{tab_id}")))
-                .checked(width_enabled)
-                .label(format!("{max_cols} col limit"))
-                .xsmall()
-                .on_click(move |checked, _, cx| {
-                    width_ws.update(cx, |w, cx| w.set_width_limit_enabled(&width_tab, *checked, cx));
-                }),
-        )
+        .child(crate::ui::toggle(SharedString::from(format!("idle-switch-{tab_id}")), idle_enabled, "Idle detector", move |checked, _, cx| {
+            idle_ws.update(cx, |w, cx| w.set_idle_detector_enabled(&idle_tab, checked, cx));
+        }))
+        .child(crate::ui::toggle_owned(SharedString::from(format!("width-switch-{tab_id}")), width_enabled, format!("{max_cols} col limit"), move |checked, _, cx| {
+            width_ws.update(cx, |w, cx| w.set_width_limit_enabled(&width_tab, checked, cx));
+        }))
         .into_any_element()
 }
 

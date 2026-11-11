@@ -226,6 +226,29 @@ impl GitController {
         cx.notify();
     }
 
+    /// `openGitHub`: the URL of this workspace's PR, or of the page to create one (the PR
+    /// status is refreshed on the way).
+    pub fn open_github(&self, cx: &mut Context<Self>) -> Task<Result<String, String>> {
+        let (id, session, git, github) = (self.id.clone(), self.session.clone(), self.git.clone(), self.github.clone());
+        cx.spawn(async move |this, cx| {
+            let deps = Deps { id, session, git, github, cx: cx.clone() };
+            let mut sink = cx.clone();
+            let mut apply = move |update| {
+                match this.update(&mut sink, |controller, cx| {
+                    controller.status.apply(update);
+                    cx.notify();
+                }) {
+                    Ok(()) | Err(_) => {}
+                }
+            };
+            match treeterm_core::git_status::open_github(&deps, &mut apply).await {
+                Ok(treeterm_core::git_status::GitHubPage::PullRequest { url })
+                | Ok(treeterm_core::git_status::GitHubPage::CreatePullRequest { url }) => Ok(url),
+                Err(error) => Err(error.to_string()),
+            }
+        })
+    }
+
     /// `pushReviewCommentsToGitHub`: post `comments` on this workspace's PR as inline review
     /// comments. Resolves with what was posted and what failed.
     pub fn push_review_comments(

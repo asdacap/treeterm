@@ -2,6 +2,7 @@
 
 mod active_processes_view;
 mod app_view;
+mod assets;
 mod auto_open_dialog;
 mod connection_picker;
 mod remote_dir_dialog;
@@ -25,6 +26,7 @@ mod theme;
 mod tool_views;
 mod traffic_badge;
 mod tree_pane;
+mod ui;
 
 use gpui_kit::{
     App, AppContext as _, Bounds, Entity, TitlebarOptions, WindowBounds, WindowOptions, point, px,
@@ -167,7 +169,7 @@ fn main() {
 
     #[cfg(feature = "automation")]
     let rt_for_automation = rt.clone();
-    gpui_kit::application().run(move |cx| {
+    gpui_kit::application().with_assets(assets::AppAssets).run(move |cx| {
         gpui_kit::init(cx);
         theme::install(cx);
         terminal_view::bind_keys(cx);

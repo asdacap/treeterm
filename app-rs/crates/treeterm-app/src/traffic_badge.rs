@@ -2,7 +2,7 @@
 //! a rate change re-renders only the badge.
 
 use gpui_kit::prelude::*;
-use gpui_kit::{Context, Entity, SharedString, Window, div};
+use gpui_kit::{Context, Entity, SharedString, Window, div, px};
 use treeterm_core::traffic::{format_bytes, format_rate};
 use treeterm_model::traffic::TrafficMeter;
 
@@ -27,7 +27,8 @@ impl Render for TrafficBadge {
         div()
             .id(self.id.clone())
             .flex_shrink_0()
-            .text_xs()
+            .text_size(px(crate::ui::SMALL))
+            .font_weight(gpui_kit::FontWeight::NORMAL)
             .whitespace_nowrap()
             .text_color(colors(cx).text_secondary)
             .child(format!("↓ {}", format_rate(rate.bytes_per_sec)))

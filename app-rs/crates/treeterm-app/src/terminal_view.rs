@@ -452,8 +452,11 @@ impl TerminalView {
         } else {
             (c.border, c.text_secondary)
         };
+        let (accent, primary) = (c.accent, c.text_primary);
         badge("scroll-badge", label, rgba(0x000000b3).into(), border, text)
             .right(px(16.))
+            .opacity(if pinned { 0.8 } else { 0.6 })
+            .hover(move |d| d.opacity(1.).border_color(accent).text_color(primary))
             .cursor_pointer()
             .tooltip_text(title)
             .on_click(cx.listener(move |view, event: &gpui_kit::ClickEvent, _, cx| {
@@ -501,12 +504,15 @@ fn badge(
         .bg(background)
         .text_color(text)
         .text_size(px(11.))
+        .font_family(default_mono_family())
+        .opacity(0.6)
         .child(label.into())
 }
 
-fn circle_button(id: &'static str, label: &'static str, cx: &App) -> gpui_kit::Stateful<gpui_kit::Div> {
+/// `.terminal-circle-btn` in `.terminal-floating-buttons`: 70% opaque until hovered.
+fn circle_button(id: &'static str, label: &'static str, size: f32, cx: &App) -> gpui_kit::Stateful<gpui_kit::Div> {
     let c = colors(cx);
-    let accent = c.accent;
+    let (accent, hover) = (c.accent, c.bg_hover);
     div()
         .id(id)
         .size(px(32.))
@@ -520,7 +526,8 @@ fn circle_button(id: &'static str, label: &'static str, cx: &App) -> gpui_kit::S
         .text_color(c.text_primary)
         .opacity(0.7)
         .cursor_pointer()
-        .hover(move |style| style.opacity(1.).border_color(accent))
+        .text_size(px(size))
+        .hover(move |style| style.opacity(1.).bg(hover).border_color(accent))
         .child(label)
 }
 
@@ -658,7 +665,7 @@ impl Render for TerminalView {
             root = root.child(
                 badge(
                     "size-mismatch",
-                    format!("{}x{}", mismatch.actual.cols, mismatch.actual.rows),
+                    format!("{} x {}", mismatch.actual.cols, mismatch.actual.rows),
                     rgba(0xb42828b3).into(),
                     gpui_kit::rgb(0xb42828).into(),
                     gpui_kit::rgb(0xff9090).into(),
@@ -678,14 +685,14 @@ impl Render for TerminalView {
                 .gap(px(8.))
                 .items_end()
                 .child(
-                    circle_button("refresh-stream", "↻", cx)
+                    circle_button("refresh-stream", "↻", 13.33, cx)
                         .tooltip_text("Refresh stream")
                         .on_click(cx.listener(|view, _, window, cx| {
                             view.refresh_stream(&RefreshStream, window, cx);
                         })),
                 )
                 .child(
-                    circle_button("scroll-down", "↓", cx)
+                    circle_button("scroll-down", "↓", 16., cx)
                         .tooltip_text("Scroll to bottom")
                         .on_click(cx.listener(|view, _, window, cx| {
                             view.scroll_to_bottom(&ScrollToBottom, window, cx);

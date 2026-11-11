@@ -27,7 +27,7 @@ use treeterm_term::palette::{Palette, SELECTION_BACKGROUND};
 use crate::terminal_view::TerminalView;
 
 /// Space between the grid and the edge of the tab (Electron: `padding: 0.5em`).
-pub const PADDING: Pixels = px(7.);
+pub const PADDING: Pixels = px(8.);
 
 /// What the view needs to map pointer positions to cells; written every prepaint.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -128,17 +128,21 @@ impl TermFont {
         }
     }
 
-    /// Cell size: one advance wide, ascent + descent tall (xterm.js with line height 1).
+    /// Cell size as xterm.js computes it with line height 1: one advance wide and ascent +
+    /// descent tall, each rounded down to whole device pixels (14px Menlo on a 2× display is
+    /// 8×16, as in Electron).
     pub fn cell_size(&self, window: &Window) -> Size<Pixels> {
         let text = window.text_system();
         let font_id = text.resolve_font(&self.font(false, false));
-        let width = text
+        let advance = text
             .advance(font_id, self.size, 'm')
             .map(|advance| advance.width)
             .unwrap_or(self.size * 0.6);
         // GPUI reports descent below the baseline as a negative offset.
-        let height = (text.ascent(font_id, self.size) + text.descent(font_id, self.size).abs()).ceil();
-        size(width, height)
+        let height = text.ascent(font_id, self.size) + text.descent(font_id, self.size).abs();
+        let scale = window.scale_factor().max(1.);
+        let device = |length: Pixels| px(((f32::from(length) * scale).floor() / scale).max(1.));
+        size(device(advance), device(height))
     }
 }
 

@@ -7,12 +7,13 @@ use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::{Sizable as _, WindowExt as _, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{AnyElement, ClickEvent, Context, Entity, EventEmitter, SharedString, Window, div, px};
-use treeterm_model::workspace_store::ActivityStyle as _;
 use treeterm_model::keybinding_store::KeybindingStore;
 use treeterm_core::tree::DropPosition;
 use treeterm_model::session_store::{AfterMerge, RemoveMode, SessionState, SessionStore, WorkspaceEntry};
 
 use crate::theme::colors;
+use crate::ui;
+use gpui_kit::assets::IconName;
 
 /// Emitted when the user picks a workspace.
 pub struct WorkspaceSelected(pub String);
@@ -195,7 +196,8 @@ impl TreePane {
 impl Render for TreePane {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let c = colors(cx);
-        let (text_secondary, error, hover) = (c.text_secondary, c.error, c.bg_hover);
+        let (text_secondary, error, hover, accent, primary, border) =
+            (c.text_secondary, c.error, c.bg_hover, c.accent, c.text_primary, c.border);
         let session = self.session.read(cx);
         let rows: Result<Vec<RowData>, AnyElement> = match session.state() {
             SessionState::Waiting => Err(status_line("Loading session…", text_secondary)),
@@ -222,11 +224,12 @@ impl Render for TreePane {
                         let status = git.read(cx).status();
                         match &status.pull_request {
                             treeterm_core::git_status::PullRequest::Found(pr) => {
-                                Some((pr.number, treeterm_model::git_controller::pr_signal(status)))
+                                Some((pr.number, pr_state_color(pr), treeterm_model::git_controller::pr_signal(status)))
                             }
                             treeterm_core::git_status::PullRequest::None => None,
                         }
                     }),
+                    git_repo: session.workspace_store(&row.id).is_some_and(|w| w.read(cx).file().is_git_repo),
                     label: session
                         .entry(&row.id)
                         .map_or(Label::Loading, |entry| Label::of(entry, cx)),
@@ -247,82 +250,97 @@ impl Render for TreePane {
             }
         };
         let remote = self.remote;
+        let locked = self.session.read(cx).is_locked();
+        let title = match &self.renaming {
+            Some((input, _)) => div()
+                .id("session-rename")
+                .flex_1()
+                .on_click(|_: &ClickEvent, _, cx| cx.stop_propagation())
+                .on_key_down(cx.listener(|pane, event: &gpui_kit::KeyDownEvent, _, cx| {
+                    if event.keystroke.key == "escape" {
+                        pane.renaming = None; // dropping the subscription discards the edit
+                        cx.notify();
+                    }
+                }))
+                .child(Input::new(input).xsmall())
+                .into_any_element(),
+            // `.tree-title`: status dot, name, traffic, force-unlock.
+            None => h_flex()
+                .id("session-title")
+                .flex_1()
+                .min_w_0()
+                .gap(px(6.))
+                .items_center()
+                .text_size(px(ui::SMALL))
+                .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                .text_color(text_secondary)
+                .child(div().size(px(8.)).flex_shrink_0().rounded_full().bg(gpui_kit::rgb(0x4caf50)))
+                .child(div().truncate().child(self.names.read(cx).name(&self.target).to_uppercase()))
+                .child(self.traffic.clone())
+                .when(locked, |d| {
+                    d.child(
+                        div()
+                            .id("force-unlock")
+                            .p(px(2.))
+                            .rounded(px(4.))
+                            .cursor_pointer()
+                            .hover(move |d| d.bg(hover))
+                            .tooltip(|window, cx| gpui_kit::component::tooltip::Tooltip::new("Force unlock session").build(window, cx))
+                            .child(ui::icon(IconName::LockOpen, 14., primary))
+                            .on_click(cx.listener(|pane, _: &ClickEvent, _, cx| {
+                                cx.stop_propagation();
+                                pane.session.update(cx, |s, cx| s.force_unlock(cx));
+                            })),
+                    )
+                })
+                .on_click(cx.listener(|pane, event: &ClickEvent, window, cx| {
+                    if event.click_count() == 2 {
+                        cx.stop_propagation();
+                        pane.start_rename(window, cx);
+                    }
+                }))
+                .into_any_element(),
+        };
         v_flex()
             .w_full()
+            .border_b_1()
+            .border_color(border)
             .child(
+                // `.session-panel-header`: 40px, 8px 16px padding, 3px accent left border.
                 h_flex()
                     .id("session-header")
-                    .px_2()
-                    .py_1()
-                    .gap_1()
+                    .h(px(40.))
+                    .pl(px(16.))
+                    .pr(px(16.))
+                    .gap(px(4.))
                     .items_center()
-                    .text_sm()
+                    .border_l(px(3.))
+                    .border_color(accent)
                     .cursor_pointer()
                     .hover(move |d| d.bg(hover))
                     .child(
                         div()
                             .id("session-fold")
-                            .w(px(14.))
-                            .text_color(text_secondary)
-                            .child(if self.folded { "▸" } else { "▾" })
+                            .size(px(16.))
+                            .flex_shrink_0()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .opacity(0.6)
+                            .hover(|d| d.opacity(1.))
+                            .child(ui::icon(if self.folded { IconName::ChevronRight } else { IconName::ChevronDown }, 16., primary))
                             .on_click(cx.listener(|pane, _: &ClickEvent, _, cx| {
                                 cx.stop_propagation();
                                 pane.folded = !pane.folded;
                                 cx.notify();
                             })),
                     )
-                    .child(match &self.renaming {
-                        Some((input, _)) => div()
-                            .id("session-rename")
-                            .flex_1()
-                            .on_click(|_: &ClickEvent, _, cx| cx.stop_propagation())
-                            .on_key_down(cx.listener(|pane, event: &gpui_kit::KeyDownEvent, _, cx| {
-                                if event.keystroke.key == "escape" {
-                                    pane.renaming = None; // dropping the subscription discards the edit
-                                    cx.notify();
-                                }
-                            }))
-                            .child(Input::new(input).xsmall())
-                            .into_any_element(),
-                        None => div()
-                            .id("session-title")
-                            .flex_1()
-                            .truncate()
-                            .child(self.names.read(cx).name(&self.target))
-                            .on_click(cx.listener(|pane, event: &ClickEvent, window, cx| {
-                                if event.click_count() == 2 {
-                                    cx.stop_propagation();
-                                    pane.start_rename(window, cx);
-                                }
-                            }))
-                            .into_any_element(),
-                    })
-                    .child(self.traffic.clone())
-                    .when(self.session.read(cx).is_locked(), |d| {
-                        d.child(
-                            div()
-                                .id("force-unlock")
-                                .px_1()
-                                .rounded_sm()
-                                .text_xs()
-                                .text_color(text_secondary)
-                                .hover(move |d| d.bg(hover))
-                                .child("🔓 Unlock")
-                                .on_click(cx.listener(|pane, _: &ClickEvent, _, cx| {
-                                    cx.stop_propagation();
-                                    pane.session.update(cx, |s, cx| s.force_unlock(cx));
-                                })),
-                        )
-                    })
+                    .child(title)
                     .on_click(cx.listener(|_, _: &ClickEvent, _, cx| cx.emit(SessionInfoRequested)))
                     .child(
-                        div()
-                            .id("open-workspace")
-                            .px_1()
-                            .rounded_sm()
-                            .cursor_pointer()
-                            .text_color(text_secondary)
-                            .hover(|d| d.bg(colors(cx).bg_hover))
+                        ui::icon_button("open-workspace", cx)
+                            .text_size(px(18.))
+                            .tooltip(|window, cx| gpui_kit::component::tooltip::Tooltip::new("Add workspace").build(window, cx))
                             .child("+")
                             .on_click(cx.listener(move |pane, _: &ClickEvent, window, cx| {
                                 cx.stop_propagation();
@@ -334,30 +352,45 @@ impl Render for TreePane {
                             })),
                     ),
             )
-            .when(!self.folded, |d| d.child(body))
+            .when(!self.folded, |d| d.child(div().pb(px(4.)).child(body)))
     }
 }
 
 impl TreePane {
     fn render_row(&self, row: RowData, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        let RowData { id, depth, has_children, label, is_worktree, unread, favourite, has_parent, pr, activity } = row;
+        let RowData { id, depth, has_children, label, is_worktree, unread, favourite, has_parent, pr, git_repo, activity } = row;
         let busy = activity != treeterm_model::workspace_store::ActivityState::Idle;
         let c = colors(cx);
-        let (label, label_color): (SharedString, _) = match label {
-            Label::Name(name) => (name, c.text_primary),
-            Label::Loading => ("Loading…".into(), c.text_secondary),
-            Label::Error(reason) => (format!("⚠ {reason}").into(), c.error),
+        let (secondary, primary) = (c.text_secondary, c.text_primary);
+        // `WorkspaceIcon`: spinner while loading, alert on error, the activity glyph while
+        // busy, else a branch (worktree) or folder.
+        let (icon, label): (AnyElement, SharedString) = match label {
+            Label::Name(name) if busy => (ui::activity_glyph(activity, 14., secondary), name),
+            Label::Name(name) => (
+                ui::icon(if is_worktree { IconName::GitBranch } else { IconName::Folder }, 16., secondary).into_any_element(),
+                name,
+            ),
+            Label::Loading => (
+                gpui_kit::component::spinner::Spinner::new()
+                    .icon(gpui_kit::component::Icon::new(IconName::LoaderCircle))
+                    .with_size(px(16.))
+                    .color(secondary)
+                    .into_any_element(),
+                "Loading…".into(),
+            ),
+            Label::Error(reason) => (ui::icon(IconName::CircleAlert, 16., c.error).into_any_element(), reason),
         };
         let selected = self.selected == Selection::Workspace(id.clone());
         // Workspace focus mode (prefix + w) moves this cursor with the arrow keys.
         let focus_cursor = self.keybindings.read(cx).machine().focused_workspace() == Some(id.as_str());
-        let chevron = match (has_children, self.collapsed.contains(&id)) {
-            (false, _) => " ",
-            (true, false) => "▾",
-            (true, true) => "▸",
+        let expand = match (has_children, self.collapsed.contains(&id)) {
+            (false, _) => None,
+            (true, false) => Some(IconName::ChevronDown),
+            (true, true) => Some(IconName::ChevronRight),
         };
         let toggle_id = id.clone();
         let select_id = id.clone();
+        let fork_id = id.clone();
         let (drag_value, move_id, drop_id) = (
             DraggedWorkspace { id: id.clone(), label: label.clone() },
             id.clone(),
@@ -367,17 +400,22 @@ impl TreePane {
         let menu_id = id.clone();
         let session = self.session.clone();
         let pane = cx.entity();
+        let group = SharedString::from(format!("ws-row-group-{id}"));
+        let root = depth == 0;
+        // `.tree-item`: 36px rows, 6px 4px padding plus 8px per level.
         h_flex()
             .id(SharedString::from(format!("ws-row-{id}")))
+            .group(group.clone())
             .w_full()
-            .h(px(24.))
-            .pl(px(8. + 12. * depth as f32))
-            .pr_2()
-            .gap_1()
-            .text_sm()
+            .min_h(px(36.))
+            .py(px(6.))
+            .pl(px(4. + 8. * depth as f32))
+            .pr(px(4.))
+            .items_center()
+            .cursor_pointer()
             .when(selected, |row| row.bg(c.bg_active))
             .when(!selected, |row| row.hover(|row| row.bg(c.bg_hover)))
-            .when(focus_cursor, |row| row.border_1().border_color(c.accent))
+            .when(focus_cursor, |row| row.border_2().border_color(c.accent))
             .on_drag(drag_value, |dragged, _, _, cx| cx.new(|_| dragged.clone()))
             .on_drag_move(cx.listener(move |pane, event: &gpui_kit::DragMoveEvent<DraggedWorkspace>, _, cx| {
                 let position = event.event.position;
@@ -420,32 +458,81 @@ impl TreePane {
             .child(
                 div()
                     .id(SharedString::from(format!("ws-toggle-{id}")))
-                    .w(px(12.))
-                    .text_color(c.text_secondary)
-                    .child(chevron)
+                    .w(px(16.))
+                    .flex_shrink_0()
+                    .flex()
+                    .justify_center()
+                    .text_color(secondary)
+                    .hover(move |d| d.text_color(primary))
+                    .children(expand.map(|name| ui::icon(name, 16., secondary)))
                     .on_click(cx.listener(move |pane, _: &ClickEvent, _, cx| {
                         cx.stop_propagation();
                         pane.toggle(&toggle_id, cx);
                     })),
             )
-            .when_some(pr, |row, (number, signal)| {
+            .child(div().mr(px(8.)).flex_shrink_0().flex().items_center().child(icon))
+            .when_some(pr, |row, (number, state_color, signal)| {
                 use treeterm_model::git_controller::PrSignal;
-                let (mark, color) = match signal {
-                    PrSignal::None => ("", 0x858585),
-                    PrSignal::MergeConflict => ("⚠", 0xff9800),
-                    PrSignal::CiFailure => ("✕", 0xf44747),
-                    PrSignal::CiRunning => ("◌", 0xe2c08d),
-                    PrSignal::ReadyToMerge => ("✓", 0x4caf50),
+                let signal = match signal {
+                    PrSignal::None => None,
+                    PrSignal::MergeConflict => Some(ui::icon(IconName::TriangleAlert, 12., gpui_kit::rgb(0xd29922)).into_any_element()),
+                    PrSignal::CiFailure => Some(ui::icon(IconName::CircleX, 12., gpui_kit::rgb(0xb62324)).into_any_element()),
+                    PrSignal::CiRunning => Some(
+                        gpui_kit::component::spinner::Spinner::new()
+                            .icon(gpui_kit::component::Icon::new(IconName::LoaderCircle))
+                            .with_size(px(12.))
+                            .color(gpui_kit::rgb(0xd29922).into())
+                            .into_any_element(),
+                    ),
+                    PrSignal::ReadyToMerge => Some(ui::icon(IconName::CircleCheck, 12., gpui_kit::rgb(0x238636)).into_any_element()),
                 };
-                row.child(div().text_xs().text_color(c.accent).child(format!("#{number}")))
-                    .when(!mark.is_empty(), |row| row.child(div().text_xs().text_color(gpui_kit::rgb(color)).child(mark)))
+                row.child(
+                    div()
+                        .mr(px(4.))
+                        .flex_shrink_0()
+                        .text_size(px(12.))
+                        .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                        .text_color(gpui_kit::rgb(state_color))
+                        .child(format!("#{number}")),
+                )
+                .children(signal.map(|signal| div().mr(px(4.)).flex_shrink_0().child(signal)))
             })
-            .when(favourite, |row| row.child(div().text_xs().text_color(gpui_kit::rgb(0xe5c07b)).child("★")))
-            .child(div().flex_1().truncate().text_color(label_color).child(label.clone()))
+            .child(div().flex_1().min_w_0().truncate().text_size(px(ui::BODY)).text_color(primary).child(label.clone()))
             // "New activity — open workspace to mark as read".
-            .when(unread, |row| row.child(div().text_xs().text_color(c.accent).child("●")))
-            .when(busy, |row| {
-                row.child(div().text_xs().flex_shrink_0().text_color(gpui_kit::rgb(activity.color())).child(activity.icon()))
+            .when(unread, |row| row.child(div().mx(px(4.)).flex_shrink_0().text_size(px(10.)).text_color(c.accent).child("●")))
+            // `.tree-item-favourite`: a filled star when marked.
+            .child(
+                div()
+                    .size(px(24.))
+                    .flex_shrink_0()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .when(favourite, |d| d.text_size(px(14.)).text_color(gpui_kit::rgb(0xf5c84a)).child("★")),
+            )
+            // `.tree-item-actions`: always on root rows, on hover otherwise.
+            .when(git_repo, |row| {
+                row.child(
+                    ui::item_action(SharedString::from(format!("ws-fork-{id}")), cx)
+                        .when(!root, |d| d.invisible().group_hover(group.clone(), |d| d.visible()))
+                        .tooltip(|window, cx| gpui_kit::component::tooltip::Tooltip::new("Fork").build(window, cx))
+                        .child(ui::icon(IconName::GitFork, 16., secondary))
+                        .on_click(cx.listener(move |pane, _: &ClickEvent, window, cx| {
+                            cx.stop_propagation();
+                            let (session, id) = (pane.session.clone(), fork_id.clone());
+                            let label = session
+                                .read(cx)
+                                .workspace_store(&id)
+                                .map(|w| SharedString::from(w.read(cx).file().display_name().to_owned()))
+                                .unwrap_or_default();
+                            let behind = behind_upstream(&session, &id, cx);
+                            upstream_guard(behind, label, window, cx, move |_, cx| {
+                                if let Err(error) = session.update(cx, |s, cx| s.quick_fork(&id, cx)) {
+                                    tracing::error!(%error, "quick fork");
+                                }
+                            });
+                        })),
+                )
             })
             .context_menu(move |menu, _window, cx| {
                 let settings_pane = pane.clone();
@@ -557,8 +644,10 @@ struct RowData {
     favourite: bool,
     /// A child worktree (it has a parent): its title and branch can be re-suggested.
     has_parent: bool,
-    /// The PR's number and what it needs (`PrIndicators`).
-    pr: Option<(u64, treeterm_model::git_controller::PrSignal)>,
+    /// The PR's number, its state's colour and what it needs (`PrIndicators`).
+    pr: Option<(u64, u32, treeterm_model::git_controller::PrSignal)>,
+    /// Shows the Fork button.
+    git_repo: bool,
     activity: treeterm_model::workspace_store::ActivityState,
     depth: usize,
     has_children: bool,
@@ -689,4 +778,18 @@ fn status_line(text: impl Into<SharedString>, color: gpui_kit::Hsla) -> AnyEleme
         .text_color(color)
         .child(text.into())
         .into_any_element()
+}
+
+/// `PR_STATE_CLASS`: open green, closed red, merged purple.
+fn pr_state_color(pr: &treeterm_core::github::PrInfo) -> u32 {
+    use treeterm_core::github::{PrDetails, PrState};
+    match &pr.details {
+        PrDetails::Loaded(status) => match status.state {
+            PrState::Open => 0x238636,
+            PrState::Closed => 0xb62324,
+            PrState::Merged => 0x8250df,
+            PrState::Other(_) => 0x858585,
+        },
+        PrDetails::Unavailable { .. } => 0x858585,
+    }
 }
