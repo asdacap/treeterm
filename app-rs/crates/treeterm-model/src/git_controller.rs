@@ -226,6 +226,22 @@ impl GitController {
         cx.notify();
     }
 
+    /// `pushReviewCommentsToGitHub`: post `comments` on this workspace's PR as inline review
+    /// comments. Resolves with what was posted and what failed.
+    pub fn push_review_comments(
+        &self,
+        comments: Vec<treeterm_core::review::ReviewComment>,
+        cx: &mut Context<Self>,
+    ) -> Task<Result<treeterm_core::github::PostCommentsOutcome, String>> {
+        let (id, session, git, github) = (self.id.clone(), self.session.clone(), self.git.clone(), self.github.clone());
+        cx.spawn(async move |_, cx| {
+            let deps = Deps { id, session, git, github, cx: cx.clone() };
+            treeterm_core::git_status::push_review_comments_to_github(&deps, comments)
+                .await
+                .map_err(|error| error.to_string())
+        })
+    }
+
     fn start_run(&mut self, cx: &mut Context<Self>) {
         let (id, session, git, github) = (self.id.clone(), self.session.clone(), self.git.clone(), self.github.clone());
         let working_tree: WorkingTree = self.status.working_tree;

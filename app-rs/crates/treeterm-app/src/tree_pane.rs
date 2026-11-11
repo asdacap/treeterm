@@ -396,6 +396,7 @@ impl TreePane {
                 row.child(div().text_xs().flex_shrink_0().text_color(gpui_kit::rgb(activity.color())).child(activity.icon()))
             })
             .context_menu(move |menu, _window, cx| {
+                let settings_pane = pane.clone();
                 let (session, id, label) = (session.clone(), menu_id.clone(), label.clone());
                 let (child_session, child_parent, child_label, pane) =
                     (session.clone(), id.clone(), label.clone(), pane.clone());
@@ -414,10 +415,19 @@ impl TreePane {
                 .separator();
                 let store = session.read(cx).workspace_store(&id).cloned();
                 let menu = match store.clone() {
-                    Some(store) => menu.item(
-                        PopupMenuItem::new(if favourite { "Unmark as Favourite" } else { "Mark as Favourite" })
-                            .on_click(move |_, _, cx| store.update(cx, |w, cx| w.toggle_favourite(cx))),
-                    ),
+                    Some(store) => {
+                        // The workspace's Settings tab (`onOpenSettings`), shown.
+                        let (settings_store, settings_id) = (store.clone(), id.clone());
+                        menu.item(PopupMenuItem::new("Settings").on_click(move |_, _, cx| {
+                            if settings_store.update(cx, |w, cx| w.open_or_focus_tab("workspace-settings", cx)).is_some() {
+                                settings_pane.update(cx, |pane, cx| pane.select(settings_id.clone(), cx));
+                            }
+                        }))
+                        .item(
+                            PopupMenuItem::new(if favourite { "Unmark as Favourite" } else { "Mark as Favourite" })
+                                .on_click(move |_, _, cx| store.update(cx, |w, cx| w.toggle_favourite(cx))),
+                        )
+                    }
                     None => menu,
                 };
                 let menu = match (store, has_parent) {

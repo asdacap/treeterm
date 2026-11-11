@@ -661,7 +661,13 @@ mod tests {
         settings.terminal.instances.push(profile);
         let choices = default_app_choices(&settings);
         let ids: Vec<&str> = choices.iter().map(|c| c.id.as_str()).collect();
-        assert_eq!(ids, ["terminal", "filesystem", "review", "terminal-term-1", "aiharness-claude"]);
+        assert_eq!(
+            ids,
+            [
+                "terminal", "filesystem", "review", "comments", "chat", "system-prompt-debugger", "github", "tty-list",
+                "ssh-upload", "terminal-term-1", "aiharness-claude"
+            ]
+        );
         assert_eq!(default_app_label(&choices, "terminal-term-1"), ">  Zsh");
         assert_eq!(default_app_label(&choices, "webapp-next"), "webapp-next (not available)");
     }

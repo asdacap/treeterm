@@ -31,6 +31,45 @@ pub enum AppKind {
     Browser { url: String },
     /// A dev server run in a terminal with `$PORT` set, and its page (`webapp-<instance>`).
     WebApp { command: String, keep_on_exit: bool },
+    /// A view over the workspace, its session or the LLM (no PTY, no page).
+    Tool(ToolApp),
+}
+
+/// The built-in tool tabs (`tool_tabs` holds their runtime side).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ToolApp {
+    /// The branch's pull request (`github`).
+    GitHub,
+    /// A tab's activity transitions and analyzer calls (`analyzer-history`).
+    AnalyzerHistory,
+    /// The workspace's review comments (`comments`).
+    Comments,
+    /// The daemon's PTYs started in this workspace (`tty-list`).
+    TtyList,
+    /// The workspace's own settings (`workspace-settings`).
+    WorkspaceSettings,
+    /// A streaming LLM chat (`chat`).
+    Chat,
+    /// Try the analyzer and title prompts on a buffer (`system-prompt-debugger`).
+    PromptDebugger,
+    /// Copy a local file to the ssh host (`ssh-upload`).
+    SshUpload,
+}
+
+impl ToolApp {
+    /// `createInitialState`.
+    pub fn initial_state(self) -> Value {
+        match self {
+            ToolApp::Chat => json!({ "messages": [] }),
+            ToolApp::GitHub
+            | ToolApp::AnalyzerHistory
+            | ToolApp::Comments
+            | ToolApp::TtyList
+            | ToolApp::WorkspaceSettings
+            | ToolApp::PromptDebugger
+            | ToolApp::SshUpload => json!({}),
+        }
+    }
 }
 
 impl AppKind {
@@ -41,7 +80,32 @@ impl AppKind {
             | AppKind::AiHarness { .. }
             | AppKind::CustomRunner { .. }
             | AppKind::WebApp { .. } => true,
-            AppKind::Files | AppKind::Editor | AppKind::Review | AppKind::Browser { .. } => false,
+            AppKind::Files | AppKind::Editor | AppKind::Review | AppKind::Browser { .. } | AppKind::Tool(_) => false,
+        }
+    }
+
+    /// Whether the new-tab menu offers it on a local or remote session
+    /// (`isAppAvailableForConnection`): upload is for ssh sessions only.
+    pub fn available_on(&self, remote: bool) -> bool {
+        match self {
+            AppKind::Tool(ToolApp::SshUpload) => remote,
+            AppKind::Tool(
+                ToolApp::GitHub
+                | ToolApp::AnalyzerHistory
+                | ToolApp::Comments
+                | ToolApp::TtyList
+                | ToolApp::WorkspaceSettings
+                | ToolApp::Chat
+                | ToolApp::PromptDebugger,
+            )
+            | AppKind::Terminal { .. }
+            | AppKind::AiHarness { .. }
+            | AppKind::CustomRunner { .. }
+            | AppKind::Files
+            | AppKind::Editor
+            | AppKind::Review
+            | AppKind::Browser { .. }
+            | AppKind::WebApp { .. } => true,
         }
     }
 }
@@ -101,6 +165,7 @@ impl AppDef {
                 "idleDetectorDisabled": false,
                 "widthLimitDisabled": false,
             }),
+            AppKind::Tool(tool) => tool.initial_state(),
         }
     }
 
@@ -114,7 +179,7 @@ impl AppDef {
             }
             // Needs its port first: see `web_app::resolve_command`.
             AppKind::WebApp { .. } => None,
-            AppKind::Files | AppKind::Editor | AppKind::Review | AppKind::Browser { .. } => None,
+            AppKind::Files | AppKind::Editor | AppKind::Review | AppKind::Browser { .. } | AppKind::Tool(_) => None,
         }
     }
 
@@ -128,7 +193,8 @@ impl AppDef {
             | AppKind::Editor
             | AppKind::Review
             | AppKind::Browser { .. }
-            | AppKind::WebApp { .. } => None,
+            | AppKind::WebApp { .. }
+            | AppKind::Tool(_) => None,
         }
     }
 }
@@ -200,6 +266,26 @@ impl AppRegistry {
                 is_default: false,
             },
         ];
+        // The tool tabs, in Electron's registration order.
+        let tool = |id: &str, name: &str, icon: &str, tool: ToolApp, show: bool| AppDef {
+            id: id.to_owned(),
+            name: name.to_owned(),
+            icon: icon.to_owned(),
+            kind: AppKind::Tool(tool),
+            can_close: true,
+            show_in_new_tab_menu: show,
+            is_default: false,
+        };
+        apps.extend([
+            tool("comments", "Comments", "\u{1F4AC}", ToolApp::Comments, true),
+            tool("chat", "Chat", "M", ToolApp::Chat, true),
+            tool("system-prompt-debugger", "System Prompt Debugger", "\u{1F52C}", ToolApp::PromptDebugger, true),
+            tool("analyzer-history", "Activity History", "\u{1F4CA}", ToolApp::AnalyzerHistory, false),
+            tool("workspace-settings", "Settings", "\u{2699}", ToolApp::WorkspaceSettings, false),
+            tool("github", "GitHub", "\u{1F419}", ToolApp::GitHub, true),
+            tool("tty-list", "TTYs", "\u{2630}", ToolApp::TtyList, true),
+            tool("ssh-upload", "Upload", "\u{2B06}", ToolApp::SshUpload, true),
+        ]);
         for instance in &settings.terminal.instances {
             apps.push(AppDef {
                 id: format!("terminal-{}", instance.id),
@@ -301,6 +387,11 @@ impl AppRegistry {
     pub fn new_tab_menu(&self) -> impl Iterator<Item = &AppDef> {
         self.apps.iter().filter(|app| app.show_in_new_tab_menu)
     }
+
+    /// The new-tab menu of a local or remote session.
+    pub fn new_tab_menu_for(&self, remote: bool) -> impl Iterator<Item = &AppDef> {
+        self.new_tab_menu().filter(move |app| app.kind.available_on(remote))
+    }
 }
 
 #[cfg(test)]
@@ -366,6 +457,40 @@ mod tests {
         assert!(registry.get("ghostty-terminal").is_some());
         let menu: Vec<_> = registry.new_tab_menu().map(|app| app.id.as_str()).collect();
         // Electron's default settings carry one AI harness ("Claude").
-        assert_eq!(menu, vec!["terminal", "filesystem", "review", "aiharness-claude"]);
+        let expected = [
+            "terminal", "filesystem", "review", "comments", "chat", "system-prompt-debugger", "github", "tty-list",
+            "ssh-upload", "aiharness-claude",
+        ];
+        assert_eq!(menu, expected);
+    }
+
+    #[test]
+    fn upload_is_offered_on_ssh_sessions_only() {
+        let registry = AppRegistry::from_settings(&Settings::default());
+        let menu = |remote| registry.new_tab_menu_for(remote).map(|app| app.id.clone()).collect::<Vec<_>>();
+        assert!(!menu(false).contains(&"ssh-upload".to_owned()));
+        assert!(menu(true).contains(&"ssh-upload".to_owned()));
+        assert_eq!(menu(false).len() + 1, menu(true).len());
+    }
+
+    #[test]
+    fn tool_tabs_keep_electrons_ids_and_initial_state() {
+        let registry = AppRegistry::from_settings(&Settings::default());
+        let ids = [
+            "comments", "chat", "system-prompt-debugger", "analyzer-history", "workspace-settings", "github",
+            "tty-list", "ssh-upload",
+        ];
+        for id in ids {
+            let app = registry.get(id).unwrap_or_else(|| panic!("{id} is registered"));
+            assert!(matches!(app.kind, AppKind::Tool(_)));
+            assert!(!app.kind.is_terminal());
+            assert!(app.startup_command("/w").is_none());
+            assert!(app.background().is_none());
+            assert!(app.can_close && !app.is_default);
+        }
+        assert_eq!(registry.get("chat").unwrap().initial_state(), json!({ "messages": [] }));
+        assert_eq!(registry.get("github").unwrap().initial_state(), json!({}));
+        assert!(!registry.get("analyzer-history").unwrap().show_in_new_tab_menu);
+        assert!(!registry.get("workspace-settings").unwrap().show_in_new_tab_menu);
     }
 }

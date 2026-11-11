@@ -60,6 +60,8 @@ struct Connected {
     traffic_badges: HashMap<String, Entity<crate::traffic_badge::TrafficBadge>>,
     /// Web App tabs showing their shell instead of their page, by (workspace, tab).
     web_app_shell: std::collections::HashSet<(String, String)>,
+    /// Views of tool tabs (GitHub, Comments, Chat, …).
+    tool_views: crate::tool_views::ToolViews,
     /// Focus the shown terminal on the next render (after a workspace or tab switch).
     focus_pending: bool,
     _selection: Subscription,
@@ -207,6 +209,7 @@ impl AppView {
             web_app_shell: std::collections::HashSet::new(),
             run_actions: HashMap::new(),
             traffic_badges: HashMap::new(),
+            tool_views: crate::tool_views::ToolViews::new(self.settings.clone()),
             focus_pending: false,
             _selection: selection,
         }
@@ -1063,6 +1066,7 @@ fn workspace_pane(
         (c.text_secondary, c.error, c.border, c.bg_primary, c.bg_hover, c.text_primary);
     let tab_bar_bg = c.bg_secondary;
     prune_terminal_views(connected, cx);
+    connected.tool_views.prune(connected.session.read(cx), cx);
     let ActiveView::Workspace(id) = &connected.active else {
         return centered(div().text_color(secondary).child("Select a workspace"));
     };
@@ -1165,7 +1169,7 @@ fn workspace_pane(
     }
     // "+" opens the new-tab menu: every application offered for new tabs.
     let menu_apps: Vec<(String, String, String)> = registry
-        .new_tab_menu()
+        .new_tab_menu_for(workspace.read(cx).is_remote())
         .map(|app| (app.id.clone(), app.name.clone(), app.icon.clone()))
         .collect();
     if !menu_apps.is_empty() {
@@ -1269,6 +1273,20 @@ fn workspace_pane(
             }
             Some(TabContent::WebApp { app, terminal }) => {
                 web_app_tab(connected, &workspace, &id, tab_id, &app, terminal, window, cx)
+            }
+            Some(
+                tool @ (TabContent::GitHub
+                | TabContent::WorkspaceSettings
+                | TabContent::AnalyzerHistory(_)
+                | TabContent::Comments(_)
+                | TabContent::TtyList(_)
+                | TabContent::Chat(_)
+                | TabContent::PromptDebugger(_)
+                | TabContent::SshUpload(_)),
+            ) => {
+                let session = connected.session.clone();
+                let view = connected.tool_views.render(&session, &workspace, &id, tab_id, tool, window, cx);
+                div().size_full().child(view).into_any_element()
             }
             Some(TabContent::StartingTerminal) => {
                 centered(div().text_color(secondary).child("Starting terminal…"))
@@ -1459,6 +1477,19 @@ fn terminal_status_bar(
         }
         (Some(_), None) | (None, _) => Vec::new(),
     };
+    // Right-click on the badge: the debug menu (`ActivityStateBadge`).
+    let (debug_ws, debug_tab) = (workspace.clone(), tab_id.to_owned());
+    let debug_menu = move |menu: gpui_kit::component::menu::PopupMenu, _: &mut Window, _: &mut gpui_kit::Context<gpui_kit::component::menu::PopupMenu>| {
+        use gpui_kit::component::menu::PopupMenuItem;
+        let (prompt_ws, prompt_tab) = (debug_ws.clone(), debug_tab.clone());
+        let (history_ws, history_tab) = (debug_ws.clone(), debug_tab.clone());
+        menu.item(PopupMenuItem::new("Debug System Prompt").on_click(move |_, _, cx| {
+            prompt_ws.update(cx, |w, cx| w.open_prompt_debugger_for_tab(&prompt_tab, cx));
+        }))
+        .item(PopupMenuItem::new("History").on_click(move |_, _, cx| {
+            history_ws.update(cx, |w, cx| w.open_activity_history(&history_tab, cx));
+        }))
+    };
     let (badge_state, analyzing, reason, auto_approve) = match analysis {
         Some((state, analyzing, reason, auto_approve)) => (state, analyzing, Some(reason), Some(auto_approve)),
         None => (activity, false, None, None),
@@ -1473,16 +1504,19 @@ fn terminal_status_bar(
         .border_t_1()
         .border_color(gpui_kit::rgb(0x333333))
         .text_size(px(11.))
-        .child(
+        .child({
+            use gpui_kit::component::menu::ContextMenuExt as _;
             div()
+                .id(SharedString::from(format!("activity-badge-{tab_id}")))
                 .px_2()
                 .py(px(2.))
                 .rounded(px(12.))
                 .bg(gpui_kit::rgb(badge_state.color()))
                 .opacity(0.8)
                 .text_color(gpui_kit::white())
-                .child(if analyzing { format!("{} …", badge_state.label()) } else { badge_state.label().to_owned() }),
-        )
+                .child(if analyzing { format!("{} …", badge_state.label()) } else { badge_state.label().to_owned() })
+                .context_menu(debug_menu)
+        })
         .when_some(reason.filter(|r| !r.is_empty()), |bar, reason| {
             bar.child(div().max_w(px(360.)).truncate().text_color(gpui_kit::rgb(0x858585)).child(reason))
         })

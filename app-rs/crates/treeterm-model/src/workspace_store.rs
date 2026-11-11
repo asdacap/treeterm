@@ -115,6 +115,16 @@ pub enum TabContent {
         app: Entity<crate::web_app::WebAppModel>,
         terminal: Option<Entity<TerminalModel>>,
     },
+    /// The branch's pull request, from the session's git controller of this workspace.
+    GitHub,
+    /// This workspace's settings (edited through the store).
+    WorkspaceSettings,
+    AnalyzerHistory(Entity<crate::tool_tabs::analyzer_history::AnalyzerHistory>),
+    Comments(Entity<crate::tool_tabs::comments::CommentsModel>),
+    TtyList(Entity<crate::tool_tabs::tty_list::TtyList>),
+    Chat(Entity<crate::tool_tabs::chat::ChatModel>),
+    PromptDebugger(Entity<crate::tool_tabs::prompt_debugger::PromptDebugger>),
+    SshUpload(Entity<crate::tool_tabs::ssh_upload::SshUpload>),
 }
 
 /// Runtime state of one tab; never persisted.
@@ -133,6 +143,7 @@ enum TabRef {
         _events: Subscription,
     },
     Browser { url: String },
+    Tool(crate::tool_tabs::ToolTab),
 }
 
 enum TerminalTab {
@@ -272,6 +283,7 @@ impl WorkspaceStore {
             Some(TabRef::Editor { model, .. }) => TabContent::Editor(model.clone()),
             Some(TabRef::Review { model, .. }) => TabContent::Review(model.clone()),
             Some(TabRef::Browser { url }) => TabContent::Browser { url: url.clone() },
+            Some(TabRef::Tool(tool)) => tool.content(),
             None => TabContent::NotPorted(tab.application_id.clone()),
         })
     }
@@ -334,7 +346,8 @@ impl WorkspaceStore {
                     | TabRef::Files { .. }
                     | TabRef::Editor { .. }
                     | TabRef::Review { .. }
-                    | TabRef::Browser { .. },
+                    | TabRef::Browser { .. }
+                    | TabRef::Tool(_),
                 )
                 | None => None,
             }
@@ -587,7 +600,8 @@ impl WorkspaceStore {
             | TabRef::Files { .. }
             | TabRef::Editor { .. }
             | TabRef::Review { .. }
-            | TabRef::Browser { .. } => None,
+            | TabRef::Browser { .. }
+            | TabRef::Tool(_) => None,
         })
     }
 
@@ -699,6 +713,11 @@ impl WorkspaceStore {
                 });
                 self.tabs.insert(tab_id.to_owned(), TabRef::Editor { model, _events: events });
             }
+            AppKind::Tool(tool) => {
+                let (tool, state) = (*tool, tab.state.clone());
+                let runtime = self.init_tool_tab(tab_id, tool, &state, cx);
+                self.tabs.insert(tab_id.to_owned(), TabRef::Tool(runtime));
+            }
             AppKind::Terminal { .. } | AppKind::AiHarness { .. } | AppKind::CustomRunner { .. } => {
                 let terminal = match tab.state.get("ptyId") {
                     Some(Value::String(pty_id)) => self.attach_terminal(tab_id, pty_id.clone(), cx),
@@ -711,6 +730,61 @@ impl WorkspaceStore {
                     }
                 };
                 self.tabs.insert(tab_id.to_owned(), TabRef::Terminal(terminal));
+            }
+        }
+    }
+
+    /// The runtime side of a tool tab (`tool_tabs`).
+    fn init_tool_tab(
+        &mut self,
+        tab_id: &str,
+        tool: crate::apps::ToolApp,
+        state: &Value,
+        cx: &mut Context<Self>,
+    ) -> crate::tool_tabs::ToolTab {
+        use crate::apps::ToolApp;
+        use crate::tool_tabs::{ToolTab, analyzer_history, chat, comments, prompt_debugger, ssh_upload, tty_list};
+        let (workspace, weak) = (cx.entity(), cx.weak_entity());
+        match tool {
+            ToolApp::GitHub => ToolTab::GitHub,
+            ToolApp::WorkspaceSettings => ToolTab::WorkspaceSettings,
+            ToolApp::AnalyzerHistory => {
+                let source = state.get("sourceTabId").and_then(Value::as_str).and_then(|tab| self.analyzer(tab));
+                ToolTab::AnalyzerHistory(
+                    cx.new(|cx| analyzer_history::AnalyzerHistory::new(state, &workspace, source, cx)),
+                )
+            }
+            ToolApp::Comments => {
+                let (fs, git, root) = (self.conn.fs_client(), self.conn.git(), self.workspace.path.clone());
+                ToolTab::Comments(cx.new(|cx| comments::CommentsModel::new(fs, git, root, &workspace, cx)))
+            }
+            ToolApp::TtyList => {
+                let (conn, path) = (self.conn.clone(), self.workspace.path.clone());
+                ToolTab::TtyList(cx.new(|cx| tty_list::TtyList::new(conn, weak, path, cx)))
+            }
+            ToolApp::Chat => {
+                let llm = self.llm.clone();
+                let model = cx.new(|_| chat::ChatModel::new(llm, state, weak));
+                let owned_tab = tab_id.to_owned();
+                let events = cx.subscribe(&model, move |store, _, event: &chat::ChatEvent, cx| {
+                    let chat::ChatEvent::StateChanged(next) = event;
+                    store.merge_tab_state(&owned_tab, next.clone(), cx);
+                });
+                ToolTab::Chat { model, _events: events }
+            }
+            ToolApp::PromptDebugger => {
+                let (llm, settings) = (self.llm.clone(), self.settings.clone());
+                let model = cx.new(|_| prompt_debugger::PromptDebugger::new(llm, &settings, state, weak));
+                let owned_tab = tab_id.to_owned();
+                let events = cx.subscribe(&model, move |store, _, event: &prompt_debugger::PromptDebuggerEvent, cx| {
+                    let prompt_debugger::PromptDebuggerEvent::SetActivity { state, detail } = event;
+                    store.set_activity(&owned_tab, *state, detail.clone(), cx);
+                });
+                ToolTab::PromptDebugger { model, _events: events }
+            }
+            ToolApp::SshUpload => {
+                let remote = self.remote.clone();
+                ToolTab::SshUpload(cx.new(|cx| ssh_upload::SshUpload::new(remote, cx)))
             }
         }
     }
@@ -1020,6 +1094,91 @@ impl WorkspaceStore {
         Some(tab)
     }
 
+    /// `openOrFocusTab`: show the first tab running `application_id`, else add one.
+    pub fn open_or_focus_tab(&mut self, application_id: &str, cx: &mut Context<Self>) -> Option<String> {
+        let existing = self
+            .workspace
+            .file
+            .app_states
+            .iter()
+            .find(|(_, tab)| tab.application_id == application_id)
+            .map(|(id, _)| id.clone());
+        match existing {
+            Some(tab_id) => {
+                self.set_active_tab(&tab_id, cx);
+                Some(tab_id)
+            }
+            None => self.add_tab(application_id, cx),
+        }
+    }
+
+    /// The System Prompt Debugger, seeded with `buffer` (`addTab('system-prompt-debugger', …)`).
+    pub fn open_prompt_debugger(&mut self, buffer: &str, cx: &mut Context<Self>) -> Option<String> {
+        self.add_tab_with("system-prompt-debugger", serde_json::json!({ "bufferText": buffer }), cx)
+    }
+
+    /// The activity badge's "Debug System Prompt": the debugger on the tab's current
+    /// viewport (empty when the tab has no terminal).
+    pub fn open_prompt_debugger_for_tab(&mut self, tab_id: &str, cx: &mut Context<Self>) -> Option<String> {
+        let viewport = match self.tabs.get(tab_id) {
+            Some(TabRef::Terminal(TerminalTab::Attached { model, .. })) => model.read(cx).viewport(),
+            Some(_) | None => String::new(),
+        };
+        self.open_prompt_debugger(&viewport, cx)
+    }
+
+    /// The activity badge's "History": the tab's transitions and analyzer calls.
+    pub fn open_activity_history(&mut self, source_tab: &str, cx: &mut Context<Self>) -> Option<String> {
+        self.add_tab_with("analyzer-history", serde_json::json!({ "sourceTabId": source_tab }), cx)
+    }
+
+    /// The application registry this workspace's tabs follow.
+    pub fn registry(&self) -> &Rc<AppRegistry> {
+        &self.registry
+    }
+
+    /// The app settings, as last applied.
+    pub fn settings(&self) -> &Rc<Settings> {
+        &self.settings
+    }
+
+    /// The workspace lives on an ssh host.
+    pub fn is_remote(&self) -> bool {
+        self.remote.is_some()
+    }
+
+    /// The Settings tab's name: a blank one is ignored.
+    pub fn set_display_name(&mut self, name: &str, cx: &mut Context<Self>) {
+        let name = name.trim();
+        if !name.is_empty() {
+            self.update_metadata("displayName", name, cx);
+        }
+    }
+
+    /// The Settings tab's description (blank clears it).
+    pub fn set_description(&mut self, description: &str, cx: &mut Context<Self>) {
+        self.update_metadata("description", description.trim(), cx);
+    }
+
+    /// "Default Application for Children"; empty inherits (`updateSettings`).
+    pub fn set_default_application(&mut self, application_id: &str, cx: &mut Context<Self>) {
+        if self.workspace.file.settings.default_application_id == application_id {
+            return;
+        }
+        self.workspace.file.settings.default_application_id = application_id.to_owned();
+        self.changed(cx);
+    }
+
+    /// The workspace as JSON ("Raw Workspace JSON"): the body with its id and path.
+    pub fn workspace_json(&self) -> Result<String, serde_json::Error> {
+        let mut value = serde_json::to_value(&self.workspace.file)?;
+        if let Value::Object(fields) = &mut value {
+            fields.insert("id".into(), Value::String(self.workspace.id.clone()));
+            fields.insert("path".into(), Value::String(self.workspace.path.clone()));
+        }
+        serde_json::to_string_pretty(&value)
+    }
+
     /// Close a tab the user asked to close: kill its PTY, then drop it from the body.
     /// Applications that cannot close (or are not ported) are left alone.
     pub fn remove_tab(&mut self, tab_id: &str, cx: &mut Context<Self>) {
@@ -1048,7 +1207,8 @@ impl WorkspaceStore {
                 | TabRef::Files { .. }
                 | TabRef::Editor { .. }
                 | TabRef::Review { .. }
-                | TabRef::Browser { .. },
+                | TabRef::Browser { .. }
+                | TabRef::Tool(_),
             )
             | None => {}
         }
@@ -1273,7 +1433,8 @@ impl WorkspaceStore {
                 | TabRef::Files { .. }
                 | TabRef::Editor { .. }
                 | TabRef::Review { .. }
-                | TabRef::Browser { .. } => {}
+                | TabRef::Browser { .. }
+                | TabRef::Tool(_) => {}
             }
         }
     }

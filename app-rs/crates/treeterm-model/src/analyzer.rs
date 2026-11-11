@@ -47,6 +47,11 @@ impl LlmService {
     pub fn llm(&self) -> &Llm {
         &self.llm
     }
+
+    /// The runtime the requests run on.
+    pub fn rt(&self) -> &Rt {
+        &self.rt
+    }
 }
 
 /// Workspace changes the analyzer asks for; the workspace store applies them.

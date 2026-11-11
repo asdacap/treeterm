@@ -8,6 +8,7 @@ pub mod activity;
 pub mod analyzer;
 pub mod attention;
 pub mod classification;
+pub mod clock;
 pub mod concurrency;
 pub mod connection;
 pub mod daemon;
