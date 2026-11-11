@@ -46,7 +46,9 @@ pub struct HttpLlm {
 
 impl HttpLlm {
     pub fn new(retry: RetryPolicy) -> Result<Self, LlmError> {
+        let tls = crate::http::tls_config().map_err(|error| LlmError::Connection(error.to_string()))?;
         let client = reqwest::Client::builder()
+            .tls_backend_preconfigured(tls)
             .build()
             .map_err(|error| LlmError::Connection(error_chain(&error)))?;
         Ok(Self { client, retry })

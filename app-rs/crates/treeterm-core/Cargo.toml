@@ -26,10 +26,16 @@ hex.workspace = true
 indexmap = { version = "2", features = ["serde"] }
 uuid = { version = "1", features = ["v4"] }
 regex = "1"
-# OpenAI-compatible chat completions (the Electron app used the OpenAI SDK over fetch).
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "stream", "http2"] }
+# HTTP for GitHub REST/GraphQL and OpenAI-compatible chat completions. rustls on ring
+# (already in the tree) with the platform verifier, so the system trust store applies, as it
+# does for Electron's fetch.
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "http2", "system-proxy", "stream"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+rustls-platform-verifier = "0.7"
 url = "2"
 httpdate = "1"
+# Line diffs, for searching a diff the way the viewer lays it out.
+similar = "2"
 
 [dev-dependencies]
 # The analyzer tests drive it with the real idle detector, as the GPUI model does.
