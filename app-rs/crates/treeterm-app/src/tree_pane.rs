@@ -349,6 +349,18 @@ impl TreePane {
                     }
                     (Some(_), false) | (None, _) => menu.separator(),
                 };
+                // A root git workspace can reopen its recently used worktrees.
+                let root_repo = !is_worktree
+                    && session.read(cx).workspace_store(&id).is_some_and(|w| w.read(cx).file().is_git_repo);
+                let menu = if root_repo {
+                    let (session, id) = (session.clone(), id.clone());
+                    menu.item(PopupMenuItem::new("Auto Open All Recent Worktrees…").on_click(move |_, window, cx| {
+                        crate::auto_open_dialog::open(session.clone(), id.clone(), window, cx);
+                    }))
+                    .separator()
+                } else {
+                    menu
+                };
                 let menu = {
                     let (session, id) = (session.clone(), id.clone());
                     menu.item(PopupMenuItem::new("Quick fork").on_click(move |_, _, cx| {

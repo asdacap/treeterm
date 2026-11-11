@@ -242,6 +242,7 @@ impl AppStore {
                     .then(|| crate::web_app::RemoteHost { app: cx.weak_entity(), connection: id.clone() });
                 let session = cx.new(|cx| {
                     let mut session = SessionStore::new(daemon, client_id, settings, llm, cx);
+                    session.use_worktree_registry();
                     if let Some(remote) = remote {
                         session.set_remote_host(remote);
                     }

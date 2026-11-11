@@ -342,6 +342,9 @@ pub struct SessionStore {
     viewed: Option<String>,
     /// For a session on an ssh host: where its web apps' ports are forwarded from.
     remote: Option<crate::web_app::RemoteHost>,
+    /// Recently used worktrees on the daemon's host (`~/.treeterm/worktrees.json`). Set by
+    /// the app; `None` (tests) records nothing.
+    registry_api: Option<treeterm_core::worktree_registry::WorktreeRegistry>,
     /// Each loaded workspace's git status (`gitController`).
     git_controllers: HashMap<String, Entity<crate::git_controller::GitController>>,
     /// The PR lookup client (`None` if it could not be built: no PR info then).
@@ -412,6 +415,7 @@ impl SessionStore {
             op_runner: None,
             viewed: None,
             remote: None,
+            registry_api: None,
             git_controllers: HashMap::new(),
             github,
             github_settings,
@@ -783,6 +787,7 @@ impl SessionStore {
         let subscription = cx.subscribe(&store, move |session, _, event: &WorkspaceEvent, cx| match event {
             WorkspaceEvent::Changed => session.enqueue_content_sync(&owned, cx),
             WorkspaceEvent::AttentionRecorded => cx.emit(SessionEvent::AttentionRecorded(owned.clone())),
+            WorkspaceEvent::LabelsChanged => session.save_registry_entry(&owned, cx),
         });
         let viewed = self.viewed.as_deref() == Some(id.as_str());
         if let Some(github) = self.github.clone() {
@@ -1636,6 +1641,22 @@ impl SessionStore {
         description: Option<String>,
         cx: &mut Context<Self>,
     ) -> Result<String, String> {
+        let mut metadata = std::collections::BTreeMap::new();
+        metadata.insert("branchIsUserDefined".to_owned(), "true".to_owned());
+        if let Some(description) = description.filter(|d| !d.is_empty()) {
+            metadata.insert("description".to_owned(), description);
+        }
+        self.adopt_worktree_with(parent_id, worktree, metadata, cx)
+    }
+
+    /// Open an existing worktree as a child of `parent_id` with `metadata`.
+    pub fn adopt_worktree_with(
+        &mut self,
+        parent_id: &str,
+        worktree: treeterm_core::git::WorktreeInfo,
+        metadata: std::collections::BTreeMap<String, String>,
+        cx: &mut Context<Self>,
+    ) -> Result<String, String> {
         let parent = self
             .workspace_store(parent_id)
             .ok_or("Parent workspace not found")?
@@ -1668,11 +1689,6 @@ impl SessionStore {
                     Ok(()) | Err(_) => {}
                 }
                 return;
-            }
-            let mut metadata = std::collections::BTreeMap::new();
-            metadata.insert("branchIsUserDefined".to_owned(), "true".to_owned());
-            if let Some(description) = description.filter(|d| !d.is_empty()) {
-                metadata.insert("description".to_owned(), description);
             }
             let published = this.update(cx, |s, cx| s.finish_child(&child_id, &parent, name, worktree, false, metadata, cx));
             if let Ok(Some(published)) = published
@@ -1760,14 +1776,120 @@ impl SessionStore {
             last_activity: now,
             extra: Default::default(),
         };
-        Some(self.add_workspace(
+        let published = self.add_workspace(
             Workspace {
                 id: id.to_owned(),
                 path: info.path,
                 file,
             },
             cx,
-        ))
+        );
+        self.save_registry_entry(id, cx);
+        Some(published)
+    }
+
+    /// The worktree registry of this session's host, when the app gave it one.
+    pub fn worktree_registry(&self) -> Option<treeterm_core::worktree_registry::WorktreeRegistry> {
+        self.registry_api.clone()
+    }
+
+    /// Record worktrees in the daemon host's registry (`~/.treeterm/worktrees.json`).
+    pub fn use_worktree_registry(&mut self) {
+        self.registry_api = Some(treeterm_core::worktree_registry::WorktreeRegistry::new(
+            Arc::new(self.conn.fs_client()),
+            Arc::new(self.conn.exec_client()),
+        ));
+    }
+
+    /// Record a worktree workspace in the registry (`saveRegistryEntry`). Best effort: a
+    /// failure is logged.
+    fn save_registry_entry(&self, id: &str, cx: &mut Context<Self>) {
+        let Some(store) = self.workspace_store(id) else {
+            return;
+        };
+        let ws = store.read(cx).workspace();
+        if !ws.file.is_worktree {
+            return;
+        }
+        let entry = treeterm_core::worktree_registry::build_entry_from_workspace(&ws.path, &ws.file);
+        let Some(registry) = self.registry_api.clone() else {
+            return;
+        };
+        cx.background_spawn(async move {
+            if let Err(error) = registry.upsert(&entry).await {
+                tracing::warn!(%error, path = %entry.path, "cannot record the worktree in the registry");
+            }
+        })
+        .detach();
+    }
+
+    /// Open recently used worktrees of `root_id`'s repository under it (`autoOpenWorktrees`):
+    /// parents before children, each child under its detected parent (or the root). Already
+    /// open paths are skipped. Runs in the background; each child is adopted as an existing
+    /// worktree (session lock per child).
+    pub fn auto_open_worktrees(&mut self, root_id: &str, items: Vec<AutoOpenItem>, cx: &mut Context<Self>) -> Result<(), String> {
+        let root_path = self
+            .workspace_store(root_id)
+            .ok_or("Root workspace not found")?
+            .read(cx)
+            .workspace()
+            .path
+            .clone();
+        let ordered = order_auto_open(items, &root_path, &self.open_paths(cx));
+        let root_id = root_id.to_owned();
+        cx.spawn(async move |this, cx| {
+            for item in ordered {
+                let started = this.update(cx, |s, cx| {
+                    let open = s.open_paths(cx);
+                    if open.iter().any(|(path, _)| *path == item.path) {
+                        return Ok(None);
+                    }
+                    let parent = item
+                        .parent_path
+                        .as_ref()
+                        .and_then(|p| open.iter().find(|(path, _)| path == p).map(|(_, id)| id.clone()))
+                        .unwrap_or_else(|| root_id.clone());
+                    let mut metadata = std::collections::BTreeMap::new();
+                    metadata.insert("branchIsUserDefined".to_owned(), "true".to_owned());
+                    for (key, value) in [("displayName", &item.display_name), ("description", &item.description)] {
+                        if let Some(value) = value.as_ref().filter(|v| !v.is_empty()) {
+                            metadata.insert(key.to_owned(), value.clone());
+                        }
+                    }
+                    let worktree = treeterm_core::git::WorktreeInfo { path: item.path.clone(), branch: item.branch.clone() };
+                    s.adopt_worktree_with(&parent, worktree, metadata, cx).map(Some)
+                });
+                let id = match started {
+                    Ok(Ok(Some(id))) => id,
+                    Ok(Ok(None)) => continue,
+                    Ok(Err(error)) => {
+                        tracing::error!(%error, path = %item.path, "auto-open worktree");
+                        continue;
+                    }
+                    Err(_) => return,
+                };
+                // Children of this one need it loaded first.
+                for _ in 0..600 {
+                    let settled = this
+                        .read_with(cx, |s, _| !matches!(s.entries.get(&id), Some(WorkspaceEntry::Loading { .. })))
+                        .unwrap_or(true);
+                    if settled {
+                        break;
+                    }
+                    cx.background_executor().timer(Duration::from_millis(100)).await;
+                }
+            }
+        })
+        .detach();
+        Ok(())
+    }
+
+    /// `(path, id)` of every loaded workspace.
+    fn open_paths(&self, cx: &App) -> Vec<(String, String)> {
+        self.entries
+            .iter()
+            .filter_map(|(id, entry)| entry.store().map(|s| (s.read(cx).workspace().path.clone(), id.clone())))
+            .collect()
     }
 
     /// Default application ids set on a workspace and its ancestors, nearest first
@@ -1987,6 +2109,40 @@ async fn release(this: &WeakSession, cx: &mut gpui_kit::AsyncApp) {
     }
 }
 
+/// One worktree to open in an [`SessionStore::auto_open_worktrees`] batch.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AutoOpenItem {
+    pub path: String,
+    pub branch: String,
+    /// The detected parent worktree; `None` for directly under the root.
+    pub parent_path: Option<String>,
+    pub display_name: Option<String>,
+    pub description: Option<String>,
+}
+
+/// Parents before children: an item comes once its parent (the root, an open workspace or
+/// an earlier item) is known; items with a missing or cyclic parent come last.
+fn order_auto_open(items: Vec<AutoOpenItem>, root_path: &str, open: &[(String, String)]) -> Vec<AutoOpenItem> {
+    let mut known: HashSet<String> = open.iter().map(|(path, _)| path.clone()).collect();
+    known.insert(root_path.to_owned());
+    let mut ordered = Vec::new();
+    let mut remaining = items;
+    loop {
+        let (ready, waiting): (Vec<AutoOpenItem>, Vec<AutoOpenItem>) = remaining
+            .into_iter()
+            .partition(|item| item.parent_path.as_ref().is_none_or(|parent| known.contains(parent)));
+        if ready.is_empty() {
+            ordered.extend(waiting);
+            return ordered;
+        }
+        for item in &ready {
+            known.insert(item.path.clone());
+        }
+        ordered.extend(ready);
+        remaining = waiting;
+    }
+}
+
 /// `removeWorkspaceInternal`, with the session lock already held: children first, kill
 /// each workspace's tabs, clean up git, drop it; then publish the smaller membership and
 /// delete the body files. Stops at the first git failure.
@@ -2012,7 +2168,16 @@ async fn remove_locked(
         let cleaned = match target {
             Some(GitCleanup::Nothing) | None => Ok(()),
             Some(GitCleanup::RemoveWorktree { root, path, branch }) => {
-                git.remove_worktree(&root, &path, branch, treeterm_core::git::Progress::Silent).await
+                let removed = git.remove_worktree(&root, &path, branch, treeterm_core::git::Progress::Silent).await;
+                if removed.is_ok() {
+                    let registry = this.read_with(cx, |s, _| s.worktree_registry()).ok().flatten();
+                    if let Some(registry) = registry
+                        && let Err(error) = registry.remove(&path).await
+                    {
+                        tracing::warn!(%error, %path, "cannot remove the worktree from the registry");
+                    }
+                }
+                removed
             }
         };
         if let Err(error) = cleaned {
@@ -2105,5 +2270,28 @@ fn remember_hash(sync: &mut WorkspaceSync, sha: String) {
     sync.recent_hashes.push_back(sha);
     if sync.recent_hashes.len() > RECENT_HASHES_MAX {
         sync.recent_hashes.pop_front();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AutoOpenItem, order_auto_open};
+
+    fn item(path: &str, parent: Option<&str>) -> AutoOpenItem {
+        AutoOpenItem {
+            path: path.to_owned(),
+            branch: path.trim_start_matches('/').to_owned(),
+            parent_path: parent.map(str::to_owned),
+            display_name: None,
+            description: None,
+        }
+    }
+
+    #[test]
+    fn auto_open_creates_parents_before_children() {
+        let items = vec![item("/leaf", Some("/mid")), item("/mid", None), item("/other", Some("/open")), item("/lost", Some("/gone"))];
+        let open = vec![("/open".to_owned(), "ws-open".to_owned())];
+        let order: Vec<String> = order_auto_open(items, "/root", &open).into_iter().map(|i| i.path).collect();
+        assert_eq!(order, vec!["/mid", "/other", "/leaf", "/lost"]);
     }
 }

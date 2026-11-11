@@ -829,3 +829,66 @@ fn a_web_app_gets_a_free_port_starts_its_server_and_is_ready(cx: &mut TestAppCon
         Some(TabContent::WebApp { terminal: Some(_), .. })
     ));
 }
+
+#[gpui_kit::test]
+fn auto_open_adopts_worktrees_under_their_detected_parents(cx: &mut TestAppContext) {
+    use treeterm_model::session_store::AutoOpenItem;
+    cx.executor().allow_parking();
+    let h = harness();
+    publish(&h, &[]);
+    let repo = TempRepo::new(&h);
+    let feat = h.daemon.root().join("wt-feat");
+    let sub = h.daemon.root().join("wt-sub");
+    repo.git(&["worktree", "add", "-q", "-b", "feat", feat.to_str().unwrap()]);
+    repo.git(&["worktree", "add", "-q", "-b", "sub", sub.to_str().unwrap(), "feat"]);
+    let store = open_store(cx, &h, "client-a");
+    let root = open_repo_workspace(cx, &store, &repo);
+    let path = |p: &std::path::Path| p.to_string_lossy().into_owned();
+    let items = vec![
+        // Child first: it must still be created after its parent.
+        AutoOpenItem {
+            path: path(&sub),
+            branch: "sub".into(),
+            parent_path: Some(path(&feat)),
+            display_name: Some("Sub work".into()),
+            description: None,
+        },
+        AutoOpenItem { path: path(&feat), branch: "feat".into(), parent_path: None, display_name: None, description: Some("the feature".into()) },
+    ];
+    store.update(cx, |s, cx| s.auto_open_worktrees(&root, items, cx)).unwrap();
+    let find = |s: &SessionStore, p: &str, cx: &gpui_kit::App| {
+        s.workspace_ids().find(|id| s.workspace_store(id).is_some_and(|w| w.read(cx).workspace().path == p)).cloned()
+    };
+    for _ in 0..500 {
+        // Auto-open polls for each parent to finish loading (executor clock).
+        cx.executor().advance_clock(std::time::Duration::from_millis(100));
+        cx.run_until_parked();
+        if cx.read(|cx| find(store.read(cx), &path(&feat), cx).is_some() && find(store.read(cx), &path(&sub), cx).is_some()) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let entries = cx.read(|cx| {
+        let s = store.read(cx);
+        s.workspace_ids()
+            .map(|id| match s.entry(id) {
+                Some(WorkspaceEntry::Loaded(w)) => format!("{id}: {}", w.read(cx).workspace().path),
+                Some(WorkspaceEntry::Error { error, .. }) => format!("{id}: error {error}"),
+                Some(WorkspaceEntry::Loading { message, .. }) => format!("{id}: loading {message}"),
+                Some(WorkspaceEntry::OperationError { error, .. }) => format!("{id}: op error {error}"),
+                None => format!("{id}: none"),
+            })
+            .collect::<Vec<_>>()
+    });
+    assert!(entries.len() == 3, "{entries:#?} want {} and {}", path(&feat), path(&sub));
+    let (feat_id, sub_id) = cx.read(|cx| {
+        let s = store.read(cx);
+        (find(s, &path(&feat), cx).unwrap(), find(s, &path(&sub), cx).unwrap())
+    });
+    let file_of = |id: &str| store.read_with(cx, |s, cx| ws(s, id).read(cx).file().clone());
+    assert_eq!(file_of(&feat_id).parent_id.as_deref(), Some(root.as_str()));
+    assert_eq!(file_of(&feat_id).metadata.get("description").map(String::as_str), Some("the feature"));
+    assert_eq!(file_of(&sub_id).parent_id.as_deref(), Some(feat_id.as_str()));
+    assert_eq!(file_of(&sub_id).display_name(), "Sub work");
+    assert_eq!(file_of(&sub_id).metadata.get("branchIsUserDefined").map(String::as_str), Some("true"));
+}

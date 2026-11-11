@@ -41,6 +41,8 @@ pub enum WorkspaceEvent {
     Changed,
     /// Work finished while the workspace was not shown: it was marked unread.
     AttentionRecorded,
+    /// The display name or description changed (the worktree registry keeps them).
+    LabelsChanged,
 }
 
 impl EventEmitter<WorkspaceEvent> for WorkspaceStore {}
@@ -1071,6 +1073,9 @@ impl WorkspaceStore {
         self.workspace.file.metadata.insert(key.to_owned(), value.to_owned());
         self.sync_idle_timeouts(cx);
         self.changed(cx);
+        if key == "displayName" || key == "description" {
+            cx.emit(WorkspaceEvent::LabelsChanged);
+        }
     }
 
     pub fn delete_metadata(&mut self, key: &str, cx: &mut Context<Self>) {
