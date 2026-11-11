@@ -83,23 +83,37 @@ Done (tested against a real in-process daemon unless noted):
   (SSH tested in core with a fake ssh host and contract tests; not yet against a real host.)
 - **AI harness (M5):** per-tab LLM analyzer (classification, auto-approve, titles, branch
   names), activity states with transitions, unread attention markers with the ding.
-- **Files / editor (M6):** file tree, highlighted viewer, images, PDF (webview), editor tab.
-- **Review (M7):** committed / uncommitted / commits views, stage/unstage/commit.
+- **Files / editor (M6):** file tree with favourites, highlighted viewer, Markdown preview,
+  images, PDF (webview), download, search panel (in file / in repo), find, go to definition;
+  editor tab.
+- **Review (M7):** committed / uncommitted / commits views, stage/unstage/commit, inline
+  comments (Electron's metadata format), viewed files, prompting the AI harness; live merge
+  output; git status (uncommitted / conflicts / behind, Pull) and PR indicators.
 - **Web (M8):** Browser tabs in a native webview (localhost guard); Web App tabs (free port
   probed on the daemon's host, dev server with `$PORT`, page once it answers, ephemeral SSH
   port forward on remote sessions — remote path tested only through the model, not a host).
-- **Tree and CLI:** favourites, title/branch refresh, unread markers, git status and PR
-  badges; `treeterm [dir]`, `treeterm ssh user@host[:port]`, `treeterm shutdown-daemon`.
+- **Workspace pane:** header with git status, PR link, Pull, ▶ Run (npm/make/just/Taskfile/
+  VS Code tasks, custom runners), Review & Merge / Abandon; AI-harness Prompt Commit /
+  Prompt Rebase; activity glyphs on tabs.
+- **Tree and sidebar:** sessions, favourites, drag and drop (reorder / reparent), unread
+  markers, PR badges, collapsible rail, title/branch refresh, Auto Open All Recent
+  Worktrees (worktree registry shared with Electron), upstream warning before forking,
+  force-unlock of a held session lock; session pane with logs, port forwards and a system
+  monitor.
+- **CLI:** `treeterm [dir]`, `treeterm ssh user@host[:port]`, `treeterm shutdown-daemon`.
 - **Packaging (M9):** `cargo run -p xtask -- dist` (macOS `.app` + zip verified; Linux
   tarball and the Nix package untested).
+- **Coexistence:** Electron and the native app on one daemon and session were checked
+  together (tabs added in either show in both, input in a shared terminal shows in both, no
+  CAS conflicts).
 
 Not yet:
 
-- GitHub app tab, review comments, viewed files, search panel, go-to-definition (core
-  logic ported; UI in progress).
-- Analyzer history / prompt debugger, chat, prompt buttons (commit, rebase, review comments).
-- Tree drag/drop, worktree registry, auto-open worktrees; 3D model viewer.
-- Parity sweep and cut-over (M10). Linux build verification (CI jobs added, not yet run).
+- 3D model viewer (needs three.js bundled into a webview page), image diffs in Review,
+  traffic badge (byte counter), session renaming, JSON debug view.
+- Linux build verification (CI jobs added, not yet run) and a real SSH host test.
+- Parity sweep sign-off and cut-over (M10): remove `src/main`, `src/preload`,
+  `src/renderer` once the checklist in the plan passes.
 
 ## Known differences from Electron (deliberate)
 
