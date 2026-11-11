@@ -286,8 +286,7 @@ mod tests {
 
     #[test]
     fn conflicts_win_then_ci_then_approval() {
-        let mut conflicting = GitStatus::default();
-        conflicting.parent_conflicts = ParentConflicts::Conflicting;
+        let conflicting = GitStatus { parent_conflicts: ParentConflicts::Conflicting, ..GitStatus::default() };
         assert_eq!(pr_signal(&conflicting), PrSignal::MergeConflict);
         assert_eq!(pr_signal(&GitStatus::default()), PrSignal::None);
         let failing = with_pr(PrState::Open, vec![ReviewState::Approved], vec![(CheckStatus::Completed, CheckConclusion::Failure)]);
