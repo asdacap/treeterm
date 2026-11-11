@@ -843,3 +843,196 @@ pub fn dialog_shadow() -> Vec<gpui_kit::BoxShadow> {
         inset: false,
     }]
 }
+
+// --- files ---
+
+/// `#f14c4c`: the Files and Editor tabs' error red (`.file-viewer-error`, `.file-tree-error`).
+pub const FILE_ERROR: u32 = 0xf14c4c;
+
+/// Width of Electron's `::-webkit-scrollbar`.
+const SCROLLBAR: f32 = 10.;
+
+/// Dragging the thumb of the [`scroll_area`] named `0`, grabbed `1` below its top.
+#[derive(Clone)]
+struct ThumbDrag(ElementId, gpui_kit::Pixels);
+
+impl gpui_kit::Render for ThumbDrag {
+    fn render(&mut self, _: &mut Window, _: &mut gpui_kit::Context<Self>) -> impl IntoElement {
+        gpui_kit::Empty
+    }
+}
+
+/// A vertically scrolling column with Electron's classic scrollbar (`::-webkit-scrollbar`:
+/// 10px, a `#3c3c3c` thumb rounded 5px on a clear track). While there is something to
+/// scroll, the bar takes its 10px from the content, as Chromium's does.
+pub fn scroll_area(id: impl Into<ElementId>, handle: &gpui_kit::ScrollHandle, content: impl IntoElement, cx: &App) -> Div {
+    use gpui_kit::{Bounds, DragMoveEvent, point, px as pixels};
+    let id: ElementId = id.into();
+    let viewport = f32::from(handle.bounds().size.height);
+    let max = f32::from(handle.max_offset().y);
+    let overflowing = max > 0. && viewport > 0.;
+    // Whether the bar shows is only known after layout: ask for another frame when it changes.
+    let probe = {
+        let handle = handle.clone();
+        gpui_kit::canvas(
+            move |_: Bounds<gpui_kit::Pixels>, window, _| {
+                let now = f32::from(handle.max_offset().y) > 0. && f32::from(handle.bounds().size.height) > 0.;
+                if now != overflowing {
+                    window.refresh();
+                }
+            },
+            |_, _, _, _| {},
+        )
+        .absolute()
+        .size_0()
+    };
+    let bar = overflowing.then(|| {
+        let content = viewport + max;
+        let thumb = (viewport * viewport / content).max(20.);
+        let travel = viewport - thumb;
+        let top = travel * (-f32::from(handle.offset().y) / max).clamp(0., 1.);
+        let thumb_color = colors(cx).border;
+        let (drag_handle, drag_id, thumb_id) = (handle.clone(), id.clone(), id.clone());
+        div()
+            .w(pixels(SCROLLBAR))
+            .h_full()
+            .flex_shrink_0()
+            .relative()
+            .on_drag_move(move |event: &DragMoveEvent<ThumbDrag>, window, cx| {
+                let ThumbDrag(dragged, grab) = event.drag(cx);
+                if *dragged != drag_id || travel <= 0. {
+                    return;
+                }
+                let at = f32::from(event.event.position.y - event.bounds.top() - *grab).clamp(0., travel);
+                drag_handle.set_offset(point(drag_handle.offset().x, pixels(-(max * at / travel))));
+                window.refresh();
+            })
+            .child(
+                div()
+                    .id((thumb_id.clone(), "thumb"))
+                    .absolute()
+                    .top(pixels(top))
+                    .w_full()
+                    .h(pixels(thumb))
+                    .rounded(pixels(5.))
+                    .bg(thumb_color)
+                    .on_drag(ThumbDrag(thumb_id, pixels(0.)), move |drag, position, _, cx| {
+                        let grab = position.y - pixels(top);
+                        cx.new(|_| ThumbDrag(drag.0.clone(), grab))
+                    }),
+            )
+    });
+    div()
+        .size_full()
+        .min_h_0()
+        .flex()
+        .relative()
+        .child(probe)
+        .child(div().id(id).flex_1().min_w_0().h_full().overflow_y_scroll().track_scroll(handle).child(content))
+        .children(bar)
+}
+
+/// Lucide's star, filled (`<Star fill="currentColor" />`); `filled: false` is the outline.
+pub fn star_icon(size: f32, filled: bool) -> Icon {
+    const FILLED: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="black" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z"/></svg>"#;
+    let icon = if filled { Icon::default().data(FILLED) } else { Icon::new(IconName::Star) };
+    icon.size(px(size))
+}
+
+/// `.file-viewer-open-btn` / `.file-viewer-toggle-btn`: 11px text, 4px 10px padding, 1px
+/// border, tertiary fill; hover fills and shows the accent border. A disabled one is faded
+/// (`opacity`: 0.6 while a download runs).
+pub fn viewer_button(id: impl Into<ElementId>, disabled: Option<f32>, cx: &App) -> Stateful<Div> {
+    let c = colors(cx);
+    let (hover_bg, accent) = (c.bg_hover, c.accent);
+    let button = div()
+        .id(id)
+        .flex_shrink_0()
+        .flex()
+        .items_center()
+        .px(px(10.))
+        .py(px(4.))
+        .rounded(px(4.))
+        .border_1()
+        .border_color(c.border)
+        .bg(c.bg_tertiary)
+        .text_size(px(SMALL))
+        .text_color(c.text_primary)
+        .whitespace_nowrap();
+    match disabled {
+        Some(opacity) => button.opacity(opacity),
+        None => button.cursor_pointer().hover(move |d| d.bg(hover_bg).border_color(accent)),
+    }
+}
+
+/// `.file-editor-save-btn` / `.file-editor-toggle-btn`: as [`viewer_button`] at 12px with
+/// 12px side padding; disabled at half opacity.
+pub fn editor_button(id: impl Into<ElementId>, disabled: bool, cx: &App) -> Stateful<Div> {
+    viewer_button(id, disabled.then_some(0.5), cx).px(px(12.)).text_size(px(12.))
+}
+
+/// `.file-viewer-language` / `.file-editor-language`: the language, a small tertiary pill.
+pub fn language_pill(text: impl Into<gpui_kit::SharedString>, cx: &App) -> Div {
+    let c = colors(cx);
+    let text: gpui_kit::SharedString = text.into();
+    div()
+        .flex_shrink_0()
+        .px(px(8.))
+        .py(px(2.))
+        .rounded(px(4.))
+        .bg(c.bg_tertiary)
+        .text_size(px(SMALL))
+        .text_color(c.text_secondary)
+        .whitespace_nowrap()
+        .child(text)
+}
+
+/// `.diff-find-btn`: a bare 2px-padded icon button, secondary until hovered; disabled at
+/// 0.4 opacity.
+pub fn find_button(id: impl Into<ElementId>, name: IconName, disabled: bool, cx: &App) -> Stateful<Div> {
+    let c = colors(cx);
+    let (hover_bg, primary) = (c.bg_hover, c.text_primary);
+    let button = div()
+        .id(id)
+        .flex_shrink_0()
+        .flex()
+        .items_center()
+        .justify_center()
+        .p(px(2.))
+        .rounded(px(3.))
+        .text_color(c.text_secondary)
+        .child(Icon::new(name).size(px(14.)));
+    if disabled {
+        button.opacity(0.4)
+    } else {
+        button.cursor_pointer().hover(move |d| d.bg(hover_bg).text_color(primary))
+    }
+}
+
+/// `.file-viewer-placeholder` / `.file-editor-placeholder`: centred secondary 14px text
+/// under 40px of space.
+pub fn viewer_placeholder(text: impl Into<gpui_kit::SharedString>, cx: &App) -> Div {
+    let text: gpui_kit::SharedString = text.into();
+    div()
+        .w_full()
+        .px(px(20.))
+        .py(px(40.))
+        .flex()
+        .justify_center()
+        .text_size(px(14.))
+        .text_color(colors(cx).text_secondary)
+        .child(text)
+}
+
+/// `.file-viewer-error`: centred red 14px text in 20px of padding.
+pub fn viewer_error(child: impl IntoElement) -> Div {
+    div()
+        .w_full()
+        .p(px(20.))
+        .flex()
+        .flex_col()
+        .items_center()
+        .text_size(px(14.))
+        .text_color(rgb(FILE_ERROR))
+        .child(child)
+}

@@ -40,6 +40,23 @@ pub enum TextEditorEvent {
 
 impl EventEmitter<TextEditorEvent> for TextEditor {}
 
+/// `EditorViewMode`: markdown shows a preview until switched to the editor.
+const VIEW_MODE_EDITOR: &str = "editor";
+const VIEW_MODE_PREVIEW: &str = "preview";
+
+/// The tab title: the file name, with ` •` while there are unsaved edits.
+pub fn tab_title(path: &str, dirty: bool) -> String {
+    let name = path.rsplit('/').next().filter(|name| !name.is_empty()).unwrap_or(path);
+    if dirty { format!("{name} \u{2022}") } else { name.to_owned() }
+}
+
+/// The title a persisted editor state calls for, if it names a file.
+pub fn tab_title_of_state(state: &Value) -> Option<String> {
+    let path = state.get("filePath").and_then(Value::as_str).filter(|path| !path.is_empty())?;
+    let dirty = state.get("isDirty").and_then(Value::as_bool).unwrap_or(false);
+    Some(tab_title(path, dirty))
+}
+
 pub struct TextEditor {
     fs: FsClient,
     root: String,
@@ -47,6 +64,8 @@ pub struct TextEditor {
     doc: EditorDoc,
     save: SaveState,
     view_mode: String,
+    /// Where to move once the text is shown (go to definition), until the view has.
+    scroll_to_line: Option<usize>,
     _load: Option<Task<()>>,
     _save: Option<Task<()>>,
     _persist: Option<Task<()>>,
@@ -64,7 +83,8 @@ impl TextEditor {
             path,
             doc: EditorDoc::Loading,
             save: SaveState::Idle,
-            view_mode: text("viewMode").unwrap_or_else(|| "editor".to_owned()),
+            view_mode: text("viewMode").unwrap_or_else(|| VIEW_MODE_EDITOR.to_owned()),
+            scroll_to_line: state.get("scrollToLine").and_then(Value::as_u64).map(|line| line as usize),
             _load: None,
             _save: None,
             _persist: None,
@@ -95,6 +115,48 @@ impl TextEditor {
         &self.save
     }
 
+    /// The language the header names (Monaco's id for the file).
+    pub fn language(&self) -> &'static str {
+        treeterm_core::files::detect_monaco_language(&self.path)
+    }
+
+    pub fn is_markdown(&self) -> bool {
+        self.language() == "markdown"
+    }
+
+    /// A markdown file shows its preview rather than the editor.
+    pub fn is_preview(&self) -> bool {
+        self.is_markdown() && self.view_mode == VIEW_MODE_PREVIEW
+    }
+
+    /// "Edit" / "Preview" on a markdown file.
+    pub fn toggle_view_mode(&mut self, cx: &mut Context<Self>) {
+        let EditorDoc::Ready { .. } = self.doc else {
+            return;
+        };
+        self.view_mode = if self.view_mode == VIEW_MODE_PREVIEW { VIEW_MODE_EDITOR } else { VIEW_MODE_PREVIEW }.to_owned();
+        self.persist_now(cx);
+        cx.notify();
+    }
+
+    /// The line to reveal once the editor shows the text, taken once.
+    pub fn take_scroll_to_line(&mut self) -> Option<usize> {
+        self.scroll_to_line.take()
+    }
+
+    /// The tab title for the current state.
+    pub fn title(&self) -> String {
+        tab_title(&self.path, self.is_dirty())
+    }
+
+    /// The user acknowledged a failed save (Electron's `alert`).
+    pub fn dismiss_save_error(&mut self, cx: &mut Context<Self>) {
+        if let SaveState::Failed(_) = self.save {
+            self.save = SaveState::Idle;
+            cx.notify();
+        }
+    }
+
     pub fn is_dirty(&self) -> bool {
         match &self.doc {
             EditorDoc::Ready { original, current, .. } => original != current,
@@ -105,13 +167,14 @@ impl TextEditor {
     fn load(&mut self, cx: &mut Context<Self>) {
         self.doc = EditorDoc::Loading;
         let read = self.fs.read_file(&self.root, &self.path, u64::MAX);
+        let language = self.language();
         self._load = Some(cx.spawn(async move |this, cx| {
             let doc = match read.await {
                 Ok(Ok(ReadOutcome::Read(file))) => match String::from_utf8(file.content) {
                     Ok(text) => EditorDoc::Ready {
                         original: text.clone(),
                         current: text,
-                        language: file.header.language.clone(),
+                        language: language.to_owned(),
                     },
                     Err(_) => EditorDoc::Error("Binary files cannot be edited".to_owned()),
                 },
@@ -120,6 +183,10 @@ impl TextEditor {
                 Err(lost) => EditorDoc::Error(lost.to_string()),
             };
             match this.update(cx, |editor, cx| {
+                // A markdown file opens on its preview.
+                if let EditorDoc::Ready { .. } = doc {
+                    editor.view_mode = if language == "markdown" { VIEW_MODE_PREVIEW } else { VIEW_MODE_EDITOR }.to_owned();
+                }
                 editor.doc = doc;
                 editor.persist_now(cx);
                 cx.notify();
@@ -138,7 +205,16 @@ impl TextEditor {
         if *current == text {
             return;
         }
-        *current = text;
+        let was_dirty = self.is_dirty();
+        if let EditorDoc::Ready { current, .. } = &mut self.doc {
+            *current = text;
+        }
+        // The tab title marks unsaved edits as soon as there are some.
+        if self.is_dirty() != was_dirty {
+            self.persist_now(cx);
+            cx.notify();
+            return;
+        }
         let executor = cx.background_executor().clone();
         self._persist = Some(cx.spawn(async move |this, cx| {
             executor.timer(PERSIST_DEBOUNCE).await;
@@ -204,5 +280,19 @@ impl TextEditor {
             }),
         };
         cx.emit(TextEditorEvent::StateChanged(state));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_title_is_the_file_name_marked_while_unsaved() {
+        assert_eq!(tab_title("/w/src/main.rs", false), "main.rs");
+        assert_eq!(tab_title("/w/src/main.rs", true), "main.rs \u{2022}");
+        assert_eq!(tab_title_of_state(&json!({ "filePath": "/w/a.md", "isDirty": true })).as_deref(), Some("a.md \u{2022}"));
+        assert_eq!(tab_title_of_state(&json!({ "status": "loading", "filePath": "/w/a.md" })).as_deref(), Some("a.md"));
+        assert_eq!(tab_title_of_state(&json!({ "status": "loading" })), None);
     }
 }

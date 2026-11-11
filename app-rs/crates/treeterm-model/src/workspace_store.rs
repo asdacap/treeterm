@@ -711,6 +711,12 @@ impl WorkspaceStore {
                 let events = cx.subscribe(&model, move |store, _, event: &crate::text_editor::TextEditorEvent, cx| {
                     let crate::text_editor::TextEditorEvent::StateChanged(next) = event;
                     store.merge_tab_state(&owned_tab, next.clone(), cx);
+                    // `FileEditor`: the title is the file name, marked while unsaved.
+                    if let Some(title) = crate::text_editor::tab_title_of_state(next)
+                        && store.workspace.file.app_states.get(&owned_tab).is_some_and(|tab| tab.title != title)
+                    {
+                        store.update_tab_title(&owned_tab, &title, cx);
+                    }
                 });
                 self.tabs.insert(tab_id.to_owned(), TabRef::Editor { model, _events: events });
             }
@@ -1090,6 +1096,16 @@ impl WorkspaceStore {
     /// Open `path` in an Editor tab, titled after the file.
     pub fn open_in_editor(&mut self, path: &str, cx: &mut Context<Self>) -> Option<String> {
         let tab = self.add_tab_with("editor", serde_json::json!({ "status": "loading", "filePath": path }), cx)?;
+        let title = path.rsplit('/').next().unwrap_or(path).to_owned();
+        self.update_tab_title(&tab, &title, cx);
+        Some(tab)
+    }
+
+    /// Open `path` in an Editor tab moved to 1-based `line` (go to definition's
+    /// `openFileAtLine`).
+    pub fn open_in_editor_at(&mut self, path: &str, line: usize, cx: &mut Context<Self>) -> Option<String> {
+        let state = serde_json::json!({ "status": "loading", "filePath": path, "scrollToLine": line });
+        let tab = self.add_tab_with("editor", state, cx)?;
         let title = path.rsplit('/').next().unwrap_or(path).to_owned();
         self.update_tab_title(&tab, &title, cx);
         Some(tab)

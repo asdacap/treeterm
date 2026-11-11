@@ -608,10 +608,15 @@ fn an_editor_tab_loads_edits_and_saves_a_file(cx: &mut TestAppContext) {
         panic!("not an editor tab");
     };
     wait_until(cx, &editor, |e| matches!(e.doc(), EditorDoc::Ready { .. }));
+    assert!(!editor.read_with(cx, |e, _| e.is_preview()), "only markdown opens on its preview");
     editor.update(cx, |e, cx| e.set_content("hello world\n".into(), cx));
     assert!(editor.read_with(cx, |e, _| e.is_dirty()));
+    // The tab title marks the unsaved edit at once.
+    let title = |cx: &mut TestAppContext| workspace.read_with(cx, |w, _| w.file().app_states[&tab].title.clone());
+    assert_eq!(title(cx), "notes.txt \u{2022}");
     editor.update(cx, |e, cx| e.save(cx));
     wait_until(cx, &editor, |e| !e.is_dirty());
+    assert_eq!(title(cx), "notes.txt");
     assert_eq!(std::fs::read_to_string(&file).unwrap(), "hello world\n");
     wait_for_disk(cx, || {
         let state = &file_on_disk(&h, "a")["appStates"][&tab]["state"];

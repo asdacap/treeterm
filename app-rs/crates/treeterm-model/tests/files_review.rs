@@ -4,7 +4,8 @@
 use gpui_kit::{AppContext as _, Entity, TestAppContext};
 use treeterm_core::review::{CommitAnchor, Freshness, LineAnchor, Resolution, Side};
 use treeterm_model::file_browser::{
-    DefinitionLookup, Favourites, FileBrowser, FileView, REPO_SEARCH_DEBOUNCE, RepoResults, SearchPanel, SearchRow, Star,
+    DefinitionLookup, Favourites, FileBrowser, FileView, NAME_SEARCH_DEBOUNCE, NameResults, REPO_SEARCH_DEBOUNCE, RepoResults,
+    SearchPanel, SearchRow, Star,
 };
 use treeterm_model::review::{Direction, Head, Notice, ReviewContent, ReviewModel};
 use treeterm_model::session_store::{SessionState, SessionStore, WorkspaceEntry};
@@ -168,6 +169,52 @@ fn the_files_search_finds_matches_in_the_file_and_the_repo(cx: &mut TestAppConte
 }
 
 #[gpui_kit::test]
+fn the_tree_searches_file_names_after_a_pause(cx: &mut TestAppContext) {
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let repo = TempRepo::new(&h);
+    repo.write("src/needle_one.rs", "1\n");
+    repo.write("docs/Needle.md", "2\n");
+    repo.write("other.txt", "3\n");
+    repo.commit_all("files");
+    let (_store, _workspace, browser) = open_browser(cx, &h, &repo, "other.txt");
+
+    browser.update(cx, |b, cx| b.set_name_query("needle", cx));
+    let search = browser.read_with(cx, |b, _| b.name_search().clone());
+    assert!(search.is_active());
+    assert_eq!(search.results, NameResults::Idle, "nothing runs before the typing pause");
+    cx.executor().advance_clock(NAME_SEARCH_DEBOUNCE);
+    wait_until(cx, &browser, |b| matches!(b.name_search().results, NameResults::Found(_) | NameResults::Failed(_)));
+    let NameResults::Found(entries) = browser.read_with(cx, |b, _| b.name_search().results.clone()) else {
+        panic!("search failed")
+    };
+    let mut names: Vec<String> = entries.iter().map(|e| e.relative_path.clone()).collect();
+    names.sort();
+    assert_eq!(names, vec!["docs/Needle.md".to_owned(), "src/needle_one.rs".to_owned()]);
+
+    // A directory result expands and is selected; a file opens.
+    let docs = format!("{}/docs", repo.root());
+    browser.update(cx, |b, cx| b.set_name_query("doc", cx));
+    cx.executor().advance_clock(NAME_SEARCH_DEBOUNCE);
+    wait_until(cx, &browser, |b| matches!(&b.name_search().results, NameResults::Found(e) if e.iter().any(|e| e.is_directory)));
+    let dir = browser.read_with(cx, |b, _| match &b.name_search().results {
+        NameResults::Found(entries) => entries.iter().find(|e| e.is_directory).cloned().unwrap(),
+        _ => unreachable!(),
+    });
+    browser.update(cx, |b, cx| b.open_name_result(&dir, cx));
+    assert_eq!(browser.read_with(cx, |b, _| b.selected().map(str::to_owned)), Some(docs.clone()));
+    assert!(browser.read_with(cx, |b, _| b.rows().iter().any(|r| r.path == docs && r.expanded)));
+
+    // Clearing (or blanking) goes back to the tree.
+    browser.update(cx, |b, cx| b.set_name_query("   ", cx));
+    cx.executor().advance_clock(NAME_SEARCH_DEBOUNCE);
+    wait_until(cx, &browser, |b| b.name_search().results == NameResults::Idle);
+    browser.update(cx, |b, cx| b.clear_name_search(cx));
+    assert!(!browser.read_with(cx, |b, _| b.name_search().is_active()));
+}
+
+#[gpui_kit::test]
 fn the_search_panel_opens_on_the_selection_or_the_word_under_the_cursor(cx: &mut TestAppContext) {
     let _serial = serial();
     cx.executor().allow_parking();
@@ -204,9 +251,9 @@ fn go_to_definition_opens_one_result_and_offers_several(cx: &mut TestAppContext)
     repo.write("src/other.rs", "\n\nfn twice() {}\n");
     repo.write("notes.txt", "needle_fn\n");
     repo.commit_all("files");
-    let (_store, _workspace, browser) = open_browser(cx, &h, &repo, "src/lib.rs");
+    let (_store, workspace, browser) = open_browser(cx, &h, &repo, "src/lib.rs");
 
-    // One definition: the viewer moves there.
+    // One definition in the open file: the viewer moves there.
     let call = browser.read_with(cx, |b, _| offset_of(b, "needle_fn", 1)) + 3;
     browser.update(cx, |b, cx| b.go_to_definition(call, cx));
     assert!(matches!(browser.read_with(cx, |b, _| b.definition().clone()), DefinitionLookup::Searching { symbol } if symbol == "needle_fn"));
@@ -215,7 +262,7 @@ fn go_to_definition_opens_one_result_and_offers_several(cx: &mut TestAppContext)
     assert!(reveal.path.ends_with("src/lib.rs"));
     assert_eq!(reveal.line_number, 1);
 
-    // Several: the user picks one, which opens its file.
+    // Several: the user picks one; another file opens in an Editor tab at the line.
     let twice = browser.read_with(cx, |b, _| offset_of(b, "twice", 1));
     browser.update(cx, |b, cx| b.go_to_definition(twice, cx));
     wait_until(cx, &browser, |b| matches!(b.definition(), DefinitionLookup::Choose { .. }));
@@ -229,11 +276,17 @@ fn go_to_definition_opens_one_result_and_offers_several(cx: &mut TestAppContext)
     let other = locations.iter().position(|l| l.file_path == "src/other.rs").unwrap();
     browser.update(cx, |b, cx| b.choose_definition(other, cx));
     assert_eq!(browser.read_with(cx, |b, _| b.definition().clone()), DefinitionLookup::Idle);
-    wait_until(cx, &browser, |b| matches!(b.view(), FileView::Text { path, .. } if path.ends_with("src/other.rs")));
-    assert_eq!(browser.read_with(cx, |b, _| b.reveal_range()).unwrap().1, 2..2);
+    let editor = workspace.read_with(cx, |w, _| {
+        w.file().app_states.values().find(|tab| tab.application_id == "editor").map(|tab| tab.state.clone())
+    });
+    let editor = editor.expect("an editor tab");
+    assert!(editor["filePath"].as_str().unwrap().ends_with("src/other.rs"), "{editor}");
+    assert_eq!(editor["scrollToLine"], 3);
+    assert!(browser.read_with(cx, |b, _| matches!(b.view(), FileView::Text { path, .. } if path.ends_with("src/lib.rs"))));
 
     // Nothing defines a keyword; plain text has no definitions; a non-word does nothing.
-    browser.update(cx, |b, cx| b.go_to_definition(0, cx));
+    let paren = browser.read_with(cx, |b, _| offset_of(b, " {}", 0)) + 1;
+    browser.update(cx, |b, cx| b.go_to_definition(paren, cx));
     assert_eq!(browser.read_with(cx, |b, _| b.definition().clone()), DefinitionLookup::Idle);
     let fn_word = browser.read_with(cx, |b, _| offset_of(b, "fn", 0));
     browser.update(cx, |b, cx| b.go_to_definition(fn_word, cx));

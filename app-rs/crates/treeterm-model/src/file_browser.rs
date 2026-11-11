@@ -34,8 +34,12 @@ use treeterm_proto::treeterm::FileEntry;
 
 use crate::workspace_store::WorkspaceStore;
 
-/// Files bigger than this are not shown until the user asks (Electron's read limit).
-pub const MAX_VIEW_BYTES: u64 = 2 * 1024 * 1024;
+/// Text and images bigger than this are not shown until the user asks (Electron's
+/// `MAX_READ_FILE_BYTES`; PDFs and models get [`treeterm_core::files::max_read_bytes_for`]).
+pub const MAX_VIEW_BYTES: u64 = treeterm_core::files::MAX_READ_FILE_BYTES;
+
+/// The tree's file name search waits for a pause in typing (`FileTree`'s 300ms debounce).
+pub const NAME_SEARCH_DEBOUNCE: Duration = Duration::from_millis(300);
 
 /// Typing restarts the repo search; it waits for a pause first (`REPO_SEARCH_DEBOUNCE_MS`).
 pub const REPO_SEARCH_DEBOUNCE: Duration = Duration::from_millis(250);
@@ -210,6 +214,32 @@ pub enum Favourites {
     Failed(String),
 }
 
+/// The tree's "Search files..." results (`FileTree`'s `SearchState`).
+#[derive(Debug, Clone, PartialEq)]
+pub enum NameResults {
+    /// Nothing searched for (yet): no entries.
+    Idle,
+    Searching,
+    Found(Vec<FileEntry>),
+    Failed(String),
+}
+
+/// The tree's file name search: while its query is not blank the tree lists the results
+/// instead of the directories. Results stay those of the last search until the next one
+/// starts, after the typing pause.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NameSearch {
+    pub query: String,
+    pub results: NameResults,
+}
+
+impl NameSearch {
+    /// Whether the tree shows results rather than directories.
+    pub fn is_active(&self) -> bool {
+        !self.query.trim().is_empty()
+    }
+}
+
 /// A tree entry's star.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Star {
@@ -264,6 +294,8 @@ pub struct FileBrowser {
     /// Saving a copy of a file to this computer (`FileDownloadButton`).
     download: DownloadState,
     _download: Option<Task<()>>,
+    name_search: NameSearch,
+    _name_search: Option<Task<()>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -273,13 +305,25 @@ pub enum DownloadState {
     Failed(String),
 }
 
-/// Directories first, then names, case-insensitively (as the Electron tree sorts).
+/// Directories first, then names byte by byte (capitals before lowercase): the daemon's
+/// order, which the Electron tree shows as it comes.
 fn sort_entries(entries: &mut [FileEntry]) {
-    entries.sort_by(|a, b| {
-        b.is_directory
-            .cmp(&a.is_directory)
-            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
-    });
+    entries.sort_by(|a, b| b.is_directory.cmp(&a.is_directory).then_with(|| a.name.cmp(&b.name)));
+}
+
+/// A read file shown as text, decoded as UTF-8 (invalid bytes replaced, as a browser
+/// decodes them), or as binary when it holds a NUL (`isBinaryContent`).
+fn text_view(path: String, content: Vec<u8>) -> FileView {
+    let size = content.len() as u64;
+    let text = match String::from_utf8(content) {
+        Ok(text) => text,
+        Err(invalid) => String::from_utf8_lossy(invalid.as_bytes()).into_owned(),
+    };
+    if treeterm_core::files::is_binary_content(&text) {
+        FileView::Binary { path, size }
+    } else {
+        FileView::Text { path, text }
+    }
 }
 
 /// Each line of `text` with the byte offset it starts at.
@@ -379,6 +423,8 @@ impl FileBrowser {
             _definition: None,
             _favourites: None,
             _workspace: observe,
+            name_search: NameSearch { query: String::new(), results: NameResults::Idle },
+            _name_search: None,
         };
         browser.resolve_favourites(cx);
         browser.load(root, cx);
@@ -510,6 +556,11 @@ impl FileBrowser {
         self.listings.get(&self.root)
     }
 
+    /// A directory's listing state, for "Loading…" / errors under an expanded directory.
+    pub fn listing(&self, dir: &str) -> Option<&Listing> {
+        self.listings.get(dir)
+    }
+
     fn push_rows(&self, dir: &str, depth: usize, rows: &mut Vec<FileRow>) {
         let Some(Listing::Loaded(entries)) = self.listings.get(dir) else {
             return;
@@ -552,11 +603,7 @@ impl FileBrowser {
         }
         let presentation = presentation_of(path);
         // PDFs and models are routinely tens of megabytes (`fileLimits.ts`).
-        let budget = match (allow_large, presentation) {
-            (true, _) => u64::MAX,
-            (false, Presentation::Pdf | Presentation::Model(_)) => treeterm_core::files::max_read_bytes_for(path),
-            (false, Presentation::Text | Presentation::Image(_)) => MAX_VIEW_BYTES,
-        };
+        let budget = if allow_large { u64::MAX } else { treeterm_core::files::max_read_bytes_for(path) };
         let read = self.fs.read_file(&self.root, path, budget);
         let owned = path.to_owned();
         self._read = Some(cx.spawn(async move |this, cx| {
@@ -576,13 +623,7 @@ impl FileBrowser {
                         bytes: std::sync::Arc::new(file.content),
                         format,
                     },
-                    Presentation::Text => match String::from_utf8(file.content) {
-                        Ok(text) => FileView::Text { path: owned.clone(), text },
-                        Err(bytes) => FileView::Binary {
-                            path: owned.clone(),
-                            size: bytes.into_bytes().len() as u64,
-                        },
-                    },
+                    Presentation::Text => text_view(owned.clone(), file.content),
                 },
                 Ok(Ok(ReadOutcome::TooLarge { size })) => FileView::TooLarge { path: owned.clone(), size },
                 Ok(Err(error)) => FileView::Failed { path: owned.clone(), error: error.to_string() },
@@ -953,6 +994,66 @@ impl FileBrowser {
         self.open_location(&hit.file_path, hit.line_number as usize, hit.column as usize, len, cx);
     }
 
+    // ---- file name search ---------------------------------------------------------------
+
+    pub fn name_search(&self) -> &NameSearch {
+        &self.name_search
+    }
+
+    /// The tree's search box changed: search file names after the typing pause. A blank
+    /// query clears the results.
+    pub fn set_name_query(&mut self, query: &str, cx: &mut Context<Self>) {
+        if self.name_search.query == query {
+            return;
+        }
+        self.name_search.query = query.to_owned();
+        let pause = cx.background_executor().timer(NAME_SEARCH_DEBOUNCE);
+        let query = query.to_owned();
+        self._name_search = Some(cx.spawn(async move |this, cx| {
+            pause.await;
+            let search = match this.update(cx, |browser, cx| {
+                cx.notify();
+                if query.trim().is_empty() {
+                    browser.name_search.results = NameResults::Idle;
+                    return None;
+                }
+                browser.name_search.results = NameResults::Searching;
+                Some(browser.fs.search_files(&browser.root, &query))
+            }) {
+                Ok(Some(search)) => search,
+                Ok(None) | Err(_) => return, // blank, or the tab closed
+            };
+            let results = match search.await {
+                Ok(Ok(entries)) => NameResults::Found(entries),
+                Ok(Err(error)) => NameResults::Failed(error.to_string()),
+                Err(lost) => NameResults::Failed(format!("Search error: {lost}")),
+            };
+            match this.update(cx, |browser, cx| {
+                browser.name_search.results = results;
+                cx.notify();
+            }) {
+                Ok(()) | Err(_) => {} // Err: tab closed
+            }
+        }));
+        cx.notify();
+    }
+
+    /// The search box's clear button.
+    pub fn clear_name_search(&mut self, cx: &mut Context<Self>) {
+        self.name_search = NameSearch { query: String::new(), results: NameResults::Idle };
+        self._name_search = None;
+        cx.notify();
+    }
+
+    /// A search result was clicked: a file opens; a directory expands (or collapses) and is
+    /// selected, as Electron does.
+    pub fn open_name_result(&mut self, entry: &FileEntry, cx: &mut Context<Self>) {
+        if entry.is_directory {
+            self.toggle_dir(&entry.path, cx);
+        }
+        self.open(&entry.path, false, cx);
+    }
+
     // ---- go to definition --------------------------------------------------------------
 
     /// Look up the definition of the word at byte `offset` of the open file: one result
@@ -990,7 +1091,7 @@ impl FileBrowser {
             Err(error) => DefinitionLookup::Failed { symbol, error: error.to_string() },
             Ok(locations) => match <[DefinitionLocation; 1]>::try_from(locations) {
                 Ok([location]) => {
-                    self.open_location(&location.file_path, location.line_number as usize, 1, 0, cx);
+                    self.go_to_location(&location, cx);
                     DefinitionLookup::Idle
                 }
                 Err(locations) if locations.is_empty() => DefinitionLookup::NotFound { symbol },
@@ -1009,7 +1110,23 @@ impl FileBrowser {
             return;
         };
         self.definition = DefinitionLookup::Idle;
-        self.open_location(&location.file_path, location.line_number as usize, 1, 0, cx);
+        self.go_to_location(&location, cx);
+        cx.notify();
+    }
+
+    /// Monaco's definition navigation: within the open file the viewer moves there; another
+    /// file opens in an Editor tab at the line (`monacoNavigationBridge.openFileAtLine`).
+    fn go_to_location(&mut self, location: &DefinitionLocation, cx: &mut Context<Self>) {
+        let line = location.line_number as usize;
+        if self.selected_relative() == Some(location.file_path.as_str()) {
+            self.open_location(&location.file_path, line, 1, 0, cx);
+            return;
+        }
+        let Some(workspace) = self.workspace.upgrade() else {
+            return;
+        };
+        let path = search::to_workspace_absolute(&self.root, &location.file_path);
+        workspace.update(cx, |w, cx| w.open_in_editor_at(&path, line, cx));
     }
 
     pub fn dismiss_definition(&mut self, cx: &mut Context<Self>) {
@@ -1050,11 +1167,12 @@ mod tests {
     }
 
     #[test]
-    fn directories_sort_first_then_names_case_insensitively() {
-        let mut entries = vec![entry("b.txt", false), entry("Src", true), entry("a.txt", false), entry("docs", true)];
+    fn directories_sort_first_then_names_as_the_daemon_orders_them() {
+        let mut entries =
+            vec![entry("b.txt", false), entry("Src", true), entry("a.txt", false), entry("docs", true), entry("README.md", false)];
         sort_entries(&mut entries);
         let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
-        assert_eq!(names, vec!["docs", "Src", "a.txt", "b.txt"]);
+        assert_eq!(names, vec!["Src", "docs", "README.md", "a.txt", "b.txt"]);
     }
 
     #[test]
@@ -1105,6 +1223,23 @@ mod tests {
         assert!(!is_favourite_path("srcs/lib.rs", &favourites));
         assert!(!is_favourite_path("README.md", &favourites));
         assert!(!is_favourite_path("anything", &["".to_owned()]));
+    }
+
+    #[test]
+    fn text_with_a_nul_is_binary_and_invalid_utf8_is_replaced() {
+        assert!(matches!(text_view("/w/a".into(), b"ab\0c".to_vec()), FileView::Binary { size: 4, .. }));
+        match text_view("/w/b".into(), vec![b'o', b'k', 0xff]) {
+            FileView::Text { text, .. } => assert_eq!(text, "ok\u{fffd}"),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_blank_name_query_is_not_a_search() {
+        let search = |query: &str| NameSearch { query: query.into(), results: NameResults::Idle };
+        assert!(!search("").is_active());
+        assert!(!search("  ").is_active());
+        assert!(search(" a").is_active());
     }
 
     #[test]
