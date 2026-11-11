@@ -1085,6 +1085,18 @@ impl WorkspaceStore {
         }
     }
 
+    /// Moved in the tree (`moveWorkspace`): a new parent and/or sort order.
+    pub fn set_placement(&mut self, parent_id: Option<String>, sort_order: i64, cx: &mut Context<Self>) {
+        let order = sort_order.to_string();
+        let file = &mut self.workspace.file;
+        if file.parent_id == parent_id && file.metadata.get("sortOrder") == Some(&order) {
+            return;
+        }
+        file.parent_id = parent_id;
+        file.metadata.insert("sortOrder".to_owned(), order);
+        self.changed(cx);
+    }
+
     /// `updateStatus`: merged or abandoned.
     pub fn set_status(&mut self, status: treeterm_core::wire::workspace_file::WorkspaceStatus, cx: &mut Context<Self>) {
         if self.workspace.file.status != status {

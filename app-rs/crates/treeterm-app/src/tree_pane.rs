@@ -8,6 +8,7 @@ use gpui_kit::prelude::*;
 use gpui_kit::{AnyElement, ClickEvent, Context, Entity, EventEmitter, SharedString, Window, div, px};
 use treeterm_model::workspace_store::ActivityStyle as _;
 use treeterm_model::keybinding_store::KeybindingStore;
+use treeterm_core::tree::DropPosition;
 use treeterm_model::session_store::{AfterMerge, RemoveMode, SessionState, SessionStore, WorkspaceEntry};
 
 use crate::theme::colors;
@@ -24,6 +25,8 @@ pub struct TreePane {
     remote: bool,
     /// The whole session's rows are hidden.
     folded: bool,
+    /// Where a workspace being dragged would land.
+    drop_hint: Option<(String, DropPosition)>,
     /// Per-window view state: which workspaces have their children hidden.
     collapsed: HashSet<String>,
     selected: Selection,
@@ -36,6 +39,32 @@ pub enum Selection {
 }
 
 impl EventEmitter<WorkspaceSelected> for TreePane {}
+
+/// A workspace being dragged in the tree (and its drag preview).
+#[derive(Clone)]
+pub struct DraggedWorkspace {
+    id: String,
+    label: SharedString,
+}
+
+impl Render for DraggedWorkspace {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let c = colors(cx);
+        div().px_2().py_1().rounded_sm().bg(c.bg_active).text_sm().child(self.label.clone())
+    }
+}
+
+/// Top quarter: before; bottom quarter: after; otherwise onto (as a child).
+fn drop_zone(y: f32, top: f32, height: f32) -> DropPosition {
+    let offset = y - top;
+    if offset < height / 4. {
+        DropPosition::Before
+    } else if offset > height * 3. / 4. {
+        DropPosition::After
+    } else {
+        DropPosition::Onto
+    }
+}
 
 /// Emitted when the user clicks the session's name: show its session pane.
 pub struct SessionInfoRequested;
@@ -58,6 +87,7 @@ impl TreePane {
             title,
             remote,
             folded: false,
+            drop_hint: None,
             collapsed: HashSet::new(),
             selected: Selection::Nothing,
         }
@@ -254,6 +284,12 @@ impl TreePane {
         };
         let toggle_id = id.clone();
         let select_id = id.clone();
+        let (drag_value, move_id, drop_id) = (
+            DraggedWorkspace { id: id.clone(), label: label.clone() },
+            id.clone(),
+            id.clone(),
+        );
+        let hint = self.drop_hint.as_ref().filter(|(target, _)| *target == id).map(|(_, position)| *position);
         let menu_id = id.clone();
         let session = self.session.clone();
         let pane = cx.entity();
@@ -268,6 +304,42 @@ impl TreePane {
             .when(selected, |row| row.bg(c.bg_active))
             .when(!selected, |row| row.hover(|row| row.bg(c.bg_hover)))
             .when(focus_cursor, |row| row.border_1().border_color(c.accent))
+            .on_drag(drag_value, |dragged, _, _, cx| cx.new(|_| dragged.clone()))
+            .on_drag_move(cx.listener(move |pane, event: &gpui_kit::DragMoveEvent<DraggedWorkspace>, _, cx| {
+                let position = event.event.position;
+                let next = if event.bounds.contains(&position) && event.drag(cx).id != move_id {
+                    let zone = drop_zone(f32::from(position.y), f32::from(event.bounds.top()), f32::from(event.bounds.size.height));
+                    Some((move_id.clone(), zone))
+                } else {
+                    None
+                };
+                let changed = match (&pane.drop_hint, &next) {
+                    (Some((old, _)), None) => *old == move_id,
+                    (old, Some(_)) => old.as_ref() != next.as_ref(),
+                    (None, None) => false,
+                };
+                if changed {
+                    pane.drop_hint = next;
+                    cx.notify();
+                }
+            }))
+            .on_drop(cx.listener(move |pane, dragged: &DraggedWorkspace, _, cx| {
+                let position = match pane.drop_hint.take() {
+                    Some((target, position)) if target == drop_id => position,
+                    Some(_) | None => DropPosition::Onto,
+                };
+                let (drag, target) = (dragged.id.clone(), drop_id.clone());
+                pane.session.update(cx, |s, cx| s.move_workspace(&drag, &target, position, cx));
+                if position == DropPosition::Onto {
+                    pane.collapsed.remove(&target);
+                }
+                cx.notify();
+            }))
+            .when_some(hint, |row, position| match position {
+                DropPosition::Before => row.border_t_2().border_color(c.accent),
+                DropPosition::After => row.border_b_2().border_color(c.accent),
+                DropPosition::Onto => row.bg(c.bg_hover).border_1().border_color(c.accent),
+            })
             .on_click(cx.listener(move |pane, _: &ClickEvent, _, cx| {
                 pane.select(select_id.clone(), cx);
             }))

@@ -138,6 +138,44 @@ fn handle(line: &str, window: AnyWindowHandle, view: &Entity<AppView>, cx: &mut 
                 window.dispatch_action(action, cx);
                 Ok(json!({ "ok": true }))
             }
+            "drag" => {
+                // `drag x1 y1 x2 y2`: press, move in steps with the button held, release.
+                let coords: Vec<f32> = rest.split_whitespace().filter_map(|v| v.parse().ok()).collect();
+                let [x1, y1, x2, y2] = coords[..] else {
+                    return Err("usage: drag <x1> <y1> <x2> <y2>".to_owned());
+                };
+                let modifiers = gpui_kit::Modifiers::default();
+                let button = gpui_kit::MouseButton::Left;
+                let at = |x: f32, y: f32| gpui_kit::point(gpui_kit::px(x), gpui_kit::px(y));
+                window.dispatch_event(
+                    gpui_kit::PlatformInput::MouseMove(gpui_kit::MouseMoveEvent { position: at(x1, y1), pressed_button: None, modifiers }),
+                    cx,
+                );
+                window.dispatch_event(
+                    gpui_kit::PlatformInput::MouseDown(gpui_kit::MouseDownEvent {
+                        button,
+                        position: at(x1, y1),
+                        modifiers,
+                        click_count: 1,
+                        first_mouse: false,
+                    }),
+                    cx,
+                );
+                for step in 1..=10 {
+                    let t = step as f32 / 10.;
+                    let position = at(x1 + (x2 - x1) * t, y1 + (y2 - y1) * t);
+                    window.dispatch_event(
+                        gpui_kit::PlatformInput::MouseMove(gpui_kit::MouseMoveEvent { position, pressed_button: Some(button), modifiers }),
+                        cx,
+                    );
+                    window.refresh();
+                }
+                window.dispatch_event(
+                    gpui_kit::PlatformInput::MouseUp(gpui_kit::MouseUpEvent { button, position: at(x2, y2), modifiers, click_count: 1 }),
+                    cx,
+                );
+                Ok(json!({ "ok": true }))
+            }
             "click" | "rclick" => {
                 // `click <x> <y>` in window points (screenshot pixels / scale factor);
                 // `rclick` uses the right button (context menus).

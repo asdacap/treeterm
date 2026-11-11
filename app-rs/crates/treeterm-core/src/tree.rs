@@ -191,3 +191,122 @@ mod tests {
         assert_eq!(sort_order(&file(None, None)), 0);
     }
 }
+
+/// Where a dragged workspace lands relative to the one it is dropped on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DropPosition {
+    Before,
+    After,
+    /// Becomes the target's last child.
+    Onto,
+}
+
+/// A workspace's place in the tree as `moveWorkspace` decides it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Placement {
+    pub id: String,
+    pub parent_id: Option<String>,
+    pub sort_order: i64,
+}
+
+/// `moveWorkspace`: the new parent and sort orders after dropping `drag` on `target` at
+/// `position`, for every workspace whose placement changes. `None` when the move is a no-op
+/// or would make a workspace its own ancestor. `workspaces` is `(id, parent, sort order)`.
+pub fn plan_move(
+    workspaces: &[(String, Option<String>, i64)],
+    drag: &str,
+    target: &str,
+    position: DropPosition,
+) -> Option<Vec<Placement>> {
+    if drag == target {
+        return None;
+    }
+    let parent_of = |id: &str| workspaces.iter().find(|(w, _, _)| w == id).map(|(_, parent, _)| parent.clone());
+    let old_parent = parent_of(drag)?;
+    let target_parent = parent_of(target)?;
+    let new_parent = match position {
+        DropPosition::Onto => Some(target.to_owned()),
+        DropPosition::Before | DropPosition::After => target_parent,
+    };
+    // Cycle check: the new parent must not be the dragged workspace or below it.
+    let mut current = new_parent.clone();
+    let mut steps = 0;
+    while let Some(id) = current {
+        if id == drag || steps > workspaces.len() {
+            return None;
+        }
+        current = parent_of(&id).flatten();
+        steps += 1;
+    }
+    let siblings = |parent: &Option<String>| {
+        let mut list: Vec<&(String, Option<String>, i64)> =
+            workspaces.iter().filter(|(id, p, _)| p == parent && id != drag).collect();
+        list.sort_by_key(|(_, _, order)| *order);
+        list.into_iter().map(|(id, _, _)| id.clone()).collect::<Vec<String>>()
+    };
+    let mut ordered = siblings(&new_parent);
+    let at = match position {
+        DropPosition::Onto => ordered.len(),
+        DropPosition::Before => ordered.iter().position(|id| id == target)?,
+        DropPosition::After => ordered.iter().position(|id| id == target)? + 1,
+    };
+    ordered.insert(at, drag.to_owned());
+    let mut out: Vec<Placement> = ordered
+        .into_iter()
+        .enumerate()
+        .map(|(i, id)| Placement { id, parent_id: new_parent.clone(), sort_order: i as i64 })
+        .collect();
+    // The siblings left behind close the gap (`reindexSiblings`).
+    if old_parent != new_parent {
+        out.extend(siblings(&old_parent).into_iter().enumerate().map(|(i, id)| Placement {
+            id,
+            parent_id: old_parent.clone(),
+            sort_order: i as i64,
+        }));
+    }
+    // Only what changes.
+    out.retain(|p| workspaces.iter().any(|(id, parent, order)| *id == p.id && (parent != &p.parent_id || *order != p.sort_order)));
+    Some(out)
+}
+
+#[cfg(test)]
+mod move_tests {
+    use super::*;
+
+    fn ws(id: &str, parent: Option<&str>, order: i64) -> (String, Option<String>, i64) {
+        (id.to_owned(), parent.map(str::to_owned), order)
+    }
+
+    fn sample() -> Vec<(String, Option<String>, i64)> {
+        vec![ws("a", None, 0), ws("b", None, 1), ws("c", None, 2), ws("a1", Some("a"), 0), ws("a2", Some("a"), 1)]
+    }
+
+    #[test]
+    fn reorders_among_siblings() {
+        let plan = plan_move(&sample(), "c", "a", DropPosition::Before).unwrap();
+        let orders: Vec<(&str, i64)> = plan.iter().map(|p| (p.id.as_str(), p.sort_order)).collect();
+        assert_eq!(orders, vec![("c", 0), ("a", 1), ("b", 2)]);
+    }
+
+    #[test]
+    fn dropping_onto_reparents_as_the_last_child_and_closes_the_gap() {
+        let plan = plan_move(&sample(), "b", "a", DropPosition::Onto).unwrap();
+        assert!(plan.contains(&Placement { id: "b".into(), parent_id: Some("a".into()), sort_order: 2 }));
+        assert!(plan.contains(&Placement { id: "c".into(), parent_id: None, sort_order: 1 }));
+        assert_eq!(plan.len(), 2);
+    }
+
+    #[test]
+    fn moving_across_parents_places_after_the_target() {
+        let plan = plan_move(&sample(), "c", "a1", DropPosition::After).unwrap();
+        assert!(plan.contains(&Placement { id: "c".into(), parent_id: Some("a".into()), sort_order: 1 }));
+        assert!(plan.contains(&Placement { id: "a2".into(), parent_id: Some("a".into()), sort_order: 2 }));
+    }
+
+    #[test]
+    fn a_workspace_cannot_move_under_itself() {
+        assert_eq!(plan_move(&sample(), "a", "a1", DropPosition::Onto), None);
+        assert_eq!(plan_move(&sample(), "a", "a2", DropPosition::After), None);
+        assert_eq!(plan_move(&sample(), "a", "a", DropPosition::Before), None);
+    }
+}

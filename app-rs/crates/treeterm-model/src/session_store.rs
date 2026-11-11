@@ -1391,6 +1391,27 @@ impl SessionStore {
         drop(self.add_workspace(Workspace { id, path, file }, cx));
     }
 
+    /// Drag and drop in the tree (`moveWorkspace`): reorder among siblings, or reparent
+    /// (`Onto`). Moves that would put a workspace under itself are ignored.
+    pub fn move_workspace(&mut self, drag: &str, target: &str, position: tree::DropPosition, cx: &mut Context<Self>) {
+        let placements: Vec<(String, Option<String>, i64)> = self
+            .entries
+            .iter()
+            .filter_map(|(id, entry)| entry.store().map(|s| (id.clone(), s.read(cx).file())))
+            .map(|(id, file)| (id, file.parent_id.clone(), tree::sort_order(file)))
+            .collect();
+        let Some(plan) = tree::plan_move(&placements, drag, target, position) else {
+            return;
+        };
+        for placement in plan {
+            if let Some(store) = self.workspace_store(&placement.id).cloned() {
+                store.update(cx, |w, cx| w.set_placement(placement.parent_id, placement.sort_order, cx));
+            }
+        }
+        self.refresh_parent_branches(cx);
+        cx.notify();
+    }
+
     /// One past the largest `sortOrder` among a parent's children (or the roots).
     fn next_sort_order(&self, parent: Option<&str>, cx: &App) -> String {
         let max = self
