@@ -1024,13 +1024,13 @@ fn run_menu(
         .entry(workspace_id.to_owned())
         .or_insert_with(|| cx.new(|cx| RunActions::new(&conn, workspace, cx)))
         .clone();
-    let runners: Vec<(String, String)> = connected
+    let runners: Vec<(String, String, String)> = connected
         .session
         .read(cx)
         .registry()
         .new_tab_menu()
         .filter(|app| app.id.starts_with("customrunner-"))
-        .map(|app| (app.id.clone(), app.name.clone()))
+        .map(|app| (app.id.clone(), app.name.clone(), app.icon.clone()))
         .collect();
     let error = model.read(cx).error().map(str::to_owned);
     let (menu_model, menu_workspace) = (model.clone(), workspace.clone());
@@ -1044,43 +1044,61 @@ fn run_menu(
                     .child("▶ Run")
                     .child(crate::ui::icon(IconName::ChevronDown, 12., fg)),
             )
-                .dropdown_menu(move |menu, _window, cx| {
+                .dropdown_menu_with_anchor(gpui_kit::Anchor::TopRight, move |menu, _window, cx| {
+                    // `.run-action-menu`: uppercase 11px group headers, 13px items, a rule
+                    // between groups; detection runs once, as in Electron.
+                    let secondary = colors(cx).text_secondary;
+                    let note = move |text: &'static str| {
+                        PopupMenuItem::element(move |_, _| div().px(px(0.)).py(px(2.)).text_size(px(12.)).text_color(secondary).child(text))
+                    };
+                    let header = move |text: String| {
+                        PopupMenuItem::element(move |_, _| div().text_size(px(11.)).text_color(secondary).child(text.to_uppercase()))
+                    };
+                    let item = |text: SharedString| {
+                        PopupMenuItem::element(move |_, _| div().py(px(2.)).text_size(px(13.)).whitespace_nowrap().child(text.clone()))
+                    };
                     let mut menu = menu;
                     let detection = menu_model.read(cx).detection().clone();
+                    let mut groups = 0;
                     match detection {
-                        Detection::Detecting => return menu.item(PopupMenuItem::label("Loading…")),
+                        Detection::Detecting => return menu.item(note("Loading...")),
                         Detection::Done(actions) => {
                             if actions.is_empty() && runners.is_empty() {
-                                return menu.item(PopupMenuItem::label("No actions found"));
+                                return menu.item(note("No actions found"));
                             }
                             let mut source = None;
                             for action in actions {
                                 if source != Some(action.source) {
                                     source = Some(action.source);
-                                    menu = menu.item(PopupMenuItem::label(action.source.as_str()));
+                                    if groups > 0 {
+                                        menu = menu.separator();
+                                    }
+                                    groups += 1;
+                                    menu = menu.item(header(action.source.as_str().to_owned()));
                                 }
-                                let (model, label) = (menu_model.clone(), action.name.clone());
-                                menu = menu.item(PopupMenuItem::new(label).on_click(move |_, _, cx| {
+                                let (model, label) = (menu_model.clone(), SharedString::from(action.name.clone()));
+                                menu = menu.item(item(label).on_click(move |_, _, cx| {
                                     model.update(cx, |m, cx| m.run(&action, cx));
                                 }));
                             }
                         }
                     }
                     if !runners.is_empty() {
-                        menu = menu.separator().item(PopupMenuItem::label("Custom Runners"));
-                        for (app_id, name) in &runners {
+                        if groups > 0 {
+                            menu = menu.separator();
+                        }
+                        menu = menu.item(header("Custom Runners".to_owned()));
+                        for (app_id, name, icon) in &runners {
                             let (workspace, app_id) = (menu_workspace.clone(), app_id.clone());
-                            menu = menu.item(PopupMenuItem::new(name.clone()).on_click(move |_, _, cx| {
+                            let label = SharedString::from(format!("{icon}\u{2009}\u{2009}{name}"));
+                            menu = menu.item(item(label).on_click(move |_, _, cx| {
                                 workspace.update(cx, |w, cx| {
                                     w.add_tab(&app_id, cx);
                                 });
                             }));
                         }
                     }
-                    let refresh = menu_model.clone();
-                    menu.separator().item(PopupMenuItem::new("Refresh").on_click(move |_, _, cx| {
-                        refresh.update(cx, |m, cx| m.detect(cx));
-                    }))
+                    menu
                 }),
         )
         .when_some(error, |d, error| d.child(div().text_xs().text_color(colors(cx).error).child(error)))
@@ -1533,7 +1551,7 @@ fn workspace_header(
         };
         let (copy, path, rename_ws) = (branch.clone(), workspace.read(cx).workspace().path.clone(), workspace.clone());
         let can_rename = file.is_worktree && !root;
-        use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
+        use gpui_kit::component::menu::ContextMenuExt as _;
         actions = actions.child(
             crate::ui::pill(if copied { "Copied!".to_owned() } else { branch }, fg, badge_bg)
                 .id("branch-badge")
@@ -1542,12 +1560,12 @@ fn workspace_header(
                 .on_click(cx.listener(move |view, _, _, cx| view.copy_branch(copy.clone(), cx)))
                 .context_menu(move |menu, _, _| {
                     let path = path.clone();
-                    let menu = menu.item(PopupMenuItem::new("Copy worktree path").on_click(move |_, _, cx| {
+                    let menu = menu.item(crate::ui::menu_item("Copy worktree path").on_click(move |_, _, cx| {
                         cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(path.clone()));
                     }));
                     if can_rename {
                         let ws = rename_ws.clone();
-                        menu.item(PopupMenuItem::new("Auto-rename branch").on_click(move |_, window, cx| {
+                        menu.item(crate::ui::menu_item("Auto-rename branch").on_click(move |_, window, cx| {
                             if let Err(error) = ws.update(cx, |w, cx| w.refresh_labels(true, cx)) {
                                 use gpui_kit::component::WindowExt as _;
                                 window.push_notification(error, cx);
@@ -1577,7 +1595,8 @@ fn workspace_header(
         );
     }
     if root {
-        let (session, ws_id, label) = (connected.session.clone(), id.to_owned(), SharedString::from(file.display_name().to_owned()));
+        // Electron names the workspace (not its display name) in this question.
+        let (session, ws_id, label) = (connected.session.clone(), id.to_owned(), SharedString::from(file.name.clone()));
         actions = actions.child(
             crate::ui::action_button("close-workspace", cx)
                 .px(px(6.))
@@ -1585,14 +1604,13 @@ fn workspace_header(
                 .tooltip(tip("Close workspace"))
                 .child(crate::ui::icon(IconName::X, 14., secondary))
                 .on_click(move |_, window, cx| {
-                    crate::tree_pane::confirm_remove(
-                        session.clone(),
-                        ws_id.clone(),
-                        label.clone(),
-                        treeterm_model::session_store::RemoveMode::KeepWorktreeAndBranch,
-                        window,
-                        cx,
-                    )
+                    // `handleCloseWorkspace`: Electron's own wording for the header's ×.
+                    let (session, ws_id) = (session.clone(), ws_id.clone());
+                    crate::ui::confirm(format!("Close workspace \"{label}\"?"), window, cx, move |_, cx| {
+                        session.update(cx, |s, cx| {
+                            s.remove_workspace(&ws_id, treeterm_model::session_store::RemoveMode::KeepWorktreeAndBranch, cx)
+                        });
+                    });
                 }),
         );
     }
@@ -1807,6 +1825,7 @@ fn workspace_pane(
                         let (icon, name) = (icon.clone(), name.clone());
                         let item = PopupMenuItem::element(move |_, _| {
                             h_flex()
+                                .h(px(29.5))
                                 .gap(px(8.))
                                 .text_size(px(13.))
                                 .child(div().w(px(16.)).flex_shrink_0().flex().justify_center().child(icon.clone()))
@@ -2174,13 +2193,12 @@ fn terminal_status_bar(
     // Right-click on the badge: the debug menu (`ActivityStateBadge`).
     let (debug_ws, debug_tab) = (workspace.clone(), tab_id.to_owned());
     let debug_menu = move |menu: gpui_kit::component::menu::PopupMenu, _: &mut Window, _: &mut gpui_kit::Context<gpui_kit::component::menu::PopupMenu>| {
-        use gpui_kit::component::menu::PopupMenuItem;
         let (prompt_ws, prompt_tab) = (debug_ws.clone(), debug_tab.clone());
         let (history_ws, history_tab) = (debug_ws.clone(), debug_tab.clone());
-        menu.item(PopupMenuItem::new("Debug System Prompt").on_click(move |_, _, cx| {
+        menu.item(crate::ui::menu_item("Debug System Prompt").on_click(move |_, _, cx| {
             prompt_ws.update(cx, |w, cx| w.open_prompt_debugger_for_tab(&prompt_tab, cx));
         }))
-        .item(PopupMenuItem::new("History").on_click(move |_, _, cx| {
+        .item(crate::ui::menu_item("History").on_click(move |_, _, cx| {
             history_ws.update(cx, |w, cx| w.open_activity_history(&history_tab, cx));
         }))
     };

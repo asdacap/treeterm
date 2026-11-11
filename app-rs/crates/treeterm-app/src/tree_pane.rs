@@ -573,20 +573,20 @@ impl TreePane {
                 let child = file.is_worktree && has_parent;
                 let (settings_store, settings_pane, settings_id) = (store.clone(), pane.clone(), menu_id.clone());
                 let mut menu = menu
-                    .item(PopupMenuItem::new("Settings").on_click(move |_, _, cx| {
+                    .item(ui::menu_item("Settings").on_click(move |_, _, cx| {
                         if settings_store.update(cx, |w, cx| w.open_or_focus_tab("workspace-settings", cx)).is_some() {
                             settings_pane.update(cx, |pane, cx| pane.select(settings_id.clone(), cx));
                         }
                     }));
                 let favourite_store = store.clone();
                 menu = menu.item(
-                    PopupMenuItem::new(if favourite { "Unmark as Favourite" } else { "Mark as Favourite" })
+                    ui::menu_item(if favourite { "Unmark as Favourite" } else { "Mark as Favourite" })
                         .on_click(move |_, _, cx| favourite_store.update(cx, |w, cx| w.toggle_favourite(cx))),
                 );
                 if child {
                     for (text, branch) in [("Refresh Title & Description", false), ("Refresh Branch Name", true)] {
                         let store = store.clone();
-                        menu = menu.item(PopupMenuItem::new(text).on_click(move |_, window, cx| {
+                        menu = menu.item(ui::menu_item(text).on_click(move |_, window, cx| {
                             if let Err(error) = store.update(cx, |w, cx| w.refresh_labels(branch, cx)) {
                                 window.push_notification(error, cx);
                             }
@@ -595,7 +595,7 @@ impl TreePane {
                 }
                 if file.is_git_repo {
                     let (pane, session, parent, label) = (pane.clone(), session.clone(), menu_id.clone(), label.clone());
-                    menu = menu.item(PopupMenuItem::new("Open Existing Branch").on_click(move |_, window, cx| {
+                    menu = menu.item(ui::menu_item("Open Existing Branch").on_click(move |_, window, cx| {
                         let (pane, session, parent, label) = (pane.clone(), session.clone(), parent.clone(), label.clone());
                         let behind = behind_upstream(&session, &parent, cx);
                         upstream_guard(behind, label.clone(), window, cx, move |window, cx| {
@@ -609,14 +609,14 @@ impl TreePane {
                 }
                 if !file.is_worktree && file.is_git_repo {
                     let (session, id) = (session.clone(), menu_id.clone());
-                    menu = menu.item(PopupMenuItem::new("Auto Open All Recent Worktrees").on_click(move |_, window, cx| {
+                    menu = menu.item(ui::menu_item("Auto Open All Recent Worktrees").on_click(move |_, window, cx| {
                         crate::auto_open_dialog::open(session.clone(), id.clone(), window, cx);
                     }));
                 }
                 if child {
                     // Review & Merge: show the workspace with its Review tab.
                     let (pane, id) = (pane.clone(), menu_id.clone());
-                    menu = menu.item(PopupMenuItem::new("Review & Merge").on_click(move |_, _, cx| {
+                    menu = menu.item(ui::menu_item("Review & Merge").on_click(move |_, _, cx| {
                         if store.update(cx, |w, cx| w.open_or_focus_tab("review", cx)).is_some() {
                             pane.update(cx, |pane, cx| pane.select(id.clone(), cx));
                         }
@@ -635,7 +635,9 @@ impl TreePane {
 
 /// `.context-menu-item.danger`: red text.
 fn danger_item(label: &'static str) -> PopupMenuItem {
-    PopupMenuItem::element(move |_, _| div().text_color(gpui_kit::rgb(0xf14c4c)).child(label))
+    PopupMenuItem::element(move |_, _| {
+        div().h(px(29.5)).flex().items_center().text_size(px(ui::BODY)).text_color(gpui_kit::rgb(0xf14c4c)).child(label)
+    })
 }
 
 /// A row's content, copied out of the session so rendering can borrow the context mutably.

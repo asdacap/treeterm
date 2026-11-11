@@ -700,8 +700,20 @@ impl Render for TerminalView {
                 ),
         );
 
-        root.context_menu(|menu, _window, _cx| {
-            menu.menu("Copy", Box::new(Copy)).menu("Paste", Box::new(Paste))
+        // `BaseTerminal`'s menu: Copy and Paste, without shortcut hints.
+        let view = cx.entity().downgrade();
+        root.context_menu(move |menu, _window, _cx| {
+            let (copy, paste) = (view.clone(), view.clone());
+            menu.item(crate::ui::menu_item("Copy").on_click(move |_, window, cx| {
+                match copy.update(cx, |view, cx| view.copy(&Copy, window, cx)) {
+                    Ok(()) | Err(_) => {}
+                }
+            }))
+            .item(crate::ui::menu_item("Paste").on_click(move |_, window, cx| {
+                match paste.update(cx, |view, cx| view.paste(&Paste, window, cx)) {
+                    Ok(()) | Err(_) => {}
+                }
+            }))
         })
     }
 }
