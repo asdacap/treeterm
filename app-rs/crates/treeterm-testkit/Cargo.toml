@@ -1,0 +1,21 @@
+[package]
+name = "treeterm-testkit"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Test support: a real TreeTerm daemon running in-process on a temporary socket."
+
+[dependencies]
+treeterm-daemon.workspace = true
+tokio.workspace = true
+tempfile.workspace = true
+
+[dev-dependencies]
+treeterm-core.workspace = true
+treeterm-proto.workspace = true
+futures.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

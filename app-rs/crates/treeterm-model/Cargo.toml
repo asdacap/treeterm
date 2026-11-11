@@ -1,0 +1,24 @@
+[package]
+name = "treeterm-model"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "TreeTerm stores as GPUI entities. Holds all app logic the views render; no widgets."
+
+[dependencies]
+treeterm-core.workspace = true
+treeterm-proto.workspace = true
+gpui-kit.workspace = true
+futures.workspace = true
+tracing.workspace = true
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+gpui-kit = { workspace = true, features = ["test-support"] }
+treeterm-testkit.workspace = true
+tokio.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

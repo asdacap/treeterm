@@ -1,0 +1,22 @@
+[package]
+name = "treeterm-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "TreeTerm native UI: renders treeterm-model stores with GPUI Kit."
+
+[[bin]]
+name = "treeterm"
+path = "src/main.rs"
+
+[dependencies]
+treeterm-core.workspace = true
+treeterm-model.workspace = true
+gpui-kit = { workspace = true, features = ["component", "assets"] }
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[lints]
+workspace = true

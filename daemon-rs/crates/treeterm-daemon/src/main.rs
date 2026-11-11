@@ -1,24 +1,11 @@
-pub mod connection_id;
-mod exec_manager;
-pub mod file_watcher;
-pub mod filesystem;
-mod grpc_server;
-pub mod paths;
-pub mod pty_manager;
-pub mod session_store;
-mod socket_path;
-
 use std::fs;
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::process;
 
 use tokio::net::UnixListener;
-use tokio_stream::wrappers::UnixListenerStream;
-use tonic::transport::Server;
-use treeterm_proto::treeterm::tree_term_daemon_server::TreeTermDaemonServer;
-
-use paths::data_dir;
+use treeterm_daemon::paths::{self, data_dir};
+use treeterm_daemon::{DaemonConfig, serve, socket_path};
 
 fn check_already_running(data_dir: &std::path::Path) -> bool {
     let pid_path = data_dir.join("daemon.pid");
@@ -78,32 +65,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     fs::set_permissions(&socket_path, fs::Permissions::from_mode(0o600))?;
     tracing::info!(?socket_path, "daemon listening");
 
-    let incoming = UnixListenerStream::new(listener);
-
-    // Initialize components (one session per daemon, PtyManager embedded)
-    let session_store = session_store::SessionStore::new();
-    session_store.start_heartbeat();
-
-    let file_watcher = file_watcher::FileWatcher::new(std::time::Duration::from_secs(2));
-
-    let svc = grpc_server::DaemonService::new(session_store.clone(), file_watcher);
-
-    let ss = session_store.clone();
-    let shutdown = async move {
-        tokio::signal::ctrl_c().await.ok();
-        tracing::info!("shutting down");
-        ss.shutdown().await;
+    let config = DaemonConfig {
+        workspaces_dir: paths::workspaces_dir(),
     };
-
-    Server::builder()
-        .layer(connection_id::ConnectionIdLayer)
-        .add_service(
-            TreeTermDaemonServer::new(svc)
-                .max_decoding_message_size(8 * 1024 * 1024)
-                .max_encoding_message_size(8 * 1024 * 1024),
-        )
-        .serve_with_incoming_shutdown(incoming, shutdown)
-        .await?;
+    let shutdown = async {
+        tokio::signal::ctrl_c().await.ok();
+    };
+    serve(config, listener, shutdown).await?;
 
     remove_pid_file(&data);
     let _ = fs::remove_file(&socket_path);

@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -58,7 +59,7 @@ pub struct SessionStore {
 }
 
 impl SessionStore {
-    pub fn new() -> Self {
+    pub fn new(workspace_data_dir: PathBuf) -> Self {
         let now = now_millis();
         let session = Session {
             id: generate_session_id(),
@@ -67,9 +68,7 @@ impl SessionStore {
             version: 1,
             lock: None,
             workspace_refs: vec![],
-            workspace_data_dir: crate::paths::workspaces_dir()
-                .to_string_lossy()
-                .into_owned(),
+            workspace_data_dir: workspace_data_dir.to_string_lossy().into_owned(),
         };
         tracing::info!(session_id = %session.id, "session created");
         Self {
@@ -362,7 +361,7 @@ mod tests {
 
     #[tokio::test]
     async fn new_creates_session_with_id_and_version() {
-        let store = SessionStore::new();
+        let store = SessionStore::new(crate::paths::workspaces_dir());
         let session = store.session().await;
 
         assert!(session.id.starts_with("session-"));
@@ -375,7 +374,7 @@ mod tests {
 
     #[tokio::test]
     async fn update_session_increments_version() {
-        let store = SessionStore::new();
+        let store = SessionStore::new(crate::paths::workspaces_dir());
 
         let (updated, accepted) = store.update_session(vec![], None, "window-a", "conn-a").await;
         assert!(accepted);
@@ -384,7 +383,7 @@ mod tests {
 
     #[tokio::test]
     async fn update_session_version_match_accepted() {
-        let store = SessionStore::new();
+        let store = SessionStore::new(crate::paths::workspaces_dir());
 
         let (updated, accepted) = store.update_session(vec![], Some(1), "window-a", "conn-a").await;
         assert!(accepted);
@@ -393,7 +392,7 @@ mod tests {
 
     #[tokio::test]
     async fn update_session_version_mismatch_rejected() {
-        let store = SessionStore::new();
+        let store = SessionStore::new(crate::paths::workspaces_dir());
 
         let (returned, accepted) = store.update_session(vec![], Some(999), "window-a", "conn-a").await;
         assert!(!accepted);
@@ -402,7 +401,7 @@ mod tests {
 
     #[tokio::test]
     async fn update_stores_refs_verbatim() {
-        let store = SessionStore::new();
+        let store = SessionStore::new(crate::paths::workspaces_dir());
         let refs = vec![
             WorkspaceRef { id: "ws-1".into(), path: "/a".into() },
             WorkspaceRef { id: "ws-2".into(), path: "/b".into() },
@@ -424,7 +423,7 @@ mod tests {
 
     #[tokio::test]
     async fn broadcast_sends_to_watchers_not_sender() {
-        let store = SessionStore::new();
+        let store = SessionStore::new(crate::paths::workspaces_dir());
         let session = store.session().await;
 
         let (tx1, mut rx1) = mpsc::channel(16);
@@ -444,7 +443,7 @@ mod tests {
 
     #[tokio::test]
     async fn remove_watcher_stops_delivery() {
-        let store = SessionStore::new();
+        let store = SessionStore::new(crate::paths::workspaces_dir());
         let session = store.session().await;
 
         let (tx, mut rx) = mpsc::channel(16);
@@ -457,7 +456,7 @@ mod tests {
 
     #[tokio::test]
     async fn add_watcher_with_initial_sends_snapshot_then_updates_in_order() {
-        let store = SessionStore::new();
+        let store = SessionStore::new(crate::paths::workspaces_dir());
         let (tx, mut rx) = mpsc::channel(16);
 
         store.add_watcher_with_initial("w".into(), tx).await;
@@ -476,7 +475,7 @@ mod tests {
 
     #[tokio::test]
     async fn broadcast_keeps_watcher_when_channel_full() {
-        let store = SessionStore::new();
+        let store = SessionStore::new(crate::paths::workspaces_dir());
         let session = store.session().await;
 
         // Capacity-1 channel: the first broadcast fills it, the second hits Full.
@@ -494,7 +493,7 @@ mod tests {
 
     #[tokio::test]
     async fn broadcast_removes_watcher_when_channel_closed() {
-        let store = SessionStore::new();
+        let store = SessionStore::new(crate::paths::workspaces_dir());
         let session = store.session().await;
 
         let (tx, rx) = mpsc::channel(16);
@@ -514,7 +513,7 @@ mod tests {
 
     #[tokio::test]
     async fn pty_manager_accessible() {
-        let store = SessionStore::new();
+        let store = SessionStore::new(crate::paths::workspaces_dir());
         // PtyManager should be functional
         let sessions = store.pty_manager().list_sessions().await;
         assert!(sessions.is_empty());
@@ -524,7 +523,7 @@ mod tests {
 
     #[tokio::test]
     async fn lock_acquires_when_unlocked() {
-        let store = SessionStore::new();
+        let store = SessionStore::new(crate::paths::workspaces_dir());
 
         let (acquired, session) = store.lock_session("conn-a".into(), 60000).await;
         assert!(acquired);
@@ -536,7 +535,7 @@ mod tests {
 
     #[tokio::test]
     async fn lock_rejects_when_held_by_other() {
-        let store = SessionStore::new();
+        let store = SessionStore::new(crate::paths::workspaces_dir());
 
         let (acquired, _) = store.lock_session("conn-a".into(), 60000).await;
         assert!(acquired);
@@ -549,7 +548,7 @@ mod tests {
 
     #[tokio::test]
     async fn lock_reacquire_by_same_holder() {
-        let store = SessionStore::new();
+        let store = SessionStore::new(crate::paths::workspaces_dir());
 
         let (acquired, session1) = store.lock_session("conn-a".into(), 10000).await;
         assert!(acquired);
@@ -564,7 +563,7 @@ mod tests {
 
     #[tokio::test]
     async fn lock_succeeds_when_expired() {
-        let store = SessionStore::new();
+        let store = SessionStore::new(crate::paths::workspaces_dir());
 
         // Lock with 0ms TTL (immediately expired)
         let (acquired, _) = store.lock_session("conn-a".into(), 0).await;
@@ -578,7 +577,7 @@ mod tests {
 
     #[tokio::test]
     async fn lock_increments_version() {
-        let store = SessionStore::new();
+        let store = SessionStore::new(crate::paths::workspaces_dir());
         let session_before = store.session().await;
 
         let (acquired, session_after) = store.lock_session("conn-a".into(), 60000).await;
@@ -588,7 +587,7 @@ mod tests {
 
     #[tokio::test]
     async fn update_rejects_when_locked_by_other() {
-        let store = SessionStore::new();
+        let store = SessionStore::new(crate::paths::workspaces_dir());
 
         let (acquired, _) = store.lock_session("conn-a".into(), 60000).await;
         assert!(acquired);
@@ -602,7 +601,7 @@ mod tests {
 
     #[tokio::test]
     async fn update_accepts_for_lock_holder() {
-        let store = SessionStore::new();
+        let store = SessionStore::new(crate::paths::workspaces_dir());
 
         let (acquired, session) = store.lock_session("conn-a".into(), 60000).await;
         assert!(acquired);
@@ -617,7 +616,7 @@ mod tests {
 
     #[tokio::test]
     async fn update_skips_version_check_for_holder() {
-        let store = SessionStore::new();
+        let store = SessionStore::new(crate::paths::workspaces_dir());
 
         let (acquired, _) = store.lock_session("conn-a".into(), 60000).await;
         assert!(acquired);
@@ -631,7 +630,7 @@ mod tests {
 
     #[tokio::test]
     async fn unlock_releases_lock() {
-        let store = SessionStore::new();
+        let store = SessionStore::new(crate::paths::workspaces_dir());
 
         store.lock_session("conn-a".into(), 60000).await;
         let session = store.unlock_session("conn-a").await;
@@ -646,7 +645,7 @@ mod tests {
 
     #[tokio::test]
     async fn unlock_noop_for_non_holder() {
-        let store = SessionStore::new();
+        let store = SessionStore::new(crate::paths::workspaces_dir());
 
         store.lock_session("conn-a".into(), 60000).await;
         let session = store.unlock_session("conn-b").await;
@@ -657,7 +656,7 @@ mod tests {
 
     #[tokio::test]
     async fn unlock_increments_version() {
-        let store = SessionStore::new();
+        let store = SessionStore::new(crate::paths::workspaces_dir());
 
         let (_, lock_session) = store.lock_session("conn-a".into(), 60000).await;
         let session = store.unlock_session("conn-a").await;
@@ -666,7 +665,7 @@ mod tests {
 
     #[tokio::test]
     async fn session_snapshot_includes_lock_state() {
-        let store = SessionStore::new();
+        let store = SessionStore::new(crate::paths::workspaces_dir());
 
         store.lock_session("conn-a".into(), 60000).await;
         let session = store.session().await;

@@ -1,0 +1,28 @@
+[package]
+name = "treeterm-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "TreeTerm app logic without UI: daemon client, connections, wire formats, pure state machines."
+
+[dependencies]
+treeterm-proto.workspace = true
+tokio.workspace = true
+tonic.workspace = true
+tower.workspace = true
+hyper-util.workspace = true
+futures.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+libc.workspace = true
+tracing.workspace = true
+dirs = "6"
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true
