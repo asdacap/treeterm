@@ -291,6 +291,37 @@ impl WorkspaceStore {
         self.workspace.file.metadata.get("isFavourite").map(String::as_str) == Some("true")
     }
 
+    /// `promptHarness`: paste `text` into the workspace's first AI-harness tab (in tab
+    /// order) whose terminal is attached, press Enter, and show that tab.
+    pub fn prompt_harness(&mut self, text: &str, cx: &mut Context<Self>) -> Result<(), String> {
+        let target = self.workspace.file.app_states.iter().find_map(|(tab_id, tab)| {
+            let app = self.registry.get(&tab.application_id)?;
+            let AppKind::AiHarness { .. } = app.kind else {
+                return None;
+            };
+            match self.tabs.get(tab_id) {
+                Some(TabRef::Terminal(TerminalTab::Attached { model, .. })) => Some((tab_id.clone(), model.clone())),
+                Some(
+                    TabRef::Terminal(TerminalTab::Creating { .. } | TerminalTab::Failed(_))
+                    | TabRef::Files { .. }
+                    | TabRef::Editor { .. }
+                    | TabRef::Review { .. }
+                    | TabRef::Browser { .. },
+                )
+                | None => None,
+            }
+        });
+        let Some((tab_id, terminal)) = target else {
+            return Err("No AI harness is running in this workspace".to_owned());
+        };
+        terminal.update(cx, |terminal, cx| {
+            terminal.paste(text, cx);
+            terminal.send_unfocused(b"\r");
+        });
+        self.set_active_tab(&tab_id, cx);
+        Ok(())
+    }
+
     /// The status bar's "Auto-approve safe" switch, persisted per tab.
     pub fn set_auto_approve(&mut self, tab_id: &str, enabled: bool, cx: &mut Context<Self>) {
         self.update_tab_state(
@@ -583,9 +614,13 @@ impl WorkspaceStore {
             }
             AppKind::Files => {
                 let fs = self.conn.fs_client();
+                let exec: std::sync::Arc<dyn treeterm_core::exec::ExecApi> = std::sync::Arc::new(self.conn.exec_client());
                 let root = self.workspace.path.clone();
                 let state = tab.state.clone();
-                let model = cx.new(|cx| crate::file_browser::FileBrowser::new(fs, root, &state, cx));
+                let (workspace, favourites) = (cx.entity(), self.workspace.file.favourite_paths.clone());
+                let model = cx.new(|cx| {
+                    crate::file_browser::FileBrowser::new(fs, exec, root, &state, &workspace, favourites, cx)
+                });
                 let owned_tab = tab_id.to_owned();
                 let events = cx.subscribe(&model, move |store, _, event: &crate::file_browser::FileBrowserEvent, cx| {
                     let crate::file_browser::FileBrowserEvent::StateChanged(next) = event;
@@ -606,7 +641,8 @@ impl WorkspaceStore {
                 };
                 let (exec, git, path, state) =
                     (self.conn.exec_client(), self.conn.git(), self.workspace.path.clone(), tab.state.clone());
-                let model = cx.new(|cx| crate::review::ReviewModel::new(exec, git, path, base, &state, cx));
+                let workspace = cx.entity();
+                let model = cx.new(|cx| crate::review::ReviewModel::new(exec, git, path, base, &state, &workspace, cx));
                 let owned_tab = tab_id.to_owned();
                 let events = cx.subscribe(&model, move |store, _, event: &crate::review::ReviewEvent, cx| {
                     match event {
@@ -1066,6 +1102,31 @@ impl WorkspaceStore {
             self.delete_metadata("isFavourite", cx);
         } else {
             self.update_metadata("isFavourite", "true", cx);
+        }
+    }
+
+    /// The workspace's own favourite files and directories (workspace-relative).
+    pub fn favourite_paths(&self) -> &[String] {
+        &self.workspace.file.favourite_paths
+    }
+
+    /// `addFavouritePath`: one already covered by a favourite directory is not added.
+    pub fn add_favourite_path(&mut self, raw_path: &str, cx: &mut Context<Self>) {
+        let path = treeterm_core::files::normalize_favourite_path(raw_path);
+        if path.is_empty() || crate::file_browser::is_favourite_path(&path, &self.workspace.file.favourite_paths) {
+            return;
+        }
+        self.workspace.file.favourite_paths.push(path);
+        self.changed(cx);
+    }
+
+    /// `removeFavouritePath`: only a path the workspace itself lists.
+    pub fn remove_favourite_path(&mut self, raw_path: &str, cx: &mut Context<Self>) {
+        let path = treeterm_core::files::normalize_favourite_path(raw_path);
+        let before = self.workspace.file.favourite_paths.len();
+        self.workspace.file.favourite_paths.retain(|favourite| *favourite != path);
+        if self.workspace.file.favourite_paths.len() != before {
+            self.changed(cx);
         }
     }
 
