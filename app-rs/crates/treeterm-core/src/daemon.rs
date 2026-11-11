@@ -194,6 +194,21 @@ impl DaemonConnection {
         })
     }
 
+    /// Run commands on the daemon's host (`ExecStream`).
+    pub fn exec_client(&self) -> crate::exec::ExecClient {
+        crate::exec::ExecClient::new(self.rt.clone(), self.main.clone())
+    }
+
+    /// Files on the daemon's host (ReadFile/WriteFile/ReadDirectory/SearchFiles/...).
+    pub fn fs_client(&self) -> crate::fs::FsClient {
+        crate::fs::FsClient::new(self.rt.clone(), self.main.clone())
+    }
+
+    /// Git on the daemon's host, through its exec and file clients.
+    pub fn git(&self) -> crate::git::GitApi {
+        crate::git::GitApi::new(std::sync::Arc::new(self.exec_client()), std::sync::Arc::new(self.fs_client()))
+    }
+
     /// Attach to a PTY. See [`crate::pty`].
     pub fn attach_pty(&self, session_id: &str, kind: AttachKind) -> PtyAttachment {
         crate::pty::attach(&self.rt, self.main.clone(), session_id, kind)
