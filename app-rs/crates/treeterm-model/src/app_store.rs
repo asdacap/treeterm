@@ -60,6 +60,14 @@ impl AppStore {
         &self.state
     }
 
+    /// "Exit and Kill Daemon": stop the local daemon (and with it every PTY).
+    pub fn shutdown_daemon(&self, cx: &gpui_kit::App) -> Option<treeterm_core::rt::Fut<Result<(), treeterm_core::daemon::ApiError>>> {
+        match &self.state {
+            AppState::Connected(session) => Some(session.read(cx).connection().shutdown()),
+            AppState::StartingDaemon | AppState::Failed(_) => None,
+        }
+    }
+
     fn on_started(&mut self, result: Result<DaemonConnection, String>, cx: &mut Context<Self>) {
         self.state = match result {
             Ok(conn) => {

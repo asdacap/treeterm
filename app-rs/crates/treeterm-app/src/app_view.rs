@@ -14,6 +14,8 @@ use crate::theme::colors;
 use crate::tree_pane::{TreePane, WorkspaceSelected};
 
 pub struct AppView {
+    /// Holds keyboard focus when nothing inside does, so window-level shortcuts dispatch.
+    focus: gpui_kit::FocusHandle,
     /// Owned, not just observed: an observation does not keep the store alive, and dropping
     /// it cancels the daemon start-up and every watch it owns.
     _store: Entity<AppStore>,
@@ -54,6 +56,7 @@ impl AppView {
     pub fn new(store: Entity<AppStore>, cx: &mut Context<Self>) -> Self {
         cx.observe(&store, |view, store, cx| view.sync(&store, cx)).detach();
         let mut view = Self {
+            focus: cx.focus_handle(),
             _store: store.clone(),
             body: Body::StartingDaemon,
         };
@@ -128,7 +131,49 @@ impl Render for AppView {
                 h_flex().size_full().child(tree).child(pane).into_any_element()
             }
         };
-        div().size_full().bg(bg).text_color(fg).child(content)
+        if window.focused(cx).is_none() {
+            window.focus(&self.focus, cx);
+        }
+        div()
+            .size_full()
+            .track_focus(&self.focus)
+            .bg(bg)
+            .text_color(fg)
+            .on_action(|_: &crate::menus::Minimize, window, _| window.minimize_window())
+            .on_action(cx.listener(|view, action: &crate::menus::SwitchToTab1, w, cx| view.switch_tab(action, w, cx)))
+            .on_action(cx.listener(|view, action: &crate::menus::SwitchToTab2, w, cx| view.switch_tab(action, w, cx)))
+            .on_action(cx.listener(|view, action: &crate::menus::SwitchToTab3, w, cx| view.switch_tab(action, w, cx)))
+            .on_action(cx.listener(|view, action: &crate::menus::SwitchToTab4, w, cx| view.switch_tab(action, w, cx)))
+            .on_action(cx.listener(|view, action: &crate::menus::SwitchToTab5, w, cx| view.switch_tab(action, w, cx)))
+            .on_action(cx.listener(|view, action: &crate::menus::SwitchToTab6, w, cx| view.switch_tab(action, w, cx)))
+            .on_action(cx.listener(|view, action: &crate::menus::SwitchToTab7, w, cx| view.switch_tab(action, w, cx)))
+            .on_action(cx.listener(|view, action: &crate::menus::SwitchToTab8, w, cx| view.switch_tab(action, w, cx)))
+            .on_action(cx.listener(|view, action: &crate::menus::SwitchToTab9, w, cx| view.switch_tab(action, w, cx)))
+            .child(content)
+    }
+}
+
+impl AppView {
+    /// Cmd/Ctrl+N: the active workspace's Nth tab, in tab order.
+    fn switch_tab(&mut self, action: &dyn gpui_kit::Action, _window: &mut Window, cx: &mut Context<Self>) {
+        let Some(index) = crate::menus::tab_index(action) else {
+            return;
+        };
+        let Body::Connected(connected) = &mut self.body else {
+            return;
+        };
+        let ActiveView::Workspace(id) = &connected.active else {
+            return;
+        };
+        let Some(store) = connected.session.read(cx).workspace_store(id).cloned() else {
+            return;
+        };
+        let tab = store.read(cx).file().app_states.get_index(index).map(|(tab, _)| tab.clone());
+        if let Some(tab) = tab {
+            store.update(cx, |w, cx| w.set_active_tab(&tab, cx));
+            connected.focus_pending = true;
+            cx.notify();
+        }
     }
 }
 

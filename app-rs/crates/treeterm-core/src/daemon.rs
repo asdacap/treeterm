@@ -134,6 +134,20 @@ impl DaemonConnection {
         })
     }
 
+    /// Stop the daemon. It exits while answering, so a dropped connection counts as done.
+    pub fn shutdown(&self) -> Fut<Result<(), ApiError>> {
+        let mut client = self.main.clone();
+        self.rt.run(async move {
+            match unary(client.shutdown(Empty {})).await {
+                Ok(Empty {}) => Ok(()),
+                Err(ApiError::Status(status)) if status.code() == tonic::Code::Unavailable
+                    || status.code() == tonic::Code::Unknown
+                    || status.code() == tonic::Code::Internal => Ok(()),
+                Err(other) => Err(other),
+            }
+        })
+    }
+
     /// Attach to a PTY. See [`crate::pty`].
     pub fn attach_pty(&self, session_id: &str, kind: AttachKind) -> PtyAttachment {
         crate::pty::attach(&self.rt, self.main.clone(), session_id, kind)

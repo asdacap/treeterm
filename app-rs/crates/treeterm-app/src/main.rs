@@ -4,6 +4,7 @@ mod app_view;
 #[cfg(feature = "automation")]
 mod automation;
 mod daemon_binary;
+mod menus;
 mod terminal_element;
 mod terminal_view;
 mod theme;
@@ -78,6 +79,7 @@ fn main() {
         theme::install(cx);
         terminal_view::bind_keys(cx);
         let store = cx.new(|cx| AppStore::new(rt, spec, settings, cx));
+        menus::install(store.clone(), cx);
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
                 None,
