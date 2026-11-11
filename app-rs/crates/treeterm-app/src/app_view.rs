@@ -1815,6 +1815,10 @@ fn workspace_pane(
                 .on_click(cx.listener(move |view, _, _, cx| {
                     let (workspace, tab) = &select;
                     workspace.update(cx, |w, cx| w.set_active_tab(tab, cx));
+                    // Electron reloads a Review tab whenever it is shown again.
+                    if let Some(TabContent::Review(review)) = workspace.read(cx).tab_content(tab) {
+                        review.update(cx, |r, cx| r.refresh(cx));
+                    }
                     if let Some(connected) = view.current_mut() {
                         connected.focus_pending = true;
                     }

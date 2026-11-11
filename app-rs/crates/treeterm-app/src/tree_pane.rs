@@ -9,7 +9,7 @@ use gpui_kit::prelude::*;
 use gpui_kit::{AnyElement, ClickEvent, Context, Entity, EventEmitter, SharedString, Window, div, px};
 use treeterm_model::keybinding_store::KeybindingStore;
 use treeterm_core::tree::DropPosition;
-use treeterm_model::session_store::{AfterMerge, RemoveMode, SessionState, SessionStore, WorkspaceEntry};
+use treeterm_model::session_store::{RemoveMode, SessionState, SessionStore, WorkspaceEntry};
 
 use crate::theme::colors;
 use crate::ui;
@@ -708,31 +708,6 @@ pub(crate) fn confirm_remove(
     };
     ui::confirm(message, window, cx, move |_, cx| {
         session.update(cx, |s, cx| s.remove_workspace(&id, mode, cx));
-    });
-}
-
-/// Merging from the tree's menu (which Electron does from the Review tab, asking only about
-/// uncommitted work): asked in the same platform message box.
-pub(crate) fn confirm_merge(
-    session: Entity<SessionStore>,
-    id: String,
-    label: SharedString,
-    squash: bool,
-    after: AfterMerge,
-    window: &mut gpui_kit::Window,
-    cx: &mut gpui_kit::App,
-) {
-    let how = if squash { "squash-merged (staged, not committed)" } else { "merged" };
-    let then = match after {
-        AfterMerge::Remove => {
-            " Uncommitted changes will be auto-committed before merging; afterwards its worktree and branch are deleted."
-        }
-        AfterMerge::Keep => " Only committed changes are merged; the workspace stays.",
-    };
-    let message =
-        format!("Merge \"{label}\" into its parent? Its branch is {how} into the parent's branch.{then} Continue?");
-    ui::confirm(message, window, cx, move |_, cx| {
-        session.update(cx, |s, cx| s.merge_workspace(&id, squash, after, cx));
     });
 }
 
