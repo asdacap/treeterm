@@ -54,6 +54,16 @@ pub fn code_context(content: &str, line_number: u32) -> Option<Vec<CodeLine>> {
     )
 }
 
+/// The commented file's absolute path. Comment paths are workspace-relative, except those
+/// Electron's Files tab wrote, which are absolute already.
+pub fn comment_file(root: &str, file_path: &str) -> String {
+    if file_path.starts_with('/') {
+        file_path.to_owned()
+    } else {
+        format!("{}/{}", root.trim_end_matches('/'), file_path)
+    }
+}
+
 /// A commented file's text, for the code context. Unreadable files show no context.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum FileText {
@@ -175,7 +185,7 @@ impl CommentsModel {
         let missing: HashSet<String> =
             comments.into_iter().map(|c| c.file_path).filter(|path| !self.files.contains_key(path)).collect();
         for path in missing {
-            let absolute = format!("{}/{}", self.root.trim_end_matches('/'), path);
+            let absolute = comment_file(&self.root, &path);
             let read = self.fs.read_file(&self.root, &absolute, max_read_bytes_for(&absolute));
             self.files.insert(path.clone(), FileText::Loading);
             let owned = path.clone();
@@ -251,7 +261,7 @@ impl CommentsModel {
         let Some(workspace) = self.workspace.upgrade() else {
             return;
         };
-        let path = format!("{}/{}", self.root.trim_end_matches('/'), comment.file_path);
+        let path = comment_file(&self.root, &comment.file_path);
         let state = json!({ "selectedPath": path, "scrollToLine": comment.line_number });
         if workspace.update(cx, |w, cx| w.add_tab_with("filesystem", state, cx)).is_none() {
             tracing::error!("the file browser is not registered");
@@ -313,12 +323,19 @@ impl CommentsModel {
 
 /// `toLocaleString` of a comment's creation time.
 pub fn created_at(comment: &ReviewComment) -> String {
-    treeterm_core::clock::date_time(treeterm_core::clock::from_millis(comment.created_at))
+    treeterm_core::clock::locale_date_time(comment.created_at)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn comment_paths_are_relative_to_the_worktree_unless_absolute() {
+        assert_eq!(comment_file("/w/repo/", "src/a.rs"), "/w/repo/src/a.rs");
+        assert_eq!(comment_file("/w/repo", "src/a.rs"), "/w/repo/src/a.rs");
+        assert_eq!(comment_file("/w/repo", "/w/repo/src/a.rs"), "/w/repo/src/a.rs");
+    }
 
     #[test]
     fn code_context_surrounds_the_line_and_stops_at_the_file_edges() {

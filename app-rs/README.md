@@ -93,8 +93,8 @@ Done (tested against a real in-process daemon unless noted):
   names), activity states with transitions, unread attention markers with the ding.
 - **Files / editor (M6):** file tree with favourites, highlighted viewer, Markdown preview,
   images, PDF and 3D models (webview; three.js bundled by `assets/model-viewer/build.sh`),
-  download, search panel (in file / in repo), find, go to definition;
-  editor tab.
+  download, search panel (in file / in repo), find, go to definition, review comments
+  (click a line number; commented lines marked in the glyph margin); editor tab.
 - **Review (M7):** committed / uncommitted / commits views, stage/unstage/commit, inline
   comments (Electron's metadata format), viewed files, image diffs (before / after),
   prompting the AI harness; live merge
@@ -155,15 +155,23 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   Chromium colour-manages saturated colours (same tokens, different pixels).
 - GPUI Kit limits: tooltips are not the native macOS ones; dialog shadows are lighter; the
   diff view keeps 19.2px rows, its own fold rows and two columns for added/deleted files;
-  the editor has no minimap or between-line comment widgets; selects open a Kit menu, not
-  the native popup; textareas have no resize grip.
+  the editor has no minimap and cannot open space between lines, so the Files viewer lists
+  its file's review comments (and the comment box) in a panel under the editor instead of
+  Monaco's view zones; selects open a Kit menu, not the native popup; textareas have no
+  resize grip.
 - With the sidebar collapsed the header keeps clear of the macOS window buttons (Electron's
   title runs under them).
-- Not ported: inline review comments in the Files viewer gutter, Cmd+F in Review, the merge
-  output inside the Review tab (it shows over the workspace), Markdown rendering of `.md`
-  pages in the browser, and the remote Browser tab's Port Forward sub-tab.
+- Not ported: Cmd+F in Review, the merge output inside the Review tab (it shows over the
+  workspace), Review's favourite viewer (a favourite outside the diff opens in an Editor
+  tab, which takes no comments), Markdown rendering of `.md` pages in the browser, and the
+  remote Browser tab's Port Forward sub-tab.
 
 ## Known differences from Electron (deliberate)
+
+- Review comments made in the Files tab are saved with the workspace-relative path, as the
+  Review tab saves them (Electron's Files tab saves the absolute path), so they also show in
+  Review and can be pushed to GitHub. Comments with Electron's absolute paths still show in
+  the Files viewer and the Comments tab; Electron's Files tab does not show the relative ones.
 
 - Placeholders for refs another window removed are dropped with the ref.
 - A replayed OSC 52 copy or bell is ignored (it already happened when it first ran).

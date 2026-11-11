@@ -1,13 +1,13 @@
-//! The Files tab's search and go to definition, and the Review tab's comments, viewed files
-//! and prompts, against a real in-process daemon and real git repos.
+//! The Files tab's search, go to definition and comments, and the Review tab's comments,
+//! viewed files and prompts, against a real in-process daemon and real git repos.
 
 use gpui_kit::{AppContext as _, Entity, TestAppContext};
 use treeterm_core::review::{CommitAnchor, Freshness, LineAnchor, Resolution, Side};
 use treeterm_model::file_browser::{
-    DefinitionLookup, Favourites, FileBrowser, FileView, NAME_SEARCH_DEBOUNCE, NameResults, REPO_SEARCH_DEBOUNCE, RepoResults,
-    SearchPanel, SearchRow, Star,
+    Anchor, DefinitionLookup, Favourites, FileBrowser, FileView, LineDraft, NAME_SEARCH_DEBOUNCE, NameResults,
+    REPO_SEARCH_DEBOUNCE, RepoResults, SearchPanel, SearchRow, Star,
 };
-use treeterm_model::review::{Direction, Head, Notice, ReviewContent, ReviewModel};
+use treeterm_model::review::{Direction, GitOp, Head, Notice, ReviewContent, ReviewModel};
 use treeterm_model::session_store::{SessionState, SessionStore, WorkspaceEntry};
 use treeterm_model::settings_store::SettingsStore;
 use treeterm_model::workspace_store::{TabContent, WorkspaceStore};
@@ -345,6 +345,112 @@ fn favourites_are_starred_in_the_tree_and_listed_above_it(cx: &mut TestAppContex
     browser.update(cx, |b, cx| b.toggle_favourite(&readme, cx));
     assert_eq!(browser.read_with(cx, |b, _| b.favourites().clone()), Favourites::Empty);
     assert!(workspace.read_with(cx, |w, _| w.favourite_paths().is_empty()));
+}
+
+/// What the Files tab says about its comments, when a wait fails.
+fn comment_state(b: &FileBrowser, cx: &gpui_kit::App) -> String {
+    format!(
+        "anchor {:?}\ndraft {:?}\nadding {:?}\nnotice {:?}\ncomments {:?}",
+        b.anchor(),
+        b.comment_draft(),
+        b.adding_comment(),
+        b.comment_notice(),
+        b.file_comments(cx)
+    )
+}
+
+fn wait_files(cx: &mut TestAppContext, browser: &Entity<FileBrowser>, what: &str, done: impl Fn(&FileBrowser, &gpui_kit::App) -> bool) {
+    for _ in 0..1000 {
+        cx.run_until_parked();
+        if browser.read_with(cx, |b, cx| done(b, cx)) {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    panic!("{what} not reached:\n{}", browser.read_with(cx, comment_state));
+}
+
+#[gpui_kit::test]
+fn files_comments_are_made_on_a_line_shown_with_the_file_and_go_outdated(cx: &mut TestAppContext) {
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let repo = TempRepo::new(&h);
+    repo.write("src/a.rs", "one\ntwo\nthree\n");
+    repo.write("b.txt", "bee\n");
+    repo.commit_all("files");
+    let (_store, workspace, browser) = open_browser(cx, &h, &repo, "src/a.rs");
+    let path = format!("{}/src/a.rs", repo.root());
+    wait_files(cx, &browser, "HEAD read", |b, _| matches!(b.anchor(), Anchor::Head(_)));
+    let Anchor::Head(head) = browser.read_with(cx, |b, _| b.anchor().clone()) else { unreachable!() };
+    let committed = repo.git(&["rev-parse", "HEAD"]);
+    assert_eq!(head, committed.trim());
+
+    // A click on line 2's number starts a comment there; blank text is not saved.
+    browser.update(cx, |b, cx| b.start_comment(2, cx));
+    assert_eq!(browser.read_with(cx, |b, _| b.comment_draft().cloned()), Some(LineDraft { path: path.clone(), line_number: 2 }));
+    browser.update(cx, |b, cx| b.submit_comment("  ", cx));
+    assert!(browser.read_with(cx, |b, _| b.comment_draft().is_some()));
+    browser.update(cx, |b, cx| b.submit_comment(" why two? ", cx));
+    wait_files(cx, &browser, "comment saved", |b, _| b.comment_draft().is_none());
+    assert_eq!(browser.read_with(cx, |b, _| b.adding_comment().clone()), GitOp::Idle);
+
+    // Saved with the path the Review tab uses, on the working-tree side, tracking the line.
+    let comments = browser.read_with(cx, |b, cx| b.file_comments(cx).unwrap());
+    assert_eq!(comments.len(), 1);
+    let comment = comments[0].clone();
+    assert_eq!((comment.file_path.as_str(), comment.line_number, comment.text.as_str()), ("src/a.rs", 2, "why two?"));
+    assert_eq!(comment.side, Side::Modified);
+    assert_eq!(comment.commit, CommitAnchor::Head(head.clone()));
+    assert_eq!(comment.line, LineAnchor::Blamed(head.clone()));
+    assert_eq!((comment.freshness, comment.resolution), (Freshness::Current, Resolution::Open));
+
+    // Comments Electron's Files tab wrote (absolute paths) show with the file; other files' do not.
+    let mut stored: Vec<serde_json::Value> = serde_json::from_value(metadata(cx, &workspace, "reviewComments").unwrap()).unwrap();
+    let electron = |id: &str, file: &str| {
+        serde_json::json!({
+            "id": id, "filePath": file, "lineNumber": 3, "text": format!("from {id}"), "commitHash": head,
+            "lineCommitHash": null, "createdAt": 1, "isOutdated": false, "addressed": false, "side": "modified"
+        })
+    };
+    stored.push(electron("absolute", &path));
+    stored.push(electron("other", "b.txt"));
+    let raw = serde_json::Value::Array(stored).to_string();
+    workspace.update(cx, |w, cx| w.update_metadata("reviewComments", &raw, cx));
+    let shown: Vec<String> = browser.read_with(cx, |b, cx| b.file_comments(cx).unwrap()).into_iter().map(|c| c.id).collect();
+    assert_eq!(shown, vec![comment.id.clone(), "absolute".to_owned()]);
+
+    // Showing another file drops the draft; that file shows its own comments.
+    browser.update(cx, |b, cx| b.start_comment(1, cx));
+    let other = format!("{}/b.txt", repo.root());
+    browser.update(cx, |b, cx| b.open(&other, false, cx));
+    assert!(browser.read_with(cx, |b, _| b.comment_draft().is_none()));
+    wait_until(cx, &browser, |b| matches!(b.view(), FileView::Text { path, .. } if *path == other));
+    let shown: Vec<String> = browser.read_with(cx, |b, cx| b.file_comments(cx).unwrap()).into_iter().map(|c| c.id).collect();
+    assert_eq!(shown, vec!["other".to_owned()]);
+    browser.update(cx, |b, cx| b.open(&path, false, cx));
+    wait_until(cx, &browser, |b| matches!(b.view(), FileView::Text { path: shown, .. } if *shown == path));
+
+    // Committing a change to the line moves its blame: a Files tab opened later marks it outdated.
+    repo.write("src/a.rs", "one\nTWO\nthree\n");
+    repo.commit_all("shout");
+    let state = serde_json::json!({ "selectedPath": path, "expandedDirs": [] });
+    let tab = workspace.update(cx, |w, cx| w.add_tab_with("filesystem", state, cx)).unwrap();
+    let Some(TabContent::Files(later)) = workspace.read_with(cx, |w, _| w.tab_content(&tab)) else {
+        panic!("not a files tab");
+    };
+    wait_files(cx, &later, "outdated", |b, cx| {
+        b.file_comments(cx).unwrap().iter().any(|c| c.id == comment.id && c.freshness == Freshness::Outdated)
+    });
+    // The untracked one went outdated with `HEAD`.
+    let absolute = later.read_with(cx, |b, cx| b.file_comments(cx).unwrap()).into_iter().find(|c| c.id == "absolute").unwrap();
+    assert_eq!(absolute.freshness, Freshness::Outdated);
+
+    // Deleting removes it from the workspace.
+    browser.update(cx, |b, cx| b.delete_comment(&comment.id, cx));
+    assert_eq!(browser.read_with(cx, |b, _| b.comment_notice().clone()), Notice::Clear);
+    let left: Vec<String> = browser.read_with(cx, |b, cx| b.file_comments(cx).unwrap()).into_iter().map(|c| c.id).collect();
+    assert_eq!(left, vec!["absolute".to_owned()]);
 }
 
 // ---- review ----------------------------------------------------------------------------

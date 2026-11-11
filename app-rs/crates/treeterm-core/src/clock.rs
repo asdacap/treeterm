@@ -60,6 +60,22 @@ pub fn date_time(at: SystemTime) -> String {
     }
 }
 
+/// `new Date(millis).toLocaleString()` (en-US): `11/11/2026, 5:57:12 PM`, local time.
+pub fn locale_date_time(millis: i64) -> String {
+    match local(from_millis(millis)) {
+        Some(t) => {
+            let (hour, half) = match t.hour {
+                0 => (12, "AM"),
+                1..=11 => (t.hour, "AM"),
+                12 => (12, "PM"),
+                _ => (t.hour - 12, "PM"),
+            };
+            format!("{}/{}/{}, {hour}:{:02}:{:02} {half}", t.month, t.day, t.year, t.minute, t.second)
+        }
+        None => "?".to_owned(),
+    }
+}
+
 /// A JavaScript timestamp (milliseconds since the epoch) as a [`SystemTime`].
 pub fn from_millis(millis: i64) -> SystemTime {
     match u64::try_from(millis) {
@@ -83,6 +99,14 @@ mod tests {
         let full = date_time(now);
         assert!(full.ends_with(&text), "{full}");
         assert!(full.starts_with(&t.year.to_string()));
+    }
+
+    #[test]
+    fn locale_times_are_twelve_hour_without_date_padding() {
+        let text = locale_date_time(0);
+        assert!(text.ends_with(" AM") || text.ends_with(" PM"), "{text}");
+        assert!(!text.starts_with('0'), "{text}");
+        assert!(text.contains(", "), "{text}");
     }
 
     #[test]

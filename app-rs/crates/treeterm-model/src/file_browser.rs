@@ -15,6 +15,8 @@
 //! directories); the tree stars them and lists the files they name above the tree.
 //! Favourites a parent workspace lists are not inherited here (Electron's
 //! `getWorkspaceFavouritePaths` walks the ancestors, which this tab cannot see).
+//!
+//! Review comments on the shown file: [`comments`].
 
 use std::collections::HashMap;
 use std::ops::Range;
@@ -27,12 +29,17 @@ use serde_json::{Value, json};
 use treeterm_core::exec::{ExecApi, ExecError};
 use treeterm_core::files::{FavouriteFile, detect_monaco_language, normalize_favourite_path, resolve_favourite_files};
 use treeterm_core::fs::{FsClient, ReadOutcome};
+use treeterm_core::git::GitApi;
 use treeterm_core::search::{
     self, Completion, DefinitionLocation, RepoHit, RepoSearchEvent, RepoSearchTool,
 };
 use treeterm_proto::treeterm::FileEntry;
 
 use crate::workspace_store::WorkspaceStore;
+
+#[path = "file_browser_comments.rs"]
+pub mod comments;
+pub use comments::{Anchor, LineDraft};
 
 /// Text and images bigger than this are not shown until the user asks (Electron's
 /// `MAX_READ_FILE_BYTES`; PDFs and models get [`treeterm_core::files::max_read_bytes_for`]).
@@ -269,6 +276,8 @@ impl EventEmitter<FileBrowserEvent> for FileBrowser {}
 pub struct FileBrowser {
     fs: FsClient,
     exec: Arc<dyn ExecApi>,
+    /// `HEAD` and `git blame`, for review comments.
+    git: GitApi,
     root: String,
     listings: HashMap<String, Listing>,
     expanded: Vec<String>,
@@ -296,6 +305,7 @@ pub struct FileBrowser {
     _download: Option<Task<()>>,
     name_search: NameSearch,
     _name_search: Option<Task<()>>,
+    comments: comments::Comments,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -378,11 +388,14 @@ fn push_repo_rows(rows: &mut Vec<SearchRow>, hits: impl IntoIterator<Item = Repo
 }
 
 impl FileBrowser {
-    /// `state` is the tab's persisted `FilesystemState`; `favourite_paths` the workspace's
-    /// (it may be mid-update, so it is not read here).
+    /// `state` is the tab's persisted `FilesystemState`; `favourite_paths` and `in_repo`
+    /// (`isGitRepo`) the workspace's (it may be mid-update, so it is not read here).
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         fs: FsClient,
         exec: Arc<dyn ExecApi>,
+        git: GitApi,
+        in_repo: bool,
         root: String,
         state: &Value,
         workspace: &Entity<WorkspaceStore>,
@@ -403,6 +416,7 @@ impl FileBrowser {
         let mut browser = Self {
             fs,
             exec,
+            git,
             root: root.clone(),
             listings: HashMap::new(),
             expanded: expanded.clone(),
@@ -425,7 +439,9 @@ impl FileBrowser {
             _workspace: observe,
             name_search: NameSearch { query: String::new(), results: NameResults::Idle },
             _name_search: None,
+            comments: comments::Comments::new(in_repo),
         };
+        browser.refresh_anchor(cx);
         browser.resolve_favourites(cx);
         browser.load(root, cx);
         for dir in expanded {
@@ -595,6 +611,7 @@ impl FileBrowser {
 
     /// Show a file. `allow_large` reads past [`MAX_VIEW_BYTES`] ("Open anyway").
     pub fn open(&mut self, path: &str, allow_large: bool, cx: &mut Context<Self>) {
+        self.drop_draft_unless(path);
         self.selected = Some(path.to_owned());
         self.view = FileView::Loading(path.to_owned());
         self.reveal = None;

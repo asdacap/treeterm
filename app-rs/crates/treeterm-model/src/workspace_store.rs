@@ -720,8 +720,9 @@ impl WorkspaceStore {
                 let root = self.workspace.path.clone();
                 let state = tab.state.clone();
                 let (workspace, favourites) = (cx.entity(), self.workspace.file.favourite_paths.clone());
+                let (git, in_repo) = (self.conn.git(), self.workspace.file.is_git_repo);
                 let model = cx.new(|cx| {
-                    crate::file_browser::FileBrowser::new(fs, exec, root, &state, &workspace, favourites, cx)
+                    crate::file_browser::FileBrowser::new(fs, exec, git, in_repo, root, &state, &workspace, favourites, cx)
                 });
                 let owned_tab = tab_id.to_owned();
                 let events = cx.subscribe(&model, move |store, _, event: &crate::file_browser::FileBrowserEvent, cx| {

@@ -8,24 +8,36 @@
 //! In the viewer, Cmd/Ctrl+F opens the search panel with the selection, Cmd/Ctrl+click or
 //! F12 goes to the definition of the word under the cursor, and the context menu offers
 //! both.
+//!
+//! A click on a line number starts a review comment on that line. Commented lines are
+//! tinted with a bar in the glyph margin (Monaco's `.comment-line` / `.comment-glyph`);
+//! GPUI Kit's editor cannot open space between lines for Monaco's view zones, so the file's
+//! comments and the comment box sit in a panel under the editor, each headed by its line.
 
+use std::cell::Cell;
 use std::rc::Rc;
 
 use gpui_kit::assets::IconName;
 use gpui_kit::component::Icon;
 use gpui_kit::component::input::{
-    Copy as CopyText, Editor, EditorState, Escape, Input, InputEvent, InputState, Search, SelectAll,
+    Copy as CopyText, Editor, EditorState, Escape, GutterDecoration, Input, InputEvent, InputState, RangeDecoration,
+    RangeDecorationCollection, RangeDecorationStyle, Search, SelectAll, TextareaState,
 };
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    AnyElement, App, Context, DragMoveEvent, Entity, Focusable as _, FontWeight, Hsla, KeyBinding, ListAlignment, ListState,
-    MouseButton, MouseUpEvent, SharedString, Subscription, Window, actions, div, list, px, relative, rgb, rgba,
+    AnyElement, App, Bounds, Context, DragMoveEvent, Entity, Focusable as _, FontWeight, Hsla, KeyBinding, ListAlignment,
+    ListState, MouseButton, MouseUpEvent, Pixels, Point, SharedString, Subscription, Window, actions, div, list, px,
+    relative, rgb, rgba,
 };
+use treeterm_core::review::{Freshness, MetadataError, ReviewComment};
 use treeterm_core::files::{detect_monaco_language, favourite_file_name, max_read_bytes_for};
 use treeterm_model::file_browser::{
-    DefinitionLookup, Favourites, FileBrowser, FileView, Listing, NameResults, SearchPanel, SearchRow, Star,
+    DefinitionLookup, Favourites, FileBrowser, FileView, LineDraft, Listing, NameResults, SearchPanel, SearchRow, Star,
 };
+use treeterm_model::review::Notice;
+
+use crate::comment_ui::{CommentActions, Placement, comment_display, comment_input};
 
 use crate::theme::colors;
 use crate::ui;
@@ -59,6 +71,52 @@ fn glyph_strip(lines: usize, glyph_margin: bool) -> f32 {
     let monaco = if glyph_margin { 21. } else { 0. } + digits.max(5) as f32 * DIGIT + 26.;
     let gpui = 6. + 4. + digits.max(3) as f32 * DIGIT + 6. + 18.;
     (monaco - gpui).max(0.)
+}
+
+/// Where the code starts: GPUI Kit's gutter (34px plus the numbers) and the strip.
+fn gutter_width(lines: usize, glyph_margin: bool) -> f32 {
+    34. + (lines.max(1).ilog10() as usize + 1).max(3) as f32 * 8.43 + glyph_strip(lines, glyph_margin)
+}
+
+/// GPUI Kit's fold column and the 6px before it, at the gutter's right end.
+const FOLD_COLUMN: f32 = 24.;
+
+/// The 1-based line `offset` is on.
+fn line_at(text: &str, offset: usize) -> u32 {
+    let before = text.get(..offset.min(text.len())).unwrap_or(text);
+    u32::try_from(before.matches('\n').count() + 1).unwrap_or(u32::MAX)
+}
+
+/// The bytes of 1-based `line`, its newline included (so an empty line has a width);
+/// `None` past the end, and for the empty line after a final newline, which has no bytes
+/// to mark (an empty range would mark the boundary above it).
+fn line_bytes(text: &str, line: u32) -> Option<std::ops::Range<usize>> {
+    let mut start = 0;
+    for (index, row) in text.split('\n').enumerate() {
+        let end = (start + row.len() + 1).min(text.len());
+        if u32::try_from(index + 1).ok()? == line {
+            return (start < end).then_some(start..end);
+        }
+        start += row.len() + 1;
+    }
+    None
+}
+
+/// `.comment-line` and `.comment-line-outdated`, and the glyph margin's mark (Monaco's
+/// 💬 / ⚠️ `.comment-glyph`; GPUI Kit fills the whole strip, so it is toned down).
+fn comment_line_colors(freshness: Freshness) -> (Hsla, Hsla) {
+    match freshness {
+        Freshness::Current => (rgba(0x0078d41a).into(), rgba(0x0078d499).into()),
+        Freshness::Outdated => (rgba(0xf0a0001a).into(), rgba(0xf0a00099).into()),
+    }
+}
+
+/// The comment being written, and the box it is typed in.
+struct DraftInput {
+    draft: LineDraft,
+    input: Entity<TextareaState>,
+    text: String,
+    _events: Subscription,
 }
 
 /// Monaco's bracket pair colours (`editorBracketHighlight.foreground1..3`, cycling by depth,
@@ -181,7 +239,17 @@ pub struct FileBrowserView {
     hovered_row: Option<String>,
     /// The divider is being dragged (it stays accent-coloured).
     resizing: bool,
+    /// The editor's commented lines (`.comment-line`).
+    comment_lines: Option<RangeDecorationCollection>,
+    /// The file and lines the gutter and `comment_lines` mark now.
+    marked: (String, Vec<(u32, Freshness)>),
+    /// Where the editor was laid out, to tell a click on a line number.
+    editor_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
+    draft_input: Option<DraftInput>,
+    comments_scroll: gpui_kit::ScrollHandle,
     _observe: Subscription,
+    /// Review comments live in the workspace's metadata.
+    _workspace: Subscription,
 }
 
 /// GPUI Kit language name for a path, by extension or file name.
@@ -264,6 +332,7 @@ impl FileBrowserView {
         cx: &mut Context<Self>,
     ) -> Self {
         let observe = cx.observe(&model, |_, _, cx| cx.notify());
+        let comments = cx.observe(&workspace, |_, _, cx| cx.notify());
         Self {
             model,
             page: None,
@@ -283,7 +352,13 @@ impl FileBrowserView {
             tree_collapsed: false,
             hovered_row: None,
             resizing: false,
+            comment_lines: None,
+            marked: (String::new(), Vec::new()),
+            editor_bounds: Rc::new(Cell::new(None)),
+            draft_input: None,
+            comments_scroll: gpui_kit::ScrollHandle::new(),
             _observe: observe,
+            _workspace: comments,
         }
     }
 
@@ -327,6 +402,8 @@ impl FileBrowserView {
         let editor = cx.new(|cx| EditorState::new(window, cx).language(language).searchable(false).default_value(text));
         self.gutter = Some(monaco_gutter(&editor, true, cx));
         self.brackets = Some(editor.update(cx, |editor, cx| editor.create_decorations_collection(brackets, cx)));
+        self.comment_lines = Some(editor.update(cx, |editor, cx| editor.create_range_decorations_collection(Vec::new(), cx)));
+        self.marked = (String::new(), Vec::new());
         self.editor = Some((path.to_owned(), editor.clone()));
         editor
     }
@@ -426,21 +503,42 @@ impl FileBrowserView {
         self.model.update(cx, |m, cx| m.go_to_definition(offset, cx));
     }
 
-    /// Cmd/Ctrl+click: the press already put the cursor on the clicked word.
+    /// Cmd/Ctrl+click goes to the definition, a click on a line number starts a comment
+    /// there (`GUTTER_LINE_NUMBERS`): the press already put the cursor on the clicked word, or
+    /// at the start of the clicked line.
     fn on_editor_mouse_up(&mut self, event: &MouseUpEvent, _: &mut Window, cx: &mut Context<Self>) {
-        if !event.modifiers.secondary(cx) {
-            return;
-        }
         let Some(editor) = self.shown_editor(cx) else {
             return;
         };
-        let (selected, offset) = {
+        let (selected, offset, lines) = {
             let editor = editor.read(cx);
-            (editor.selected_range(), editor.cursor())
+            (editor.selected_range(), editor.cursor(), gpui_kit::component::input::RopeExt::lines_len(editor.text()))
         };
-        if selected.is_empty() {
-            self.model.update(cx, |m, cx| m.go_to_definition(offset, cx));
+        if !selected.is_empty() {
+            return;
         }
+        if event.modifiers.secondary(cx) {
+            self.model.update(cx, |m, cx| m.go_to_definition(offset, cx));
+            return;
+        }
+        if event.click_count != 1 || !self.on_line_numbers(event.position, lines) {
+            return;
+        }
+        let FileView::Text { text, .. } = self.model.read(cx).view() else {
+            return;
+        };
+        let line = line_at(text, offset);
+        self.model.update(cx, |m, cx| m.start_comment(line, cx));
+    }
+
+    /// Whether `position` is on the editor's glyph margin or line numbers (left of the fold
+    /// column).
+    fn on_line_numbers(&self, position: Point<Pixels>, lines: usize) -> bool {
+        let Some(bounds) = self.editor_bounds.get() else {
+            return false;
+        };
+        let x = f32::from(position.x - bounds.origin.x);
+        bounds.contains(&position) && x < gutter_width(lines, true) - FOLD_COLUMN
     }
 
     /// Select what the model asked to reveal, once the editor has a layout to scroll.
@@ -1126,37 +1224,229 @@ impl FileBrowserView {
         frame.child(header).child(div().flex_1().min_h_0().overflow_hidden().child(body)).into_any_element()
     }
 
-    /// The read-only editor (Monaco: 14px Menlo, 21px rows, 8px above the first line).
+    /// The read-only editor (Monaco: 14px Menlo, 21px rows, 8px above the first line), and
+    /// the file's review comments under it.
     fn text_body(&mut self, path: &str, text: &str, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let editor = self.editor_for(path, text, window, cx);
         // Monaco shows the search panel's matches only by selecting the chosen one.
         self.apply_reveal(&editor, window, cx);
         let overlay = self.definition_overlay(cx);
+        let comments = self.model.read(cx).file_comments(cx);
+        self.mark_comment_lines(path, text, comments.as_deref().unwrap_or_default(), cx);
+        let panel = self.comments_panel(path, comments, window, cx);
+        let bounds = self.editor_bounds.clone();
+        let measure = gpui_kit::canvas(move |b, _, _| bounds.set(Some(b)), |_, _, _, _| {}).absolute().size_full();
         v_flex()
             .size_full()
-            .key_context(VIEWER_CONTEXT)
-            .on_action(cx.listener(Self::on_go_to_definition))
-            .on_action(cx.listener(Self::on_search_word))
-            .children(overlay)
             .child(
-                div().flex_1().min_h_0().on_mouse_up(MouseButton::Left, cx.listener(Self::on_editor_mouse_up)).child(
-                    Editor::new(&editor)
-                        .readonly(true)
-                        .bordered(false)
-                        .h_full()
-                        .font_family(MONO)
-                        .text_size(px(14.))
-                        .context_menu(|menu, _, _| {
-                            menu.menu("Go to Definition", Box::new(GoToDefinition))
-                                .separator()
-                                .menu("Copy", Box::new(CopyText))
-                                .menu("Search", Box::new(SearchWord))
-                                .separator()
-                                .menu("Select All", Box::new(SelectAll))
-                        }),
-                ),
+                v_flex()
+                    .flex_1()
+                    .min_h_0()
+                    .key_context(VIEWER_CONTEXT)
+                    .on_action(cx.listener(Self::on_go_to_definition))
+                    .on_action(cx.listener(Self::on_search_word))
+                    .children(overlay)
+                    .child(
+                        div()
+                            .relative()
+                            .flex_1()
+                            .min_h_0()
+                            .on_mouse_up(MouseButton::Left, cx.listener(Self::on_editor_mouse_up))
+                            .child(measure)
+                            .child(
+                                Editor::new(&editor)
+                                    .readonly(true)
+                                    .bordered(false)
+                                    .h_full()
+                                    .font_family(MONO)
+                                    .text_size(px(14.))
+                                    .context_menu(|menu, _, _| {
+                                        menu.menu("Go to Definition", Box::new(GoToDefinition))
+                                            .separator()
+                                            .menu("Copy", Box::new(CopyText))
+                                            .menu("Search", Box::new(SearchWord))
+                                            .separator()
+                                            .menu("Select All", Box::new(SelectAll))
+                                    }),
+                            ),
+                    ),
             )
+            .children(panel)
             .into_any_element()
+    }
+
+    /// Tint the commented lines and mark them in the glyph margin, when they change.
+    fn mark_comment_lines(&mut self, path: &str, text: &str, comments: &[ReviewComment], cx: &mut Context<Self>) {
+        let mut marks: Vec<(u32, Freshness)> = comments.iter().map(|c| (c.line_number, c.freshness)).collect();
+        marks.sort_unstable_by_key(|(line, freshness)| (*line, *freshness == Freshness::Current));
+        marks.dedup_by_key(|(line, _)| *line);
+        if self.marked.0 == path && self.marked.1 == marks {
+            return;
+        }
+        let (Some(gutter), Some(lines)) = (&self.gutter, &self.comment_lines) else {
+            return;
+        };
+        let spans: Vec<(std::ops::Range<usize>, Freshness)> =
+            marks.iter().filter_map(|(line, freshness)| Some((line_bytes(text, *line)?, *freshness))).collect();
+        gutter.set(
+            spans.iter().map(|(range, freshness)| GutterDecoration::new(range.clone()).with_color(comment_line_colors(*freshness).1)).collect(),
+            cx,
+        );
+        lines.set(
+            spans
+                .iter()
+                .map(|(range, freshness)| {
+                    RangeDecoration::new(range.clone())
+                        .with_style(RangeDecorationStyle::Fill)
+                        .with_color(comment_line_colors(*freshness).0)
+                })
+                .collect(),
+            cx,
+        );
+        self.marked = (path.to_owned(), marks);
+    }
+
+    /// The draft's comment box, made when the draft changes.
+    fn draft_box(&mut self, draft: &LineDraft, window: &mut Window, cx: &mut Context<Self>) -> (Entity<TextareaState>, bool) {
+        if let Some(shown) = &self.draft_input
+            && shown.draft == *draft
+        {
+            return (shown.input.clone(), !shown.text.trim().is_empty());
+        }
+        let input = cx.new(|cx| {
+            TextareaState::new(window, cx).placeholder("Add your comment... (Cmd/Ctrl+Enter to submit, Esc to cancel)")
+        });
+        let events = cx.subscribe_in(&input, window, |view, input, event: &InputEvent, _, cx| match event {
+            InputEvent::PressEnter { secondary: true, .. } => {
+                let text = input.read(cx).value().to_string();
+                view.model.update(cx, |m, cx| m.submit_comment(&text, cx));
+            }
+            InputEvent::Change => {
+                if let Some(draft) = &mut view.draft_input {
+                    draft.text = input.read(cx).value().to_string();
+                }
+                cx.notify();
+            }
+            InputEvent::PressEnter { .. } | InputEvent::Focus | InputEvent::Blur => {}
+        });
+        input.update(cx, |input, cx| input.focus(window, cx));
+        self.draft_input = Some(DraftInput { draft: draft.clone(), input: input.clone(), text: String::new(), _events: events });
+        (input, false)
+    }
+
+    /// The file's review comments, grouped by line (`.inline-comment-display-group`), with
+    /// the comment box (`.inline-comment-zone`) first; nothing while there are neither.
+    fn comments_panel(
+        &mut self,
+        path: &str,
+        comments: Result<Vec<ReviewComment>, MetadataError>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let c = colors(cx);
+        let (border, accent, secondary, bg_secondary) = (c.border, c.accent, c.text_secondary, c.bg_secondary);
+        let (draft, adding, notice) = {
+            let model = self.model.read(cx);
+            (model.comment_draft().filter(|d| d.path == path).cloned(), model.adding_comment().clone(), model.comment_notice().clone())
+        };
+        let comments = match comments {
+            Ok(comments) => comments,
+            Err(error) => {
+                return Some(
+                    div().px(px(12.)).py(px(8.)).border_t_1().border_color(border).child(ui::viewer_error(error.to_string())).into_any_element(),
+                );
+            }
+        };
+        let notice = match notice {
+            Notice::Clear => None,
+            Notice::Error(error) => Some(error),
+        };
+        let draft = match draft {
+            Some(draft) => Some(draft),
+            None => {
+                self.draft_input = None;
+                None
+            }
+        };
+        if comments.is_empty() && draft.is_none() && notice.is_none() {
+            return None;
+        }
+        let (delete, cancel, submit, reveal) = (self.model.clone(), self.model.clone(), self.model.clone(), self.model.clone());
+        let shown = treeterm_core::search::to_workspace_relative(self.model.read(cx).root(), path).to_owned();
+        let actions = CommentActions {
+            delete: Rc::new(move |id, cx| delete.update(cx, |m, cx| m.delete_comment(id, cx))),
+            cancel: Rc::new(move |cx| cancel.update(cx, |m, cx| m.cancel_comment(cx))),
+            submit: Rc::new(move |text, cx| submit.update(cx, |m, cx| m.submit_comment(text, cx))),
+        };
+        let placement = Placement::Viewer {
+            reveal: Rc::new(move |line, cx| reveal.update(cx, |m, cx| m.open_location(&shown, line as usize, 1, 0, cx))),
+        };
+        let draft_zone = draft.map(|draft| {
+            let (input, has_text) = self.draft_box(&draft, window, cx);
+            let label = format!("Comment on line {}", draft.line_number);
+            div()
+                .mx(px(8.))
+                .my(px(4.))
+                .p(px(12.))
+                .rounded(px(4.))
+                .border_1()
+                .border_color(accent)
+                .bg(bg_secondary)
+                .shadow_md()
+                .child(comment_input(&input, has_text, label, &adding, &actions, window, cx))
+                .into_any_element()
+        });
+        let mut lines: Vec<(u32, Vec<ReviewComment>)> = Vec::new();
+        for comment in comments {
+            match lines.iter_mut().find(|(line, _)| *line == comment.line_number) {
+                Some((_, group)) => group.push(comment),
+                None => lines.push((comment.line_number, vec![comment])),
+            }
+        }
+        lines.sort_by_key(|(line, _)| *line);
+        let count: usize = lines.iter().map(|(_, group)| group.len()).sum();
+        let groups = lines.into_iter().map(|(line, group)| {
+            v_flex()
+                .id(SharedString::from(format!("comment-group-{line}")))
+                .gap(px(4.))
+                .mx(px(8.))
+                .my(px(4.))
+                .px(px(8.))
+                .py(px(2.))
+                .rounded(px(4.))
+                .border_1()
+                .border_color(border)
+                .bg(bg_secondary)
+                .children(group.iter().map(|comment| comment_display(comment, &placement, &actions, cx)))
+                .into_any_element()
+        });
+        let title = h_flex()
+            .flex_shrink_0()
+            .gap(px(6.))
+            .px(px(12.))
+            .py(px(6.))
+            .text_size(px(11.))
+            .font_weight(FontWeight::SEMIBOLD)
+            .text_color(secondary)
+            .child(format!("REVIEW COMMENTS ({count})"));
+        let body = v_flex()
+            .pb(px(4.))
+            .children(draft_zone)
+            .children(groups)
+            .when_some(notice, |d, error| {
+                d.child(div().mx(px(12.)).my(px(4.)).text_size(px(12.)).text_color(rgb(0xf85149)).child(error))
+            });
+        Some(
+            v_flex()
+                .flex_shrink_0()
+                .max_h(relative(0.4))
+                .border_t_1()
+                .border_color(border)
+                .bg(colors(cx).bg_primary)
+                .child(title)
+                .child(div().flex_1().min_h_0().child(ui::scroll_area("file-comments", &self.comments_scroll, body, cx)))
+                .into_any_element(),
+        )
     }
 
     // ---- search panel ------------------------------------------------------------------
@@ -1428,11 +1718,26 @@ mod tests {
     }
 
     #[test]
+    fn comment_lines_are_found_by_offset_and_number() {
+        let text = "one\n\nthree";
+        assert_eq!(line_at(text, 0), 1);
+        assert_eq!(line_at(text, 4), 2);
+        assert_eq!(line_at(text, 5), 3);
+        assert_eq!(line_at(text, 99), 3);
+        assert_eq!(line_bytes(text, 1), Some(0..4));
+        assert_eq!(line_bytes(text, 2), Some(4..5));
+        assert_eq!(line_bytes(text, 3), Some(5..10));
+        assert_eq!(line_bytes(text, 4), None);
+        assert_eq!(line_bytes(text, 0), None);
+        // The empty line after a final newline has nothing to mark.
+        assert_eq!(line_bytes("one\n", 1), Some(0..4));
+        assert_eq!(line_bytes("one\n", 2), None);
+    }
+
+    #[test]
     fn the_glyph_strip_makes_up_monacos_gutter() {
         // GPUI Kit's gutter is 34px plus the numbers; the strip brings it to Monaco's.
-        let gutter = |lines: usize, glyph: bool| {
-            34. + (lines.max(1).ilog10() as usize + 1).max(3) as f32 * 8.43 + glyph_strip(lines, glyph)
-        };
+        let gutter = gutter_width;
         assert!((gutter(18, true) - 89.15).abs() < 0.01);
         assert!((gutter(500, false) - 68.15).abs() < 0.01);
         // Monaco's numbers stay 5 digits wide until there are more lines than that.

@@ -9,6 +9,7 @@ mod remote_dir_dialog;
 mod session_info_view;
 mod child_dialog;
 mod cli;
+mod comment_ui;
 #[cfg(feature = "automation")]
 mod automation;
 mod browser_view;

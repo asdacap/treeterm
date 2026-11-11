@@ -11,18 +11,19 @@ use gpui_kit::component::diff::{
     Diff, DiffAnnotation, DiffChangeIndicator, DiffDecoration, DiffEvent, DiffFile, DiffHunkSeparator, DiffLinePosition,
     DiffLineRange, DiffMode, DiffSide, DiffState,
 };
-use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
+use gpui_kit::component::input::{InputEvent, TextareaState};
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    AnyElement, App, Bounds, ClickEvent, Context, Element, ElementId, GlobalElementId, InspectorElementId, LayoutId, Pixels, Entity, FontWeight, Focusable as _, MouseButton, SharedString, Subscription,
-    WeakEntity, Window, div, px, rgb, rgba,
+    AnyElement, App, Bounds, ClickEvent, Context, Element, ElementId, GlobalElementId, InspectorElementId, LayoutId, Pixels, Entity, MouseButton, SharedString, Subscription,
+    WeakEntity, Window, div, px, rgb,
 };
 use treeterm_core::git::{FileChangeStats, FileChangeStatus, Staging, UncommittedFile};
-use treeterm_core::review::{Freshness, ReviewComment, Side};
+use treeterm_core::review::{ReviewComment, Side};
 use treeterm_model::review::{CommentDraft, GitOp, ImageSides, ReviewModel, StageTarget};
 
 use super::ReviewView;
+use crate::comment_ui::{CommentActions, Placement, comment_display, comment_input};
 use super::parts::{change_stats, checkbox, outline_button, plain_icon, spinner, status_badge};
 use crate::file_browser_view::language_for;
 use crate::theme::colors;
@@ -681,156 +682,29 @@ fn comment_group(
     window: &mut Window,
     cx: &mut App,
 ) -> AnyElement {
-    let c = colors(cx);
-    let (secondary, primary, tertiary, border, hover, accent, bg_primary) =
-        (c.text_secondary, c.text_primary, c.bg_tertiary, c.border, c.bg_hover, c.accent, c.bg_primary);
+    let (delete, cancel, submit) = (model.clone(), model.clone(), model.clone());
+    let actions = CommentActions {
+        delete: Rc::new(move |id, cx| delete.update(cx, |m, cx| m.delete_comment(id, cx))),
+        cancel: Rc::new(move |cx| cancel.update(cx, |m, cx| m.cancel_comment(cx))),
+        submit: Rc::new(move |text, cx| submit.update(cx, |m, cx| m.submit_comment(text, cx))),
+    };
     // Over GPUI Kit's annotation padding; its top border is `.pierre-diff-annotation`'s.
     let pad = window.rem_size() * 0.75;
     // Pierre's annotations inherit its monospace font; buttons keep the UI font.
-    let ui_font = gpui_kit::component::ActiveTheme::theme(cx).font_family.clone();
-    let mut group = v_flex().mx(-pad).my(-pad).px(px(8.)).py(px(4.)).bg(c.bg_secondary).font_family(super::parts::MONO);
-    for comment in comments {
-        let outdated = comment.freshness == Freshness::Outdated;
-        let delete = |id: String, model: Entity<ReviewModel>| {
-            div()
-                .id(SharedString::from(format!("delete-comment-{id}")))
-                .font_family(ui_font.clone())
-                .size(px(20.))
-                .flex_shrink_0()
-                .flex()
-                .items_center()
-                .justify_center()
-                .rounded(px(4.))
-                .text_size(px(18.))
-                .text_color(secondary)
-                .cursor_pointer()
-                .hover(move |d| d.bg(hover).text_color(rgb(0xf14c4c)))
-                .child("×")
-                .on_click(move |_, _, cx| model.update(cx, |m, cx| m.delete_comment(&id, cx)))
-        };
-        let card = v_flex()
-            .mb(px(8.))
-            .p(px(12.))
-            .rounded(px(4.))
-            .border_1()
-            .border_color(if outdated { rgb(0xf0a000).into() } else { border })
-            .bg(if outdated { rgba(0xf0a0000d).into() } else { tertiary })
-            .when(outdated, |d| {
-                d.child(
-                    h_flex()
-                        .gap(px(8.))
-                        .items_center()
-                        .mb(px(8.))
-                        .text_size(px(12.))
-                        .child(
-                            div()
-                                .px(px(6.))
-                                .py(px(2.))
-                                .rounded(px(3.))
-                                .bg(rgb(0xf0a000))
-                                .text_color(rgb(0x1e1e1e))
-                                .text_size(px(10.))
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .child("OUTDATED"),
-                        )
-                        .child(div().ml_auto().child(delete(comment.id.clone(), model.clone()))),
-                )
-            })
-            .child(
-                h_flex()
-                    .items_start()
-                    .mb(px(8.))
-                    .text_size(px(13.))
-                    .line_height(gpui_kit::relative(1.5))
-                    .text_color(primary)
-                    .child(div().flex_1().min_w_0().child(comment.text.clone()))
-                    .when(!outdated, |d| d.child(div().ml(px(8.)).child(delete(comment.id.clone(), model.clone())))),
-            )
-            .child(div().text_size(px(11.)).text_color(secondary).child(locale_date_time(comment.created_at)));
-        group = group.child(card);
+    let group = v_flex()
+        .mx(-pad)
+        .my(-pad)
+        .px(px(8.))
+        .py(px(4.))
+        .bg(colors(cx).bg_secondary)
+        .font_family(super::parts::MONO)
+        .children(comments.iter().map(|comment| comment_display(comment, &Placement::Diff, &actions, cx)));
+    match input {
+        Some((input, has_text)) => group
+            .child(comment_input(&input, has_text, draft_label.unwrap_or_default(), adding, &actions, window, cx))
+            .into_any_element(),
+        None => group.into_any_element(),
     }
-    if let Some((input, has_text)) = input {
-        let (save, cancel, text) = (model.clone(), model.clone(), input.clone());
-        let saving = *adding == GitOp::Running;
-        let enabled = has_text && !saving;
-        let focused = input.read(cx).focus_handle(cx).is_focused(window);
-        group = group.child(
-            v_flex()
-                .child(div().mb(px(8.)).text_size(px(13.)).text_color(secondary).child(draft_label.unwrap_or_default()))
-                .child(
-                    div()
-                        .on_key_down(move |event: &gpui_kit::KeyDownEvent, _, cx| {
-                            if event.keystroke.key == "escape" {
-                                cancel.update(cx, |m, cx| m.cancel_comment(cx));
-                            }
-                        })
-                        .child(
-                            Textarea::new(&input)
-                                .appearance(false)
-                                .w_full()
-                                .min_h(px(60.))
-                                .px(px(12.))
-                                .py(px(8.))
-                                .text_size(px(13.))
-                                .bg(bg_primary)
-                                .border_1()
-                                .border_color(if focused { accent } else { border })
-                                .rounded(px(4.)),
-                        ),
-                )
-                .child(
-                    h_flex()
-                        .gap(px(8.))
-                        .mt(px(12.))
-                        .child(
-                            div()
-                                .id("comment-cancel")
-                                .font_family(ui_font.clone())
-                                .px(px(16.))
-                                .py(px(6.))
-                                .rounded(px(4.))
-                                .text_size(px(13.))
-                                .bg(tertiary)
-                                .text_color(primary)
-                                .cursor_pointer()
-                                .hover(move |d| d.bg(hover))
-                                .child("Cancel")
-                                .on_click({
-                                    let model = model.clone();
-                                    move |_, _, cx| model.update(cx, |m, cx| m.cancel_comment(cx))
-                                }),
-                        )
-                        .child(
-                            div()
-                                .id("comment-submit")
-                                .font_family(ui_font.clone())
-                                .px(px(16.))
-                                .py(px(6.))
-                                .rounded(px(4.))
-                                .text_size(px(13.))
-                                .bg(accent)
-                                .text_color(gpui_kit::white())
-                                .when(!enabled, |d| d.opacity(0.5))
-                                .when(enabled, |d| d.cursor_pointer().hover(|d| d.bg(rgb(0x006cbf))))
-                                .child("Add Comment")
-                                .when(enabled, |d| {
-                                    d.on_click(move |_, _, cx| {
-                                        let text = text.read(cx).value().to_string();
-                                        save.update(cx, |m, cx| m.submit_comment(&text, cx));
-                                    })
-                                }),
-                        ),
-                )
-                .when_some(
-                    match adding {
-                        GitOp::Failed(message) => Some(message.clone()),
-                        GitOp::Idle | GitOp::Running => None,
-                    },
-                    |d, message| d.child(div().mt(px(8.)).text_size(px(12.)).text_color(rgb(0xf85149)).child(message)),
-                ),
-        );
-    }
-    group.into_any_element()
 }
 
 /// An ISO-8601 time (`git log %aI`: `2026-11-11T17:57:00+08:00`) as milliseconds since the
@@ -876,22 +750,6 @@ pub fn locale_date(iso: &str) -> String {
     }
 }
 
-/// `new Date(ms).toLocaleString()` (en-US): `11/11/2026, 5:57:12 PM`, local time.
-pub fn locale_date_time(millis: i64) -> String {
-    match treeterm_core::clock::local(treeterm_core::clock::from_millis(millis)) {
-        Some(t) => {
-            let (hour, half) = match t.hour {
-                0 => (12, "AM"),
-                1..=11 => (t.hour, "AM"),
-                12 => (12, "PM"),
-                _ => (t.hour - 12, "PM"),
-            };
-            format!("{}/{}/{}, {hour}:{:02}:{:02} {half}", t.month, t.day, t.year, t.minute, t.second)
-        }
-        None => "?".to_owned(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -910,7 +768,5 @@ mod tests {
         assert!(date.ends_with("/2026"), "{date}");
         assert!(!date.starts_with('0'), "{date}");
         assert_eq!(locale_date("garbage"), "garbage");
-        let time = locale_date_time(0);
-        assert!(time.ends_with(" AM") || time.ends_with(" PM"), "{time}");
     }
 }
