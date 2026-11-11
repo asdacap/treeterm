@@ -1,0 +1,181 @@
+{
+  "terminal": {
+    "fontSize": 13.5,
+    "fontFamily": "'JetBrains Mono', Menlo, monospace",
+    "cursorStyle": "bar",
+    "cursorBlink": false,
+    "showRawChars": true,
+    "allowOsc52Clipboard": false,
+    "maxCols": 200,
+    "instances": [
+      {
+        "id": "term-1",
+        "name": "Zsh",
+        "icon": ">",
+        "startupCommand": "zsh -l",
+        "isDefault": true,
+        "futureInstanceKey": "kept"
+      }
+    ],
+    "lineHeight": 1.2
+  },
+  "sandbox": {
+    "enabledByDefault": true,
+    "allowNetworkByDefault": false
+  },
+  "aiHarness": {
+    "instances": [
+      {
+        "id": "claude",
+        "name": "Claude",
+        "icon": "✦",
+        "command": "claude",
+        "isDefault": true,
+        "enableSandbox": true,
+        "allowNetwork": false,
+        "backgroundColor": "#000000",
+        "disableScrollbar": true,
+        "keepOnExit": true,
+        "env": {
+          "FUTURE": [
+            1,
+            2
+          ]
+        }
+      }
+    ]
+  },
+  "customRunner": {
+    "instances": [
+      {
+        "id": "rider",
+        "name": "Rider",
+        "icon": "▶",
+        "commandTemplate": "rider {{workspace_path}}",
+        "isDefault": false
+      }
+    ]
+  },
+  "webApp": {
+    "instances": [
+      {
+        "id": "next",
+        "name": "Next",
+        "icon": "🌐",
+        "command": "npm run dev -- -p $PORT",
+        "isDefault": true,
+        "keepOnExit": false
+      }
+    ]
+  },
+  "browser": {
+    "instances": [
+      {
+        "id": "graf",
+        "name": "Grafana",
+        "icon": "📈",
+        "url": "http://localhost:3000/",
+        "isDefault": false
+      }
+    ]
+  },
+  "notifications": {
+    "soundEnabled": false,
+    "volume": 0.5
+  },
+  "appearance": {
+    "theme": "system"
+  },
+  "prefixMode": {
+    "enabled": false,
+    "prefixKey": "Control+A",
+    "timeout": 2500
+  },
+  "keybindings": {
+    "newTab": "t",
+    "closeTab": "q",
+    "nextTab": "l",
+    "prevTab": "h",
+    "openSettings": ";",
+    "workspaceFocus": "f",
+    "splitPane": "s"
+  },
+  "daemon": {
+    "mergeThreshold": 1024,
+    "compactedLimit": 2048,
+    "scrollbackLines": 500
+  },
+  "ssh": {
+    "savedConnections": [
+      {
+        "id": "box",
+        "host": "box.lan",
+        "user": "me",
+        "port": 2222,
+        "identityFile": "~/.ssh/id_box",
+        "label": "Box",
+        "portForwards": [
+          {
+            "localPort": 8080,
+            "remoteHost": "localhost",
+            "remotePort": 80
+          }
+        ]
+      },
+      {
+        "id": "other",
+        "host": "other.lan",
+        "user": "you",
+        "port": 22,
+        "portForwards": [],
+        "jumpHost": "bastion"
+      }
+    ]
+  },
+  "llm": {
+    "baseUrl": "http://localhost:11434/v1",
+    "apiKey": "sk-test",
+    "model": "llama3"
+  },
+  "terminalAnalyzer": {
+    "provider": "classifier",
+    "titleModel": "chat/titles",
+    "model": "typesafe/jev-1.13",
+    "systemPrompt": "My prompt at {{cwd}}",
+    "criteria": {
+      "working": "Working at {{cwd}}",
+      "safe_permission_requested": "Safe within {{safe_paths}}",
+      "permission_request": "Asks",
+      "completed": "Done",
+      "user_input_required": "Needs input",
+      "application_error": "Crashed",
+      "idle": "Prompt",
+      "future_state": "Kept"
+    },
+    "titleSystemPrompt": "Name this \"terminal\"\nin 5 words",
+    "reasoningEffort": "high",
+    "safePaths": [
+      "/tmp",
+      "/work"
+    ],
+    "bufferLines": 50,
+    "idleDebounceMs": 750,
+    "idleDebounceUnreadMs": 9000,
+    "temperature": 0
+  },
+  "github": {
+    "pat": "ghp_test",
+    "autodetectViaGh": false
+  },
+  "globalDefaultApplicationId": "aiHarness-claude",
+  "recentDirectories": [
+    "/work/a",
+    "/work/b"
+  ],
+  "debug": {
+    "showBadge": true
+  },
+  "futureTopLevel": {
+    "nested": true
+  }
+}
