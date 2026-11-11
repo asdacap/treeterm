@@ -1803,7 +1803,16 @@ fn workspace_pane(
                 .dropdown_menu(move |mut menu, _window, _cx| {
                     for (id, name, icon) in &menu_apps {
                         let (target, view, id) = (target.clone(), view_entity.clone(), id.clone());
-                        menu = menu.item(PopupMenuItem::new(format!("{icon}  {name}")).on_click(
+                        // `.app-menu-item`: a 16px centred icon, 8px gap, the name (13px).
+                        let (icon, name) = (icon.clone(), name.clone());
+                        let item = PopupMenuItem::element(move |_, _| {
+                            h_flex()
+                                .gap(px(8.))
+                                .text_size(px(13.))
+                                .child(div().w(px(16.)).flex_shrink_0().flex().justify_center().child(icon.clone()))
+                                .child(div().flex_1().whitespace_nowrap().child(name.clone()))
+                        });
+                        menu = menu.item(item.on_click(
                             move |_, _, cx| {
                                 target.update(cx, |w, cx| w.add_tab(&id, cx));
                                 view.update(cx, |view, cx| view.focus_active_tab(cx));
