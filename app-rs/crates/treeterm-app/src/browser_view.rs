@@ -122,3 +122,66 @@ impl Render for BrowserView {
             .child(div().flex_1().min_h_0().child(body))
     }
 }
+
+/// A PDF from memory in a webview: served to it under `treeterm-pdf://` (WKWebView renders
+/// PDFs itself; elsewhere the user can open the file externally).
+pub struct PdfView {
+    bytes: std::sync::Arc<Vec<u8>>,
+    page: Page,
+    shown: bool,
+}
+
+impl PdfView {
+    pub fn new(bytes: std::sync::Arc<Vec<u8>>) -> Self {
+        Self {
+            bytes,
+            page: Page::NotBuilt,
+            shown: true,
+        }
+    }
+
+    /// Show or hide the native view (tab switched away, another file, dialog open).
+    pub fn set_shown(&mut self, shown: bool, cx: &mut Context<Self>) {
+        if self.shown == shown {
+            return;
+        }
+        self.shown = shown;
+        if let Page::Live(webview) = &self.page {
+            webview.update(cx, |w, _| if shown { w.show() } else { w.hide() });
+        }
+    }
+
+    fn build(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let bytes = self.bytes.clone();
+        let builder = wry::WebViewBuilder::new()
+            .with_custom_protocol("treeterm-pdf".into(), move |_, _| {
+                wry::http::Response::builder()
+                    .header("Content-Type", "application/pdf")
+                    .body(std::borrow::Cow::Owned((*bytes).clone()))
+                    .unwrap_or_else(|_| wry::http::Response::new(std::borrow::Cow::Borrowed(&[][..])))
+            })
+            .with_url("treeterm-pdf://localhost/document.pdf")
+            .with_navigation_handler(|url| url.starts_with("treeterm-pdf://"))
+            .with_new_window_req_handler(|url, _| {
+                open_externally(&url);
+                wry::NewWindowResponse::Deny
+            });
+        self.page = match WebView::build(builder, window, cx) {
+            Ok(webview) => Page::Live(cx.new(|_| webview)),
+            Err(error) => Page::Failed(format!("Cannot show the PDF: {error}")),
+        };
+    }
+}
+
+impl Render for PdfView {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if let Page::NotBuilt = self.page {
+            self.build(window, cx);
+        }
+        match &self.page {
+            Page::NotBuilt => div().into_any_element(),
+            Page::Failed(message) => div().p_4().text_color(colors(cx).error).child(message.clone()).into_any_element(),
+            Page::Live(webview) => div().size_full().child(webview.clone()).into_any_element(),
+        }
+    }
+}

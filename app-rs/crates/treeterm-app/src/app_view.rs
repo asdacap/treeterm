@@ -532,6 +532,19 @@ fn workspace_pane(connected: &mut Connected, window: &mut Window, cx: &mut Conte
         let shown = !dialog_open && shown_key.as_ref() == Some(&key);
         view.update(cx, |v, cx| v.set_shown(shown, cx));
     }
+    let shown_files = match &active {
+        Some(tab) => match workspace.read(cx).tab_content(tab) {
+            Some(TabContent::Files(model)) => Some(model.entity_id()),
+            Some(_) | None => None,
+        },
+        None => None,
+    };
+    let file_views: Vec<(EntityId, Entity<crate::file_browser_view::FileBrowserView>)> =
+        connected.file_views.iter().map(|(k, v)| (*k, v.clone())).collect();
+    for (model_id, view) in file_views {
+        let shown = !dialog_open && shown_files == Some(model_id);
+        view.update(cx, |v, cx| v.set_shown(shown, cx));
+    }
 
     v_flex()
         .flex_1()

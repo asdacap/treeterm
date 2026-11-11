@@ -28,10 +28,46 @@ pub enum FileView {
     Nothing,
     Loading(String),
     Text { path: String, text: String },
+    /// Shown as an image (by extension).
+    Image { path: String, bytes: std::sync::Arc<Vec<u8>>, kind: ImageKind },
+    /// Shown in a PDF viewer.
+    Pdf { path: String, bytes: std::sync::Arc<Vec<u8>> },
     /// Not valid UTF-8 (images, archives, ...).
     Binary { path: String, size: u64 },
     TooLarge { path: String, size: u64 },
     Failed { path: String, error: String },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImageKind {
+    Png,
+    Jpeg,
+    Gif,
+    Webp,
+    Svg,
+    Bmp,
+}
+
+/// How a file is shown, by extension (`isImagePath` / PDF detection in Electron).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Presentation {
+    Text,
+    Image(ImageKind),
+    Pdf,
+}
+
+fn presentation_of(path: &str) -> Presentation {
+    let ext = path.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
+    match ext.as_str() {
+        "png" => Presentation::Image(ImageKind::Png),
+        "jpg" | "jpeg" => Presentation::Image(ImageKind::Jpeg),
+        "gif" => Presentation::Image(ImageKind::Gif),
+        "webp" => Presentation::Image(ImageKind::Webp),
+        "svg" => Presentation::Image(ImageKind::Svg),
+        "bmp" => Presentation::Image(ImageKind::Bmp),
+        "pdf" => Presentation::Pdf,
+        _ => Presentation::Text,
+    }
 }
 
 /// One visible tree row.
@@ -197,13 +233,25 @@ impl FileBrowser {
         let budget = if allow_large { u64::MAX } else { MAX_VIEW_BYTES };
         let read = self.fs.read_file(&self.root, path, budget);
         let owned = path.to_owned();
+        let presentation = presentation_of(path);
         self._read = Some(cx.spawn(async move |this, cx| {
             let view = match read.await {
-                Ok(Ok(ReadOutcome::Read(file))) => match String::from_utf8(file.content) {
-                    Ok(text) => FileView::Text { path: owned.clone(), text },
-                    Err(bytes) => FileView::Binary {
+                Ok(Ok(ReadOutcome::Read(file))) => match presentation {
+                    Presentation::Image(kind) => FileView::Image {
                         path: owned.clone(),
-                        size: bytes.into_bytes().len() as u64,
+                        bytes: std::sync::Arc::new(file.content),
+                        kind,
+                    },
+                    Presentation::Pdf => FileView::Pdf {
+                        path: owned.clone(),
+                        bytes: std::sync::Arc::new(file.content),
+                    },
+                    Presentation::Text => match String::from_utf8(file.content) {
+                        Ok(text) => FileView::Text { path: owned.clone(), text },
+                        Err(bytes) => FileView::Binary {
+                            path: owned.clone(),
+                            size: bytes.into_bytes().len() as u64,
+                        },
                     },
                 },
                 Ok(Ok(ReadOutcome::TooLarge { size })) => FileView::TooLarge { path: owned.clone(), size },
@@ -245,6 +293,13 @@ mod tests {
             size: None,
             modified_time: None,
         }
+    }
+
+    #[test]
+    fn files_are_presented_by_extension() {
+        assert_eq!(presentation_of("/w/a.PNG"), Presentation::Image(ImageKind::Png));
+        assert_eq!(presentation_of("/w/doc.pdf"), Presentation::Pdf);
+        assert_eq!(presentation_of("/w/main.rs"), Presentation::Text);
     }
 
     #[test]

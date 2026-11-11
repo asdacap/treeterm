@@ -12,6 +12,8 @@ use crate::theme::colors;
 
 pub struct FileBrowserView {
     model: Entity<FileBrowser>,
+    /// The PDF shown, and the webview showing it.
+    pdf: Option<(String, Entity<crate::browser_view::PdfView>)>,
     workspace: Entity<treeterm_model::workspace_store::WorkspaceStore>,
     /// The editor showing the current file, and which file it shows.
     editor: Option<(String, Entity<EditorState>)>,
@@ -77,9 +79,19 @@ impl FileBrowserView {
         let observe = cx.observe(&model, |_, _, cx| cx.notify());
         Self {
             model,
+            pdf: None,
             workspace,
             editor: None,
             _observe: observe,
+        }
+    }
+
+    /// Show the PDF webview only while this tab is shown, a PDF is the current file, and no
+    /// dialog covers it.
+    pub fn set_shown(&mut self, shown: bool, cx: &mut Context<Self>) {
+        let is_pdf = matches!(self.model.read(cx).view(), FileView::Pdf { .. });
+        if let Some((_, pdf)) = &self.pdf {
+            pdf.update(cx, |p, cx| p.set_shown(shown && is_pdf, cx));
         }
     }
 
@@ -156,6 +168,37 @@ impl FileBrowserView {
             FileView::Nothing => centered(div().text_color(secondary).child("Select a file").into_any_element()),
             FileView::Loading(_) => centered(div().text_color(secondary).child("Loading…").into_any_element()),
             FileView::Failed { error: message, .. } => centered(div().text_color(error).child(message).into_any_element()),
+            FileView::Image { bytes, kind, .. } => {
+                use treeterm_model::file_browser::ImageKind;
+                let format = match kind {
+                    ImageKind::Png => gpui_kit::ImageFormat::Png,
+                    ImageKind::Jpeg => gpui_kit::ImageFormat::Jpeg,
+                    ImageKind::Gif => gpui_kit::ImageFormat::Gif,
+                    ImageKind::Webp => gpui_kit::ImageFormat::Webp,
+                    ImageKind::Svg => gpui_kit::ImageFormat::Svg,
+                    ImageKind::Bmp => gpui_kit::ImageFormat::Bmp,
+                };
+                let image = std::sync::Arc::new(gpui_kit::Image::from_bytes(format, (*bytes).clone()));
+                div()
+                    .size_full()
+                    .p_4()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(gpui_kit::img(image).max_w_full().max_h_full().object_fit(gpui_kit::ObjectFit::Contain))
+                    .into_any_element()
+            }
+            FileView::Pdf { path, bytes } => {
+                let view = match &self.pdf {
+                    Some((shown, view)) if *shown == path => view.clone(),
+                    Some(_) | None => {
+                        let view = cx.new(|_| crate::browser_view::PdfView::new(bytes));
+                        self.pdf = Some((path, view.clone()));
+                        view
+                    }
+                };
+                div().size_full().child(view).into_any_element()
+            }
             FileView::Binary { size, .. } => {
                 centered(div().text_color(secondary).child(format!("Binary file ({})", format_size(size))).into_any_element())
             }
