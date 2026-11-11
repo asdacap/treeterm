@@ -16,6 +16,7 @@ use treeterm_model::workspace_store::{ActivityStyle as _, TabContent};
 use crate::terminal_view::TerminalView;
 use crate::theme::colors;
 use gpui_kit::assets::IconName;
+use gpui_kit::component::Sizable as _;
 use crate::tree_pane::{TreePane, WorkspaceSelected};
 
 pub struct AppView {
@@ -216,6 +217,11 @@ impl AppView {
         let (keybindings, names) = (self.keybindings.clone(), self.names.clone());
         let tree = cx.new(|cx| TreePane::new(session.clone(), keybindings, names, target, remote, cx));
         let info_id = id.clone();
+        let disconnect_id = id.clone();
+        cx.subscribe(&tree, move |view, _, _: &crate::tree_pane::DisconnectRequested, cx| {
+            view.store.update(cx, |s, cx| s.disconnect(&disconnect_id, cx));
+        })
+        .detach();
         cx.subscribe(&tree, move |view, _, _: &crate::tree_pane::SessionInfoRequested, cx| {
             view.info_pending = Some(info_id.clone());
             cx.notify();
@@ -273,12 +279,13 @@ impl AppView {
         self.sessions.get_mut(&id)
     }
 
-    /// The collapsed sidebar: one initial per workspace of every connected session, with its
-    /// activity glyph; click to show it.
+    /// The collapsed sidebar (`.tree-pane-collapsed`, 36px): sound toggle and expand, then one
+    /// 32px icon per workspace of every session (`WorkspaceIcon`, favourite star overlay).
     fn rail(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let c = colors(cx);
-        let (bg, border, hover, active, secondary) = (c.bg_secondary, c.border, c.bg_hover, c.bg_active, c.text_secondary);
-        let mut rail = v_flex().gap_1().items_center();
+        let (bg, border, hover, active, secondary, primary) =
+            (c.bg_secondary, c.border, c.bg_hover, c.bg_active, c.text_secondary, c.text_primary);
+        let mut rail = v_flex().py(px(4.)).items_center();
         for (conn_id, connected) in &self.sessions {
             let session = connected.session.read(cx);
             let shown = match (&self.active, &connected.active) {
@@ -288,55 +295,80 @@ impl AppView {
             for row in session.tree_rows(&Default::default(), cx) {
                 let Some(store) = session.workspace_store(&row.id) else { continue };
                 let workspace = store.read(cx);
-                let name = workspace.file().display_name().to_owned();
-                let initial: String = name.chars().next().map(|ch| ch.to_uppercase().collect()).unwrap_or_default();
+                let name = SharedString::from(workspace.file().display_name().to_owned());
+                let is_worktree = workspace.file().is_worktree;
+                let favourite = workspace.is_favourite();
                 let activity = workspace.overall_activity();
                 let is_shown = shown.as_deref() == Some(row.id.as_str());
+                let color = if is_shown { primary } else { secondary };
+                let icon = if activity == treeterm_model::workspace_store::ActivityState::Idle {
+                    crate::ui::icon(if is_worktree { IconName::GitBranch } else { IconName::Folder }, 16., color).into_any_element()
+                } else {
+                    crate::ui::activity_glyph(activity, 14., color)
+                };
                 let (tree, id) = (connected.tree.clone(), row.id.clone());
                 rail = rail.child(
                     div()
                         .id(SharedString::from(format!("rail-{}", row.id)))
-                        .size(px(28.))
-                        .rounded_md()
+                        .relative()
+                        .size(px(32.))
+                        .flex_shrink_0()
+                        .rounded(px(4.))
                         .flex()
                         .items_center()
                         .justify_center()
-                        .text_sm()
                         .cursor_pointer()
                         .when(is_shown, |d| d.bg(active))
                         .when(!is_shown, |d| d.hover(move |d| d.bg(hover)))
-                        .child(if activity == treeterm_model::workspace_store::ActivityState::Idle {
-                            div().child(initial).into_any_element()
-                        } else {
-                            div().text_color(gpui_kit::rgb(activity.color())).child(activity.icon()).into_any_element()
+                        .tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(name.clone()).build(window, cx))
+                        .child(icon)
+                        .when(favourite, |d| {
+                            d.child(
+                                div()
+                                    .absolute()
+                                    .top(px(1.))
+                                    .right(px(1.))
+                                    .text_size(px(10.))
+                                    .line_height(px(10.))
+                                    .text_color(gpui_kit::rgb(0xf5c84a))
+                                    .child("★"),
+                            )
                         })
                         .on_click(move |_, _, cx| tree.update(cx, |tree, cx| tree.select(id.clone(), cx))),
                 );
             }
         }
+        let on = self.settings.read(cx).settings().notifications.sound_enabled;
         v_flex()
             .h_full()
-            .w(px(40.))
+            .w(px(36.))
             .flex_shrink_0()
             .bg(bg)
-            .border_r_1()
-            .border_color(border)
             .pt(px(38.))
-            .gap_2()
-            .items_center()
             .child(
-                div()
-                    .id("expand-sidebar")
-                    .px_1()
-                    .rounded_sm()
-                    .cursor_pointer()
-                    .text_color(secondary)
-                    .hover(move |d| d.bg(hover))
-                    .child("»")
-                    .on_click(cx.listener(|view, _, _, cx| {
-                        view.sidebar_collapsed = false;
-                        cx.notify();
-                    })),
+                v_flex()
+                    .py(px(12.))
+                    .items_center()
+                    .border_b_1()
+                    .border_color(border)
+                    .child(
+                        crate::ui::icon_button("sound-toggle", cx)
+                            .child(crate::ui::icon(if on { IconName::Volume2 } else { IconName::VolumeX }, 14., primary))
+                            .on_click(cx.listener(move |view, _, _, cx| {
+                                view.settings.update(cx, |store, cx| {
+                                    store.update(|s| s.notifications.sound_enabled = !on, cx)
+                                });
+                            })),
+                    )
+                    .child(
+                        crate::ui::icon_button("expand-sidebar", cx)
+                            .tooltip(|window, cx| gpui_kit::component::tooltip::Tooltip::new("Expand sidebar").build(window, cx))
+                            .child(crate::ui::icon(IconName::PanelLeftOpen, 14., primary))
+                            .on_click(cx.listener(|view, _, _, cx| {
+                                view.sidebar_collapsed = false;
+                                cx.notify();
+                            })),
+                    ),
             )
             .child(div().id("rail").flex_1().overflow_y_scroll().child(rail))
             .into_any_element()
@@ -348,8 +380,7 @@ impl AppView {
             return self.rail(cx);
         }
         let c = colors(cx);
-        let (bg, secondary, error, hover, border, fg) =
-            (c.bg_secondary, c.text_secondary, c.error, c.bg_hover, c.border, c.text_primary);
+        let (bg, secondary, border, fg) = (c.bg_secondary, c.text_secondary, c.border, c.text_primary);
         let names = self.names.read(cx);
         let slots: Vec<(ConnectionId, String, ConnState, bool)> = self
             .store
@@ -358,75 +389,53 @@ impl AppView {
             .map(|slot| (slot.id.clone(), names.name(&slot.target), slot.state.clone(), slot.is_local()))
             .collect();
         let mut list = v_flex().w_full();
-        for (index, (id, name, state, local)) in slots.into_iter().enumerate() {
-            let banner = |text: String, color| div().px_3().py_1().text_xs().text_color(color).child(text);
-            let button = |label: &'static str, key: String| {
-                gpui_kit::component::button::Button::new(SharedString::from(key)).label(label).xsmall()
-            };
-            use gpui_kit::component::Sizable as _;
-            use gpui_kit::component::button::ButtonVariants as _;
+        for (index, (id, name, state, _local)) in slots.into_iter().enumerate() {
             let section = match state {
                 ConnState::Connected(_) => match self.sessions.get(&id) {
                     Some(connected) => connected.tree.clone().into_any_element(),
-                    None => banner(format!("{name}: starting…"), secondary).into_any_element(),
+                    None => session_panel(&id, &name, SessionIcon::Connecting, None, None, cx),
                 },
                 ConnState::Connecting(phase) => {
                     let what = match phase {
-                        treeterm_core::connection::ConnectPhase::Bootstrap => "Bootstrapping…",
-                        treeterm_core::connection::ConnectPhase::Tunnel => "Establishing tunnel…",
-                        treeterm_core::connection::ConnectPhase::Daemon if local => "Starting daemon…",
-                        treeterm_core::connection::ConnectPhase::Daemon => "Connecting to daemon…",
+                        treeterm_core::connection::ConnectPhase::Bootstrap => "Bootstrapping...",
+                        treeterm_core::connection::ConnectPhase::Tunnel => "Establishing tunnel...",
+                        treeterm_core::connection::ConnectPhase::Daemon => "Connecting to daemon...",
                     };
-                    v_flex()
-                        .child(session_name(&id, name.clone(), hover, cx))
-                        .child(h_flex().px_3().gap_2().text_xs().text_color(secondary).child(Spinner::new()).child(what))
-                        .into_any_element()
+                    // `.tree-empty` with 12px text and 4px 8px padding.
+                    let status = div().px(px(8.)).py(px(4.)).text_size(px(12.)).text_color(secondary).child(what);
+                    session_panel(&id, &name, SessionIcon::Connecting, None, Some(status.into_any_element()), cx)
                 }
                 ConnState::Reconnecting { attempt, error: reason } => {
                     let (now, stop) = (id.clone(), id.clone());
-                    v_flex()
-                        .child(session_name(&id, name.clone(), hover, cx))
-                        .child(banner(format!("Reconnecting (attempt {attempt})… {reason}"), secondary))
-                        .child(
-                            h_flex()
-                                .px_3()
-                                .gap_1()
-                                .child(button("Retry now", format!("retry-{id}")).ghost().on_click(cx.listener(
-                                    move |view, _, _, cx| view.store.read(cx).reconnect_now(&now),
-                                )))
-                                .child(button("Stop", format!("stop-{id}")).ghost().on_click(cx.listener(
-                                    move |view, _, _, cx| view.store.read(cx).cancel_reconnect(&stop),
-                                ))),
-                        )
-                        .into_any_element()
+                    let banner = connection_banner(
+                        BannerKind::Reconnecting,
+                        format!("Reconnecting (attempt {attempt})... {reason}"),
+                        vec![
+                            ("Retry now", Box::new(move |view: &mut AppView, cx: &mut Context<AppView>| view.store.read(cx).reconnect_now(&now))),
+                            ("Stop", Box::new(move |view: &mut AppView, cx: &mut Context<AppView>| view.store.read(cx).cancel_reconnect(&stop))),
+                        ],
+                        cx,
+                    );
+                    session_panel(&id, &name, SessionIcon::Reconnecting, Some(banner), None, cx)
                 }
                 ConnState::Failed { error: reason, hash_mismatch } => {
                     let (again, gone) = (id.clone(), id.clone());
-                    let mut actions = h_flex().px_3().gap_1().child(
-                        button("Reconnect", format!("reconnect-{id}")).ghost().on_click(cx.listener(
-                            move |view, _, _, cx| view.store.read(cx).reconnect(&again),
-                        )),
-                    );
+                    let mut buttons: Vec<(&'static str, BannerAction)> = vec![
+                        ("Reconnect", Box::new(move |view: &mut AppView, cx: &mut Context<AppView>| view.store.read(cx).reconnect(&again))),
+                        ("Disconnect", Box::new(move |view: &mut AppView, cx: &mut Context<AppView>| view.store.update(cx, |s, cx| s.disconnect(&gone, cx)))),
+                    ];
                     if hash_mismatch {
+                        // Electron offers these in the session pane's Daemon Mismatch tab.
                         let (refresh, accept) = (id.clone(), id.clone());
-                        actions = actions
-                            .child(button("Refresh daemon", format!("refresh-{id}")).ghost().on_click(cx.listener(
-                                move |view, _, _, cx| view.reconnect_outdated(&refresh, treeterm_core::connection::OutdatedDaemon::Refresh, cx),
-                            )))
-                            .child(button("Connect anyway", format!("accept-{id}")).ghost().on_click(cx.listener(
-                                move |view, _, _, cx| view.reconnect_outdated(&accept, treeterm_core::connection::OutdatedDaemon::Accept, cx),
-                            )));
+                        buttons.push(("Refresh daemon", Box::new(move |view: &mut AppView, cx: &mut Context<AppView>| {
+                            view.reconnect_outdated(&refresh, treeterm_core::connection::OutdatedDaemon::Refresh, cx)
+                        })));
+                        buttons.push(("Connect anyway", Box::new(move |view: &mut AppView, cx: &mut Context<AppView>| {
+                            view.reconnect_outdated(&accept, treeterm_core::connection::OutdatedDaemon::Accept, cx)
+                        })));
                     }
-                    if !local {
-                        actions = actions.child(button("Disconnect", format!("disconnect-{id}")).ghost().on_click(
-                            cx.listener(move |view, _, _, cx| view.store.update(cx, |s, cx| s.disconnect(&gone, cx))),
-                        ));
-                    }
-                    v_flex()
-                        .child(session_name(&id, name.clone(), hover, cx))
-                        .child(banner(reason, error))
-                        .child(actions)
-                        .into_any_element()
+                    let banner = connection_banner(BannerKind::Error, reason, buttons, cx);
+                    session_panel(&id, &name, SessionIcon::Failed, Some(banner), None, cx)
                 }
             };
             list = list.child(div().when(index > 0, |d| d.mt(px(12.))).child(section));
@@ -490,35 +499,65 @@ impl AppView {
     /// Favourite workspaces of every connected session (`FavouritesPanel`); none, no panel.
     fn favourites(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let c = colors(cx);
-        let (secondary, hover, star) = (c.text_secondary, c.bg_hover, gpui_kit::rgb(0xe5c07b));
+        let (secondary, primary, hover, active, accent, border) =
+            (c.text_secondary, c.text_primary, c.bg_hover, c.bg_active, c.accent, c.border);
         let mut rows = Vec::new();
-        for connected in self.sessions.values() {
+        for (conn_id, connected) in &self.sessions {
             let session = connected.session.read(cx);
+            let shown = match (&self.active, &connected.active) {
+                (Some(active_id), ActiveView::Workspace(id)) if active_id == conn_id => Some(id.clone()),
+                (Some(_), ActiveView::Workspace(_)) | (_, ActiveView::Nothing) | (None, ActiveView::Workspace(_)) => None,
+            };
             for id in session.workspace_ids() {
                 let Some(store) = session.workspace_store(id) else { continue };
                 let workspace = store.read(cx);
                 if workspace.is_favourite() {
-                    rows.push((id.clone(), workspace.file().display_name().to_owned(), connected.tree.clone()));
+                    rows.push((
+                        id.clone(),
+                        workspace.file().display_name().to_owned(),
+                        workspace.file().is_worktree,
+                        workspace.has_unread_attention(),
+                        workspace.overall_activity(),
+                        shown.as_deref() == Some(id.as_str()),
+                        connected.tree.clone(),
+                    ));
                 }
             }
         }
         if rows.is_empty() {
             return None;
         }
-        let mut panel = v_flex()
-            .pb_2()
-            .child(h_flex().px_3().pb_1().gap_1().text_xs().text_color(secondary).child(div().text_color(star).child("★")).child("FAVOURITES"));
-        for (id, name, tree) in rows {
+        // `.favourites-header`: filled star and "FAVOURITES", 11px semibold secondary.
+        let mut panel = v_flex().pb(px(6.)).border_b(px(2.)).border_color(border).child(
+            h_flex()
+                .pt(px(6.))
+                .px(px(12.))
+                .pb(px(2.))
+                .gap(px(4.))
+                .items_center()
+                .child(div().text_size(px(12.)).line_height(px(12.)).text_color(secondary).child("★"))
+                .child(crate::ui::caps_title("Favourites", cx)),
+        );
+        for (id, name, is_worktree, unread, activity, is_shown, tree) in rows {
+            let icon = if activity == treeterm_model::workspace_store::ActivityState::Idle {
+                crate::ui::icon(if is_worktree { IconName::GitBranch } else { IconName::Folder }, 16., secondary).into_any_element()
+            } else {
+                crate::ui::activity_glyph(activity, 14., secondary)
+            };
             panel = panel.child(
-                div()
+                h_flex()
                     .id(SharedString::from(format!("fav-{id}")))
-                    .px_3()
-                    .py(px(2.))
-                    .text_sm()
-                    .truncate()
+                    .min_h(px(36.))
+                    .py(px(6.))
+                    .px(px(4.))
+                    .items_center()
                     .cursor_pointer()
-                    .hover(move |d| d.bg(hover))
-                    .child(name)
+                    .when(is_shown, |d| d.bg(active))
+                    .when(!is_shown, |d| d.hover(move |d| d.bg(hover)))
+                    .when(unread, |d| d.border_l(px(2.)).border_color(accent))
+                    .child(div().mr(px(8.)).flex_shrink_0().child(icon))
+                    .child(div().flex_1().min_w_0().truncate().text_size(px(crate::ui::BODY)).text_color(primary).child(name))
+                    .when(unread, |d| d.child(div().mx(px(4.)).text_size(px(10.)).text_color(accent).child("●")))
                     .on_click(move |_, _, cx| tree.update(cx, |tree, cx| tree.select(id.clone(), cx))),
             );
         }
@@ -1260,20 +1299,128 @@ fn merge_panel(
 }
 
 /// A session's name in the sidebar; clicking it opens the session pane.
-fn session_name(id: &ConnectionId, name: String, hover: gpui_kit::Hsla, cx: &mut Context<AppView>) -> impl IntoElement + use<> {
-    let id = id.clone();
-    div()
-        .id(SharedString::from(format!("session-name-{id}")))
-        .px_2()
-        .py_1()
-        .text_sm()
-        .cursor_pointer()
-        .hover(move |d| d.bg(hover))
-        .child(name)
-        .on_click(cx.listener(move |view, _, _, cx| {
-            view.info_pending = Some(id.clone());
-            cx.notify();
-        }))
+/// The status icon in a session header (`renderStatusIcon`).
+enum SessionIcon {
+    Connecting,
+    Reconnecting,
+    Failed,
+}
+
+enum BannerKind {
+    Reconnecting,
+    Error,
+}
+
+type BannerAction = Box<dyn Fn(&mut AppView, &mut Context<AppView>)>;
+
+/// `.connection-banner`: an 11px coloured strip with small outlined buttons.
+fn connection_banner(kind: BannerKind, text: String, buttons: Vec<(&'static str, BannerAction)>, cx: &mut Context<AppView>) -> AnyElement {
+    let (color, background, icon): (u32, u32, AnyElement) = match kind {
+        BannerKind::Reconnecting => (
+            0xff9800,
+            0xff980014,
+            Spinner::new()
+                .icon(gpui_kit::component::Icon::new(IconName::LoaderCircle))
+                .with_size(px(12.))
+                .color(gpui_kit::rgb(0xff9800).into())
+                .into_any_element(),
+        ),
+        BannerKind::Error => (0xf44336, 0xf4433614, crate::ui::icon(IconName::CircleAlert, 12., gpui_kit::rgb(0xf44336)).into_any_element()),
+    };
+    let border = colors(cx).border;
+    let mut banner = h_flex()
+        .gap(px(6.))
+        .px(px(8.))
+        .py(px(4.))
+        .items_center()
+        .text_size(px(11.))
+        .text_color(gpui_kit::rgb(color))
+        .bg(gpui_kit::rgba(background))
+        .border_b_1()
+        .border_color(border)
+        .child(icon)
+        .child(div().flex_1().min_w_0().truncate().child(text));
+    for (index, (label, action)) in buttons.into_iter().enumerate() {
+        banner = banner.child(
+            div()
+                .id(("banner-button", index))
+                .flex_shrink_0()
+                .px(px(6.))
+                .py(px(1.))
+                .rounded(px(3.))
+                .border_1()
+                .border_color(gpui_kit::rgb(color))
+                .text_size(px(10.))
+                .whitespace_nowrap()
+                .cursor_pointer()
+                .hover(|d| d.bg(gpui_kit::rgba(0xffffff1a)))
+                .child(label)
+                .on_click(cx.listener(move |view, _, _, cx| action(view, cx))),
+        );
+    }
+    banner.into_any_element()
+}
+
+/// A session that is not connected: the same header as a live one (`.session-panel-header`)
+/// with its status icon and no add button, then its banner or status line.
+fn session_panel(
+    id: &ConnectionId,
+    name: &str,
+    icon: SessionIcon,
+    banner: Option<AnyElement>,
+    status: Option<AnyElement>,
+    cx: &mut Context<AppView>,
+) -> AnyElement {
+    let c = colors(cx);
+    let (secondary, primary, accent, hover, border) = (c.text_secondary, c.text_primary, c.accent, c.bg_hover, c.border);
+    let icon: AnyElement = match icon {
+        SessionIcon::Connecting | SessionIcon::Reconnecting => Spinner::new()
+            .icon(gpui_kit::component::Icon::new(IconName::LoaderCircle))
+            .with_size(px(14.))
+            .color(match icon {
+                SessionIcon::Reconnecting => gpui_kit::rgb(0xff9800).into(),
+                SessionIcon::Connecting | SessionIcon::Failed => secondary,
+            })
+            .into_any_element(),
+        SessionIcon::Failed => crate::ui::icon(IconName::CircleAlert, 14., gpui_kit::rgb(0xf44336)).into_any_element(),
+    };
+    let open = id.clone();
+    v_flex()
+        .w_full()
+        .border_b_1()
+        .border_color(border)
+        .child(
+            h_flex()
+                .id(SharedString::from(format!("session-name-{id}")))
+                .h(px(40.))
+                .px(px(16.))
+                .gap(px(4.))
+                .items_center()
+                .border_l(px(3.))
+                .border_color(accent)
+                .cursor_pointer()
+                .hover(move |d| d.bg(hover))
+                .child(div().size(px(16.)).opacity(0.6).child(crate::ui::icon(IconName::ChevronDown, 16., primary)))
+                .child(
+                    h_flex()
+                        .flex_1()
+                        .min_w_0()
+                        .gap(px(6.))
+                        .items_center()
+                        .text_size(px(11.))
+                        .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                        .text_color(secondary)
+                        .child(icon)
+                        .child(div().truncate().child(name.to_uppercase()))
+                        .child(div().font_weight(gpui_kit::FontWeight::NORMAL).child("↓ …")),
+                )
+                .on_click(cx.listener(move |view, _, _, cx| {
+                    view.info_pending = Some(open.clone());
+                    cx.notify();
+                })),
+        )
+        .child(v_flex().pb(px(4.)).children(banner).children(status))
+        .into_any_element()
 }
 
 fn centered(child: impl IntoElement) -> AnyElement {
@@ -1504,24 +1651,52 @@ fn workspace_pane(
     prune_terminal_views(connected, cx);
     connected.tool_views.prune(connected.session.read(cx), cx);
     let ActiveView::Workspace(id) = &connected.active else {
-        return centered(div().text_color(secondary).child("Select a workspace"));
+        // `.workspace-empty`.
+        return centered(
+            v_flex()
+                .items_center()
+                .child(div().mb(px(8.)).text_size(px(18.)).font_weight(gpui_kit::FontWeight::MEDIUM).text_color(colors(cx).text_primary).child("No workspace selected"))
+                .child(div().text_size(px(13.)).text_color(secondary).child("Select a workspace from the sidebar or add a new one to get started.")),
+        );
     };
     let id = id.clone();
     let workspace = match connected.session.read(cx).entry(&id) {
         // The selection can outlive its workspace when another window removes it.
         None => return centered(div().text_color(secondary).child("Workspace was removed")),
         Some(WorkspaceEntry::Loading { message, output, .. }) => {
-            // Git's output while a worktree is being created.
-            let tail: Vec<String> = output.iter().rev().take(30).rev().cloned().collect();
+            // `.workspace-loading`: git's output while a worktree is being created.
+            let tail: Vec<String> = output.iter().rev().take(200).rev().cloned().collect();
+            let c = colors(cx);
             return v_flex()
                 .flex_1()
                 .h_full()
-                .p_4()
+                .p(px(16.))
                 .pt(px(38.))
-                .gap_2()
-                .child(h_flex().gap_2().text_color(secondary).child(Spinner::new()).child(message.clone()))
+                .child(
+                    h_flex()
+                        .gap(px(8.))
+                        .mb(px(12.))
+                        .items_center()
+                        .text_size(px(13.))
+                        .text_color(secondary)
+                        .child(
+                            Spinner::new()
+                                .icon(gpui_kit::component::Icon::new(IconName::LoaderCircle))
+                                .with_size(px(16.))
+                                .color(secondary),
+                        )
+                        .child(message.clone()),
+                )
                 .child(
                     v_flex()
+                        .id("workspace-loading-output")
+                        .flex_1()
+                        .overflow_y_scroll()
+                        .p(px(12.))
+                        .rounded(px(4.))
+                        .border_1()
+                        .border_color(c.border)
+                        .bg(c.bg_secondary)
                         .font_family("Menlo")
                         .text_size(px(12.))
                         .text_color(secondary)
@@ -1793,30 +1968,77 @@ fn web_app_tab(
     window: &mut Window,
     cx: &mut Context<AppView>,
 ) -> AnyElement {
-    use gpui_kit::component::Sizable as _;
-    use gpui_kit::component::button::{Button, ButtonVariants as _};
     use treeterm_model::web_app::WebAppPhase;
     let c = colors(cx);
-    let (secondary, error, border) = (c.text_secondary, c.error, c.border);
+    let (secondary, border) = (c.text_secondary, c.border);
     let key = (workspace_id.to_owned(), tab_id.to_owned());
     let shell = connected.web_app_shell.contains(&key);
-    let mut bar = h_flex().px_2().py_1().gap_1().border_b_1().border_color(border);
+    // `.ssh-pane-subtabs`: 11px tabs with a 2px accent underline on the active one.
+    let (primary, accent) = (c.text_primary, c.accent);
+    let mut bar = h_flex().pl(px(4.)).border_b_1().border_color(border);
     for (label, wants_shell) in [("Browser", false), ("Shell", true)] {
-        let button = Button::new(SharedString::from(format!("webapp-{label}-{tab_id}"))).xsmall().label(label);
-        let button = if shell == wants_shell { button.primary() } else { button.ghost() };
+        let active = shell == wants_shell;
         let key = key.clone();
-        bar = bar.child(button.on_click(cx.listener(move |view, _, _, cx| {
-            if let Some(connected) = view.current_mut() {
-                if wants_shell {
+        bar = bar.child(
+            div()
+                .id(SharedString::from(format!("webapp-{label}-{tab_id}")))
+                .px(px(12.))
+                .py(px(6.))
+                .text_size(px(11.))
+                .border_b(px(2.))
+                .border_color(if active { accent } else { gpui_kit::transparent_black() })
+                .text_color(if active { primary } else { secondary })
+                .cursor_pointer()
+                .hover(move |d| d.text_color(primary))
+                .child(label)
+                .on_click(cx.listener(move |view, _, _, cx| {
+                    if let Some(connected) = view.current_mut() {
+                        if wants_shell {
+                            connected.web_app_shell.insert(key.clone());
+                            connected.focus_pending = true;
+                        } else {
+                            connected.web_app_shell.remove(&key);
+                        }
+                    }
+                    cx.notify();
+                })),
+        );
+    }
+    // `.webapp-waiting`: a 20px spinner over a 13px message, and the "View shell" link.
+    let view_shell = {
+        let key = key.clone();
+        div()
+            .id(SharedString::from(format!("webapp-view-shell-{tab_id}")))
+            .text_size(px(12.))
+            .text_color(accent)
+            .cursor_pointer()
+            .child("View shell")
+            .on_click(cx.listener(move |view, _, _, cx| {
+                if let Some(connected) = view.current_mut() {
                     connected.web_app_shell.insert(key.clone());
                     connected.focus_pending = true;
-                } else {
-                    connected.web_app_shell.remove(&key);
                 }
-            }
-            cx.notify();
-        })));
-    }
+                cx.notify();
+            }))
+    };
+    let waiting = |message: String, link: gpui_kit::Stateful<gpui_kit::Div>| {
+        v_flex()
+            .size_full()
+            .items_center()
+            .justify_center()
+            .gap(px(12.))
+            .text_size(px(13.))
+            .text_color(secondary)
+            .child(
+                Spinner::new()
+                    .icon(gpui_kit::component::Icon::new(IconName::LoaderCircle))
+                    .with_size(px(20.))
+                    .color(accent),
+            )
+            .child(message)
+            .child(link)
+            .into_any_element()
+    };
     let body = if shell {
         match terminal {
             Some(model) => {
@@ -1851,24 +2073,29 @@ fn web_app_tab(
                     .clone();
                 div().size_full().child(view).into_any_element()
             }
-            WebAppPhase::AllocatingPort => centered(div().text_color(secondary).child("Finding a free port…")),
-            WebAppPhase::WaitingForServer { port } => {
-                centered(div().text_color(secondary).child(format!("Waiting for the server on port {port}…")))
-            }
-            WebAppPhase::Forwarding { port } => {
-                centered(div().text_color(secondary).child(format!("Forwarding port {port} from the remote host…")))
-            }
+            WebAppPhase::AllocatingPort => waiting("Finding a free port…".to_owned(), view_shell),
+            WebAppPhase::WaitingForServer { port } => waiting(format!("Waiting for server on port {port}…"), view_shell),
+            WebAppPhase::Forwarding { port } => waiting(format!("Starting port forward for port {port}…"), view_shell),
             WebAppPhase::Error(message) => {
                 let retry = app.clone();
-                centered(
-                    v_flex()
-                        .gap_2()
-                        .items_center()
-                        .child(div().text_color(error).child(message))
-                        .child(Button::new("webapp-retry").small().label("Retry").on_click(move |_, _, cx| {
-                            retry.update(cx, |app, cx| app.retry(cx));
-                        })),
-                )
+                v_flex()
+                    .size_full()
+                    .items_center()
+                    .justify_center()
+                    .gap(px(12.))
+                    .text_size(px(13.))
+                    .child(div().px(px(8.)).text_color(gpui_kit::rgb(0xf44336)).child(message))
+                    .child(
+                        div()
+                            .id("webapp-retry")
+                            .text_size(px(12.))
+                            .text_color(accent)
+                            .cursor_pointer()
+                            .child("Retry")
+                            .on_click(move |_, _, cx| retry.update(cx, |app, cx| app.retry(cx))),
+                    )
+                    .child(view_shell)
+                    .into_any_element()
             }
         }
     };

@@ -78,6 +78,11 @@ pub struct SessionInfoRequested;
 
 impl EventEmitter<SessionInfoRequested> for TreePane {}
 
+/// The session header's "Disconnect".
+pub struct DisconnectRequested;
+
+impl EventEmitter<DisconnectRequested> for TreePane {}
+
 impl TreePane {
     pub fn new(
         session: Entity<SessionStore>,
@@ -241,6 +246,13 @@ impl Render for TreePane {
         };
         let body = match rows {
             Err(status) => status,
+            // `.tree-empty`: 16px padding, 12px secondary text.
+            Ok(rows) if rows.is_empty() => div()
+                .p(px(16.))
+                .text_size(px(12.))
+                .text_color(text_secondary)
+                .child("No workspaces. Click + to add one.")
+                .into_any_element(),
             Ok(rows) => {
                 let mut list = v_flex().w_full();
                 for row in rows {
@@ -337,6 +349,17 @@ impl Render for TreePane {
                     )
                     .child(title)
                     .on_click(cx.listener(|_, _: &ClickEvent, _, cx| cx.emit(SessionInfoRequested)))
+                    .context_menu({
+                        let pane = cx.entity().downgrade();
+                        move |menu, _, _| {
+                            let pane = pane.clone();
+                            menu.item(danger_item("Disconnect").on_click(move |_, _, cx| {
+                                match pane.update(cx, |_, cx| cx.emit(DisconnectRequested)) {
+                                    Ok(()) | Err(_) => {}
+                                }
+                            }))
+                        }
+                    })
                     .child(
                         ui::icon_button("open-workspace", cx)
                             .text_size(px(18.))
@@ -416,6 +439,8 @@ impl TreePane {
             .when(selected, |row| row.bg(c.bg_active))
             .when(!selected, |row| row.hover(|row| row.bg(c.bg_hover)))
             .when(focus_cursor, |row| row.border_2().border_color(c.accent))
+            // `.workspace-unread`: a 2px accent rule on the left.
+            .when(unread && !focus_cursor, |row| row.border_l(px(2.)).border_color(c.accent))
             .on_drag(drag_value, |dragged, _, _, cx| cx.new(|_| dragged.clone()))
             .on_drag_move(cx.listener(move |pane, event: &gpui_kit::DragMoveEvent<DraggedWorkspace>, _, cx| {
                 let position = event.event.position;
@@ -534,105 +559,83 @@ impl TreePane {
                         })),
                 )
             })
+            // `SessionPanel`'s row menu: the same items, conditions and order.
             .context_menu(move |menu, _window, cx| {
-                let settings_pane = pane.clone();
-                let (session, id, label) = (session.clone(), menu_id.clone(), label.clone());
-                let (child_session, child_parent, child_label, pane) =
-                    (session.clone(), id.clone(), label.clone(), pane.clone());
-                let menu = menu.item(PopupMenuItem::new("New child workspace…").on_click(move |_, window, cx| {
-                    let (pane, session, parent, label) =
-                        (pane.clone(), child_session.clone(), child_parent.clone(), child_label.clone());
-                    let behind = behind_upstream(&session, &parent, cx);
-                    upstream_guard(behind, label.clone(), window, cx, move |window, cx| {
-                        let pane = pane.clone();
-                        let on_created: crate::child_dialog::OnCreated = std::rc::Rc::new(move |id, _, cx| {
-                            pane.update(cx, |pane, cx| pane.select(id, cx));
-                        });
-                        crate::child_dialog::open(session.clone(), parent.clone(), label.clone(), on_created, window, cx);
-                    });
-                }))
-                .separator();
-                let store = session.read(cx).workspace_store(&id).cloned();
-                let menu = match store.clone() {
-                    Some(store) => {
-                        // The workspace's Settings tab (`onOpenSettings`), shown.
-                        let (settings_store, settings_id) = (store.clone(), id.clone());
-                        menu.item(PopupMenuItem::new("Settings").on_click(move |_, _, cx| {
-                            if settings_store.update(cx, |w, cx| w.open_or_focus_tab("workspace-settings", cx)).is_some() {
-                                settings_pane.update(cx, |pane, cx| pane.select(settings_id.clone(), cx));
+                let store = session.read(cx).workspace_store(&menu_id).cloned();
+                let Some(store) = store else {
+                    // Not loaded: only Dismiss.
+                    let (session, id, label) = (session.clone(), menu_id.clone(), label.clone());
+                    return menu.item(danger_item("Dismiss").on_click(move |_, window, cx| {
+                        confirm_remove(session.clone(), id.clone(), label.clone(), RemoveMode::KeepWorktreeAndBranch, window, cx)
+                    }));
+                };
+                let file = store.read(cx).file().clone();
+                let child = file.is_worktree && has_parent;
+                let (settings_store, settings_pane, settings_id) = (store.clone(), pane.clone(), menu_id.clone());
+                let mut menu = menu
+                    .item(PopupMenuItem::new("Settings").on_click(move |_, _, cx| {
+                        if settings_store.update(cx, |w, cx| w.open_or_focus_tab("workspace-settings", cx)).is_some() {
+                            settings_pane.update(cx, |pane, cx| pane.select(settings_id.clone(), cx));
+                        }
+                    }));
+                let favourite_store = store.clone();
+                menu = menu.item(
+                    PopupMenuItem::new(if favourite { "Unmark as Favourite" } else { "Mark as Favourite" })
+                        .on_click(move |_, _, cx| favourite_store.update(cx, |w, cx| w.toggle_favourite(cx))),
+                );
+                if child {
+                    for (text, branch) in [("Refresh Title & Description", false), ("Refresh Branch Name", true)] {
+                        let store = store.clone();
+                        menu = menu.item(PopupMenuItem::new(text).on_click(move |_, window, cx| {
+                            if let Err(error) = store.update(cx, |w, cx| w.refresh_labels(branch, cx)) {
+                                window.push_notification(error, cx);
                             }
-                        }))
-                        .item(
-                            PopupMenuItem::new(if favourite { "Unmark as Favourite" } else { "Mark as Favourite" })
-                                .on_click(move |_, _, cx| store.update(cx, |w, cx| w.toggle_favourite(cx))),
-                        )
+                        }));
                     }
-                    None => menu,
-                };
-                let menu = match (store, has_parent) {
-                    (Some(store), true) => {
-                        let relabel = |menu: gpui_kit::component::menu::PopupMenu, text: &'static str, branch: bool| {
-                            let store = store.clone();
-                            menu.item(PopupMenuItem::new(text).on_click(move |_, window, cx| {
-                                if let Err(error) = store.update(cx, |w, cx| w.refresh_labels(branch, cx)) {
-                                    window.push_notification(error, cx);
-                                }
-                            }))
-                        };
-                        let menu = relabel(menu, "Refresh Title & Description", false);
-                        relabel(menu, "Refresh Branch Name", true).separator()
-                    }
-                    (Some(_), false) | (None, _) => menu.separator(),
-                };
-                // A root git workspace can reopen its recently used worktrees.
-                let root_repo = !is_worktree
-                    && session.read(cx).workspace_store(&id).is_some_and(|w| w.read(cx).file().is_git_repo);
-                let menu = if root_repo {
-                    let (session, id) = (session.clone(), id.clone());
-                    menu.item(PopupMenuItem::new("Auto Open All Recent Worktrees…").on_click(move |_, window, cx| {
+                }
+                if file.is_git_repo {
+                    let (pane, session, parent, label) = (pane.clone(), session.clone(), menu_id.clone(), label.clone());
+                    menu = menu.item(PopupMenuItem::new("Open Existing Branch").on_click(move |_, window, cx| {
+                        let (pane, session, parent, label) = (pane.clone(), session.clone(), parent.clone(), label.clone());
+                        let behind = behind_upstream(&session, &parent, cx);
+                        upstream_guard(behind, label.clone(), window, cx, move |window, cx| {
+                            let pane = pane.clone();
+                            let on_created: crate::child_dialog::OnCreated = std::rc::Rc::new(move |id, _, cx| {
+                                pane.update(cx, |pane, cx| pane.select(id, cx));
+                            });
+                            crate::child_dialog::open(session.clone(), parent.clone(), label.clone(), on_created, window, cx);
+                        });
+                    }));
+                }
+                if !file.is_worktree && file.is_git_repo {
+                    let (session, id) = (session.clone(), menu_id.clone());
+                    menu = menu.item(PopupMenuItem::new("Auto Open All Recent Worktrees").on_click(move |_, window, cx| {
                         crate::auto_open_dialog::open(session.clone(), id.clone(), window, cx);
-                    }))
-                    .separator()
-                } else {
-                    menu
-                };
-                let menu = {
-                    let (session, id, label) = (session.clone(), id.clone(), label.clone());
-                    menu.item(PopupMenuItem::new("Quick fork").on_click(move |_, window, cx| {
-                        let (session, id) = (session.clone(), id.clone());
-                        let behind = behind_upstream(&session, &id, cx);
-                        upstream_guard(behind, label.clone(), window, cx, move |_, cx| {
-                            if let Err(error) = session.update(cx, |s, cx| s.quick_fork(&id, cx)) {
-                                tracing::error!(%error, "quick fork");
-                            }
-                        });
-                    }))
-                    .separator()
-                };
-                let remove = |menu: gpui_kit::component::menu::PopupMenu, text: &'static str, mode: RemoveMode| {
-                    let (session, id, label) = (session.clone(), id.clone(), label.clone());
-                    menu.item(PopupMenuItem::new(text).on_click(move |_, window, cx| {
-                        confirm_remove(session.clone(), id.clone(), label.clone(), mode, window, cx)
-                    }))
-                };
-                let merge = |menu: gpui_kit::component::menu::PopupMenu, text: &'static str, squash: bool, after: AfterMerge| {
-                    let (session, id, label) = (session.clone(), id.clone(), label.clone());
-                    menu.item(PopupMenuItem::new(text).on_click(move |_, window, cx| {
-                        confirm_merge(session.clone(), id.clone(), label.clone(), squash, after, window, cx)
-                    }))
-                };
-                let menu = if is_worktree {
-                    let menu = merge(menu, "Merge into parent and remove…", false, AfterMerge::Remove);
-                    let menu = merge(menu, "Squash-merge into parent and remove…", true, AfterMerge::Remove);
-                    let menu = merge(menu, "Merge into parent, keep workspace…", false, AfterMerge::Keep).separator();
-                    let menu = remove(menu, "Remove (delete worktree and branch)…", RemoveMode::DeleteWorktreeAndBranch);
-                    remove(menu, "Remove, keep branch…", RemoveMode::KeepBranch)
-                } else {
-                    menu
-                };
-                remove(menu, "Remove from TreeTerm (keep files)…", RemoveMode::KeepWorktreeAndBranch)
+                    }));
+                }
+                if child {
+                    // Review & Merge: show the workspace with its Review tab.
+                    let (pane, id) = (pane.clone(), menu_id.clone());
+                    menu = menu.item(PopupMenuItem::new("Review & Merge").on_click(move |_, _, cx| {
+                        if store.update(cx, |w, cx| w.open_or_focus_tab("review", cx)).is_some() {
+                            pane.update(cx, |pane, cx| pane.select(id.clone(), cx));
+                        }
+                    }));
+                }
+                if !file.is_worktree {
+                    let (session, id, label) = (session.clone(), menu_id.clone(), label.clone());
+                    menu = menu.item(danger_item("Remove").on_click(move |_, window, cx| {
+                        confirm_remove(session.clone(), id.clone(), label.clone(), RemoveMode::KeepWorktreeAndBranch, window, cx)
+                    }));
+                }
+                menu
             })
     }
+}
+
+/// `.context-menu-item.danger`: red text.
+fn danger_item(label: &'static str) -> PopupMenuItem {
+    PopupMenuItem::element(move |_, _| div().text_color(gpui_kit::rgb(0xf14c4c)).child(label))
 }
 
 /// A row's content, copied out of the session so rendering can borrow the context mutably.
