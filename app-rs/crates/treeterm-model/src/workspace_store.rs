@@ -179,6 +179,20 @@ impl WorkspaceStore {
         })
     }
 
+    /// The workspace's most urgent tab activity, for the tree (anything needing the user
+    /// first, then work in progress).
+    pub fn overall_activity(&self) -> ActivityState {
+        let rank = |state: ActivityState| match state {
+            ActivityState::PermissionRequest | ActivityState::UserInputRequired => 5,
+            ActivityState::ApplicationError | ActivityState::Error => 4,
+            ActivityState::SafePermissionRequested => 3,
+            ActivityState::Working => 2,
+            ActivityState::Completed => 1,
+            ActivityState::Idle => 0,
+        };
+        self.activity.values().copied().max_by_key(|state| rank(*state)).unwrap_or_default()
+    }
+
     /// `settings.terminal.maxCols`, the width the "col limit" switch caps at.
     pub fn max_cols(&self) -> u16 {
         self.settings.terminal.max_cols

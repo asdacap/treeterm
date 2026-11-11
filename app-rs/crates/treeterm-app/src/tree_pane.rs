@@ -94,6 +94,10 @@ impl Render for TreePane {
                 .tree_rows(&self.collapsed, cx)
                 .into_iter()
                 .map(|row| RowData {
+                    activity: session
+                        .workspace_store(&row.id)
+                        .map(|w| w.read(cx).overall_activity())
+                        .unwrap_or_default(),
                     is_worktree: session
                         .workspace_store(&row.id)
                         .is_some_and(|w| w.read(cx).file().is_worktree),
@@ -150,7 +154,8 @@ impl Render for TreePane {
 
 impl TreePane {
     fn render_row(&self, row: RowData, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        let RowData { id, depth, has_children, label, is_worktree } = row;
+        let RowData { id, depth, has_children, label, is_worktree, activity } = row;
+        let busy = activity != treeterm_model::workspace_store::ActivityState::Idle;
         let c = colors(cx);
         let (label, label_color): (SharedString, _) = match label {
             Label::Name(name) => (name, c.text_primary),
@@ -195,7 +200,16 @@ impl TreePane {
                         pane.toggle(&toggle_id, cx);
                     })),
             )
-            .child(div().truncate().text_color(label_color).child(label.clone()))
+            .child(div().flex_1().truncate().text_color(label_color).child(label.clone()))
+            .when(busy, |row| {
+                row.child(
+                    div()
+                        .size(px(7.))
+                        .flex_shrink_0()
+                        .rounded_full()
+                        .bg(gpui_kit::rgb(activity.color())),
+                )
+            })
             .context_menu(move |menu, _window, _cx| {
                 let (session, id, label) = (session.clone(), menu_id.clone(), label.clone());
                 let (child_session, child_parent, child_label, pane) =
@@ -245,6 +259,7 @@ impl TreePane {
 struct RowData {
     id: String,
     is_worktree: bool,
+    activity: treeterm_model::workspace_store::ActivityState,
     depth: usize,
     has_children: bool,
     label: Label,

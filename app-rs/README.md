@@ -34,13 +34,17 @@ Done (tested against a real in-process daemon unless noted):
   custom runners), layout-ordered tab strip, new-tab menu, workspace removal (keep both).
 - **Keys (M3, part):** prefix mode + overlay, workspace focus, Cmd/Ctrl+1–9, app menu,
   Exit and Kill Daemon.
-- **Settings (M3, part):** full `settings.json` model with load/save (unknown keys kept).
+- **Settings (M3, part):** full `settings.json` model (load/save, unknown keys kept), live
+  reload when Electron edits it, Settings dialog (terminal + keyboard sections).
+- **Git and worktrees (M2):** exec/fs/git clients (full `gitClient.ts` port), open a directory
+  as a workspace, create child worktrees (live git output), merge/squash-merge into the
+  parent (keep or remove), remove with or without git cleanup; activity dots in the tree.
 
 Not yet:
 
-- Git layer and worktree flows: open workspace, create child (new/existing/recent/branch/PR),
-  merge/abandon/remove with git cleanup, git status polling.
-- Settings dialog, close-confirm, context menus beyond removal, tree drag/drop, favourites UI.
+- Child creation from existing worktrees/recent/branch/remote/PR, quick fork, abandon,
+  worktree registry, git status polling and badges.
+- Remaining settings sections, close-confirm, tree drag/drop, favourites UI.
 - SSH/remote connections, port forwards, session info pane, CLI (M4).
 - AI harness analyzer/LLM/chat, attention (M5); filesystem/editor (M6); review/diff/GitHub (M7);
   webview panes, PDF, 3D (M8); packaging (M9); parity sweep and cut-over (M10).
@@ -51,5 +55,7 @@ Not yet:
 - Placeholders for refs another window removed are dropped with the ref.
 - A replayed OSC 52 copy or bell is ignored (it already happened when it first ran).
 - Corrupt `settings.json` is an error (logged; defaults used) instead of being overwritten.
+- Merge-and-remove stages untracked files before its WIP commit (Electron's `commit -am`
+  skips them, failing the merge or losing new files with the deleted worktree).
 - Daemon fix: each gRPC connection now gets its own id, so the session lock actually excludes
   other connections (it was shared by all connections before).
