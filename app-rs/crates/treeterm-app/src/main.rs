@@ -4,6 +4,7 @@ mod app_view;
 #[cfg(feature = "automation")]
 mod automation;
 mod daemon_binary;
+mod keybinding_overlay;
 mod menus;
 mod terminal_element;
 mod terminal_view;
@@ -11,8 +12,11 @@ mod theme;
 mod tree_pane;
 
 use gpui_kit::{
-    AppContext as _, Bounds, TitlebarOptions, WindowBounds, WindowOptions, point, px, size,
+    App, AppContext as _, Bounds, Entity, TitlebarOptions, WindowBounds, WindowOptions, point, px,
+    size,
 };
+use treeterm_core::keybinding::{KeyOutcome, KeyPress, KeybindingSettings, Modifiers, Os};
+use treeterm_model::keybinding_store::KeybindingStore;
 use treeterm_core::local_daemon::LocalDaemonSpec;
 use treeterm_core::paths::{self, process_env};
 use treeterm_core::rt::Rt;
@@ -28,6 +32,52 @@ pub fn window_counts_as_active(window: &gpui_kit::Window) -> bool {
 
 fn automation_enabled() -> bool {
     std::env::var_os("TREETERM_AUTOMATION_SOCKET").is_some()
+}
+
+/// Prefix-mode settings from `settings.json`. A value that does not parse falls back to the
+/// defaults, loudly.
+fn keybinding_settings() -> KeybindingSettings {
+    let raw = paths::user_data_dir()
+        .ok()
+        .and_then(|dir| std::fs::read(treeterm_core::settings::settings_path(&dir)).ok())
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+        .unwrap_or(serde_json::Value::Null);
+    match KeybindingSettings::from_settings_json(&raw, Os::host()) {
+        Ok(settings) => settings,
+        Err(error) => {
+            tracing::error!(%error, "invalid keybinding settings; using defaults");
+            KeybindingSettings::default()
+        }
+    }
+}
+
+/// Every keystroke passes the shortcut machine before the focused view (a terminal) sees
+/// it, so the prefix key and its follow-up never reach the PTY.
+fn intercept_shortcuts(keybindings: Entity<KeybindingStore>, view: Entity<AppView>, cx: &mut App) {
+    cx.intercept_keystrokes(move |event, _window, cx| {
+        let k = &event.keystroke;
+        let m = k.modifiers;
+        let press = KeyPress::from_gpui(
+            &k.key,
+            k.key_char.as_deref(),
+            Modifiers {
+                control: m.control,
+                alt: m.alt,
+                shift: m.shift,
+                platform: m.platform,
+                function: m.function,
+            },
+        );
+        match keybindings.update(cx, |kb, cx| kb.handle_key(&press, cx)) {
+            KeyOutcome::PassThrough => {}
+            KeyOutcome::Consumed => cx.stop_propagation(),
+            KeyOutcome::Perform(action) => {
+                cx.stop_propagation();
+                view.update(cx, |view, cx| view.perform(action, cx));
+            }
+        }
+    })
+    .detach();
 }
 
 fn local_daemon_spec() -> Result<LocalDaemonSpec, paths::PathError> {
@@ -94,9 +144,13 @@ fn main() {
             }),
             ..WindowOptions::default()
         };
-        let (window, view) =
-            gpui_kit::open_window(options, cx, |_, cx| cx.new(|cx| AppView::new(store, cx)))
-                .expect("open the main window");
+        let keybindings = cx.new(|_| KeybindingStore::new(keybinding_settings()));
+        let (window, view) = gpui_kit::open_window(options, cx, {
+            let keybindings = keybindings.clone();
+            |_, cx| cx.new(|cx| AppView::new(store, keybindings, cx))
+        })
+        .expect("open the main window");
+        intercept_shortcuts(keybindings, view.clone(), cx);
         #[cfg(feature = "automation")]
         if let Ok(path) = std::env::var("TREETERM_AUTOMATION_SOCKET") {
             automation::start(path.into(), window, view, &rt_for_automation, cx);

@@ -5,6 +5,7 @@ use std::collections::HashSet;
 use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{AnyElement, ClickEvent, Context, Entity, EventEmitter, SharedString, Window, div, px};
+use treeterm_model::keybinding_store::KeybindingStore;
 use treeterm_model::session_store::{SessionState, SessionStore, WorkspaceEntry};
 
 use crate::theme::colors;
@@ -14,6 +15,7 @@ pub struct WorkspaceSelected(pub String);
 
 pub struct TreePane {
     session: Entity<SessionStore>,
+    keybindings: Entity<KeybindingStore>,
     /// Per-window view state: which workspaces have their children hidden.
     collapsed: HashSet<String>,
     selected: Selection,
@@ -28,10 +30,12 @@ pub enum Selection {
 impl EventEmitter<WorkspaceSelected> for TreePane {}
 
 impl TreePane {
-    pub fn new(session: Entity<SessionStore>, cx: &mut Context<Self>) -> Self {
+    pub fn new(session: Entity<SessionStore>, keybindings: Entity<KeybindingStore>, cx: &mut Context<Self>) -> Self {
         cx.observe(&session, |_, _, cx| cx.notify()).detach();
+        cx.observe(&keybindings, |_, _, cx| cx.notify()).detach();
         Self {
             session,
+            keybindings,
             collapsed: HashSet::new(),
             selected: Selection::Nothing,
         }
@@ -113,6 +117,8 @@ impl TreePane {
             Label::Error(reason) => (format!("⚠ {reason}").into(), c.error),
         };
         let selected = self.selected == Selection::Workspace(id.clone());
+        // Workspace focus mode (prefix + w) moves this cursor with the arrow keys.
+        let focus_cursor = self.keybindings.read(cx).machine().focused_workspace() == Some(id.as_str());
         let chevron = match (has_children, self.collapsed.contains(&id)) {
             (false, _) => " ",
             (true, false) => "▾",
@@ -130,6 +136,7 @@ impl TreePane {
             .text_sm()
             .when(selected, |row| row.bg(c.bg_active))
             .when(!selected, |row| row.hover(|row| row.bg(c.bg_hover)))
+            .when(focus_cursor, |row| row.border_1().border_color(c.accent))
             .on_click(cx.listener(move |pane, _: &ClickEvent, _, cx| {
                 pane.select(select_id.clone(), cx);
             }))

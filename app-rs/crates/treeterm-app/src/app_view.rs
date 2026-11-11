@@ -5,7 +5,9 @@ use std::collections::HashMap;
 use gpui_kit::component::{h_flex, spinner::Spinner, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{AnyElement, App, Context, Entity, EntityId, SharedString, Subscription, Window, div, px};
+use treeterm_core::keybinding::{Action, PrefixAction};
 use treeterm_model::app_store::{AppState, AppStore};
+use treeterm_model::keybinding_store::KeybindingStore;
 use treeterm_model::session_store::{SessionStore, WorkspaceEntry};
 use treeterm_model::workspace_store::TabContent;
 
@@ -14,6 +16,7 @@ use crate::theme::colors;
 use crate::tree_pane::{TreePane, WorkspaceSelected};
 
 pub struct AppView {
+    keybindings: Entity<KeybindingStore>,
     /// Holds keyboard focus when nothing inside does, so window-level shortcuts dispatch.
     focus: gpui_kit::FocusHandle,
     /// Owned, not just observed: an observation does not keep the store alive, and dropping
@@ -53,9 +56,11 @@ enum Next {
 }
 
 impl AppView {
-    pub fn new(store: Entity<AppStore>, cx: &mut Context<Self>) -> Self {
+    pub fn new(store: Entity<AppStore>, keybindings: Entity<KeybindingStore>, cx: &mut Context<Self>) -> Self {
         cx.observe(&store, |view, store, cx| view.sync(&store, cx)).detach();
+        cx.observe(&keybindings, |_, _, cx| cx.notify()).detach();
         let mut view = Self {
+            keybindings,
             focus: cx.focus_handle(),
             _store: store.clone(),
             body: Body::StartingDaemon,
@@ -87,7 +92,8 @@ impl AppView {
 
     fn connect(&mut self, session: Entity<SessionStore>, cx: &mut Context<Self>) -> Connected {
         cx.observe(&session, |_, _, cx| cx.notify()).detach();
-        let tree = cx.new(|cx| TreePane::new(session.clone(), cx));
+        let keybindings = self.keybindings.clone();
+        let tree = cx.new(|cx| TreePane::new(session.clone(), keybindings, cx));
         let selection = cx.subscribe(&tree, |view, _, WorkspaceSelected(id), cx| {
             if let Body::Connected(connected) = &mut view.body {
                 connected.active = ActiveView::Workspace(id.clone());
@@ -140,39 +146,111 @@ impl Render for AppView {
             .bg(bg)
             .text_color(fg)
             .on_action(|_: &crate::menus::Minimize, window, _| window.minimize_window())
-            .on_action(cx.listener(|view, action: &crate::menus::SwitchToTab1, w, cx| view.switch_tab(action, w, cx)))
-            .on_action(cx.listener(|view, action: &crate::menus::SwitchToTab2, w, cx| view.switch_tab(action, w, cx)))
-            .on_action(cx.listener(|view, action: &crate::menus::SwitchToTab3, w, cx| view.switch_tab(action, w, cx)))
-            .on_action(cx.listener(|view, action: &crate::menus::SwitchToTab4, w, cx| view.switch_tab(action, w, cx)))
-            .on_action(cx.listener(|view, action: &crate::menus::SwitchToTab5, w, cx| view.switch_tab(action, w, cx)))
-            .on_action(cx.listener(|view, action: &crate::menus::SwitchToTab6, w, cx| view.switch_tab(action, w, cx)))
-            .on_action(cx.listener(|view, action: &crate::menus::SwitchToTab7, w, cx| view.switch_tab(action, w, cx)))
-            .on_action(cx.listener(|view, action: &crate::menus::SwitchToTab8, w, cx| view.switch_tab(action, w, cx)))
-            .on_action(cx.listener(|view, action: &crate::menus::SwitchToTab9, w, cx| view.switch_tab(action, w, cx)))
             .child(content)
+            .children(crate::keybinding_overlay::render(&self.keybindings, window, cx))
     }
 }
 
 impl AppView {
-    /// Cmd/Ctrl+N: the active workspace's Nth tab, in tab order.
-    fn switch_tab(&mut self, action: &dyn gpui_kit::Action, _window: &mut Window, cx: &mut Context<Self>) {
-        let Some(index) = crate::menus::tab_index(action) else {
-            return;
-        };
-        let Body::Connected(connected) = &mut self.body else {
-            return;
+    /// The active workspace's store, if it is loaded.
+    fn active_store(&self, cx: &App) -> Option<Entity<treeterm_model::workspace_store::WorkspaceStore>> {
+        let Body::Connected(connected) = &self.body else {
+            return None;
         };
         let ActiveView::Workspace(id) = &connected.active else {
-            return;
+            return None;
         };
-        let Some(store) = connected.session.read(cx).workspace_store(id).cloned() else {
-            return;
-        };
-        let tab = store.read(cx).file().app_states.get_index(index).map(|(tab, _)| tab.clone());
-        if let Some(tab) = tab {
-            store.update(cx, |w, cx| w.set_active_tab(&tab, cx));
+        connected.session.read(cx).workspace_store(id).cloned()
+    }
+
+    fn focus_active_tab(&mut self, cx: &mut Context<Self>) {
+        if let Body::Connected(connected) = &mut self.body {
             connected.focus_pending = true;
-            cx.notify();
+        }
+        cx.notify();
+    }
+
+    /// Perform a shortcut decided by the keybinding machine (`WorkspacePane`'s handlers).
+    pub fn perform(&mut self, action: Action, cx: &mut Context<Self>) {
+        match action {
+            Action::SwitchToTab { index } => {
+                let Some(store) = self.active_store(cx) else { return };
+                let tab = store.read(cx).file().app_states.get_index(index).map(|(id, _)| id.clone());
+                if let Some(tab) = tab {
+                    store.update(cx, |w, cx| w.set_active_tab(&tab, cx));
+                    self.focus_active_tab(cx);
+                }
+            }
+            Action::SetActiveWorkspace { workspace_id } => {
+                if let Body::Connected(connected) = &self.body {
+                    connected.tree.update(cx, |tree, cx| tree.select(workspace_id, cx));
+                }
+            }
+            Action::Prefix(PrefixAction::NewTab) => {
+                let Some(store) = self.active_store(cx) else { return };
+                let Body::Connected(connected) = &self.body else { return };
+                let app = connected.session.read(cx).registry().default_app().map(|app| app.id.clone());
+                if let Some(app) = app {
+                    store.update(cx, |w, cx| w.add_tab(&app, cx));
+                    self.focus_active_tab(cx);
+                }
+            }
+            Action::Prefix(PrefixAction::CloseTab) => {
+                let Some(store) = self.active_store(cx) else { return };
+                // Electron never closes the last tab from the keyboard.
+                let file = store.read(cx).file();
+                if file.app_states.len() > 1
+                    && let Some(active) = file.active_tab_id.clone()
+                {
+                    store.update(cx, |w, cx| w.remove_tab(&active, cx));
+                    self.focus_active_tab(cx);
+                }
+            }
+            Action::Prefix(direction @ (PrefixAction::NextTab | PrefixAction::PrevTab)) => {
+                let Some(store) = self.active_store(cx) else { return };
+                let file = store.read(cx).file();
+                let count = file.app_states.len();
+                if count == 0 {
+                    return;
+                }
+                let current = file
+                    .active_tab_id
+                    .as_ref()
+                    .and_then(|id| file.app_states.get_index_of(id));
+                let next = match (direction, current) {
+                    (PrefixAction::NextTab, Some(i)) => (i + 1) % count,
+                    (PrefixAction::NextTab, None) => 0,
+                    (_, Some(0) | None) => count - 1,
+                    (_, Some(i)) => i - 1,
+                };
+                let tab = file.app_states.get_index(next).map(|(id, _)| id.clone());
+                if let Some(tab) = tab {
+                    store.update(cx, |w, cx| w.set_active_tab(&tab, cx));
+                    self.focus_active_tab(cx);
+                }
+            }
+            Action::Prefix(PrefixAction::WorkspaceFocus) => {
+                let Body::Connected(connected) = &self.body else { return };
+                let session = connected.session.read(cx);
+                let ids: Vec<String> = session
+                    .tree_rows(&Default::default(), cx)
+                    .into_iter()
+                    .map(|row| row.id)
+                    .collect();
+                let current = match &connected.active {
+                    ActiveView::Workspace(id) => ids.iter().position(|w| w == id).unwrap_or(0),
+                    ActiveView::Nothing => 0,
+                };
+                if let Err(error) = self
+                    .keybindings
+                    .update(cx, |kb, cx| kb.enter_workspace_focus(ids, current, cx))
+                {
+                    tracing::error!(%error, "workspace focus");
+                }
+            }
+            Action::Prefix(PrefixAction::OpenSettings) => {
+                tracing::info!("settings dialog is not available in the native app yet");
+            }
         }
     }
 }
