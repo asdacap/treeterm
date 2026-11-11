@@ -1,53 +1,85 @@
+//! Per-connection identity for gRPC requests.
+//!
+//! Session locks belong to a connection (a client keeps lock-sensitive calls on one HTTP/2
+//! connection of their own), so every request must carry the id of the connection it came
+//! in on. The id is minted when the socket is accepted and handed to tonic as the stream's
+//! connect info, which tonic inserts into each request's extensions.
+//!
+//! (A tower layer on the server cannot do this: tonic builds the layered service once and
+//! clones it for every connection, so an id minted in the layer is shared by all of them.)
+
+use std::io;
+use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use http::Request;
-use tower::{Layer, Service};
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+use tokio::net::UnixStream;
+use tonic::transport::server::Connected;
 
-/// Daemon-generated per-connection identifier.
-/// Injected into every request's extensions by the tower layer.
-#[derive(Clone, Debug)]
+/// Daemon-generated per-connection identifier, found in every request's extensions.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ConnectionId(pub String);
 
-/// Tower layer that assigns a unique UUID to each gRPC connection.
-///
-/// `Layer::layer()` is called once per accepted connection, generating
-/// a fresh UUID. All requests on that connection share the same ID.
-#[derive(Clone)]
-pub struct ConnectionIdLayer;
+/// An accepted socket together with its connection id.
+pub struct IdentifiedStream {
+    inner: UnixStream,
+    id: ConnectionId,
+}
 
-impl<S> Layer<S> for ConnectionIdLayer {
-    type Service = ConnectionIdService<S>;
-
-    fn layer(&self, inner: S) -> Self::Service {
-        ConnectionIdService {
+impl IdentifiedStream {
+    pub fn new(inner: UnixStream) -> Self {
+        Self {
             inner,
-            connection_id: ConnectionId(uuid::Uuid::new_v4().to_string()),
+            id: ConnectionId(uuid::Uuid::new_v4().to_string()),
         }
     }
 }
 
-/// Wraps an inner service, injecting `ConnectionId` into every request.
-#[derive(Clone)]
-pub struct ConnectionIdService<S> {
-    inner: S,
-    connection_id: ConnectionId,
+impl Connected for IdentifiedStream {
+    type ConnectInfo = ConnectionId;
+
+    fn connect_info(&self) -> ConnectionId {
+        self.id.clone()
+    }
 }
 
-impl<S, B> Service<Request<B>> for ConnectionIdService<S>
-where
-    S: Service<Request<B>>,
-{
-    type Response = S::Response;
-    type Error = S::Error;
-    type Future = S::Future;
+impl AsyncRead for IdentifiedStream {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.inner).poll_read(cx, buf)
+    }
+}
 
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.inner.poll_ready(cx)
+impl AsyncWrite for IdentifiedStream {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        Pin::new(&mut self.inner).poll_write(cx, buf)
     }
 
-    fn call(&mut self, mut req: Request<B>) -> Self::Future {
-        req.extensions_mut().insert(self.connection_id.clone());
-        self.inner.call(req)
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.inner).poll_flush(cx)
+    }
+
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.inner).poll_shutdown(cx)
+    }
+
+    fn poll_write_vectored(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        bufs: &[io::IoSlice<'_>],
+    ) -> Poll<io::Result<usize>> {
+        Pin::new(&mut self.inner).poll_write_vectored(cx, bufs)
+    }
+
+    fn is_write_vectored(&self) -> bool {
+        self.inner.is_write_vectored()
     }
 }
 
@@ -55,21 +87,19 @@ where
 mod tests {
     use super::*;
 
-    #[test]
-    fn layer_generates_unique_ids() {
-        let layer = ConnectionIdLayer;
-
-        // Two connections get different IDs
-        let svc1 = layer.layer(());
-        let svc2 = layer.layer(());
-        assert_ne!(svc1.connection_id.0, svc2.connection_id.0);
+    #[tokio::test]
+    async fn each_accepted_stream_gets_its_own_id() {
+        let (a, _) = UnixStream::pair().unwrap();
+        let (b, _) = UnixStream::pair().unwrap();
+        let a = IdentifiedStream::new(a);
+        let b = IdentifiedStream::new(b);
+        assert_ne!(a.connect_info(), b.connect_info());
     }
 
-    #[test]
-    fn clone_preserves_id() {
-        let layer = ConnectionIdLayer;
-        let svc = layer.layer(());
-        let cloned = svc.clone();
-        assert_eq!(svc.connection_id.0, cloned.connection_id.0);
+    #[tokio::test]
+    async fn a_stream_keeps_its_id() {
+        let (a, _) = UnixStream::pair().unwrap();
+        let a = IdentifiedStream::new(a);
+        assert_eq!(a.connect_info(), a.connect_info());
     }
 }

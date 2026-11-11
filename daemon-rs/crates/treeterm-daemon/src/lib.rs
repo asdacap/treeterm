@@ -19,6 +19,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use tokio::net::UnixListener;
+use tokio_stream::StreamExt as _;
 use tokio_stream::wrappers::UnixListenerStream;
 use tonic::transport::Server;
 use treeterm_proto::treeterm::tree_term_daemon_server::TreeTermDaemonServer;
@@ -50,13 +51,16 @@ pub async fn serve(
         session_store.shutdown().await;
     };
 
+    // Each accepted socket carries its own connection id (see `connection_id`).
+    let incoming = UnixListenerStream::new(listener)
+        .map(|stream| stream.map(connection_id::IdentifiedStream::new));
+
     Server::builder()
-        .layer(connection_id::ConnectionIdLayer)
         .add_service(
             TreeTermDaemonServer::new(svc)
                 .max_decoding_message_size(MAX_MESSAGE_SIZE)
                 .max_encoding_message_size(MAX_MESSAGE_SIZE),
         )
-        .serve_with_incoming_shutdown(UnixListenerStream::new(listener), shutdown)
+        .serve_with_incoming_shutdown(incoming, shutdown)
         .await
 }

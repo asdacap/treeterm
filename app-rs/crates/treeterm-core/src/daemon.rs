@@ -5,8 +5,9 @@ use std::time::Duration;
 
 use futures::{Stream, StreamExt, TryFutureExt};
 use treeterm_proto::treeterm::{
-    CreatePtyRequest, Empty, FileWatchEvent, KillPtyRequest, PtySessionInfo, Session,
-    SessionWatchEvent, SessionWatchRequest, UpdateSessionRequest, WatchFileRequest, WorkspaceRef,
+    CreatePtyRequest, Empty, FileWatchEvent, ForceUnlockSessionRequest, KillPtyRequest,
+    LockSessionRequest, PtySessionInfo, Session, SessionWatchEvent, SessionWatchRequest,
+    UnlockSessionRequest, UpdateSessionRequest, WatchFileRequest, WorkspaceRef,
 };
 
 use crate::pty::{AttachKind, CreatePty, PtyAttachment};
@@ -23,6 +24,14 @@ pub enum ApiError {
     Protocol(&'static str),
     #[error("daemon did not answer within {}s", .0.as_secs())]
     DeadlineExceeded(Duration),
+}
+
+/// Outcome of [`DaemonConnection::lock_session`], with the session after the call.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SessionLockResult {
+    Acquired(Session),
+    /// Another connection holds the lock.
+    HeldElsewhere(Session),
 }
 
 /// Unary calls fail after this long instead of hanging on a wedged daemon. Streams have no
@@ -94,6 +103,40 @@ impl DaemonConnection {
         };
         self.rt
             .run(async move { unary(client.update_session(request)).await })
+    }
+
+    /// Take the session lock for this connection (the daemon keys locks by connection,
+    /// hence the session channel). While held, other connections' updates are rejected.
+    pub fn lock_session(&self, ttl: Duration) -> Fut<Result<SessionLockResult, ApiError>> {
+        let mut client = self.session.clone();
+        let request = LockSessionRequest {
+            ttl_ms: Some(i64::try_from(ttl.as_millis()).unwrap_or(i64::MAX)),
+        };
+        self.rt.run(async move {
+            let response = unary(client.lock_session(request)).await?;
+            let session = response
+                .session
+                .ok_or(ApiError::Protocol("LockSession response without a session"))?;
+            Ok(if response.acquired {
+                SessionLockResult::Acquired(session)
+            } else {
+                SessionLockResult::HeldElsewhere(session)
+            })
+        })
+    }
+
+    pub fn unlock_session(&self) -> Fut<Result<Session, ApiError>> {
+        let mut client = self.session.clone();
+        self.rt
+            .run(async move { unary(client.unlock_session(UnlockSessionRequest {})).await })
+    }
+
+    /// Break another window's stale lock.
+    pub fn force_unlock_session(&self) -> Fut<Result<Session, ApiError>> {
+        let mut client = self.session.clone();
+        self.rt.run(async move {
+            unary(client.force_unlock_session(ForceUnlockSessionRequest {})).await
+        })
     }
 
     /// Start a PTY (or, for a known `handle`, find the live one) and return its id.

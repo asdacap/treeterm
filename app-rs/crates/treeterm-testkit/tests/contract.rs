@@ -110,3 +110,28 @@ async fn body_writes_are_compare_and_swap() {
     assert_eq!(next, BodyWrite::Written);
     assert_eq!(std::fs::read_to_string(daemon.workspaces_dir().join("w.json")).unwrap(), "two");
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_session_lock_is_held_per_connection() {
+    use std::time::Duration;
+    use treeterm_core::daemon::SessionLockResult;
+    let daemon = TestDaemon::start();
+    let a = DaemonConnection::open(&rt(), daemon.socket_path()).await.unwrap().unwrap();
+    let b = DaemonConnection::open(&rt(), daemon.socket_path()).await.unwrap().unwrap();
+
+    let locked = a.lock_session(Duration::from_secs(60)).await.unwrap().unwrap();
+    assert!(matches!(locked, SessionLockResult::Acquired(ref s) if s.lock.is_some()));
+    let other = b.lock_session(Duration::from_secs(60)).await.unwrap().unwrap();
+    assert!(matches!(other, SessionLockResult::HeldElsewhere(_)));
+    // Another connection's update is rejected while the lock is held.
+    let rejected = b.update_session(vec![], None, "b").await.unwrap().unwrap();
+    assert_eq!(rejected.version, match locked { SessionLockResult::Acquired(s) => s.version, _ => unreachable!() });
+
+    let unlocked = a.unlock_session().await.unwrap().unwrap();
+    assert!(unlocked.lock.is_none());
+    assert!(matches!(
+        b.lock_session(Duration::from_secs(60)).await.unwrap().unwrap(),
+        SessionLockResult::Acquired(_)
+    ));
+    assert!(b.force_unlock_session().await.unwrap().unwrap().lock.is_none());
+}
