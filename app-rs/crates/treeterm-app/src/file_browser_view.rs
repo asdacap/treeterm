@@ -517,7 +517,81 @@ impl FileBrowserView {
         }
     }
 
+    /// "Download": pick where to save a copy of `path` on this computer.
+    fn download_button(&self, path: &str, cx: &mut Context<Self>) -> AnyElement {
+        use treeterm_model::file_browser::DownloadState;
+        let state = self.model.read(cx).download_state().clone();
+        let error_color = colors(cx).error;
+        let (label, busy) = match &state {
+            DownloadState::Idle => ("Download", false),
+            DownloadState::Downloading => ("Downloading…", true),
+            DownloadState::Failed(_) => ("Retry download", false),
+        };
+        let (model, owned) = (self.model.clone(), path.to_owned());
+        h_flex()
+            .gap_2()
+            .when_some(
+                match state {
+                    DownloadState::Failed(error) => Some(error),
+                    DownloadState::Idle | DownloadState::Downloading => None,
+                },
+                |d, error| d.child(div().text_xs().text_color(error_color).truncate().child(format!("Download failed: {error}"))),
+            )
+            .child(Button::new("download-file").xsmall().ghost().label(label).disabled(busy).on_click(cx.listener(
+                move |_, _, _, cx| {
+                    let name = owned.rsplit('/').next().unwrap_or("download").to_owned();
+                    let dir = dirs::download_dir().or_else(dirs::home_dir).unwrap_or_default();
+                    let picked = cx.prompt_for_new_path(&dir, Some(&name));
+                    let (model, path) = (model.clone(), owned.clone());
+                    cx.spawn(async move |_, cx| {
+                        let destination = match picked.await {
+                            Ok(Ok(Some(destination))) => destination,
+                            Ok(Ok(None)) | Err(_) => return, // cancelled
+                            Ok(Err(error)) => return tracing::error!(%error, "save dialog failed"),
+                        };
+                        model.update(cx, |m, cx| m.download(&path, destination, cx));
+                    })
+                    .detach();
+                },
+            )))
+            .into_any_element()
+    }
+
     fn viewer(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let body = self.viewer_body(window, cx);
+        // Views without their own header get a bar with Download.
+        let path = match self.model.read(cx).view() {
+            FileView::Image { path, .. } | FileView::Pdf { path, .. } | FileView::Binary { path, .. } | FileView::TooLarge { path, .. } => {
+                Some(path.clone())
+            }
+            FileView::Nothing | FileView::Loading(_) | FileView::Failed { .. } | FileView::Text { .. } => None,
+        };
+        let Some(path) = path else {
+            return body;
+        };
+        let c = colors(cx);
+        let (secondary, border) = (c.text_secondary, c.border);
+        let download = self.download_button(&path, cx);
+        v_flex()
+            .size_full()
+            .child(
+                h_flex()
+                    .px_3()
+                    .py_1()
+                    .gap_2()
+                    .items_center()
+                    .text_xs()
+                    .text_color(secondary)
+                    .border_b_1()
+                    .border_color(border)
+                    .child(div().flex_1().truncate().child(path))
+                    .child(download),
+            )
+            .child(div().flex_1().min_h_0().child(body))
+            .into_any_element()
+    }
+
+    fn viewer_body(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let c = colors(cx);
         let (secondary, error, border) = (c.text_secondary, c.error, c.border);
         let centered = |child: AnyElement| div().size_full().flex().items_center().justify_center().child(child).into_any_element();
@@ -634,6 +708,7 @@ impl FileBrowserView {
                                     },
                                 )))
                             })
+                            .child(self.download_button(&path, cx))
                             .child(Button::new("edit-file").xsmall().ghost().label("Edit").on_click(cx.listener(
                                 move |view, _, _, cx| {
                                     view.workspace.update(cx, |w, cx| w.open_in_editor(&edit_path, cx));

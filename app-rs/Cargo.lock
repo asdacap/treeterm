@@ -9178,6 +9178,7 @@ dependencies = [
 name = "treeterm-app"
 version = "0.1.0"
 dependencies = [
+ "dirs 6.0.0",
  "futures",
  "gpui-kit",
  "gpui-webview",

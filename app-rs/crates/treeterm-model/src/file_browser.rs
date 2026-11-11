@@ -251,6 +251,16 @@ pub struct FileBrowser {
     _definition: Option<Task<()>>,
     _favourites: Option<Task<()>>,
     _workspace: Subscription,
+    /// Saving a copy of a file to this computer (`FileDownloadButton`).
+    download: DownloadState,
+    _download: Option<Task<()>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DownloadState {
+    Idle,
+    Downloading,
+    Failed(String),
 }
 
 /// Directories first, then names, case-insensitively (as the Electron tree sorts).
@@ -353,6 +363,8 @@ impl FileBrowser {
             reveals: 0,
             loads: HashMap::new(),
             _read: None,
+            download: DownloadState::Idle,
+            _download: None,
             _search: None,
             _definition: None,
             _favourites: None,
@@ -370,6 +382,40 @@ impl FileBrowser {
             }
         }
         browser
+    }
+
+    pub fn download_state(&self) -> &DownloadState {
+        &self.download
+    }
+
+    /// Save `path` (on the daemon's host) to `destination` on this computer.
+    pub fn download(&mut self, path: &str, destination: std::path::PathBuf, cx: &mut Context<Self>) {
+        self.download = DownloadState::Downloading;
+        let read = self.fs.read_file(&self.root, path, u64::MAX);
+        let executor = cx.background_executor().clone();
+        self._download = Some(cx.spawn(async move |this, cx| {
+            let result = match read.await {
+                Ok(Ok(ReadOutcome::Read(file))) => {
+                    let content = file.content;
+                    executor
+                        .spawn(async move { std::fs::write(&destination, content).map_err(|e| format!("{}: {e}", destination.display())) })
+                        .await
+                }
+                Ok(Ok(ReadOutcome::TooLarge { size })) => Err(format!("File too large ({size} bytes)")),
+                Ok(Err(error)) => Err(error.to_string()),
+                Err(lost) => Err(lost.to_string()),
+            };
+            match this.update(cx, |browser, cx| {
+                browser.download = match result {
+                    Ok(()) => DownloadState::Idle,
+                    Err(error) => DownloadState::Failed(error),
+                };
+                cx.notify();
+            }) {
+                Ok(()) | Err(_) => {}
+            }
+        }));
+        cx.notify();
     }
 
     pub fn root(&self) -> &str {

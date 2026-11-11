@@ -918,3 +918,25 @@ fn a_lock_held_elsewhere_shows_and_can_be_forced_open(cx: &mut TestAppContext) {
     store.update(cx, |s, cx| s.force_unlock(cx));
     wait_until(cx, &store, |s| !s.is_locked());
 }
+
+#[gpui_kit::test]
+fn a_file_downloads_to_a_local_path(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    std::fs::write(h.daemon.workspaces_dir().join("a.json"), body("a", None)).unwrap();
+    publish(&h, &["a"]);
+    let source = h.daemon.root().join("data.bin");
+    std::fs::write(&source, [0u8, 1, 2, 255, 7]).unwrap();
+    let store = open_store(cx, &h, "client-a");
+    wait_until(cx, &store, |s| loaded(s, "a"));
+    let workspace = store.read_with(cx, |s, _| ws(s, "a"));
+    let tab = workspace.update(cx, |w, cx| w.add_tab("filesystem", cx)).unwrap();
+    let Some(TabContent::Files(files)) = workspace.read_with(cx, |w, _| w.tab_content(&tab)) else {
+        panic!("not a files tab");
+    };
+    let out = tempfile::tempdir().unwrap();
+    let destination = out.path().join("copy.bin");
+    files.update(cx, |f, cx| f.download(&source.to_string_lossy(), destination.clone(), cx));
+    wait_until(cx, &files, |f| *f.download_state() == treeterm_model::file_browser::DownloadState::Idle && destination.exists());
+    assert_eq!(std::fs::read(&destination).unwrap(), vec![0u8, 1, 2, 255, 7]);
+}

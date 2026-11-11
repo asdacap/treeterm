@@ -13,6 +13,7 @@ path = "src/main.rs"
 [dependencies]
 treeterm-core.workspace = true
 indexmap = "2"
+dirs = "6"
 treeterm-model.workspace = true
 treeterm-term.workspace = true
 gpui-webview = "=0.9.1"
