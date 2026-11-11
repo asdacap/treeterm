@@ -36,6 +36,50 @@ pub enum WorkspaceEvent {
 
 impl EventEmitter<WorkspaceEvent> for WorkspaceStore {}
 
+/// What a tab's program is doing. Port of `ActivityState` (`src/shared/types.ts`). The
+/// viewport idle detector produces `Working`/`Idle`; the LLM analyzer the rest.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ActivityState {
+    #[default]
+    Idle,
+    Working,
+    UserInputRequired,
+    PermissionRequest,
+    SafePermissionRequested,
+    Completed,
+    ApplicationError,
+    Error,
+}
+
+impl ActivityState {
+    pub fn label(self) -> &'static str {
+        match self {
+            ActivityState::Idle => "idle",
+            ActivityState::Working => "working",
+            ActivityState::UserInputRequired => "input required",
+            ActivityState::PermissionRequest => "permission request",
+            ActivityState::SafePermissionRequested => "safe permission",
+            ActivityState::Completed => "completed",
+            ActivityState::ApplicationError => "application error",
+            ActivityState::Error => "error",
+        }
+    }
+
+    /// Badge colour, as `ActivityStateBadge.tsx`.
+    pub fn color(self) -> u32 {
+        match self {
+            ActivityState::Idle => 0x666666,
+            ActivityState::Working => 0x2472c8,
+            ActivityState::UserInputRequired => 0xe5e510,
+            ActivityState::PermissionRequest => 0xcd6600,
+            ActivityState::SafePermissionRequested => 0x0dbc79,
+            ActivityState::Completed => 0x23d18b,
+            ActivityState::ApplicationError => 0xd16969,
+            ActivityState::Error => 0xf44747,
+        }
+    }
+}
+
 /// What a tab shows.
 pub enum TabContent {
     Terminal(Entity<TerminalModel>),
@@ -69,6 +113,8 @@ pub struct WorkspaceStore {
     registry: Rc<AppRegistry>,
     settings: Rc<Settings>,
     tabs: HashMap<String, TabRef>,
+    /// Per-tab activity; runtime only (`activityState` store).
+    activity: HashMap<String, ActivityState>,
 }
 
 fn new_tab_id() -> String {
@@ -94,6 +140,7 @@ impl WorkspaceStore {
             registry,
             settings,
             tabs: HashMap::new(),
+            activity: HashMap::new(),
         };
         let tab_ids: Vec<String> = store.workspace.file.app_states.keys().cloned().collect();
         for tab_id in tab_ids {
@@ -119,6 +166,66 @@ impl WorkspaceStore {
             Some(TabRef::Terminal(TerminalTab::Failed(error))) => TabContent::Failed(error.clone()),
             None => TabContent::NotPorted(tab.application_id.clone()),
         })
+    }
+
+    /// `settings.terminal.maxCols`, the width the "col limit" switch caps at.
+    pub fn max_cols(&self) -> u16 {
+        self.settings.terminal.max_cols
+    }
+
+    pub fn activity(&self, tab_id: &str) -> ActivityState {
+        self.activity.get(tab_id).copied().unwrap_or_default()
+    }
+
+    fn set_activity(&mut self, tab_id: &str, state: ActivityState, cx: &mut Context<Self>) {
+        if self.activity.insert(tab_id.to_owned(), state) != Some(state) {
+            cx.notify();
+        }
+    }
+
+    /// A boolean in the tab's state that defaults to false (the `*Disabled` flags).
+    pub fn tab_flag(&self, tab_id: &str, key: &str) -> bool {
+        self.workspace
+            .file
+            .app_states
+            .get(tab_id)
+            .and_then(|tab| tab.state.get(key))
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    }
+
+    /// The status bar's "col limit" switch: persisted per tab, applied to its terminal.
+    pub fn set_width_limit_enabled(&mut self, tab_id: &str, enabled: bool, cx: &mut Context<Self>) {
+        self.update_tab_state(
+            tab_id,
+            |state| {
+                if let Value::Object(state) = state {
+                    state.insert("widthLimitDisabled".into(), Value::Bool(!enabled));
+                }
+            },
+            cx,
+        );
+        let limit = if enabled {
+            WidthLimit::Capped(self.settings.terminal.max_cols)
+        } else {
+            WidthLimit::Off
+        };
+        if let Some(TabRef::Terminal(TerminalTab::Attached { model, .. })) = self.tabs.get(tab_id) {
+            model.update(cx, |model, cx| model.set_width_limit(limit, cx));
+        }
+    }
+
+    /// The status bar's "Idle detector" switch, persisted per tab.
+    pub fn set_idle_detector_enabled(&mut self, tab_id: &str, enabled: bool, cx: &mut Context<Self>) {
+        self.update_tab_state(
+            tab_id,
+            |state| {
+                if let Value::Object(state) = state {
+                    state.insert("idleDetectorDisabled".into(), Value::Bool(!enabled));
+                }
+            },
+            cx,
+        );
     }
 
     /// Every terminal this workspace holds, for automation and teardown.
@@ -183,7 +290,9 @@ impl WorkspaceStore {
             } else {
                 WidthLimit::Capped(settings.terminal.max_cols)
             },
-            idle_timeout: (!flag("idleDetectorDisabled")).then_some(settings.analyzer.idle_debounce),
+            // Always detecting: the per-tab switch gates only the Working edge, read when it
+            // fires, so turning it off still lets a pending Idle land.
+            idle_timeout: Some(settings.analyzer.idle_debounce),
         }
     }
 
@@ -194,10 +303,13 @@ impl WorkspaceStore {
         let owned_tab = tab_id.to_owned();
         let events = cx.subscribe(&model, move |store, _, event: &TerminalEvent, cx| match event {
             TerminalEvent::CloseRequested { .. } => store.remove_tab(&owned_tab, cx),
-            TerminalEvent::Clipboard(_)
-            | TerminalEvent::Bell
-            | TerminalEvent::Activity(_)
-            | TerminalEvent::Idle(_) => {}
+            TerminalEvent::Activity(_) => {
+                if !store.tab_flag(&owned_tab, "idleDetectorDisabled") {
+                    store.set_activity(&owned_tab, ActivityState::Working, cx);
+                }
+            }
+            TerminalEvent::Idle(_) => store.set_activity(&owned_tab, ActivityState::Idle, cx),
+            TerminalEvent::Clipboard(_) | TerminalEvent::Bell => {}
         });
         TerminalTab::Attached {
             model,
@@ -276,6 +388,7 @@ impl WorkspaceStore {
     /// Detaches its terminal; never kills the PTY.
     fn dispose_tab(&mut self, tab_id: &str) {
         self.tabs.remove(tab_id);
+        self.activity.remove(tab_id);
     }
 
     /// Add a tab running `application_id` and make it active. Returns the tab id, or `None`

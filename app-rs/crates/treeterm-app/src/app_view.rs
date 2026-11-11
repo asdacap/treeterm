@@ -330,7 +330,11 @@ fn workspace_pane(connected: &mut Connected, window: &mut Window, cx: &mut Conte
                     let focus = view.read(cx).focus_handle().clone();
                     window.focus(&focus, cx);
                 }
-                div().size_full().child(view).into_any_element()
+                v_flex()
+                    .size_full()
+                    .child(div().flex_1().min_h_0().child(view))
+                    .child(terminal_status_bar(&workspace, tab_id, cx))
+                    .into_any_element()
             }
             Some(TabContent::StartingTerminal) => {
                 centered(div().text_color(secondary).child("Starting terminal…"))
@@ -352,6 +356,63 @@ fn workspace_pane(connected: &mut Connected, window: &mut Window, cx: &mut Conte
         .child(header)
         .child(tabs)
         .child(div().flex_1().min_h_0().child(content))
+        .into_any_element()
+}
+
+/// The bar under a terminal: activity badge, idle-detector and width-limit switches.
+/// Port of `TerminalStatusBar.tsx`; both switches persist in the tab's state.
+fn terminal_status_bar(
+    workspace: &Entity<treeterm_model::workspace_store::WorkspaceStore>,
+    tab_id: &str,
+    cx: &mut Context<AppView>,
+) -> AnyElement {
+    use gpui_kit::component::Sizable as _;
+    use gpui_kit::component::switch::Switch;
+    let store = workspace.read(cx);
+    let activity = store.activity(tab_id);
+    let idle_enabled = !store.tab_flag(tab_id, "idleDetectorDisabled");
+    let width_enabled = !store.tab_flag(tab_id, "widthLimitDisabled");
+    let max_cols = store.max_cols();
+    let (idle_ws, idle_tab) = (workspace.clone(), tab_id.to_owned());
+    let (width_ws, width_tab) = (workspace.clone(), tab_id.to_owned());
+    h_flex()
+        .h(px(28.))
+        .flex_shrink_0()
+        .px_2()
+        .gap_3()
+        .items_center()
+        .bg(gpui_kit::rgb(0x1e1e1e))
+        .border_t_1()
+        .border_color(gpui_kit::rgb(0x333333))
+        .text_size(px(11.))
+        .child(
+            div()
+                .px_2()
+                .py(px(2.))
+                .rounded(px(12.))
+                .bg(gpui_kit::rgb(activity.color()))
+                .opacity(0.8)
+                .text_color(gpui_kit::white())
+                .child(activity.label()),
+        )
+        .child(
+            Switch::new(SharedString::from(format!("idle-switch-{tab_id}")))
+                .checked(idle_enabled)
+                .label("Idle detector")
+                .xsmall()
+                .on_click(move |checked, _, cx| {
+                    idle_ws.update(cx, |w, cx| w.set_idle_detector_enabled(&idle_tab, *checked, cx));
+                }),
+        )
+        .child(
+            Switch::new(SharedString::from(format!("width-switch-{tab_id}")))
+                .checked(width_enabled)
+                .label(format!("{max_cols} col limit"))
+                .xsmall()
+                .on_click(move |checked, _, cx| {
+                    width_ws.update(cx, |w, cx| w.set_width_limit_enabled(&width_tab, *checked, cx));
+                }),
+        )
         .into_any_element()
 }
 
