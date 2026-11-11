@@ -6,6 +6,7 @@
 //! - `state` — what the window shows (workspaces, selection, terminal screens)
 //! - `select <workspace-id>` / `tab <workspace-id> <tab-id>`
 //! - `newtab <workspace-id>` / `closetab <workspace-id> <tab-id>`
+//! - `open <directory>` — open a directory as a workspace (no folder picker)
 //! - `type <text>` — type text as keystrokes; `key <keystroke>` — e.g. `enter`, `ctrl-c`
 //! - `screenshot <path.png>` — render the last frame offscreen (no screen-capture permission)
 
@@ -110,6 +111,10 @@ fn handle(line: &str, window: AnyWindowHandle, view: &Entity<AppView>, cx: &mut 
                 let (workspace, tab) = rest.split_once(' ').ok_or("usage: closetab <workspace> <tab>")?;
                 view.update(cx, |view, cx| view.automation_close_tab(workspace, tab, cx));
                 Ok(json!({ "ok": true }))
+            }
+            "open" => {
+                let id = view.update(cx, |view, cx| view.automation_open_workspace(rest.to_owned(), cx));
+                Ok(json!({ "ok": id.is_some(), "id": id }))
             }
             "focus" => {
                 // Re-run focus sync: focus the shown terminal again.

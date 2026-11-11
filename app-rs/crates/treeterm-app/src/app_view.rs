@@ -632,6 +632,15 @@ impl AppView {
         store.update(cx, |w, cx| w.add_tab(&app, cx))
     }
 
+    pub fn automation_open_workspace(&mut self, path: String, cx: &mut Context<Self>) -> Option<String> {
+        let Body::Connected(connected) = &self.body else {
+            return None;
+        };
+        let id = connected.session.update(cx, |s, cx| s.open_workspace(path, cx));
+        connected.tree.update(cx, |tree, cx| tree.select(id.clone(), cx));
+        Some(id)
+    }
+
     pub fn automation_close_tab(&mut self, workspace: &str, tab: &str, cx: &mut Context<Self>) {
         if let Body::Connected(connected) = &self.body
             && let Some(store) = connected.session.read(cx).workspace_store(workspace).cloned()

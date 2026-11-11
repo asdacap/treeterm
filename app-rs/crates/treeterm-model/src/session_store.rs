@@ -178,6 +178,19 @@ fn refs_json(refs: &[WorkspaceRef]) -> String {
     stable_json::to_string(&list).expect("refs serialize")
 }
 
+fn now_millis() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or_default()
+}
+
+/// `ws-<millis>-<7 random chars>`, as Electron mints them.
+fn new_workspace_id() -> String {
+    let suffix: String = uuid::Uuid::new_v4().simple().to_string().chars().take(7).collect();
+    format!("ws-{}-{suffix}", now_millis())
+}
+
 fn name_from_path(path: &str) -> String {
     path.rsplit('/').find(|part| !part.is_empty()).unwrap_or(path).to_owned()
 }
@@ -1053,6 +1066,115 @@ impl SessionStore {
     }
 
     // ---- workspace lifecycle ----------------------------------------------------------------
+
+    /// Open a directory as a new root workspace (`addWorkspace`): a placeholder at once,
+    /// then git info, the default tab, its body and its ref. Returns the new id.
+    pub fn open_workspace(&mut self, path: String, cx: &mut Context<Self>) -> String {
+        let id = new_workspace_id();
+        let name = name_from_path(&path);
+        self.entries.insert(
+            id.clone(),
+            WorkspaceEntry::Loading {
+                name: name.clone(),
+                message: "Loading workspace...".to_owned(),
+                output: Vec::new(),
+            },
+        );
+        cx.notify();
+        let git = self.conn.git();
+        let owned = id.clone();
+        cx.spawn(async move |this, cx| {
+            let info = git.get_info(&path).await;
+            match this.update(cx, |session, cx| session.finish_open_workspace(owned, name, path, info, cx)) {
+                Ok(()) | Err(_) => {} // Err: store dropped
+            }
+        })
+        .detach();
+        id
+    }
+
+    fn finish_open_workspace(
+        &mut self,
+        id: String,
+        name: String,
+        path: String,
+        info: treeterm_core::git::GitInfo,
+        cx: &mut Context<Self>,
+    ) {
+        use treeterm_core::git::GitInfo;
+        use treeterm_core::wire::workspace_file::{AppState, WorkspaceStatus, WorktreeSettings};
+        // Dismissed while git info was loading.
+        if !matches!(self.entries.get(&id), Some(WorkspaceEntry::Loading { .. })) {
+            return;
+        }
+        let global_default = self.settings.read(cx).settings().global_default_application_id.clone();
+        let mut app_states = IndexMap::new();
+        let mut active_tab_id = None;
+        if let Some(app) = self.registry.default_for_workspace([], &global_default) {
+            let tab_id = crate::workspace_store::new_tab_id();
+            app_states.insert(
+                tab_id.clone(),
+                AppState {
+                    application_id: app.id.clone(),
+                    title: app.name.clone(),
+                    state: app.initial_state(),
+                },
+            );
+            active_tab_id = Some(tab_id);
+        }
+        let (is_git_repo, git_branch, git_root_path) = match info {
+            GitInfo::NotRepo => (false, None, None),
+            GitInfo::Repo { branch, root_path } => (true, Some(branch), Some(root_path)),
+        };
+        let now = now_millis();
+        let file = WorkspaceFile {
+            name,
+            parent_id: None,
+            status: WorkspaceStatus::Active,
+            is_git_repo,
+            git_branch,
+            git_root_path,
+            is_worktree: false,
+            is_detached: Some(false),
+            app_states,
+            active_tab_id,
+            metadata: [("sortOrder".to_owned(), self.next_sort_order(None, cx))].into(),
+            settings: WorktreeSettings::default(),
+            favourite_paths: Vec::new(),
+            created_at: now,
+            last_activity: now,
+            extra: Default::default(),
+        };
+        self.add_workspace(Workspace { id, path, file }, cx);
+    }
+
+    /// One past the largest `sortOrder` among a parent's children (or the roots).
+    fn next_sort_order(&self, parent: Option<&str>, cx: &App) -> String {
+        let max = self
+            .entries
+            .values()
+            .filter_map(|entry| entry.store())
+            .map(|store| store.read(cx).file())
+            .filter(|file| file.parent_id.as_deref() == parent)
+            .map(|file| tree::sort_order(file))
+            .max();
+        match max {
+            Some(max) => (max + 1).to_string(),
+            None => "0".to_owned(),
+        }
+    }
+
+    /// Drop a placeholder or failed workspace from this window (`dismissWorkspace`).
+    pub fn dismiss_workspace(&mut self, id: &str, cx: &mut Context<Self>) {
+        if matches!(
+            self.entries.get(id),
+            Some(WorkspaceEntry::Loading { .. } | WorkspaceEntry::Error { .. })
+        ) {
+            self.entries.shift_remove(id);
+            cx.emit(SessionEvent::WorkspaceRemoved(id.to_owned()));
+            cx.notify();
+        }
+    }
 
     /// Add a workspace built here (`createWorkspaceFile` + ref sync): write its first body
     /// (must-not-exist CAS), open its watch, then publish it.

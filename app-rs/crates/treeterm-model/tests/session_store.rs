@@ -290,3 +290,34 @@ fn settings_changes_reach_live_terminals(cx: &mut TestAppContext) {
     };
     terminal.read_with(cx, |t, _| assert_eq!(t.options().settings.font_size, 17.0));
 }
+
+#[gpui_kit::test]
+fn opening_a_directory_adds_a_root_workspace_with_git_info_and_a_terminal(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    publish(&h, &[]);
+    let repo = h.daemon.root().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    let git = |args: &[&str]| {
+        let status = std::process::Command::new("git").args(args).current_dir(&repo).status().unwrap();
+        assert!(status.success(), "git {args:?}");
+    };
+    git(&["init", "-q", "-b", "main"]);
+    git(&["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init"]);
+
+    let first = open_store(cx, &h, "client-a");
+    let second = open_store(cx, &h, "client-b");
+    wait_until(cx, &first, |s| matches!(s.state(), SessionState::Live));
+    let path = repo.to_string_lossy().into_owned();
+    let id = first.update(cx, |s, cx| s.open_workspace(path.clone(), cx));
+    assert!(matches!(first.read_with(cx, |s, _| matches!(s.entry(&id), Some(WorkspaceEntry::Loading { .. }))), true));
+
+    wait_until_app(cx, &second, |s, cx| s.workspace_store(&id).is_some_and(|w| w.read(cx).file().name == "repo"));
+    let disk = file_on_disk(&h, &id);
+    assert_eq!(disk["isGitRepo"], true);
+    assert_eq!(disk["gitBranch"], "main");
+    assert_eq!(disk["metadata"]["sortOrder"], "0");
+    let tab = disk["activeTabId"].as_str().unwrap().to_owned();
+    assert_eq!(disk["appStates"][&tab]["applicationId"], "terminal");
+    wait_for_disk(cx, || file_on_disk(&h, &id)["appStates"][&tab]["state"]["ptyId"].is_string());
+}

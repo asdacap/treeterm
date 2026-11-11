@@ -128,7 +128,7 @@ fn parse_hex_color(text: &str) -> Option<treeterm_term::alacritty_terminal::vte:
     })
 }
 
-fn new_tab_id() -> String {
+pub(crate) fn new_tab_id() -> String {
     let millis = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis())

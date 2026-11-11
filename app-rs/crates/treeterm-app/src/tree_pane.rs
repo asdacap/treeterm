@@ -49,6 +49,32 @@ impl TreePane {
         cx.notify();
     }
 
+    /// Pick a directory and open it as a root workspace (`OpenWorkspaceDialog`, local only).
+    fn open_workspace(&mut self, cx: &mut Context<Self>) {
+        let picked = cx.prompt_for_paths(gpui_kit::PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: Some("Open Workspace".into()),
+        });
+        cx.spawn(async move |pane, cx| {
+            let path = match picked.await {
+                Ok(Ok(Some(mut paths))) if !paths.is_empty() => paths.remove(0),
+                Ok(Ok(_)) => return, // cancelled
+                Ok(Err(error)) => return tracing::error!(%error, "folder picker failed"),
+                Err(_canceled) => return,
+            };
+            let path = path.to_string_lossy().into_owned();
+            match pane.update(cx, |pane, cx| {
+                let id = pane.session.update(cx, |s, cx| s.open_workspace(path, cx));
+                pane.select(id, cx);
+            }) {
+                Ok(()) | Err(_) => {} // Err: the pane closed
+            }
+        })
+        .detach();
+    }
+
     pub fn select(&mut self, id: String, cx: &mut Context<Self>) {
         self.selected = Selection::Workspace(id.clone());
         cx.emit(WorkspaceSelected(id));
@@ -97,12 +123,23 @@ impl Render for TreePane {
             // macOS traffic lights sit over the top 38px, as in Electron's `.tree-pane-content`.
             .pt(px(38.))
             .child(
-                div()
+                h_flex()
                     .px_3()
                     .pb_2()
+                    .justify_between()
                     .text_xs()
                     .text_color(text_secondary)
-                    .child("WORKSPACES"),
+                    .child("WORKSPACES")
+                    .child(
+                        div()
+                            .id("open-workspace")
+                            .px_1()
+                            .rounded_sm()
+                            .cursor_pointer()
+                            .hover(|d| d.bg(colors(cx).bg_hover))
+                            .child("+")
+                            .on_click(cx.listener(|pane, _: &ClickEvent, _, cx| pane.open_workspace(cx))),
+                    ),
             )
             .child(div().id("tree-rows").flex_1().overflow_y_scroll().child(body))
     }
