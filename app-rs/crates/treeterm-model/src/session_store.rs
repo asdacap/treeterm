@@ -25,7 +25,7 @@ use treeterm_core::daemon::{ApiError, DaemonConnection};
 use crate::settings_store::{SettingsEvent, SettingsStore};
 use treeterm_core::tree::{self, TreeNode, TreeRow};
 use treeterm_core::wire::stable_json::{self, sha256_hex};
-use treeterm_core::wire::workspace_file::{WorkspaceFile, parse_workspace_file, stored_json};
+use treeterm_core::wire::workspace_file::{WorkspaceFile, WorkspaceStatus, parse_workspace_file, stored_json};
 use treeterm_core::workspace_io::{BodyWrite, Expected};
 use treeterm_proto::treeterm::file_watch_event::State as FileState;
 use treeterm_proto::treeterm::{FileWatchEvent, Session, SessionLock, SessionWatchEvent, WorkspaceRef};
@@ -85,6 +85,14 @@ pub enum RemoveMode {
     KeepBranch,
     /// `removeWorkspaceKeepBoth`: only leave the session.
     KeepWorktreeAndBranch,
+}
+
+/// What happens to a child after its branch is merged into the parent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AfterMerge {
+    /// Remove it with its worktree and branch.
+    Remove,
+    Keep,
 }
 
 /// The git side of removing one workspace.
@@ -1474,74 +1482,66 @@ impl SessionStore {
         let git = self.conn.git();
         cx.spawn(async move |this, cx| {
             let locked = lock.await.unwrap_or_else(|_| Err("session store dropped".to_owned()));
-            if let Err(error) = locked {
-                match this.update(cx, |session, cx| session.set_operation_error(&id, &store, error, cx)) {
-                    Ok(()) | Err(_) => {} // Err: store dropped
-                }
-                return;
-            }
-            let Ok(subtree) = this.update(cx, |session, cx| session.subtree(&id, cx)) else {
-                return;
-            };
-            let mut failure = None;
-            for removed_id in &subtree {
-                let Ok(target) = this.update(cx, |session, cx| {
-                    let ws = session.workspace_store(removed_id)?.clone();
-                    ws.update(cx, |w, cx| w.close_all_tabs(cx));
-                    let w = ws.read(cx).workspace();
-                    Some(GitCleanup::for_workspace(&w.file, &w.path, mode))
-                }) else {
-                    return;
-                };
-                let cleaned = match target {
-                    Some(GitCleanup::Nothing) | None => Ok(()),
-                    Some(GitCleanup::RemoveWorktree { root, path, branch }) => {
-                        git.remove_worktree(&root, &path, branch, treeterm_core::git::Progress::Silent).await
+            match locked {
+                Ok(()) => {
+                    if let Err(error) = remove_locked(&this, &id, mode, &git, cx).await {
+                        match this.update(cx, |session, cx| session.set_operation_error(&id, &store, error, cx)) {
+                            Ok(()) | Err(_) => {}
+                        }
                     }
-                };
-                if let Err(error) = cleaned {
-                    failure = Some(error.to_string());
-                    break;
+                    release(&this, cx).await;
                 }
-                if this.update(cx, |session, cx| session.on_workspace_removed(removed_id, cx)).is_err() {
-                    return;
-                }
+                Err(error) => match this.update(cx, |session, cx| session.set_operation_error(&id, &store, error, cx)) {
+                    Ok(()) | Err(_) => {} // Err: store dropped
+                },
             }
-            if let Some(error) = failure {
+        })
+        .detach();
+    }
+
+    /// Merge a child worktree's branch into its parent (`mergeAndRemoveWorkspace` /
+    /// `mergeAndKeepWorkspace`), under the session lock. Refused while the parent has
+    /// uncommitted changes. Before a merge that removes the child, its uncommitted work is
+    /// committed as WIP; after it the child is marked merged and removed with its worktree
+    /// and branch. Failures show on the child.
+    pub fn merge_workspace(&mut self, id: &str, squash: bool, after: AfterMerge, cx: &mut Context<Self>) {
+        let Some(store) = self.workspace_store(id).cloned() else {
+            return;
+        };
+        let id = id.to_owned();
+        let lock = self.acquire_lock(cx);
+        let git = self.conn.git();
+        cx.spawn(async move |this, cx| {
+            let locked = lock.await.unwrap_or_else(|_| Err("session store dropped".to_owned()));
+            let result = match locked {
+                Ok(()) => {
+                    let merged = merge_locked(&this, &id, squash, after, &git, cx).await;
+                    let result = match (merged, after) {
+                        (Ok(()), AfterMerge::Remove) => {
+                            match this.update(cx, |_, cx| store.update(cx, |w, cx| w.set_status(WorkspaceStatus::Merged, cx))) {
+                                Ok(()) | Err(_) => {}
+                            }
+                            remove_locked(&this, &id, RemoveMode::DeleteWorktreeAndBranch, &git, cx)
+                                .await
+                                .map_err(|error| format!("Merge succeeded but cleanup failed: {error}"))
+                        }
+                        (Ok(()), AfterMerge::Keep) => {
+                            match this.update(cx, |session, cx| session.clear_workspace_error(&id, cx)) {
+                                Ok(()) | Err(_) => {}
+                            }
+                            Ok(())
+                        }
+                        (Err(error), _) => Err(error),
+                    };
+                    release(&this, cx).await;
+                    result
+                }
+                Err(error) => Err(error),
+            };
+            if let Err(error) = result {
                 match this.update(cx, |session, cx| session.set_operation_error(&id, &store, error, cx)) {
                     Ok(()) | Err(_) => {}
                 }
-            }
-            let Ok(published) = this.update(cx, |session, cx| session.sync_refs("removeWorkspace", cx)) else {
-                return;
-            };
-            if published.await.is_err() {
-                return;
-            }
-            // Membership is the source of truth; deleting the files is cleanup after.
-            let Ok(deletes) = this.update(cx, |session, _| {
-                subtree
-                    .iter()
-                    .filter(|removed_id| !session.entries.contains_key(*removed_id))
-                    .map(|removed_id| {
-                        (removed_id.clone(), session.conn.delete_body(&session.data_dir, &format!("{removed_id}.json")))
-                    })
-                    .collect::<Vec<_>>()
-            }) else {
-                return;
-            };
-            for (removed_id, delete) in deletes {
-                match delete.await {
-                    Ok(Ok(())) => {}
-                    Ok(Err(error)) => tracing::error!(workspace = %removed_id, %error, "failed to delete workspace file"),
-                    Err(lost) => tracing::error!(workspace = %removed_id, %lost, "failed to delete workspace file"),
-                }
-            }
-            let Ok(unlock) = this.update(cx, |session, cx| session.release_lock(cx)) else {
-                return;
-            };
-            if unlock.await.is_err() {
-                tracing::debug!("unlock dropped with the store");
             }
         })
         .detach();
@@ -1652,6 +1652,129 @@ impl SessionStore {
             }
         }
     }
+}
+
+type WeakSession = gpui_kit::WeakEntity<SessionStore>;
+
+/// Release the session lock taken for an operation.
+async fn release(this: &WeakSession, cx: &mut gpui_kit::AsyncApp) {
+    let Ok(unlock) = this.update(cx, |session, cx| session.release_lock(cx)) else {
+        return;
+    };
+    if unlock.await.is_err() {
+        tracing::debug!("unlock dropped with the store");
+    }
+}
+
+/// `removeWorkspaceInternal`, with the session lock already held: children first, kill
+/// each workspace's tabs, clean up git, drop it; then publish the smaller membership and
+/// delete the body files. Stops at the first git failure.
+async fn remove_locked(
+    this: &WeakSession,
+    id: &str,
+    mode: RemoveMode,
+    git: &treeterm_core::git::GitApi,
+    cx: &mut gpui_kit::AsyncApp,
+) -> Result<(), String> {
+    let gone = || "session store dropped".to_owned();
+    let subtree = this.update(cx, |session, cx| session.subtree(id, cx)).map_err(|_| gone())?;
+    let mut failure = None;
+    for removed_id in &subtree {
+        let target = this
+            .update(cx, |session, cx| {
+                let ws = session.workspace_store(removed_id)?.clone();
+                ws.update(cx, |w, cx| w.close_all_tabs(cx));
+                let w = ws.read(cx).workspace();
+                Some(GitCleanup::for_workspace(&w.file, &w.path, mode))
+            })
+            .map_err(|_| gone())?;
+        let cleaned = match target {
+            Some(GitCleanup::Nothing) | None => Ok(()),
+            Some(GitCleanup::RemoveWorktree { root, path, branch }) => {
+                git.remove_worktree(&root, &path, branch, treeterm_core::git::Progress::Silent).await
+            }
+        };
+        if let Err(error) = cleaned {
+            failure = Some(error.to_string());
+            break;
+        }
+        this.update(cx, |session, cx| session.on_workspace_removed(removed_id, cx))
+            .map_err(|_| gone())?;
+    }
+    let published = this
+        .update(cx, |session, cx| session.sync_refs("removeWorkspace", cx))
+        .map_err(|_| gone())?;
+    if published.await.is_err() {
+        return Err(gone());
+    }
+    // Membership is the source of truth; deleting the files is cleanup after.
+    let deletes = this
+        .update(cx, |session, _| {
+            subtree
+                .iter()
+                .filter(|removed_id| !session.entries.contains_key(*removed_id))
+                .map(|removed_id| {
+                    (removed_id.clone(), session.conn.delete_body(&session.data_dir, &format!("{removed_id}.json")))
+                })
+                .collect::<Vec<_>>()
+        })
+        .map_err(|_| gone())?;
+    for (removed_id, delete) in deletes {
+        match delete.await {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => tracing::error!(workspace = %removed_id, %error, "failed to delete workspace file"),
+            Err(lost) => tracing::error!(workspace = %removed_id, %lost, "failed to delete workspace file"),
+        }
+    }
+    match failure {
+        Some(error) => Err(error),
+        None => Ok(()),
+    }
+}
+
+/// `mergeWorkspaceCore`, with the session lock already held.
+async fn merge_locked(
+    this: &WeakSession,
+    id: &str,
+    squash: bool,
+    after: AfterMerge,
+    git: &treeterm_core::git::GitApi,
+    cx: &mut gpui_kit::AsyncApp,
+) -> Result<(), String> {
+    use treeterm_core::git::{MergeMode, Progress};
+    let (child_path, child_name, child_branch, parent_path) = this
+        .update(cx, |session, cx| -> Result<_, String> {
+            let child = session.workspace_store(id).ok_or("Workspace not found")?.read(cx).workspace();
+            let (true, Some(parent_id)) = (child.file.is_worktree, child.file.parent_id.clone()) else {
+                return Err("Not a worktree workspace".to_owned());
+            };
+            let parent = session
+                .workspace_store(&parent_id)
+                .map(|p| p.read(cx).workspace())
+                .filter(|p| p.file.git_root_path.is_some() && p.file.git_branch.is_some())
+                .ok_or("Parent workspace not found or not a git repo")?;
+            let branch = child.file.git_branch.clone().ok_or("Workspace has no branch to merge")?;
+            Ok((child.path.clone(), child.file.name.clone(), branch, parent.path.clone()))
+        })
+        .map_err(|_| "session store dropped".to_owned())??;
+    if git.has_uncommitted_changes(&parent_path).await.map_err(|e| e.to_string())? {
+        return Err("Parent workspace has uncommitted changes. Commit or stash them before merging.".to_owned());
+    }
+    if after == AfterMerge::Remove && git.has_uncommitted_changes(&child_path).await.map_err(|e| e.to_string())? {
+        // Deviation from Electron: stage untracked files too. `commit -am` alone skips
+        // them, so untracked-only work made the merge fail, and new files next to edits were
+        // left out of the commit and then deleted with the worktree.
+        git.stage_all(&child_path)
+            .await
+            .map_err(|e| format!("Failed to stage changes: {e}"))?;
+        git.commit_all(&child_path, &format!("WIP: Auto-commit before merge from {child_name}"), Progress::Silent)
+            .await
+            .map_err(|e| format!("Failed to commit changes: {e}"))?;
+    }
+    let mode = if squash { MergeMode::Squash } else { MergeMode::Merge };
+    git.merge(&parent_path, &child_branch, mode, Progress::Silent)
+        .await
+        .map_err(|e| format!("Merge failed: {e}"))
 }
 
 fn remember_hash(sync: &mut WorkspaceSync, sha: String) {

@@ -7,7 +7,7 @@ use gpui_kit::component::{ActiveTheme as _, WindowExt as _, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{AnyElement, ClickEvent, Context, Entity, EventEmitter, SharedString, Window, div, px};
 use treeterm_model::keybinding_store::KeybindingStore;
-use treeterm_model::session_store::{RemoveMode, SessionState, SessionStore, WorkspaceEntry};
+use treeterm_model::session_store::{AfterMerge, RemoveMode, SessionState, SessionStore, WorkspaceEntry};
 
 use crate::theme::colors;
 
@@ -221,7 +221,16 @@ impl TreePane {
                         confirm_remove(session.clone(), id.clone(), label.clone(), mode, window, cx)
                     }))
                 };
+                let merge = |menu: gpui_kit::component::menu::PopupMenu, text: &'static str, squash: bool, after: AfterMerge| {
+                    let (session, id, label) = (session.clone(), id.clone(), label.clone());
+                    menu.item(PopupMenuItem::new(text).on_click(move |_, window, cx| {
+                        confirm_merge(session.clone(), id.clone(), label.clone(), squash, after, window, cx)
+                    }))
+                };
                 let menu = if is_worktree {
+                    let menu = merge(menu, "Merge into parent and remove…", false, AfterMerge::Remove);
+                    let menu = merge(menu, "Squash-merge into parent and remove…", true, AfterMerge::Remove);
+                    let menu = merge(menu, "Merge into parent, keep workspace…", false, AfterMerge::Keep).separator();
                     let menu = remove(menu, "Remove (delete worktree and branch)…", RemoveMode::DeleteWorktreeAndBranch);
                     remove(menu, "Remove, keep branch…", RemoveMode::KeepBranch)
                 } else {
@@ -286,6 +295,35 @@ fn confirm_remove(
             .show_cancel(true)
             .on_ok(move |_, _, cx| {
                 session.update(cx, |s, cx| s.remove_workspace(&id, mode, cx));
+                true
+            })
+    });
+}
+
+fn confirm_merge(
+    session: Entity<SessionStore>,
+    id: String,
+    label: SharedString,
+    squash: bool,
+    after: AfterMerge,
+    window: &mut gpui_kit::Window,
+    cx: &mut gpui_kit::App,
+) {
+    let how = if squash { "squash-merged (staged, not committed)" } else { "merged" };
+    let then = match after {
+        AfterMerge::Remove => {
+            " Its uncommitted work is committed first; afterwards its tabs are closed and its worktree and branch deleted."
+        }
+        AfterMerge::Keep => " Only committed work is merged; the workspace stays.",
+    };
+    window.open_alert_dialog(cx, move |alert, _, _| {
+        let (session, id) = (session.clone(), id.clone());
+        alert
+            .title(format!("Merge “{label}” into its parent?"))
+            .description(format!("Its branch is {how} into the parent's branch.{then}"))
+            .show_cancel(true)
+            .on_ok(move |_, _, cx| {
+                session.update(cx, |s, cx| s.merge_workspace(&id, squash, after, cx));
                 true
             })
     });

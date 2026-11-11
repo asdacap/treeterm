@@ -394,3 +394,57 @@ fn a_child_workspace_is_a_new_worktree_from_the_parent_branch(cx: &mut TestAppCo
 fn loaded_now(store: &Entity<SessionStore>, cx: &mut TestAppContext, id: &str) -> bool {
     store.read_with(cx, |s, _| loaded(s, id))
 }
+
+#[gpui_kit::test]
+fn merging_a_child_brings_its_commits_into_the_parent_and_removes_it(cx: &mut TestAppContext) {
+    use treeterm_model::session_store::AfterMerge;
+    cx.executor().allow_parking();
+    let h = harness();
+    publish(&h, &[]);
+    let repo_name = format!("tt-test-{}", uuid::Uuid::new_v4().simple());
+    let repo = h.daemon.root().join(&repo_name);
+    let worktrees_home = dirs::home_dir().unwrap().join(".treeterm/worktrees").join(&repo_name);
+    struct Cleanup(std::path::PathBuf);
+    impl Drop for Cleanup {
+        fn drop(&mut self) {
+            if self.0.exists() && std::fs::remove_dir_all(&self.0).is_err() {
+                eprintln!("could not remove {}", self.0.display());
+            }
+        }
+    }
+    let _cleanup = Cleanup(worktrees_home.clone());
+    std::fs::create_dir_all(&repo).unwrap();
+    let git_in = |dir: &std::path::Path, args: &[&str]| {
+        let out = std::process::Command::new("git").args(args).current_dir(dir).output().unwrap();
+        assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+    git_in(&repo, &["init", "-q", "-b", "main"]);
+    git_in(&repo, &["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init"]);
+
+    let store = open_store(cx, &h, "client-a");
+    wait_until(cx, &store, |s| matches!(s.state(), SessionState::Live));
+    let root = store.update(cx, |s, cx| s.open_workspace(repo.to_string_lossy().into_owned(), cx));
+    wait_until(cx, &store, |s| loaded(s, &root));
+    let child = store.update(cx, |s, cx| s.add_child_workspace(&root, "feat-merge".into(), false, None, cx)).unwrap();
+    wait_until(cx, &store, |s| loaded(s, &child));
+    let child_dir = worktrees_home.join("feat-merge");
+    wait_for_disk(cx, || child_dir.exists());
+
+    // Uncommitted work in the child is auto-committed before a merge that removes it.
+    std::fs::write(child_dir.join("feature.txt"), "done\n").unwrap();
+    std::process::Command::new("git").args(["config", "user.email", "t@t"]).current_dir(&repo).status().unwrap();
+    std::process::Command::new("git").args(["config", "user.name", "t"]).current_dir(&repo).status().unwrap();
+    store.update(cx, |s, cx| s.merge_workspace(&child, false, AfterMerge::Remove, cx));
+    wait_until(cx, &store, |s| s.entry(&child).is_none() || matches!(s.entry(&child), Some(WorkspaceEntry::OperationError { .. })));
+    if let Some(error) = store.read_with(cx, |s, _| match s.entry(&child) {
+        Some(WorkspaceEntry::OperationError { error, .. }) => Some(error.clone()),
+        _ => None,
+    }) {
+        panic!("merge failed: {error}");
+    }
+    assert_eq!(std::fs::read_to_string(repo.join("feature.txt")).unwrap(), "done\n");
+    assert!(git_in(&repo, &["log", "--oneline"]).contains("WIP: Auto-commit before merge from feat-merge"));
+    wait_for_disk(cx, || !child_dir.exists());
+    assert!(!git_in(&repo, &["branch", "--list", "feat-merge"]).contains("feat-merge"));
+}

@@ -519,6 +519,14 @@ impl WorkspaceStore {
         }
     }
 
+    /// `updateStatus`: merged or abandoned.
+    pub fn set_status(&mut self, status: treeterm_core::wire::workspace_file::WorkspaceStatus, cx: &mut Context<Self>) {
+        if self.workspace.file.status != status {
+            self.workspace.file.status = status;
+            self.changed(cx);
+        }
+    }
+
     /// Git reports another branch than the body records (`updateGitInfo`).
     pub fn set_git_branch(&mut self, branch: &str, cx: &mut Context<Self>) {
         if self.workspace.file.git_branch.as_deref() == Some(branch) {
