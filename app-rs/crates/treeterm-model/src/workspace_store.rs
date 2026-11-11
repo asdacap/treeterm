@@ -117,6 +117,17 @@ pub struct WorkspaceStore {
     activity: HashMap<String, ActivityState>,
 }
 
+/// `#rrggbb` → colour; anything else is ignored (the default background is used).
+fn parse_hex_color(text: &str) -> Option<treeterm_term::alacritty_terminal::vte::ansi::Rgb> {
+    let hex = text.strip_prefix('#').filter(|h| h.len() == 6)?;
+    let value = u32::from_str_radix(hex, 16).ok()?;
+    Some(treeterm_term::alacritty_terminal::vte::ansi::Rgb {
+        r: (value >> 16) as u8,
+        g: (value >> 8) as u8,
+        b: value as u8,
+    })
+}
+
 fn new_tab_id() -> String {
     let millis = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -254,8 +265,9 @@ impl WorkspaceStore {
         let Some(app) = self.registry.get(&tab.application_id) else {
             return; // not ported: the tab stays as the other app left it
         };
+        let startup_command = app.startup_command(&self.workspace.path);
         match &app.kind {
-            AppKind::Terminal { startup_command } => {
+            AppKind::Terminal { .. } | AppKind::AiHarness { .. } | AppKind::CustomRunner { .. } => {
                 let terminal = match tab.state.get("ptyId") {
                     Some(Value::String(pty_id)) => self.attach_terminal(tab_id, pty_id.clone(), cx),
                     Some(_) | None => {
@@ -263,7 +275,7 @@ impl WorkspaceStore {
                             Some(Value::String(handle)) => handle.clone(),
                             Some(_) | None => uuid::Uuid::new_v4().to_string(),
                         };
-                        self.create_pty(tab_id, handle, startup_command.clone(), cx)
+                        self.create_pty(tab_id, handle, startup_command, cx)
                     }
                 };
                 self.tabs.insert(tab_id.to_owned(), TabRef::Terminal(terminal));
@@ -280,9 +292,18 @@ impl WorkspaceStore {
             .and_then(|s| s.get("enabled"))
             .and_then(Value::as_bool)
             .unwrap_or(false);
+        let app_background = self
+            .registry
+            .get(&self.workspace.file.app_states[tab_id].application_id)
+            .and_then(|app| app.background())
+            .and_then(parse_hex_color);
         TerminalOptions {
             pty_id,
-            background: if sandboxed { SANDBOX_BACKGROUND } else { DEFAULT_BACKGROUND },
+            background: match (app_background, sandboxed) {
+                (Some(color), _) => color,
+                (None, true) => SANDBOX_BACKGROUND,
+                (None, false) => DEFAULT_BACKGROUND,
+            },
             settings: settings.terminal.clone(),
             keep_on_exit: flag("keepOnExit"),
             width_limit: if flag("widthLimitDisabled") {

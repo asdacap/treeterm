@@ -350,32 +350,32 @@ fn workspace_pane(connected: &mut Connected, window: &mut Window, cx: &mut Conte
                 })),
         );
     }
-    let default_app = connected
-        .session
-        .read(cx)
-        .registry()
-        .default_app()
-        .map(|app| app.id.clone());
-    if let Some(app_id) = default_app {
+    // "+" opens the new-tab menu: every application offered for new tabs.
+    let menu_apps: Vec<(String, String, String)> = registry
+        .new_tab_menu()
+        .map(|app| (app.id.clone(), app.name.clone(), app.icon.clone()))
+        .collect();
+    if !menu_apps.is_empty() {
+        use gpui_kit::component::button::{Button, ButtonVariants as _};
+        use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
         let target = workspace.clone();
+        let view_entity = cx.entity();
         tabs = tabs.child(
-            div()
-                .id("new-tab")
-                .h_full()
-                .px_3()
-                .flex()
-                .items_center()
-                .text_color(secondary)
-                .hover(move |s| s.bg(hover).text_color(primary))
-                .cursor_pointer()
-                .child("+")
-                .on_click(cx.listener(move |view, _, _, cx| {
-                    target.update(cx, |w, cx| w.add_tab(&app_id, cx));
-                    if let Body::Connected(connected) = &mut view.body {
-                        connected.focus_pending = true;
+            Button::new("new-tab")
+                .ghost()
+                .label("+")
+                .dropdown_menu(move |mut menu, _window, _cx| {
+                    for (id, name, icon) in &menu_apps {
+                        let (target, view, id) = (target.clone(), view_entity.clone(), id.clone());
+                        menu = menu.item(PopupMenuItem::new(format!("{icon}  {name}")).on_click(
+                            move |_, _, cx| {
+                                target.update(cx, |w, cx| w.add_tab(&id, cx));
+                                view.update(cx, |view, cx| view.focus_active_tab(cx));
+                            },
+                        ));
                     }
-                    cx.notify();
-                })),
+                    menu
+                }),
         );
     }
 
