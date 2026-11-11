@@ -26,6 +26,8 @@ pub enum AppKind {
     Files,
     /// One file being edited (`editor`); opened from the file viewer.
     Editor,
+    /// What a worktree changed (`review`).
+    Review,
 }
 
 impl AppKind {
@@ -33,7 +35,7 @@ impl AppKind {
     pub fn is_terminal(&self) -> bool {
         match self {
             AppKind::Terminal { .. } | AppKind::AiHarness { .. } | AppKind::CustomRunner { .. } => true,
-            AppKind::Files | AppKind::Editor => false,
+            AppKind::Files | AppKind::Editor | AppKind::Review => false,
         }
     }
 }
@@ -63,6 +65,7 @@ impl AppDef {
                 "widthLimitDisabled": false,
             }),
             AppKind::Files => json!({ "selectedPath": null, "expandedDirs": [] }),
+            AppKind::Review => json!({ "viewMode": "committed" }),
             AppKind::Editor => json!({
                 "status": "ready", "filePath": "", "originalContent": "", "currentContent": "",
                 "language": "plaintext", "isDirty": false, "viewMode": "editor"
@@ -92,7 +95,7 @@ impl AppDef {
             AppKind::CustomRunner { command_template } => {
                 Some(command_template.replace("{{workspace_path}}", workspace_path))
             }
-            AppKind::Files | AppKind::Editor => None,
+            AppKind::Files | AppKind::Editor | AppKind::Review => None,
         }
     }
 
@@ -100,7 +103,11 @@ impl AppDef {
     pub fn background(&self) -> Option<&str> {
         match &self.kind {
             AppKind::AiHarness { background, .. } => Some(background),
-            AppKind::Terminal { .. } | AppKind::CustomRunner { .. } | AppKind::Files | AppKind::Editor => None,
+            AppKind::Terminal { .. }
+            | AppKind::CustomRunner { .. }
+            | AppKind::Files
+            | AppKind::Editor
+            | AppKind::Review => None,
         }
     }
 }
@@ -135,6 +142,15 @@ impl AppRegistry {
                 can_close: true,
                 show_in_new_tab_menu: true,
                 is_default: true,
+            },
+            AppDef {
+                id: "review".to_owned(),
+                name: "Review".to_owned(),
+                icon: "\u{1F4CB}".to_owned(),
+                kind: AppKind::Review,
+                can_close: true,
+                show_in_new_tab_menu: true,
+                is_default: false,
             },
             AppDef {
                 id: "editor".to_owned(),
@@ -274,6 +290,6 @@ mod tests {
         assert!(registry.get("ghostty-terminal").is_some());
         let menu: Vec<_> = registry.new_tab_menu().map(|app| app.id.as_str()).collect();
         // Electron's default settings carry one AI harness ("Claude").
-        assert_eq!(menu, vec!["terminal", "filesystem", "aiharness-claude"]);
+        assert_eq!(menu, vec!["terminal", "filesystem", "review", "aiharness-claude"]);
     }
 }

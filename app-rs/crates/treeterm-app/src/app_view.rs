@@ -44,6 +44,8 @@ struct Connected {
     file_views: HashMap<EntityId, Entity<crate::file_browser_view::FileBrowserView>>,
     /// Views of Editor tabs, by model.
     editor_views: HashMap<EntityId, Entity<crate::text_editor_view::TextEditorView>>,
+    /// Views of Review tabs, by model.
+    review_views: HashMap<EntityId, Entity<crate::review_view::ReviewView>>,
     /// Focus the shown terminal on the next render (after a workspace or tab switch).
     focus_pending: bool,
     _selection: Subscription,
@@ -126,6 +128,7 @@ impl AppView {
             terminal_views: HashMap::new(),
             file_views: HashMap::new(),
             editor_views: HashMap::new(),
+            review_views: HashMap::new(),
             focus_pending: false,
             _selection: selection,
         }
@@ -482,6 +485,14 @@ fn workspace_pane(connected: &mut Connected, window: &mut Window, cx: &mut Conte
                     .editor_views
                     .entry(model.entity_id())
                     .or_insert_with(|| cx.new(|cx| crate::text_editor_view::TextEditorView::new(model.clone(), cx)))
+                    .clone();
+                div().size_full().child(view).into_any_element()
+            }
+            Some(TabContent::Review(model)) => {
+                let view = connected
+                    .review_views
+                    .entry(model.entity_id())
+                    .or_insert_with(|| cx.new(|cx| crate::review_view::ReviewView::new(model.clone(), cx)))
                     .clone();
                 div().size_full().child(view).into_any_element()
             }

@@ -8,6 +8,7 @@ mod daemon_binary;
 mod file_browser_view;
 mod keybinding_overlay;
 mod menus;
+mod review_view;
 mod settings_view;
 mod terminal_element;
 mod text_editor_view;

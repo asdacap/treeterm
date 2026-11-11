@@ -85,6 +85,7 @@ pub enum TabContent {
     Terminal(Entity<TerminalModel>),
     Files(Entity<crate::file_browser::FileBrowser>),
     Editor(Entity<crate::text_editor::TextEditor>),
+    Review(Entity<crate::review::ReviewModel>),
     /// The tab's PTY is being created.
     StartingTerminal,
     Failed(String),
@@ -101,6 +102,10 @@ enum TabRef {
     },
     Editor {
         model: Entity<crate::text_editor::TextEditor>,
+        _events: Subscription,
+    },
+    Review {
+        model: Entity<crate::review::ReviewModel>,
         _events: Subscription,
     },
 }
@@ -123,6 +128,8 @@ pub struct WorkspaceStore {
     registry: Rc<AppRegistry>,
     settings: Rc<Settings>,
     tabs: HashMap<String, TabRef>,
+    /// The parent workspace's branch, kept current by the session (Review's base).
+    parent_branch: Option<String>,
     /// Per-tab activity; runtime only (`activityState` store).
     activity: HashMap<String, ActivityState>,
 }
@@ -161,6 +168,7 @@ impl WorkspaceStore {
             registry,
             settings,
             tabs: HashMap::new(),
+            parent_branch: None,
             activity: HashMap::new(),
         };
         let tab_ids: Vec<String> = store.workspace.file.app_states.keys().cloned().collect();
@@ -187,6 +195,7 @@ impl WorkspaceStore {
             Some(TabRef::Terminal(TerminalTab::Failed(error))) => TabContent::Failed(error.clone()),
             Some(TabRef::Files { model, .. }) => TabContent::Files(model.clone()),
             Some(TabRef::Editor { model, .. }) => TabContent::Editor(model.clone()),
+            Some(TabRef::Review { model, .. }) => TabContent::Review(model.clone()),
             None => TabContent::NotPorted(tab.application_id.clone()),
         })
     }
@@ -203,6 +212,26 @@ impl WorkspaceStore {
             ActivityState::Idle => 0,
         };
         self.activity.values().copied().max_by_key(|state| rank(*state)).unwrap_or_default()
+    }
+
+    /// Set by the session whenever the parent's branch is known or changes. Review tabs
+    /// opened before it was known start comparing once it is.
+    pub fn set_parent_branch(&mut self, branch: Option<String>, cx: &mut Context<Self>) {
+        if self.parent_branch == branch {
+            return;
+        }
+        self.parent_branch = branch;
+        let reviews: Vec<String> = self
+            .tabs
+            .iter()
+            .filter(|(_, tab)| matches!(tab, TabRef::Review { .. }))
+            .map(|(id, _)| id.clone())
+            .collect();
+        for tab_id in reviews {
+            self.dispose_tab(&tab_id);
+            self.init_tab(&tab_id, cx);
+        }
+        cx.notify();
     }
 
     /// `settings.terminal.maxCols`, the width the "col limit" switch caps at.
@@ -271,7 +300,8 @@ impl WorkspaceStore {
             TabRef::Terminal(TerminalTab::Attached { model, .. }) => Some(model),
             TabRef::Terminal(TerminalTab::Creating { .. } | TerminalTab::Failed(_))
             | TabRef::Files { .. }
-            | TabRef::Editor { .. } => None,
+            | TabRef::Editor { .. }
+            | TabRef::Review { .. } => None,
         })
     }
 
@@ -306,6 +336,22 @@ impl WorkspaceStore {
                     store.merge_tab_state(&owned_tab, next.clone(), cx);
                 });
                 self.tabs.insert(tab_id.to_owned(), TabRef::Files { model, _events: events });
+            }
+            AppKind::Review => {
+                let base = match (tab.state.get("baseBranchOverride").and_then(Value::as_str), &self.parent_branch) {
+                    (Some(branch), _) if !branch.is_empty() => crate::review::ReviewBase::Branch(branch.to_owned()),
+                    (_, Some(branch)) => crate::review::ReviewBase::Branch(branch.clone()),
+                    (_, None) => crate::review::ReviewBase::None,
+                };
+                let (exec, git, path, state) =
+                    (self.conn.exec_client(), self.conn.git(), self.workspace.path.clone(), tab.state.clone());
+                let model = cx.new(|cx| crate::review::ReviewModel::new(exec, git, path, base, &state, cx));
+                let owned_tab = tab_id.to_owned();
+                let events = cx.subscribe(&model, move |store, _, event: &crate::review::ReviewEvent, cx| {
+                    let crate::review::ReviewEvent::StateChanged(next) = event;
+                    store.merge_tab_state(&owned_tab, next.clone(), cx);
+                });
+                self.tabs.insert(tab_id.to_owned(), TabRef::Review { model, _events: events });
             }
             AppKind::Editor => {
                 let fs = self.conn.fs_client();
@@ -565,7 +611,13 @@ impl WorkspaceStore {
                 // Its creation finds the tab gone and kills the PTY (`on_pty_created`).
                 tracing::debug!(%handle, "tab closed while its PTY was starting");
             }
-            Some(TabRef::Terminal(TerminalTab::Failed(_)) | TabRef::Files { .. } | TabRef::Editor { .. }) | None => {}
+            Some(
+                TabRef::Terminal(TerminalTab::Failed(_))
+                | TabRef::Files { .. }
+                | TabRef::Editor { .. }
+                | TabRef::Review { .. },
+            )
+            | None => {}
         }
         self.dispose_tab(tab_id);
 
@@ -723,7 +775,8 @@ impl WorkspaceStore {
                 // A PTY still starting is killed by its creation finding the tab gone.
                 TabRef::Terminal(TerminalTab::Creating { .. } | TerminalTab::Failed(_))
                 | TabRef::Files { .. }
-                | TabRef::Editor { .. } => {}
+                | TabRef::Editor { .. }
+                | TabRef::Review { .. } => {}
             }
         }
     }

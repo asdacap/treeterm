@@ -733,8 +733,29 @@ impl SessionStore {
             WorkspaceEvent::Changed => session.enqueue_content_sync(&owned, cx),
         });
         self.store_events.insert(id, subscription);
-        cx.observe(&store, |_, _, cx| cx.notify()).detach();
+        cx.observe(&store, |session, _, cx| {
+            session.refresh_parent_branches(cx);
+            cx.notify();
+        })
+        .detach();
         store
+    }
+
+    /// Tell every child workspace its parent's current branch (its Review base).
+    fn refresh_parent_branches(&mut self, cx: &mut Context<Self>) {
+        let stores: Vec<Entity<WorkspaceStore>> = self.entries.values().filter_map(|e| e.store().cloned()).collect();
+        let branches: HashMap<String, Option<String>> = stores
+            .iter()
+            .map(|s| {
+                let w = s.read(cx).workspace();
+                (w.id.clone(), w.file.git_branch.clone())
+            })
+            .collect();
+        for store in stores {
+            let parent = store.read(cx).file().parent_id.clone();
+            let branch = parent.and_then(|p| branches.get(&p).cloned().flatten());
+            store.update(cx, |w, cx| w.set_parent_branch(branch, cx));
+        }
     }
 
     // ---- body writes --------------------------------------------------------------------
