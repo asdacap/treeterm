@@ -64,6 +64,12 @@ pub enum FileView {
     Image { path: String, bytes: std::sync::Arc<Vec<u8>>, kind: ImageKind },
     /// Shown in a PDF viewer.
     Pdf { path: String, bytes: std::sync::Arc<Vec<u8>> },
+    /// Shown in the 3D model viewer.
+    Model {
+        path: String,
+        bytes: std::sync::Arc<Vec<u8>>,
+        format: treeterm_core::files::content_kind::ModelFormat,
+    },
     /// Not valid UTF-8 (images, archives, ...).
     Binary { path: String, size: u64 },
     TooLarge { path: String, size: u64 },
@@ -86,6 +92,7 @@ enum Presentation {
     Text,
     Image(ImageKind),
     Pdf,
+    Model(treeterm_core::files::content_kind::ModelFormat),
 }
 
 fn presentation_of(path: &str) -> Presentation {
@@ -98,7 +105,10 @@ fn presentation_of(path: &str) -> Presentation {
         "svg" => Presentation::Image(ImageKind::Svg),
         "bmp" => Presentation::Image(ImageKind::Bmp),
         "pdf" => Presentation::Pdf,
-        _ => Presentation::Text,
+        _ => match treeterm_core::files::content_kind::model_format(path) {
+            Ok(format) => Presentation::Model(format),
+            Err(_not_a_model) => Presentation::Text,
+        },
     }
 }
 
@@ -540,10 +550,15 @@ impl FileBrowser {
         if let SearchPanel::Open(search) = &mut self.search {
             search.active = None;
         }
-        let budget = if allow_large { u64::MAX } else { MAX_VIEW_BYTES };
+        let presentation = presentation_of(path);
+        // PDFs and models are routinely tens of megabytes (`fileLimits.ts`).
+        let budget = match (allow_large, presentation) {
+            (true, _) => u64::MAX,
+            (false, Presentation::Pdf | Presentation::Model(_)) => treeterm_core::files::max_read_bytes_for(path),
+            (false, Presentation::Text | Presentation::Image(_)) => MAX_VIEW_BYTES,
+        };
         let read = self.fs.read_file(&self.root, path, budget);
         let owned = path.to_owned();
-        let presentation = presentation_of(path);
         self._read = Some(cx.spawn(async move |this, cx| {
             let view = match read.await {
                 Ok(Ok(ReadOutcome::Read(file))) => match presentation {
@@ -555,6 +570,11 @@ impl FileBrowser {
                     Presentation::Pdf => FileView::Pdf {
                         path: owned.clone(),
                         bytes: std::sync::Arc::new(file.content),
+                    },
+                    Presentation::Model(format) => FileView::Model {
+                        path: owned.clone(),
+                        bytes: std::sync::Arc::new(file.content),
+                        format,
                     },
                     Presentation::Text => match String::from_utf8(file.content) {
                         Ok(text) => FileView::Text { path: owned.clone(), text },
@@ -696,6 +716,7 @@ impl FileBrowser {
                     | FileView::Loading(_)
                     | FileView::Image { .. }
                     | FileView::Pdf { .. }
+                    | FileView::Model { .. }
                     | FileView::Binary { .. }
                     | FileView::TooLarge { .. }
                     | FileView::Failed { .. },
@@ -819,6 +840,7 @@ impl FileBrowser {
             | FileView::Text { .. }
             | FileView::Image { .. }
             | FileView::Pdf { .. }
+            | FileView::Model { .. }
             | FileView::Binary { .. }
             | FileView::TooLarge { .. }
             | FileView::Failed { .. } => false,
@@ -1020,6 +1042,10 @@ mod tests {
     fn files_are_presented_by_extension() {
         assert_eq!(presentation_of("/w/a.PNG"), Presentation::Image(ImageKind::Png));
         assert_eq!(presentation_of("/w/doc.pdf"), Presentation::Pdf);
+        assert_eq!(
+            presentation_of("/w/parts/Bracket.STL"),
+            Presentation::Model(treeterm_core::files::content_kind::ModelFormat::Stl)
+        );
         assert_eq!(presentation_of("/w/main.rs"), Presentation::Text);
     }
 

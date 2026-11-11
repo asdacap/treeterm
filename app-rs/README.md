@@ -84,7 +84,8 @@ Done (tested against a real in-process daemon unless noted):
 - **AI harness (M5):** per-tab LLM analyzer (classification, auto-approve, titles, branch
   names), activity states with transitions, unread attention markers with the ding.
 - **Files / editor (M6):** file tree with favourites, highlighted viewer, Markdown preview,
-  images, PDF (webview), download, search panel (in file / in repo), find, go to definition;
+  images, PDF and 3D models (webview; three.js bundled by `assets/model-viewer/build.sh`),
+  download, search panel (in file / in repo), find, go to definition;
   editor tab.
 - **Review (M7):** committed / uncommitted / commits views, stage/unstage/commit, inline
   comments (Electron's metadata format), viewed files, image diffs (before / after),
@@ -118,7 +119,6 @@ Done (tested against a real in-process daemon unless noted):
 
 Not yet:
 
-- 3D model viewer (needs three.js bundled into a webview page).
 - Linux build verification (CI jobs added, not yet run) and a real SSH host test.
 - Parity sweep sign-off and cut-over (M10): remove `src/main`, `src/preload`,
   `src/renderer` once the checklist in the plan passes.

@@ -38,8 +38,8 @@ const SEARCH_ROW_HEIGHT: f32 = 22.;
 
 pub struct FileBrowserView {
     model: Entity<FileBrowser>,
-    /// The PDF shown, and the webview showing it.
-    pdf: Option<(String, Entity<crate::browser_view::PdfView>)>,
+    /// The PDF or 3D model shown, and the webview showing it.
+    page: Option<(String, Entity<crate::browser_view::AssetPageView>)>,
     /// Markdown files show their source instead of the preview.
     markdown_source: bool,
     workspace: Entity<treeterm_model::workspace_store::WorkspaceStore>,
@@ -113,7 +113,7 @@ impl FileBrowserView {
         let observe = cx.observe(&model, |_, _, cx| cx.notify());
         Self {
             model,
-            pdf: None,
+            page: None,
             markdown_source: false,
             workspace,
             editor: None,
@@ -124,12 +124,29 @@ impl FileBrowserView {
         }
     }
 
-    /// Show the PDF webview only while this tab is shown, a PDF is the current file, and no
-    /// dialog covers it.
+    /// Show the PDF / model webview only while this tab is shown, such a file is the current
+    /// one, and no dialog covers it.
     pub fn set_shown(&mut self, shown: bool, cx: &mut Context<Self>) {
-        let is_pdf = matches!(self.model.read(cx).view(), FileView::Pdf { .. });
-        if let Some((_, pdf)) = &self.pdf {
-            pdf.update(cx, |p, cx| p.set_shown(shown && is_pdf, cx));
+        let in_webview = matches!(self.model.read(cx).view(), FileView::Pdf { .. } | FileView::Model { .. });
+        if let Some((_, page)) = &self.page {
+            page.update(cx, |p, cx| p.set_shown(shown && in_webview, cx));
+        }
+    }
+
+    /// The webview page for `path`, built when the shown file changes.
+    fn page_for(
+        &mut self,
+        path: String,
+        build: impl FnOnce() -> crate::browser_view::AssetPageView,
+        cx: &mut Context<Self>,
+    ) -> Entity<crate::browser_view::AssetPageView> {
+        match &self.page {
+            Some((shown, view)) if *shown == path => view.clone(),
+            Some(_) | None => {
+                let view = cx.new(|_| build());
+                self.page = Some((path, view.clone()));
+                view
+            }
         }
     }
 
@@ -561,9 +578,11 @@ impl FileBrowserView {
         let body = self.viewer_body(window, cx);
         // Views without their own header get a bar with Download.
         let path = match self.model.read(cx).view() {
-            FileView::Image { path, .. } | FileView::Pdf { path, .. } | FileView::Binary { path, .. } | FileView::TooLarge { path, .. } => {
-                Some(path.clone())
-            }
+            FileView::Image { path, .. }
+            | FileView::Pdf { path, .. }
+            | FileView::Model { path, .. }
+            | FileView::Binary { path, .. }
+            | FileView::TooLarge { path, .. } => Some(path.clone()),
             FileView::Nothing | FileView::Loading(_) | FileView::Failed { .. } | FileView::Text { .. } => None,
         };
         let Some(path) = path else {
@@ -621,14 +640,11 @@ impl FileBrowserView {
                     .into_any_element()
             }
             FileView::Pdf { path, bytes } => {
-                let view = match &self.pdf {
-                    Some((shown, view)) if *shown == path => view.clone(),
-                    Some(_) | None => {
-                        let view = cx.new(|_| crate::browser_view::PdfView::new(bytes));
-                        self.pdf = Some((path, view.clone()));
-                        view
-                    }
-                };
+                let view = self.page_for(path, || crate::browser_view::AssetPageView::pdf(bytes), cx);
+                div().size_full().child(view).into_any_element()
+            }
+            FileView::Model { path, bytes, format } => {
+                let view = self.page_for(path, || crate::browser_view::AssetPageView::model(bytes, format.as_str()), cx);
                 div().size_full().child(view).into_any_element()
             }
             FileView::Binary { size, .. } => {
