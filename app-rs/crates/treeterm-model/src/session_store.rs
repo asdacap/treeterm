@@ -76,6 +76,47 @@ impl WorkspaceEntry {
     }
 }
 
+/// What happens to a removed workspace's git worktree and branch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RemoveMode {
+    /// `removeWorkspace`: remove the worktree and delete its branch (unless detached).
+    DeleteWorktreeAndBranch,
+    /// `removeWorkspaceKeepBranch`.
+    KeepBranch,
+    /// `removeWorkspaceKeepBoth`: only leave the session.
+    KeepWorktreeAndBranch,
+}
+
+/// The git side of removing one workspace.
+enum GitCleanup {
+    Nothing,
+    RemoveWorktree {
+        root: String,
+        path: String,
+        branch: treeterm_core::git::BranchDisposal,
+    },
+}
+
+impl GitCleanup {
+    fn for_workspace(file: &WorkspaceFile, path: &str, mode: RemoveMode) -> Self {
+        use treeterm_core::git::BranchDisposal;
+        let (true, Some(root)) = (file.is_worktree, file.git_root_path.clone()) else {
+            return GitCleanup::Nothing;
+        };
+        let branch = match mode {
+            RemoveMode::KeepWorktreeAndBranch => return GitCleanup::Nothing,
+            RemoveMode::KeepBranch => BranchDisposal::Keep,
+            RemoveMode::DeleteWorktreeAndBranch if file.is_detached == Some(true) => BranchDisposal::Keep,
+            RemoveMode::DeleteWorktreeAndBranch => BranchDisposal::Delete,
+        };
+        GitCleanup::RemoveWorktree {
+            root,
+            path: path.to_owned(),
+            branch,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionEvent {
     WorkspaceRemoved(String),
@@ -1420,35 +1461,58 @@ impl SessionStore {
         out
     }
 
-    /// Remove a workspace and its descendants from the session (`removeWorkspaceKeepBoth`):
-    /// under the session lock, kill their tabs' PTYs, publish the smaller membership, then
-    /// delete their body files. The git side (worktree, branch) is left as it is.
-    pub fn remove_workspace_keep_both(&mut self, id: &str, cx: &mut Context<Self>) {
+    /// Remove a workspace and its descendants (`removeWorkspace*`): under the session lock,
+    /// children first, kill each one's tabs, clean up git as `mode` says, drop it; then
+    /// publish the smaller membership and delete the body files. A failure stops the
+    /// removal and shows on the workspace.
+    pub fn remove_workspace(&mut self, id: &str, mode: RemoveMode, cx: &mut Context<Self>) {
         let Some(store) = self.workspace_store(id).cloned() else {
             return;
         };
         let id = id.to_owned();
         let lock = self.acquire_lock(cx);
+        let git = self.conn.git();
         cx.spawn(async move |this, cx| {
             let locked = lock.await.unwrap_or_else(|_| Err("session store dropped".to_owned()));
             if let Err(error) = locked {
-                match this.update(cx, |session, cx| {
-                    session.set_operation_error(&id, &store, error, cx);
-                }) {
+                match this.update(cx, |session, cx| session.set_operation_error(&id, &store, error, cx)) {
                     Ok(()) | Err(_) => {} // Err: store dropped
                 }
                 return;
             }
-            let Ok((published, removed)) = this.update(cx, |session, cx| {
-                let removed = session.subtree(&id, cx);
-                for removed_id in &removed {
-                    if let Some(store) = session.workspace_store(removed_id).cloned() {
-                        store.update(cx, |w, cx| w.close_all_tabs(cx));
+            let Ok(subtree) = this.update(cx, |session, cx| session.subtree(&id, cx)) else {
+                return;
+            };
+            let mut failure = None;
+            for removed_id in &subtree {
+                let Ok(target) = this.update(cx, |session, cx| {
+                    let ws = session.workspace_store(removed_id)?.clone();
+                    ws.update(cx, |w, cx| w.close_all_tabs(cx));
+                    let w = ws.read(cx).workspace();
+                    Some(GitCleanup::for_workspace(&w.file, &w.path, mode))
+                }) else {
+                    return;
+                };
+                let cleaned = match target {
+                    Some(GitCleanup::Nothing) | None => Ok(()),
+                    Some(GitCleanup::RemoveWorktree { root, path, branch }) => {
+                        git.remove_worktree(&root, &path, branch, treeterm_core::git::Progress::Silent).await
                     }
-                    session.on_workspace_removed(removed_id, cx);
+                };
+                if let Err(error) = cleaned {
+                    failure = Some(error.to_string());
+                    break;
                 }
-                (session.sync_refs("removeWorkspace", cx), removed)
-            }) else {
+                if this.update(cx, |session, cx| session.on_workspace_removed(removed_id, cx)).is_err() {
+                    return;
+                }
+            }
+            if let Some(error) = failure {
+                match this.update(cx, |session, cx| session.set_operation_error(&id, &store, error, cx)) {
+                    Ok(()) | Err(_) => {}
+                }
+            }
+            let Ok(published) = this.update(cx, |session, cx| session.sync_refs("removeWorkspace", cx)) else {
                 return;
             };
             if published.await.is_err() {
@@ -1456,9 +1520,12 @@ impl SessionStore {
             }
             // Membership is the source of truth; deleting the files is cleanup after.
             let Ok(deletes) = this.update(cx, |session, _| {
-                removed
+                subtree
                     .iter()
-                    .map(|removed_id| (removed_id.clone(), session.conn.delete_body(&session.data_dir, &format!("{removed_id}.json"))))
+                    .filter(|removed_id| !session.entries.contains_key(*removed_id))
+                    .map(|removed_id| {
+                        (removed_id.clone(), session.conn.delete_body(&session.data_dir, &format!("{removed_id}.json")))
+                    })
                     .collect::<Vec<_>>()
             }) else {
                 return;
@@ -1478,6 +1545,11 @@ impl SessionStore {
             }
         })
         .detach();
+    }
+
+    /// `removeWorkspaceKeepBoth`.
+    pub fn remove_workspace_keep_both(&mut self, id: &str, cx: &mut Context<Self>) {
+        self.remove_workspace(id, RemoveMode::KeepWorktreeAndBranch, cx);
     }
 
     /// `id` and every workspace below it, children first.

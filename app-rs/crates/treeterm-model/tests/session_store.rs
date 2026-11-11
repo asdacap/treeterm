@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 use gpui_kit::{AppContext as _, Entity, TestAppContext};
 use treeterm_core::wire::workspace_file::{WorkspaceFile, WorkspaceStatus, WorktreeSettings};
-use treeterm_model::session_store::{SessionState, SessionStore, WorkspaceEntry};
+use treeterm_model::session_store::{RemoveMode, SessionState, SessionStore, WorkspaceEntry};
 use treeterm_model::settings_store::SettingsStore;
 use treeterm_model::workspace_store::{TabContent, Workspace, WorkspaceStore};
 use treeterm_proto::treeterm::WorkspaceRef;
@@ -161,7 +161,9 @@ fn a_tab_whose_program_exits_is_closed(cx: &mut TestAppContext) {
     let Some(TabContent::Terminal(terminal)) = workspace.read_with(cx, |w, _| w.tab_content(&tab)) else {
         unreachable!()
     };
-    wait_until(cx, &terminal, |t| !t.screen_text().trim().is_empty());
+    // Live stream is enough: the PTY buffers input until the (user's own, possibly slow)
+    // shell reads it.
+    wait_until(cx, &terminal, |t| *t.overlay() == treeterm_model::terminal::Overlay::Hidden);
     // Past the "exited immediately" window, so the exit closes the tab.
     cx.executor().advance_clock(std::time::Duration::from_secs(2));
     terminal.update(cx, |t, cx| {
@@ -380,4 +382,15 @@ fn a_child_workspace_is_a_new_worktree_from_the_parent_branch(cx: &mut TestAppCo
         let rows: Vec<String> = store.read(cx).tree_rows(&HashSet::new(), cx).into_iter().map(|r| r.id).collect();
         assert_eq!(rows, vec![root.clone(), child.clone()]);
     });
+
+    // Removing it deletes the worktree and its branch.
+    store.update(cx, |s, cx| s.remove_workspace(&child, RemoveMode::DeleteWorktreeAndBranch, cx));
+    wait_until(cx, &store, |s| s.entry(&child).is_none());
+    wait_for_disk(cx, || !worktrees_home.join("feature-x").exists());
+    assert!(!git(&["branch", "--list", "feature-x"]).contains("feature-x"));
+    assert!(loaded_now(&store, cx, &root));
+}
+
+fn loaded_now(store: &Entity<SessionStore>, cx: &mut TestAppContext, id: &str) -> bool {
+    store.read_with(cx, |s, _| loaded(s, id))
 }
