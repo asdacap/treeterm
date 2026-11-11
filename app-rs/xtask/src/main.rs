@@ -7,6 +7,7 @@
 mod bundle;
 mod cargo;
 mod daemons;
+mod linux_check;
 
 use std::fmt::Display;
 use std::fs;
@@ -24,6 +25,8 @@ Commands:
                    macOS  app-rs/target/dist/TreeTerm.app and TreeTerm-<version>-<arch>-macos.zip
                    Linux  app-rs/target/dist/treeterm-<version>-<arch>-linux/ and .tar.gz
   dist           build-daemons, then bundle.
+  check-linux    Type-check and lint the workspace for Linux from any host (stub pkg-config;
+                 catches compile errors only). Needs the x86_64-unknown-linux-musl target.
 
 Options:
   --debug        Package a debug build of the app (bundle, dist), to try out a bundle quickly.
@@ -94,6 +97,7 @@ enum Task {
     BuildDaemons,
     Bundle(Profile),
     Dist(Profile),
+    CheckLinux,
     Help,
 }
 
@@ -117,6 +121,7 @@ fn parse(args: &[String]) -> Result<Task> {
         ),
         (Some("bundle"), profile) => Ok(Task::Bundle(profile)),
         (Some("dist"), profile) => Ok(Task::Dist(profile)),
+        (Some("check-linux"), _) => Ok(Task::CheckLinux),
         (Some(other), _) => Err(format!("unknown command {other}")),
     }
 }
@@ -133,6 +138,7 @@ fn run(task: Task, repo: &Repo) -> Result<()> {
             daemons::build(repo)?;
             bundle::bundle(repo, profile)
         }
+        Task::CheckLinux => linux_check::check(repo),
     }
 }
 
@@ -196,6 +202,7 @@ mod tests {
     #[test]
     fn parses_commands_and_the_debug_flag() {
         assert_eq!(parse(&args(&["build-daemons"])), Ok(Task::BuildDaemons));
+        assert_eq!(parse(&args(&["check-linux"])), Ok(Task::CheckLinux));
         assert_eq!(
             parse(&args(&["bundle"])),
             Ok(Task::Bundle(Profile::Release))

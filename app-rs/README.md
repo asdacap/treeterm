@@ -119,7 +119,8 @@ Done (tested against a real in-process daemon unless noted):
 
 Not yet:
 
-- Linux build verification (CI jobs added, not yet run) and a real SSH host test.
+- Running on Linux (the workspace compiles and is clippy-clean for Linux:
+  `cargo run -p xtask -- check-linux`; CI jobs added, not yet run) and a real SSH host test.
 - Parity sweep sign-off and cut-over (M10): remove `src/main`, `src/preload`,
   `src/renderer` once the checklist in the plan passes.
 

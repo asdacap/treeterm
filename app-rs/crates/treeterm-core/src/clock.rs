@@ -21,8 +21,9 @@ pub fn local(at: SystemTime) -> Option<LocalTime> {
         Ok(since) => i64::try_from(since.as_secs()).ok()?,
         Err(before) => -i64::try_from(before.duration().as_secs()).ok()?,
     };
-    // `time_t` is narrower than i64 on some targets.
-    #[allow(clippy::useless_conversion)]
+    // `time_t` is narrower than i64 on some targets. On musl the alias is deprecated only
+    // because its width will change; `try_into` follows whatever width it has.
+    #[allow(clippy::useless_conversion, deprecated)]
     let time: libc::time_t = seconds.try_into().ok()?;
     // SAFETY: `localtime_r` writes only into the `tm` we own and reads `time`.
     let mut tm: libc::tm = unsafe { std::mem::zeroed() };
