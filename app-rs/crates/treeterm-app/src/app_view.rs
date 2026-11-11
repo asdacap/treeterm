@@ -626,6 +626,76 @@ impl AppView {
     }
 }
 
+/// `MergeAbandonButton` for a child worktree: "Review & Merge" (opens Review), or "Abandon"
+/// when its branch has nothing to merge; the menu has the merge and abandon variants.
+fn merge_menu(
+    connected: &Connected,
+    workspace: &Entity<treeterm_model::workspace_store::WorkspaceStore>,
+    workspace_id: &str,
+    cx: &mut Context<AppView>,
+) -> Option<AnyElement> {
+    use gpui_kit::component::Sizable as _;
+    use gpui_kit::component::button::{Button, ButtonVariants as _};
+    use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
+    use treeterm_core::git_status::ParentDiff;
+    use treeterm_model::session_store::{AfterMerge, RemoveMode};
+    let file = workspace.read(cx).file().clone();
+    if !file.is_worktree || file.parent_id.as_deref().is_none_or(str::is_empty) {
+        return None;
+    }
+    let clean = connected
+        .session
+        .read(cx)
+        .git_controller(workspace_id)
+        .is_some_and(|git| git.read(cx).status().parent_diff == ParentDiff::Clean);
+    let (session, ws, id, label): (_, _, String, SharedString) =
+        (connected.session.clone(), workspace.clone(), workspace_id.to_owned(), file.display_name().to_owned().into());
+    Some(
+        Button::new(SharedString::from(format!("merge-{workspace_id}")))
+            .xsmall()
+            .ghost()
+            .label(if clean { "Abandon ▾" } else { "Review & Merge ▾" })
+            .dropdown_menu(move |menu, _window, _cx| {
+                let review = ws.clone();
+                let merge = |menu: gpui_kit::component::menu::PopupMenu, text: &'static str, squash: bool, after: AfterMerge| {
+                    let (session, id, label) = (session.clone(), id.clone(), label.clone());
+                    menu.item(PopupMenuItem::new(text).on_click(move |_, window, cx| {
+                        crate::tree_pane::confirm_merge(session.clone(), id.clone(), label.clone(), squash, after, window, cx)
+                    }))
+                };
+                let remove = |menu: gpui_kit::component::menu::PopupMenu, text: &'static str, mode: RemoveMode| {
+                    let (session, id, label) = (session.clone(), id.clone(), label.clone());
+                    menu.item(PopupMenuItem::new(text).on_click(move |_, window, cx| {
+                        crate::tree_pane::confirm_remove(session.clone(), id.clone(), label.clone(), mode, window, cx)
+                    }))
+                };
+                let menu = menu.item(PopupMenuItem::new("Open Review").on_click(move |_, _, cx| {
+                    review.update(cx, |w, cx| {
+                        let existing = w
+                            .file()
+                            .app_states
+                            .iter()
+                            .find(|(_, tab)| tab.application_id == "review")
+                            .map(|(id, _)| id.clone());
+                        match existing {
+                            Some(tab) => w.set_active_tab(&tab, cx),
+                            None => {
+                                w.add_tab("review", cx);
+                            }
+                        }
+                    });
+                }));
+                let menu = merge(menu.separator(), "Merge into parent and remove…", false, AfterMerge::Remove);
+                let menu = merge(menu, "Squash-merge into parent and remove…", true, AfterMerge::Remove);
+                let menu = merge(menu, "Merge into parent, keep workspace…", false, AfterMerge::Keep);
+                let menu = remove(menu.separator(), "Abandon (delete worktree and branch)…", RemoveMode::DeleteWorktreeAndBranch);
+                let menu = remove(menu, "Abandon, keep branch…", RemoveMode::KeepBranch);
+                remove(menu, "Abandon, keep worktree and branch…", RemoveMode::KeepWorktreeAndBranch)
+            })
+            .into_any_element(),
+    )
+}
+
 /// "▶ Run" (`RunActionDropdown`): the workspace's detected actions by source, then the
 /// custom runners.
 fn run_menu(
@@ -963,6 +1033,7 @@ fn workspace_pane(connected: &mut Connected, window: &mut Window, cx: &mut Conte
             d.children(git_status_items(&controller, cx))
         })
         .child(run_menu(connected, &workspace, &id, cx))
+        .children(merge_menu(connected, &workspace, &id, cx))
         .when_some(operation_error, |d, error| {
             d.child(div().text_sm().text_color(colors(cx).error).child(format!("⚠ {error}")))
         });

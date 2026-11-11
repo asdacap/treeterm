@@ -501,7 +501,7 @@ impl Label {
 
 /// Removing kills the workspace's (and its children's) running programs, and possibly
 /// deletes their worktrees and branches, so ask first.
-fn confirm_remove(
+pub(crate) fn confirm_remove(
     session: Entity<SessionStore>,
     id: String,
     label: SharedString,
@@ -531,7 +531,7 @@ fn confirm_remove(
     });
 }
 
-fn confirm_merge(
+pub(crate) fn confirm_merge(
     session: Entity<SessionStore>,
     id: String,
     label: SharedString,
