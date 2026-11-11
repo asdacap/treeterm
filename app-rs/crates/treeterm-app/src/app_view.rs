@@ -739,8 +739,29 @@ fn git_status_items(
             .on_click(move |_, _, cx| refresh.update(cx, |git, cx| git.refresh(cx)))
             .into_any_element(),
     ];
-    if status.behind_count > 0 {
-        items.push(div().text_sm().text_color(c.text_secondary).child(format!("↓ {} behind", status.behind_count)).into_any_element());
+    // `GitPullButton`: behind upstream → pull.
+    let pull_state = controller.read(cx).pull_state().clone();
+    if status.behind_count > 0 || pull_state != treeterm_model::git_controller::PullState::Idle {
+        use treeterm_model::git_controller::PullState;
+        let pull = controller.clone();
+        let (label, color) = match &pull_state {
+            PullState::Pulling => ("◌ Pulling…".to_owned(), c.text_secondary),
+            PullState::Failed(error) => (format!("⚠ {error}"), c.error),
+            PullState::Idle => (format!("↓ Pull ({} behind)", status.behind_count), c.text_secondary),
+        };
+        items.push(
+            div()
+                .id("git-pull")
+                .px_2()
+                .rounded_sm()
+                .text_sm()
+                .text_color(color)
+                .cursor_pointer()
+                .hover(move |d| d.bg(hover))
+                .child(label)
+                .on_click(move |_, _, cx| pull.update(cx, |git, cx| git.pull(cx)))
+                .into_any_element(),
+        );
     }
     if let PullRequest::Found(pr) = &status.pull_request {
         let url = pr.url.clone();

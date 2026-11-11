@@ -123,6 +123,9 @@ pub struct GitController {
     scheduler: RefreshScheduler,
     /// Why the last refresh's failing steps failed (logged, and shown on hover).
     failures: Vec<String>,
+    /// `pullLoading` / the last pull's error.
+    pull: PullState,
+    _pull: Option<Task<()>>,
     _run: Option<Task<()>>,
     _timer: Option<Task<()>>,
 }
@@ -137,6 +140,8 @@ impl GitController {
             status: GitStatus::default(),
             scheduler: RefreshScheduler::default(),
             failures: Vec::new(),
+            pull: PullState::Idle,
+            _pull: None,
             _run: None,
             _timer: None,
         }
@@ -153,6 +158,43 @@ impl GitController {
 
     pub fn failures(&self) -> &[String] {
         &self.failures
+    }
+
+    pub fn pull_state(&self) -> &PullState {
+        &self.pull
+    }
+
+    /// `pullFromRemote`: pull the branch, then refresh the status.
+    pub fn pull(&mut self, cx: &mut Context<Self>) {
+        if self.pull == PullState::Pulling {
+            return;
+        }
+        self.pull = PullState::Pulling;
+        let (id, session, git, github) = (self.id.clone(), self.session.clone(), self.git.clone(), self.github.clone());
+        self._pull = Some(cx.spawn(async move |this, cx| {
+            let deps = Deps { id, session, git, github, cx: cx.clone() };
+            let mut sink = cx.clone();
+            let apply_to = this.clone();
+            let mut apply = move |update| {
+                match apply_to.update(&mut sink, |controller, cx| {
+                    controller.status.apply(update);
+                    cx.notify();
+                }) {
+                    Ok(()) | Err(_) => {}
+                }
+            };
+            let result = treeterm_core::git_status::pull_from_remote(&deps, &mut apply).await;
+            match this.update(cx, |controller, cx| {
+                controller.pull = match result {
+                    Ok(()) => PullState::Idle,
+                    Err(error) => PullState::Failed(format!("Pull failed: {error}")),
+                };
+                controller.refresh(cx);
+            }) {
+                Ok(()) | Err(_) => {}
+            }
+        }));
+        cx.notify();
     }
 
     /// `refreshGit`: run the checks now, or once the cooldown since the last run ends.
@@ -213,6 +255,13 @@ impl GitController {
             }
         }));
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PullState {
+    Idle,
+    Pulling,
+    Failed(String),
 }
 
 /// What a PR needs, at a glance (`getPrSignal`).
