@@ -35,6 +35,8 @@ pub struct AppView {
     info_pending: Option<ConnectionId>,
     /// `treeterm <dir>`: open (or select) this workspace once the local session is live.
     open_on_start: Option<String>,
+    /// The sidebar is a narrow rail of workspace initials (`CollapsedSessionPanel`).
+    sidebar_collapsed: bool,
 }
 
 /// Per-window state for a connected session.
@@ -96,6 +98,7 @@ impl AppView {
             info: None,
             info_pending: None,
             open_on_start: None,
+            sidebar_collapsed: false,
         };
         view.sync(&store, cx);
         view
@@ -227,8 +230,80 @@ impl AppView {
         self.sessions.get_mut(&id)
     }
 
+    /// The collapsed sidebar: one initial per workspace of every connected session, with its
+    /// activity glyph; click to show it.
+    fn rail(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let c = colors(cx);
+        let (bg, border, hover, active, secondary) = (c.bg_secondary, c.border, c.bg_hover, c.bg_active, c.text_secondary);
+        let mut rail = v_flex().gap_1().items_center();
+        for (conn_id, connected) in &self.sessions {
+            let session = connected.session.read(cx);
+            let shown = match (&self.active, &connected.active) {
+                (Some(active_id), ActiveView::Workspace(id)) if active_id == conn_id => Some(id.clone()),
+                _ => None,
+            };
+            for row in session.tree_rows(&Default::default(), cx) {
+                let Some(store) = session.workspace_store(&row.id) else { continue };
+                let workspace = store.read(cx);
+                let name = workspace.file().display_name().to_owned();
+                let initial: String = name.chars().next().map(|ch| ch.to_uppercase().collect()).unwrap_or_default();
+                let activity = workspace.overall_activity();
+                let is_shown = shown.as_deref() == Some(row.id.as_str());
+                let (tree, id) = (connected.tree.clone(), row.id.clone());
+                rail = rail.child(
+                    div()
+                        .id(SharedString::from(format!("rail-{}", row.id)))
+                        .size(px(28.))
+                        .rounded_md()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .text_sm()
+                        .cursor_pointer()
+                        .when(is_shown, |d| d.bg(active))
+                        .when(!is_shown, |d| d.hover(move |d| d.bg(hover)))
+                        .child(if activity == treeterm_model::workspace_store::ActivityState::Idle {
+                            div().child(initial).into_any_element()
+                        } else {
+                            div().text_color(gpui_kit::rgb(activity.color())).child(activity.icon()).into_any_element()
+                        })
+                        .on_click(move |_, _, cx| tree.update(cx, |tree, cx| tree.select(id.clone(), cx))),
+                );
+            }
+        }
+        v_flex()
+            .h_full()
+            .w(px(40.))
+            .flex_shrink_0()
+            .bg(bg)
+            .border_r_1()
+            .border_color(border)
+            .pt(px(38.))
+            .gap_2()
+            .items_center()
+            .child(
+                div()
+                    .id("expand-sidebar")
+                    .px_1()
+                    .rounded_sm()
+                    .cursor_pointer()
+                    .text_color(secondary)
+                    .hover(move |d| d.bg(hover))
+                    .child("»")
+                    .on_click(cx.listener(|view, _, _, cx| {
+                        view.sidebar_collapsed = false;
+                        cx.notify();
+                    })),
+            )
+            .child(div().id("rail").flex_1().overflow_y_scroll().child(rail))
+            .into_any_element()
+    }
+
     /// The left column: every connection with its tree, status and actions.
     fn sidebar(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        if self.sidebar_collapsed {
+            return self.rail(cx);
+        }
         let c = colors(cx);
         let (bg, secondary, error, hover, border) = (c.bg_secondary, c.text_secondary, c.error, c.bg_hover, c.border);
         let slots: Vec<(ConnectionId, String, ConnState, bool)> = self
@@ -329,6 +404,20 @@ impl AppView {
                     .text_color(secondary)
                     .child("SESSIONS")
                     .child(div().flex_1())
+                    .child(
+                        div()
+                            .id("collapse-sidebar")
+                            .px_1()
+                            .mr_2()
+                            .rounded_sm()
+                            .cursor_pointer()
+                            .hover(move |d| d.bg(hover))
+                            .child("«")
+                            .on_click(cx.listener(|view, _, _, cx| {
+                                view.sidebar_collapsed = true;
+                                cx.notify();
+                            })),
+                    )
                     .child({
                         let on = self.settings.read(cx).settings().notifications.sound_enabled;
                         div()
@@ -441,10 +530,12 @@ impl Render for AppView {
         self.sync_info(window, cx);
         let sidebar = self.sidebar(cx);
         let info = self.info.clone();
+        let collapsed = self.sidebar_collapsed && cfg!(target_os = "macos");
         let pane = match (info, self.current_mut()) {
             (Some(info), _) => info.into_any_element(),
             (None, current) => match current {
-            Some(connected) => workspace_pane(connected, window, cx),
+            // macOS traffic lights sit over the header's left end once the sidebar is a rail.
+            Some(connected) => workspace_pane(connected, if collapsed { px(72.) } else { px(16.) }, window, cx),
             None => {
                 let starting = self.store.read(cx).sessions().next().map(|slot| slot.state.clone());
                 match starting {
@@ -943,7 +1034,12 @@ fn centered(child: impl IntoElement) -> AnyElement {
 
 /// The active workspace: header, tab strip and the active tab. Terminal tabs are live;
 /// other application kinds arrive in later milestones.
-fn workspace_pane(connected: &mut Connected, window: &mut Window, cx: &mut Context<AppView>) -> AnyElement {
+fn workspace_pane(
+    connected: &mut Connected,
+    header_inset: gpui_kit::Pixels,
+    window: &mut Window,
+    cx: &mut Context<AppView>,
+) -> AnyElement {
     let c = colors(cx);
     let (secondary, error, border, active_bg, hover, primary) =
         (c.text_secondary, c.error, c.border, c.bg_primary, c.bg_hover, c.text_primary);
@@ -1080,7 +1176,7 @@ fn workspace_pane(connected: &mut Connected, window: &mut Window, cx: &mut Conte
 
     let header = h_flex()
         .h(px(38.))
-        .pl(px(16.))
+        .pl(header_inset)
         .gap_3()
         .items_center()
         .border_b_1()
