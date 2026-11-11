@@ -222,7 +222,11 @@ fn workspace_pane(connected: &mut Connected, window: &mut Window, cx: &mut Conte
 
     let mut tabs = h_flex().h(px(32.)).bg(tab_bar_bg).border_b_1().border_color(border);
     let registry = connected.session.read(cx).registry().clone();
-    for (tab_id, tab) in &file.app_states {
+    let order = treeterm_core::layout::order_tabs(
+        file.app_states.keys(),
+        file.metadata.get("layoutModel").map(String::as_str),
+    );
+    for (tab_id, tab) in order.iter().filter_map(|id| file.app_states.get_key_value(id)) {
         let is_active = active.as_deref() == Some(tab_id.as_str());
         // Tabs of applications the native app lacks (or that cannot close) keep no close button.
         let closable = registry.get(&tab.application_id).is_some_and(|app| app.can_close);
