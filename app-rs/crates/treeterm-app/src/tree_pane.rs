@@ -6,6 +6,7 @@ use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
 use gpui_kit::component::{ActiveTheme as _, WindowExt as _, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{AnyElement, ClickEvent, Context, Entity, EventEmitter, SharedString, Window, div, px};
+use treeterm_model::workspace_store::ActivityStyle as _;
 use treeterm_model::keybinding_store::KeybindingStore;
 use treeterm_model::session_store::{AfterMerge, RemoveMode, SessionState, SessionStore, WorkspaceEntry};
 

@@ -95,6 +95,10 @@ pub enum TerminalEvent {
     Bell,
     Activity(String),
     Idle(IdleEdge),
+    /// The user typed (text or encoded keys), for the AI-harness analyzer.
+    Input(String),
+    /// The program exited (whether or not the tab closes).
+    Exited(i32),
 }
 
 impl EventEmitter<TerminalEvent> for TerminalModel {}
@@ -310,7 +314,7 @@ impl TerminalModel {
     /// Typed input or encoded keys. Dropped while replaying or unfocused: keystrokes can only
     /// come from the focused terminal, and anything else would be the emulator answering a
     /// query that was answered when it first ran.
-    pub fn write_input(&mut self, bytes: &[u8]) {
+    pub fn write_input(&mut self, bytes: &[u8], cx: &mut Context<Self>) {
         let gate = &self.attachment.gate;
         if gate.is_replaying() || !gate.is_focused() {
             return;
@@ -318,8 +322,51 @@ impl TerminalModel {
         if self.attachment.input.send(bytes).is_err() {
             tracing::debug!(pty = %self.options.pty_id, "input dropped: pty stream closed");
         }
+        cx.emit(TerminalEvent::Input(String::from_utf8_lossy(bytes).into_owned()));
         // Typing returns to the newest output, as xterm.js does.
         self.scroll_to_bottom_quietly();
+    }
+
+    /// Write on the program's behalf, whatever has focus (the analyzer's auto-approve).
+    pub fn send_unfocused(&self, bytes: &[u8]) {
+        if self.attachment.input.send(bytes).is_err() {
+            tracing::debug!(pty = %self.options.pty_id, "input dropped: pty stream closed");
+        }
+    }
+
+    /// The visible screen as the idle detector and analyzer read it.
+    pub fn viewport(&self) -> String {
+        view::snapshot_viewport(&*self.attachment.term.lock())
+    }
+
+    /// Change how long output must be quiet before an idle edge (`None`: no detection).
+    /// Takes effect from the next burst.
+    pub fn set_idle_timeout(&mut self, timeout: Option<Duration>, cx: &mut Context<Self>) {
+        if self.options.idle_timeout == timeout {
+            return;
+        }
+        self.options.idle_timeout = timeout;
+        match (timeout, self.idle.is_some()) {
+            (Some(timeout), false) => {
+                let now = cx.background_executor().now();
+                self.idle = Some(IdleDetector::new(self.viewport(), timeout, now));
+            }
+            (None, true) => {
+                self.idle = None;
+                self.idle_timer = None;
+            }
+            (Some(_), true) | (None, false) => {}
+        }
+    }
+
+    /// Report an idle edge now if output is quiet, else at the end of the current burst.
+    pub fn request_idle_edge(&mut self, cx: &mut Context<Self>) {
+        let Some(detector) = self.idle.as_mut() else {
+            return;
+        };
+        let outputs = detector.request_idle_edge();
+        self.emit_idle(outputs, cx);
+        self.schedule_idle_timer(cx);
     }
 
     /// Paste text, bracketed when the program asked for it. Not gated on focus: the context
@@ -629,6 +676,7 @@ impl TerminalModel {
 
     fn on_exit(&mut self, code: i32, cx: &mut Context<Self>) {
         self.exited = Some(code);
+        cx.emit(TerminalEvent::Exited(code));
         let elapsed = cx.background_executor().now() - self.attachment.connected_at;
         if code != 0 && elapsed < IMMEDIATE_EXIT_WINDOW {
             self.overlay = Overlay::ExitedImmediately(code);

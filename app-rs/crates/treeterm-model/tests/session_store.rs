@@ -38,7 +38,7 @@ fn open_store(cx: &mut TestAppContext, h: &Harness, client: &str) -> Entity<Sess
     let conn = h.conn.clone();
     let client = client.to_owned();
     let settings = cx.new(|_| SettingsStore::in_memory(Default::default()));
-    cx.new(|cx| SessionStore::new(conn, client, settings, cx))
+    cx.new(|cx| SessionStore::new(conn, client, settings, None, cx))
 }
 
 fn loaded(s: &SessionStore, id: &str) -> bool {
@@ -168,7 +168,7 @@ fn a_tab_whose_program_exits_is_closed(cx: &mut TestAppContext) {
     cx.executor().advance_clock(std::time::Duration::from_secs(2));
     terminal.update(cx, |t, cx| {
         t.set_focused(true, cx);
-        t.write_input(b"exit 0\r");
+        t.write_input(b"exit 0\r", cx);
     });
     wait_for_disk(cx, || tabs_on_disk(&h, "a").is_empty());
 }
@@ -279,7 +279,7 @@ fn settings_changes_reach_live_terminals(cx: &mut TestAppContext) {
     publish(&h, &["a"]);
     let settings = cx.new(|_| SettingsStore::in_memory(Default::default()));
     let conn = h.conn.clone();
-    let store = cx.new(|cx| SessionStore::new(conn, "client-a".into(), settings.clone(), cx));
+    let store = cx.new(|cx| SessionStore::new(conn, "client-a".into(), settings.clone(), None, cx));
     wait_until(cx, &store, |s| loaded(s, "a"));
     let workspace = store.read_with(cx, |s, _| ws(s, "a"));
     let tab = workspace.update(cx, |w, cx| w.add_tab("terminal", cx)).unwrap();
@@ -652,4 +652,66 @@ fn active_child_workspaces_count_as_unmerged(cx: &mut TestAppContext) {
     wait_until(cx, &store, |s| loaded(s, "root") && loaded(s, "kid") && loaded(s, "done"));
     let unmerged = cx.read(|cx| store.read(cx).unmerged_sub_workspaces(cx));
     assert_eq!(unmerged, vec![("kid".to_owned(), None)]);
+}
+
+#[gpui_kit::test]
+fn an_ai_harness_tab_is_classified_by_its_analyzer(cx: &mut TestAppContext) {
+    use std::sync::Arc;
+    use treeterm_core::llm::FakeLlm;
+    use treeterm_core::settings::ClassifierProvider;
+    use treeterm_model::analyzer::LlmService;
+    use treeterm_model::workspace_store::ActivityState;
+    cx.executor().allow_parking();
+    let h = harness();
+    std::fs::write(h.daemon.workspaces_dir().join("a.json"), body("a", None)).unwrap();
+    publish(&h, &["a"]);
+
+    let mut settings = treeterm_core::settings::from_value(serde_json::json!({
+        "aiHarness": { "instances": [{
+            "id": "bot", "name": "Bot", "icon": "B",
+            "command": "sh -c 'echo \"Allow write to config.toml? (y/n)\"; sleep 60'",
+            "isDefault": false, "enableSandbox": false, "allowNetwork": true,
+            "backgroundColor": "#1a1a24", "disableScrollbar": false, "keepOnExit": true
+        }]}
+    }))
+    .unwrap();
+    settings.llm.api_key = "test-key".into();
+    settings.llm.base_url = "http://localhost".into();
+    settings.terminal_analyzer.provider = ClassifierProvider::ChatCompletions;
+    settings.terminal_analyzer.model = "test-model".into();
+    settings.terminal_analyzer.idle_debounce = std::time::Duration::from_millis(300);
+    let fake = FakeLlm::default();
+    fake.on_complete_chat(|_, _| Ok(r#"{"state":"permission_request","reason":"asks to write config.toml"}"#.into()));
+    let llm = LlmService::new(Arc::new(fake.clone()), h.rt.clone());
+    let conn = h.conn.clone();
+    let settings_store = cx.new(|_| SettingsStore::in_memory(settings));
+    let store = cx.new(|cx| SessionStore::new(conn, "client-a".into(), settings_store, Some(llm), cx));
+    wait_until(cx, &store, |s| loaded(s, "a"));
+    let workspace = store.read_with(cx, |s, _| ws(s, "a"));
+
+    let tab = workspace.update(cx, |w, cx| w.add_tab("aiharness-bot", cx)).unwrap();
+    wait_until_app(cx, &workspace, |w, _| w.analyzer(&tab).is_some());
+    // The screen settles (first on the shell prompt, then on the question); each idle edge
+    // (fake clock) gets the screen classified.
+    let asked = || {
+        fake.chat_calls()
+            .iter()
+            .any(|(messages, _)| messages.iter().any(|m| m.content.contains("Allow write to config.toml?")))
+    };
+    for _ in 0..1000 {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        cx.executor().advance_clock(std::time::Duration::from_millis(100));
+        cx.run_until_parked();
+        if asked() && workspace.read_with(cx, |w, _| w.activity(&tab)) == ActivityState::PermissionRequest {
+            break;
+        }
+    }
+    let screen = workspace.read_with(cx, |w, cx| match w.tab_content(&tab) {
+        Some(TabContent::Terminal(t)) => t.read(cx).screen_text(),
+        _ => String::new(),
+    });
+    assert!(asked(), "the question was never classified; {} calls; screen:\n{screen}", fake.chat_calls().len());
+    assert_eq!(workspace.read_with(cx, |w, _| w.activity(&tab)), ActivityState::PermissionRequest);
+    let analyzer = workspace.read_with(cx, |w, _| w.analyzer(&tab)).unwrap();
+    assert_eq!(analyzer.read_with(cx, |a, _| a.analyzer().reason().to_owned()), "asks to write config.toml");
 }

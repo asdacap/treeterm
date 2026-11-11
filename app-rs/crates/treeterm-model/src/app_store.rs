@@ -31,6 +31,8 @@ pub enum AppState {
 
 pub struct AppStore {
     rt: Rt,
+    /// The LLM client every session's analyzers share (`None` if it could not be built).
+    llm: Option<crate::analyzer::LlmService>,
     spec: LocalDaemonSpec,
     state: AppState,
     settings: Entity<SettingsStore>,
@@ -52,7 +54,15 @@ pub fn reconnect_delay(attempt: u32) -> Duration {
 
 impl AppStore {
     pub fn new(rt: Rt, spec: LocalDaemonSpec, settings: Entity<SettingsStore>, cx: &mut Context<Self>) -> Self {
+        let llm = match crate::analyzer::LlmService::http(rt.clone()) {
+            Ok(llm) => Some(llm),
+            Err(error) => {
+                tracing::error!(%error, "no LLM client: AI-harness analysis is off");
+                None
+            }
+        };
         let mut store = Self {
+            llm,
             rt,
             spec,
             state: AppState::StartingDaemon,
@@ -106,7 +116,8 @@ impl AppStore {
                 self._connect = None;
                 let client_id = self.client_id.clone();
                 let settings = self.settings.clone();
-                let session = cx.new(|cx| SessionStore::new(conn, client_id, settings, cx));
+                let llm = self.llm.clone();
+                let session = cx.new(|cx| SessionStore::new(conn, client_id, settings, llm, cx));
                 cx.observe(&session, |_, _, cx| cx.notify()).detach();
                 self._session_events = Some(cx.subscribe(
                     &session,

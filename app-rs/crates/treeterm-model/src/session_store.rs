@@ -309,6 +309,8 @@ fn name_from_path(path: &str) -> String {
 
 pub struct SessionStore {
     conn: DaemonConnection,
+    /// Given to every workspace for its AI-harness analyzers.
+    llm: Option<crate::analyzer::LlmService>,
     client_id: String,
     settings: Entity<SettingsStore>,
     registry: Rc<AppRegistry>,
@@ -341,6 +343,7 @@ impl SessionStore {
         conn: DaemonConnection,
         client_id: String,
         settings: Entity<SettingsStore>,
+        llm: Option<crate::analyzer::LlmService>,
         cx: &mut Context<Self>,
     ) -> Self {
         let mut events = conn.watch_session(&client_id);
@@ -365,6 +368,7 @@ impl SessionStore {
         });
         Self {
             conn,
+            llm,
             client_id,
             settings,
             registry,
@@ -739,7 +743,8 @@ impl SessionStore {
         let conn = self.conn.clone();
         let registry = self.registry.clone();
         let settings = self.settings.read(cx).settings().clone();
-        let store = cx.new(|cx| WorkspaceStore::new(workspace, conn, registry, settings, cx));
+        let llm = self.llm.clone();
+        let store = cx.new(|cx| WorkspaceStore::new(workspace, conn, registry, settings, llm, cx));
         let owned = id.clone();
         let subscription = cx.subscribe(&store, move |session, _, event: &WorkspaceEvent, cx| match event {
             WorkspaceEvent::Changed => session.enqueue_content_sync(&owned, cx),

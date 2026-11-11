@@ -10,34 +10,39 @@ use treeterm_core::rt::Rt;
 use treeterm_testkit::TestDaemon;
 
 pub struct Harness {
-    /// `Some` until dropped; see the `Drop` impl.
-    tokio: Option<tokio::runtime::Runtime>,
     pub daemon: TestDaemon,
     pub conn: DaemonConnection,
+    pub rt: Rt,
+}
+
+/// One tokio runtime for every test in the binary, never shut down. tokio reaps child
+/// processes through process-wide SIGCHLD state: with a runtime per test, a child spawned
+/// after an earlier test's runtime went away could wait forever (seen as a hung
+/// `git status` in the second test of a run).
+fn runtime() -> &'static tokio::runtime::Runtime {
+    static RUNTIME: std::sync::LazyLock<tokio::runtime::Runtime> = std::sync::LazyLock::new(|| {
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(4)
+            .enable_all()
+            .build()
+            .expect("test runtime")
+    });
+    &RUNTIME
 }
 
 impl Drop for Harness {
-    /// The in-process daemon waits for each shell on a blocking thread, and dropping a
-    /// runtime waits for its blocking threads. Kill the shells, then let the runtime go
-    /// without waiting.
+    /// Kill the test's shells; the daemon stops when `daemon` drops.
     fn drop(&mut self) {
         if let Ok(Ok(sessions)) = futures::executor::block_on(self.conn.list_pty_sessions()) {
             for session in sessions {
                 if futures::executor::block_on(self.conn.kill_pty(&session.id)).is_err() {}
             }
         }
-        if let Some(tokio) = self.tokio.take() {
-            tokio.shutdown_background();
-        }
     }
 }
 
 pub fn harness() -> Harness {
-    let tokio = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(2)
-        .enable_all()
-        .build()
-        .unwrap();
+    let tokio = runtime();
     let daemon = {
         let _enter = tokio.enter();
         TestDaemon::start()
@@ -46,7 +51,7 @@ pub fn harness() -> Harness {
     let conn = futures::executor::block_on(DaemonConnection::open(&rt, daemon.socket_path()))
         .unwrap()
         .unwrap();
-    Harness { tokio: Some(tokio), daemon, conn }
+    Harness { daemon, conn, rt }
 }
 
 /// Daemon events arrive from tokio threads in real time; pump the GPUI test scheduler

@@ -28,6 +28,11 @@ impl Rt {
         Self { handle }
     }
 
+    /// Enter the runtime's context, for constructors that must run inside it (reqwest).
+    pub fn enter(&self) -> tokio::runtime::EnterGuard<'_> {
+        self.handle.enter()
+    }
+
     /// Run `fut` on tokio. The returned future resolves with its output on any executor.
     pub fn run<T: Send + 'static>(&self, fut: impl Future<Output = T> + Send + 'static) -> Fut<T> {
         let (tx, rx) = oneshot::channel();

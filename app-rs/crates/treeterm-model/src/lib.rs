@@ -5,6 +5,7 @@
 //! I/O goes through `treeterm_core` and arrives via [`treeterm_core::rt`].
 
 pub mod active_processes;
+pub mod analyzer;
 pub mod app_store;
 pub mod apps;
 pub mod file_browser;

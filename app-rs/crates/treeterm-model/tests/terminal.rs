@@ -59,7 +59,7 @@ fn open(cx: &mut TestAppContext, h: &Harness, options: TerminalOptions) -> Entit
 }
 
 fn type_line(cx: &mut TestAppContext, model: &Entity<TerminalModel>, line: &str) {
-    model.update(cx, |m, _| m.write_input(format!("{line}\r").as_bytes()));
+    model.update(cx, |m, cx| m.write_input(format!("{line}\r").as_bytes(), cx));
 }
 
 #[gpui_kit::test]

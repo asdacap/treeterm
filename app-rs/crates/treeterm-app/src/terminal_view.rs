@@ -91,7 +91,9 @@ impl TerminalView {
                 TerminalEvent::CloseRequested { .. }
                 | TerminalEvent::Bell
                 | TerminalEvent::Activity(_)
-                | TerminalEvent::Idle(_) => {}
+                | TerminalEvent::Idle(_)
+                | TerminalEvent::Input(_)
+                | TerminalEvent::Exited(_) => {}
             }),
             cx.on_focus(&focus, window, |view, window, cx| view.sync_focus(window, cx)),
             cx.on_blur(&focus, window, |view, window, cx| view.sync_focus(window, cx)),
@@ -198,7 +200,7 @@ impl TerminalView {
             self.reset_blink();
             self.model.update(cx, |model, cx| {
                 model.clear_selection(cx);
-                model.write_input(&bytes);
+                model.write_input(&bytes, cx);
             });
             cx.stop_propagation();
         }
@@ -237,7 +239,7 @@ impl TerminalView {
             },
         };
         if let Some(bytes) = mouse::encode_mouse(input, mode) {
-            self.model.update(cx, |model, _| model.write_input(&bytes));
+            self.model.update(cx, |model, cx| model.write_input(&bytes, cx));
         }
         true
     }
@@ -363,7 +365,7 @@ impl TerminalView {
             return;
         }
         if let Some(bytes) = mouse::alternate_scroll(whole, mode) {
-            self.model.update(cx, |model, _| model.write_input(&bytes));
+            self.model.update(cx, |model, cx| model.write_input(&bytes, cx));
             return;
         }
         self.model.update(cx, |model, cx| model.scroll_lines(whole, cx));
@@ -742,7 +744,7 @@ impl gpui_kit::EntityInputHandler for TerminalView {
             let bytes = text.as_bytes().to_vec();
             self.model.update(cx, |model, cx| {
                 model.clear_selection(cx);
-                model.write_input(&bytes);
+                model.write_input(&bytes, cx);
             });
         }
         cx.notify();

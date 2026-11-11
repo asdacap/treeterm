@@ -9,7 +9,7 @@ use treeterm_core::keybinding::{Action, PrefixAction};
 use treeterm_model::app_store::{AppState, AppStore};
 use treeterm_model::keybinding_store::KeybindingStore;
 use treeterm_model::session_store::{SessionStore, WorkspaceEntry};
-use treeterm_model::workspace_store::TabContent;
+use treeterm_model::workspace_store::{ActivityStyle as _, TabContent};
 
 use crate::terminal_view::TerminalView;
 use crate::theme::colors;
@@ -592,11 +592,21 @@ fn terminal_status_bar(
     use gpui_kit::component::switch::Switch;
     let store = workspace.read(cx);
     let activity = store.activity(tab_id);
+    // AI-harness tabs: the analyzer's state, whether it is classifying, and why.
+    let analysis = store.analyzer(tab_id).map(|analyzer| {
+        let a = analyzer.read(cx).analyzer();
+        (a.ai_state(), a.analyzing(), a.reason().to_owned(), a.auto_approve())
+    });
     let idle_enabled = !store.tab_flag(tab_id, "idleDetectorDisabled");
     let width_enabled = !store.tab_flag(tab_id, "widthLimitDisabled");
     let max_cols = store.max_cols();
     let (idle_ws, idle_tab) = (workspace.clone(), tab_id.to_owned());
     let (width_ws, width_tab) = (workspace.clone(), tab_id.to_owned());
+    let (approve_ws, approve_tab) = (workspace.clone(), tab_id.to_owned());
+    let (badge_state, analyzing, reason, auto_approve) = match analysis {
+        Some((state, analyzing, reason, auto_approve)) => (state, analyzing, Some(reason), Some(auto_approve)),
+        None => (activity, false, None, None),
+    };
     h_flex()
         .h(px(28.))
         .flex_shrink_0()
@@ -612,11 +622,25 @@ fn terminal_status_bar(
                 .px_2()
                 .py(px(2.))
                 .rounded(px(12.))
-                .bg(gpui_kit::rgb(activity.color()))
+                .bg(gpui_kit::rgb(badge_state.color()))
                 .opacity(0.8)
                 .text_color(gpui_kit::white())
-                .child(activity.label()),
+                .child(if analyzing { format!("{} …", badge_state.label()) } else { badge_state.label().to_owned() }),
         )
+        .when_some(reason.filter(|r| !r.is_empty()), |bar, reason| {
+            bar.child(div().max_w(px(360.)).truncate().text_color(gpui_kit::rgb(0x858585)).child(reason))
+        })
+        .when_some(auto_approve, |bar, checked| {
+            bar.child(
+                Switch::new(SharedString::from(format!("approve-switch-{tab_id}")))
+                    .checked(checked)
+                    .label("Auto-approve safe")
+                    .xsmall()
+                    .on_click(move |checked, _, cx| {
+                        approve_ws.update(cx, |w, cx| w.set_auto_approve(&approve_tab, *checked, cx));
+                    }),
+            )
+        })
         .child(
             Switch::new(SharedString::from(format!("idle-switch-{tab_id}")))
                 .checked(idle_enabled)

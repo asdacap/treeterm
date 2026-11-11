@@ -10,6 +10,9 @@ use std::rc::Rc;
 
 use gpui_kit::{AppContext as _, Context, Entity, EventEmitter, Subscription, Task};
 use serde_json::Value;
+use treeterm_core::activity::{ActivityStates, TransitionDetail};
+use treeterm_core::analyzer::idle_timeout as analyzer_idle_timeout;
+use treeterm_core::attention::has_unread_workspace_attention;
 use treeterm_core::daemon::DaemonConnection;
 use treeterm_core::pty::CreatePty;
 use treeterm_core::settings::Settings;
@@ -17,6 +20,7 @@ use treeterm_core::wire::workspace_file::{AppState, WorkspaceFile};
 use treeterm_term::fit::WidthLimit;
 use treeterm_term::palette::{DEFAULT_BACKGROUND, SANDBOX_BACKGROUND};
 
+use crate::analyzer::{AnalyzerEvent, AnalyzerModel, LlmService};
 use crate::apps::{AppKind, AppRegistry};
 use crate::terminal::{TerminalEvent, TerminalModel, TerminalOptions};
 
@@ -36,23 +40,17 @@ pub enum WorkspaceEvent {
 
 impl EventEmitter<WorkspaceEvent> for WorkspaceStore {}
 
-/// What a tab's program is doing. Port of `ActivityState` (`src/shared/types.ts`). The
-/// viewport idle detector produces `Working`/`Idle`; the LLM analyzer the rest.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ActivityState {
-    #[default]
-    Idle,
-    Working,
-    UserInputRequired,
-    PermissionRequest,
-    SafePermissionRequested,
-    Completed,
-    ApplicationError,
-    Error,
+pub use treeterm_core::activity::ActivityState;
+
+/// How an activity state is shown (`ActivityStateBadge.tsx`).
+pub trait ActivityStyle {
+    fn label(self) -> &'static str;
+    /// Badge colour.
+    fn color(self) -> u32;
 }
 
-impl ActivityState {
-    pub fn label(self) -> &'static str {
+impl ActivityStyle for ActivityState {
+    fn label(self) -> &'static str {
         match self {
             ActivityState::Idle => "idle",
             ActivityState::Working => "working",
@@ -65,8 +63,7 @@ impl ActivityState {
         }
     }
 
-    /// Badge colour, as `ActivityStateBadge.tsx`.
-    pub fn color(self) -> u32 {
+    fn color(self) -> u32 {
         match self {
             ActivityState::Idle => 0x666666,
             ActivityState::Working => 0x2472c8,
@@ -120,6 +117,8 @@ enum TerminalTab {
     },
     Attached {
         model: Entity<TerminalModel>,
+        /// AI-harness tabs: the LLM analyzer reading this terminal.
+        analyzer: Option<(Entity<AnalyzerModel>, Subscription)>,
         _events: Subscription,
     },
     Failed(String),
@@ -133,8 +132,11 @@ pub struct WorkspaceStore {
     tabs: HashMap<String, TabRef>,
     /// The parent workspace's branch, kept current by the session (Review's base).
     parent_branch: Option<String>,
-    /// Per-tab activity; runtime only (`activityState` store).
-    activity: HashMap<String, ActivityState>,
+    /// Per-tab activity and its transitions; runtime only (`activityState` store).
+    activity: ActivityStates,
+    /// Runs AI-harness analyzers; `None` leaves them off (tests, no LLM client).
+    llm: Option<LlmService>,
+    _git_refresh: Option<Task<()>>,
 }
 
 /// `#rrggbb` → colour; anything else is ignored (the default background is used).
@@ -163,6 +165,7 @@ impl WorkspaceStore {
         conn: DaemonConnection,
         registry: Rc<AppRegistry>,
         settings: Rc<Settings>,
+        llm: Option<LlmService>,
         cx: &mut Context<Self>,
     ) -> Self {
         let mut store = Self {
@@ -172,7 +175,9 @@ impl WorkspaceStore {
             settings,
             tabs: HashMap::new(),
             parent_branch: None,
-            activity: HashMap::new(),
+            activity: ActivityStates::default(),
+            llm,
+            _git_refresh: None,
         };
         let tab_ids: Vec<String> = store.workspace.file.app_states.keys().cloned().collect();
         for tab_id in tab_ids {
@@ -207,15 +212,36 @@ impl WorkspaceStore {
     /// The workspace's most urgent tab activity, for the tree (anything needing the user
     /// first, then work in progress).
     pub fn overall_activity(&self) -> ActivityState {
-        let rank = |state: ActivityState| match state {
-            ActivityState::PermissionRequest | ActivityState::UserInputRequired => 5,
-            ActivityState::ApplicationError | ActivityState::Error => 4,
-            ActivityState::SafePermissionRequested => 3,
-            ActivityState::Working => 2,
-            ActivityState::Completed => 1,
-            ActivityState::Idle => 0,
-        };
-        self.activity.values().copied().max_by_key(|state| rank(*state)).unwrap_or_default()
+        self.activity.workspace_state(self.workspace.file.app_states.keys().map(String::as_str))
+    }
+
+    /// Every activity state and its transitions (debugging, attention).
+    pub fn activity_states(&self) -> &ActivityStates {
+        &self.activity
+    }
+
+    /// The analyzer of an AI-harness tab.
+    pub fn analyzer(&self, tab_id: &str) -> Option<Entity<AnalyzerModel>> {
+        match self.tabs.get(tab_id) {
+            Some(TabRef::Terminal(TerminalTab::Attached { analyzer: Some((analyzer, _)), .. })) => Some(analyzer.clone()),
+            Some(_) | None => None,
+        }
+    }
+
+    /// The status bar's "Auto-approve safe" switch, persisted per tab.
+    pub fn set_auto_approve(&mut self, tab_id: &str, enabled: bool, cx: &mut Context<Self>) {
+        self.update_tab_state(
+            tab_id,
+            |state| {
+                if let Value::Object(state) = state {
+                    state.insert("autoApprove".into(), Value::Bool(enabled));
+                }
+            },
+            cx,
+        );
+        if let Some(analyzer) = self.analyzer(tab_id) {
+            analyzer.update(cx, |a, cx| a.set_auto_approve(enabled, cx));
+        }
     }
 
     /// Set by the session whenever the parent's branch is known or changes. Review tabs
@@ -244,13 +270,51 @@ impl WorkspaceStore {
     }
 
     pub fn activity(&self, tab_id: &str) -> ActivityState {
-        self.activity.get(tab_id).copied().unwrap_or_default()
+        self.activity.get(tab_id).unwrap_or_default()
     }
 
-    fn set_activity(&mut self, tab_id: &str, state: ActivityState, cx: &mut Context<Self>) {
-        if self.activity.insert(tab_id.to_owned(), state) != Some(state) {
+    fn set_activity(&mut self, tab_id: &str, state: ActivityState, detail: TransitionDetail, cx: &mut Context<Self>) {
+        if self.activity.get(tab_id) != Some(state) {
+            self.activity.set_tab_state(tab_id, state, detail, std::time::SystemTime::now());
             cx.notify();
         }
+    }
+
+    /// The idle debounce for this workspace's terminals: longer while it carries an unread
+    /// attention marker.
+    fn idle_timeout(&self) -> std::time::Duration {
+        let unread = match has_unread_workspace_attention(&self.workspace.file.metadata) {
+            Ok(unread) => unread,
+            Err(error) => {
+                tracing::warn!(%error, "unreadable attention metadata");
+                false
+            }
+        };
+        analyzer_idle_timeout(&self.settings.terminal_analyzer, unread)
+    }
+
+    /// Metadata or settings changed: terminals take the current idle debounce.
+    fn sync_idle_timeouts(&mut self, cx: &mut Context<Self>) {
+        let timeout = self.idle_timeout();
+        let models: Vec<Entity<TerminalModel>> = self.terminals().cloned().collect();
+        for model in models {
+            model.update(cx, |m, cx| m.set_idle_timeout(Some(timeout), cx));
+        }
+    }
+
+    /// Re-read the checked-out branch (the analyzer saw the program change things).
+    pub fn refresh_git_branch(&mut self, cx: &mut Context<Self>) {
+        let git = self.conn.git();
+        let path = self.workspace.path.clone();
+        self._git_refresh = Some(cx.spawn(async move |this, cx| {
+            let info = git.get_info(&path).await;
+            match this.update(cx, |store, cx| match info {
+                treeterm_core::git::GitInfo::Repo { branch, .. } => store.set_git_branch(&branch, cx),
+                treeterm_core::git::GitInfo::NotRepo => {}
+            }) {
+                Ok(()) | Err(_) => {} // Err: workspace gone
+            }
+        }));
     }
 
     /// A boolean in the tab's state that defaults to false (the `*Disabled` flags).
@@ -425,7 +489,7 @@ impl WorkspaceStore {
             },
             // Always detecting: the per-tab switch gates only the Working edge, read when it
             // fires, so turning it off still lets a pending Idle land.
-            idle_timeout: Some(settings.terminal_analyzer.idle_debounce),
+            idle_timeout: Some(self.idle_timeout()),
         }
     }
 
@@ -433,21 +497,68 @@ impl WorkspaceStore {
         let options = self.terminal_options(tab_id, pty_id);
         let conn = self.conn.clone();
         let model = cx.new(|cx| TerminalModel::new(conn, options, cx));
+        let analyzer = self.start_analyzer(tab_id, &model, cx);
+        let analyzed = analyzer.is_some();
         let owned_tab = tab_id.to_owned();
         let events = cx.subscribe(&model, move |store, _, event: &TerminalEvent, cx| match event {
             TerminalEvent::CloseRequested { .. } => store.remove_tab(&owned_tab, cx),
-            TerminalEvent::Activity(_) => {
+            // An analyzed tab's activity comes from its analyzer.
+            TerminalEvent::Activity(snapshot) if !analyzed => {
                 if !store.tab_flag(&owned_tab, "idleDetectorDisabled") {
-                    store.set_activity(&owned_tab, ActivityState::Working, cx);
+                    let detail = TransitionDetail::ViewportChanged { snapshot: snapshot.clone() };
+                    store.set_activity(&owned_tab, ActivityState::Working, detail, cx);
                 }
             }
-            TerminalEvent::Idle(_) => store.set_activity(&owned_tab, ActivityState::Idle, cx),
-            TerminalEvent::Clipboard(_) | TerminalEvent::Bell => {}
+            TerminalEvent::Idle(edge) if !analyzed => {
+                let detail = TransitionDetail::ViewportIdle {
+                    snapshot: edge.snapshot.clone(),
+                    idle_timeout: edge.idle_timeout,
+                };
+                store.set_activity(&owned_tab, ActivityState::Idle, detail, cx);
+            }
+            TerminalEvent::Activity(_)
+            | TerminalEvent::Idle(_)
+            | TerminalEvent::Clipboard(_)
+            | TerminalEvent::Bell
+            | TerminalEvent::Input(_)
+            | TerminalEvent::Exited(_) => {}
         });
         TerminalTab::Attached {
             model,
+            analyzer,
             _events: events,
         }
+    }
+
+    /// An AI-harness tab gets an analyzer (`initAnalyzer`), when an LLM client exists.
+    fn start_analyzer(
+        &mut self,
+        tab_id: &str,
+        terminal: &Entity<TerminalModel>,
+        cx: &mut Context<Self>,
+    ) -> Option<(Entity<AnalyzerModel>, Subscription)> {
+        let tab = self.workspace.file.app_states.get(tab_id)?;
+        let app = self.registry.get(&tab.application_id)?;
+        let AppKind::AiHarness { .. } = app.kind else {
+            return None;
+        };
+        let llm = self.llm.clone()?;
+        let auto_approve = tab.state.get("autoApprove").and_then(Value::as_bool).unwrap_or(false);
+        let cwd = self.workspace.path.clone();
+        let repo_path = self.workspace.file.git_root_path.clone().unwrap_or_else(|| cwd.clone());
+        let (settings, git, terminal, workspace, owned_tab) =
+            (self.settings.clone(), self.conn.git(), terminal.clone(), cx.weak_entity(), tab_id.to_owned());
+        let analyzer = cx.new(|cx| {
+            AnalyzerModel::new(&settings, cwd, repo_path, auto_approve, llm, git, terminal, workspace, owned_tab, cx)
+        });
+        let owned_tab = tab_id.to_owned();
+        let events = cx.subscribe(&analyzer, move |store, _, event: &AnalyzerEvent, cx| match event {
+            AnalyzerEvent::SetActivity { state, detail } => store.set_activity(&owned_tab, *state, detail.clone(), cx),
+            AnalyzerEvent::UpdateMetadata { key, value } => store.update_metadata(key, value, cx),
+            AnalyzerEvent::BranchRenamed(branch) => store.set_git_branch(branch, cx),
+            AnalyzerEvent::RefreshGit => store.refresh_git_branch(cx),
+        });
+        Some((analyzer, events))
     }
 
     /// `ensureTty`: create the tab's PTY, keyed by its persisted handle so the daemon
@@ -521,7 +632,7 @@ impl WorkspaceStore {
     /// Detaches its terminal; never kills the PTY.
     fn dispose_tab(&mut self, tab_id: &str) {
         self.tabs.remove(tab_id);
-        self.activity.remove(tab_id);
+        self.activity.remove_tab_state(tab_id);
     }
 
     /// Add a tab running `application_id` and make it active. Returns the tab id, or `None`
@@ -684,11 +795,13 @@ impl WorkspaceStore {
             return;
         }
         self.workspace.file.metadata.insert(key.to_owned(), value.to_owned());
+        self.sync_idle_timeouts(cx);
         self.changed(cx);
     }
 
     pub fn delete_metadata(&mut self, key: &str, cx: &mut Context<Self>) {
         if self.workspace.file.metadata.remove(key).is_some() {
+            self.sync_idle_timeouts(cx);
             self.changed(cx);
         }
     }
@@ -758,6 +871,7 @@ impl WorkspaceStore {
         for tab_id in tab_ids {
             self.init_tab(&tab_id, cx);
         }
+        self.sync_idle_timeouts(cx);
         cx.notify();
     }
 
@@ -767,11 +881,16 @@ impl WorkspaceStore {
         self.registry = registry;
         self.settings = settings;
         for tab in self.tabs.values() {
-            if let TabRef::Terminal(TerminalTab::Attached { model, .. }) = tab {
+            if let TabRef::Terminal(TerminalTab::Attached { model, analyzer, .. }) = tab {
                 let terminal = self.settings.terminal.clone();
                 model.update(cx, |model, cx| model.apply_settings(terminal, cx));
+                if let Some((analyzer, _)) = analyzer {
+                    let settings = self.settings.clone();
+                    analyzer.update(cx, |a, cx| a.set_settings(&settings, cx));
+                }
             }
         }
+        self.sync_idle_timeouts(cx);
         // Tabs of applications that just appeared (a new AI harness instance) start now.
         let tab_ids: Vec<String> = self.workspace.file.app_states.keys().cloned().collect();
         for tab_id in tab_ids {
