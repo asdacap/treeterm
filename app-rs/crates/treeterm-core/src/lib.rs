@@ -9,6 +9,7 @@ pub mod analyzer;
 pub mod attention;
 pub mod classification;
 pub mod concurrency;
+pub mod connection;
 pub mod daemon;
 pub mod exec;
 pub mod fs;
