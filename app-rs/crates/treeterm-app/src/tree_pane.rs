@@ -7,7 +7,7 @@ use gpui_kit::component::{ActiveTheme as _, WindowExt as _, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{AnyElement, ClickEvent, Context, Entity, EventEmitter, SharedString, Window, div, px};
 use treeterm_model::keybinding_store::KeybindingStore;
-use treeterm_model::session_store::{SessionState, SessionStore, WorkspaceEntry};
+use treeterm_model::session_store::{RemoveMode, SessionState, SessionStore, WorkspaceEntry};
 
 use crate::theme::colors;
 
@@ -94,6 +94,9 @@ impl Render for TreePane {
                 .tree_rows(&self.collapsed, cx)
                 .into_iter()
                 .map(|row| RowData {
+                    is_worktree: session
+                        .workspace_store(&row.id)
+                        .is_some_and(|w| w.read(cx).file().is_worktree),
                     label: session
                         .entry(&row.id)
                         .map_or(Label::Loading, |entry| Label::of(entry, cx)),
@@ -147,7 +150,7 @@ impl Render for TreePane {
 
 impl TreePane {
     fn render_row(&self, row: RowData, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        let RowData { id, depth, has_children, label } = row;
+        let RowData { id, depth, has_children, label, is_worktree } = row;
         let c = colors(cx);
         let (label, label_color): (SharedString, _) = match label {
             Label::Name(name) => (name, c.text_primary),
@@ -197,7 +200,7 @@ impl TreePane {
                 let (session, id, label) = (session.clone(), menu_id.clone(), label.clone());
                 let (child_session, child_parent, child_label, pane) =
                     (session.clone(), id.clone(), label.clone(), pane.clone());
-                menu.item(PopupMenuItem::new("New child workspace…").on_click(move |_, window, cx| {
+                let menu = menu.item(PopupMenuItem::new("New child workspace…").on_click(move |_, window, cx| {
                     let pane = pane.clone();
                     let on_created: crate::child_dialog::OnCreated = std::rc::Rc::new(move |id, _, cx| {
                         pane.update(cx, |pane, cx| pane.select(id, cx));
@@ -211,10 +214,20 @@ impl TreePane {
                         cx,
                     );
                 }))
-                .separator()
-                .item(PopupMenuItem::new("Remove from TreeTerm (keep worktree and branch)").on_click(
-                    move |_, window, cx| confirm_remove(session.clone(), id.clone(), label.clone(), window, cx),
-                ))
+                .separator();
+                let remove = |menu: gpui_kit::component::menu::PopupMenu, text: &'static str, mode: RemoveMode| {
+                    let (session, id, label) = (session.clone(), id.clone(), label.clone());
+                    menu.item(PopupMenuItem::new(text).on_click(move |_, window, cx| {
+                        confirm_remove(session.clone(), id.clone(), label.clone(), mode, window, cx)
+                    }))
+                };
+                let menu = if is_worktree {
+                    let menu = remove(menu, "Remove (delete worktree and branch)…", RemoveMode::DeleteWorktreeAndBranch);
+                    remove(menu, "Remove, keep branch…", RemoveMode::KeepBranch)
+                } else {
+                    menu
+                };
+                remove(menu, "Remove from TreeTerm (keep files)…", RemoveMode::KeepWorktreeAndBranch)
             })
     }
 }
@@ -222,6 +235,7 @@ impl TreePane {
 /// A row's content, copied out of the session so rendering can borrow the context mutably.
 struct RowData {
     id: String,
+    is_worktree: bool,
     depth: usize,
     has_children: bool,
     label: Label,
@@ -245,25 +259,33 @@ impl Label {
     }
 }
 
-/// Removing kills the workspace's (and its children's) running programs, so ask first.
+/// Removing kills the workspace's (and its children's) running programs, and possibly
+/// deletes their worktrees and branches, so ask first.
 fn confirm_remove(
     session: Entity<SessionStore>,
     id: String,
     label: SharedString,
+    mode: RemoveMode,
     window: &mut gpui_kit::Window,
     cx: &mut gpui_kit::App,
 ) {
+    let consequence = match mode {
+        RemoveMode::DeleteWorktreeAndBranch => {
+            "Its worktree directory is deleted along with its branch (unless detached). Uncommitted work is lost."
+        }
+        RemoveMode::KeepBranch => "Its worktree directory is deleted; the branch stays.",
+        RemoveMode::KeepWorktreeAndBranch => "The directory, worktree and branch stay on disk.",
+    };
     window.open_alert_dialog(cx, move |alert, _, _| {
         let (session, id) = (session.clone(), id.clone());
         alert
             .title(format!("Remove “{label}”?"))
-            .description(
-                "Its tabs and those of its child workspaces are closed and their programs killed. \
-                 The directory, worktree and branch stay on disk.",
-            )
+            .description(format!(
+                "Its tabs and those of its child workspaces are closed and their programs killed. {consequence}"
+            ))
             .show_cancel(true)
             .on_ok(move |_, _, cx| {
-                session.update(cx, |s, cx| s.remove_workspace_keep_both(&id, cx));
+                session.update(cx, |s, cx| s.remove_workspace(&id, mode, cx));
                 true
             })
     });
