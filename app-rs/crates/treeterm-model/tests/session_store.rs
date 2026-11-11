@@ -241,3 +241,28 @@ fn an_added_workspace_is_written_then_published(cx: &mut TestAppContext) {
     assert_eq!(file_on_disk(&h, "ws-new")["parentHash"], "");
     first.read_with(cx, |s, _| assert!(s.version() >= 2));
 }
+
+#[gpui_kit::test]
+fn removing_a_workspace_takes_its_children_and_files_with_it(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    std::fs::write(h.daemon.workspaces_dir().join("root.json"), body("root", None)).unwrap();
+    std::fs::write(h.daemon.workspaces_dir().join("child.json"), body("child", Some("root"))).unwrap();
+    std::fs::write(h.daemon.workspaces_dir().join("other.json"), body("other", None)).unwrap();
+    publish(&h, &["root", "child", "other"]);
+    let store = open_store(cx, &h, "client-a");
+    let watcher = open_store(cx, &h, "client-b");
+    wait_until(cx, &store, |s| loaded(s, "root") && loaded(s, "child") && loaded(s, "other"));
+    wait_until(cx, &watcher, |s| loaded(s, "root"));
+
+    store.update(cx, |s, cx| s.remove_workspace_keep_both("root", cx));
+    wait_until(cx, &store, |s| s.entry("root").is_none() && s.entry("child").is_none());
+    // Another window sees the membership change.
+    wait_until(cx, &watcher, |s| s.entry("root").is_none() && s.entry("child").is_none() && loaded(s, "other"));
+    wait_for_disk(cx, || {
+        !h.daemon.workspaces_dir().join("root.json").exists() && !h.daemon.workspaces_dir().join("child.json").exists()
+    });
+    assert!(h.daemon.workspaces_dir().join("other.json").exists());
+    // The lock was released.
+    store.read_with(cx, |s, _| assert!(s.version() >= 3));
+}

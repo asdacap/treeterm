@@ -570,6 +570,19 @@ impl WorkspaceStore {
         cx.notify();
     }
 
+    /// The workspace is being removed: kill every tab's daemon resources (`ref.close()`).
+    pub fn close_all_tabs(&mut self, cx: &mut Context<Self>) {
+        for tab in self.tabs.values() {
+            match tab {
+                TabRef::Terminal(TerminalTab::Attached { model, .. }) => {
+                    model.update(cx, |model, cx| model.kill(cx));
+                }
+                // A PTY still starting is killed by its creation finding the tab gone.
+                TabRef::Terminal(TerminalTab::Creating { .. } | TerminalTab::Failed(_)) => {}
+            }
+        }
+    }
+
     /// The workspace leaves the session: detach every terminal. PTYs keep running.
     pub fn dispose(&mut self) {
         self.tabs.clear();

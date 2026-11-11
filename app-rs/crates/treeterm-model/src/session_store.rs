@@ -126,11 +126,33 @@ enum Writer {
     Running { rerun: bool, task: Option<Task<()>> },
 }
 
-/// One op on the session-version queue. Un-started syncs absorb later sync requests.
+/// One op on the session-version queue: everything that bumps the daemon's session
+/// version (UpdateSession, LockSession, UnlockSession) runs in enqueue order, so no two
+/// race on the daemon (`enqueueOp` / `enqueueSync`).
+enum QueuedOp {
+    /// Un-started syncs absorb later sync requests.
+    Sync(QueuedSync),
+    Lock(oneshot::Sender<Result<(), String>>),
+    Unlock(oneshot::Sender<()>),
+}
+
 struct QueuedSync {
     reasons: Vec<&'static str>,
     done: Vec<oneshot::Sender<()>>,
 }
+
+/// An op taken off the queue, with its RPC in flight.
+enum RunningOp {
+    Sync(QueuedSync, Option<(RefSync, treeterm_core::rt::Fut<Result<Session, ApiError>>)>),
+    Lock(
+        oneshot::Sender<Result<(), String>>,
+        treeterm_core::rt::Fut<Result<treeterm_core::daemon::SessionLockResult, ApiError>>,
+    ),
+    Unlock(oneshot::Sender<()>, treeterm_core::rt::Fut<Result<Session, ApiError>>),
+}
+
+/// How long a lock taken for a multi-step operation lives if it is never released.
+const LOCK_TTL: Duration = Duration::from_secs(60);
 
 /// A ref sync in flight: what was sent, and the base to restore if the call fails.
 struct RefSync {
@@ -182,7 +204,7 @@ pub struct SessionStore {
     known_refs: IndexMap<String, String>,
     ref_sync_attempts: u32,
     ref_sync_retry_on_next_event: bool,
-    ops: VecDeque<QueuedSync>,
+    ops: VecDeque<QueuedOp>,
     op_runner: Option<Task<()>>,
     disposed: bool,
     _session_watch: Task<()>,
@@ -787,60 +809,141 @@ impl SessionStore {
     /// Queue a membership sync. Requests made before the queued sync starts share it.
     fn enqueue_sync(&mut self, reason: &'static str, done: Option<oneshot::Sender<()>>, cx: &mut Context<Self>) {
         match self.ops.back_mut() {
-            Some(pending) => {
+            Some(QueuedOp::Sync(pending)) => {
                 pending.reasons.push(reason);
                 pending.done.extend(done);
             }
-            None => self.ops.push_back(QueuedSync {
+            Some(QueuedOp::Lock(_) | QueuedOp::Unlock(_)) | None => self.ops.push_back(QueuedOp::Sync(QueuedSync {
                 reasons: vec![reason],
                 done: done.into_iter().collect(),
-            }),
+            })),
         }
-        if self.op_runner.is_none() {
-            self.op_runner = Some(cx.spawn(async move |this, cx| {
-                loop {
-                    let Ok(next) = this.update(cx, |store, cx| store.start_next_sync(cx)) else {
-                        return;
-                    };
-                    let Some((op, call)) = next else {
-                        return;
-                    };
-                    if let Some((sync, call)) = call {
-                        let result = call.await;
-                        if this
-                            .update(cx, |store, cx| store.finish_sync(sync, result, cx))
-                            .is_err()
-                        {
-                            return;
-                        }
-                    }
-                    for done in op.done {
-                        done.send(()).ok(); // the requester may not wait for it
-                    }
-                }
-            }));
-        }
+        self.ensure_op_runner(cx);
     }
 
-    #[allow(clippy::type_complexity)]
-    fn start_next_sync(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) -> Option<(
-        QueuedSync,
-        Option<(RefSync, treeterm_core::rt::Fut<Result<Session, ApiError>>)>,
-    )> {
+    /// Take the session lock for a multi-step operation (`acquireLock`). Resolves with an
+    /// error message when another window holds it.
+    pub fn acquire_lock(&mut self, cx: &mut Context<Self>) -> oneshot::Receiver<Result<(), String>> {
+        let (tx, rx) = oneshot::channel();
+        self.ops.push_back(QueuedOp::Lock(tx));
+        self.ensure_op_runner(cx);
+        rx
+    }
+
+    pub fn release_lock(&mut self, cx: &mut Context<Self>) -> oneshot::Receiver<()> {
+        let (tx, rx) = oneshot::channel();
+        self.ops.push_back(QueuedOp::Unlock(tx));
+        self.ensure_op_runner(cx);
+        rx
+    }
+
+    fn ensure_op_runner(&mut self, cx: &mut Context<Self>) {
+        if self.op_runner.is_some() {
+            return;
+        }
+        self.op_runner = Some(cx.spawn(async move |this, cx| {
+            loop {
+                let Ok(Some(running)) = this.update(cx, |store, cx| store.start_next_op(cx)) else {
+                    return;
+                };
+                let finished = match running {
+                    RunningOp::Sync(op, call) => {
+                        let ok = match call {
+                            Some((sync, call)) => {
+                                let result = call.await;
+                                this.update(cx, |store, cx| store.finish_sync(sync, result, cx)).is_ok()
+                            }
+                            None => true,
+                        };
+                        for done in op.done {
+                            done.send(()).ok(); // the requester may not wait for it
+                        }
+                        ok
+                    }
+                    RunningOp::Lock(done, call) => {
+                        let result = call.await;
+                        let outcome = this.update(cx, |store, cx| store.finish_lock(result, cx));
+                        let ok = outcome.is_ok();
+                        done.send(outcome.unwrap_or_else(|_| Err("session store dropped".to_owned()))).ok();
+                        ok
+                    }
+                    RunningOp::Unlock(done, call) => {
+                        let result = call.await;
+                        let ok = this.update(cx, |store, cx| store.finish_unlock(result, cx)).is_ok();
+                        done.send(()).ok();
+                        ok
+                    }
+                };
+                if !finished {
+                    return;
+                }
+            }
+        }));
+    }
+
+    fn start_next_op(&mut self, cx: &mut Context<Self>) -> Option<RunningOp> {
         let Some(op) = self.ops.pop_front() else {
             self.op_runner = None;
             return None;
         };
+        Some(match op {
+            QueuedOp::Sync(sync) => {
+                let call = self.start_sync(&sync, cx);
+                RunningOp::Sync(sync, call)
+            }
+            QueuedOp::Lock(done) => RunningOp::Lock(done, self.conn.lock_session(LOCK_TTL)),
+            QueuedOp::Unlock(done) => RunningOp::Unlock(done, self.conn.unlock_session()),
+        })
+    }
+
+    fn finish_lock(
+        &mut self,
+        result: Result<Result<treeterm_core::daemon::SessionLockResult, ApiError>, treeterm_core::rt::TaskLost>,
+        cx: &mut Context<Self>,
+    ) -> Result<(), String> {
+        use treeterm_core::daemon::SessionLockResult;
+        let outcome = match result {
+            Ok(Ok(SessionLockResult::Acquired(session))) => {
+                self.version = session.version;
+                self.lock = session.lock;
+                Ok(())
+            }
+            Ok(Ok(SessionLockResult::HeldElsewhere(session))) => {
+                self.lock = session.lock;
+                Err("Session is locked by another window".to_owned())
+            }
+            Ok(Err(error)) => Err(error.to_string()),
+            Err(lost) => Err(lost.to_string()),
+        };
+        cx.notify();
+        outcome
+    }
+
+    fn finish_unlock(&mut self, result: Result<Result<Session, ApiError>, treeterm_core::rt::TaskLost>, cx: &mut Context<Self>) {
+        match result {
+            // The version comes from the daemon's answer, never an optimistic increment.
+            Ok(Ok(session)) => {
+                self.version = session.version;
+                self.lock = session.lock;
+            }
+            Ok(Err(error)) => tracing::error!(%error, "failed to unlock session"),
+            Err(lost) => tracing::error!(%lost, "failed to unlock session"),
+        }
+        cx.notify();
+    }
+
+    fn start_sync(
+        &mut self,
+        op: &QueuedSync,
+        cx: &mut Context<Self>,
+    ) -> Option<(RefSync, treeterm_core::rt::Fut<Result<Session, ApiError>>)> {
         if self.connection != ConnectionStatus::Connected || self.disposed {
-            return Some((op, None));
+            return None;
         }
         let refs = self.current_refs(cx);
         let json = refs_json(&refs);
         if json == self.last_synced_refs {
-            return Some((op, None));
+            return None;
         }
         tracing::info!(reasons = ?op.reasons, "syncing workspace refs to daemon");
         // Optimistic: our send becomes the known base so its echo is skipped; restored
@@ -849,15 +952,12 @@ impl SessionStore {
         let expected = self.version;
         let call = self.conn.update_session(refs, Some(expected), &self.client_id);
         Some((
-            op,
-            Some((
-                RefSync {
-                    previous,
-                    sent: json,
-                    expected,
-                },
-                call,
-            )),
+            RefSync {
+                previous,
+                sent: json,
+                expected,
+            },
+            call,
         ))
     }
 
@@ -966,6 +1066,94 @@ impl SessionStore {
         .detach();
         cx.notify();
         store
+    }
+
+    /// Remove a workspace and its descendants from the session (`removeWorkspaceKeepBoth`):
+    /// under the session lock, kill their tabs' PTYs, publish the smaller membership, then
+    /// delete their body files. The git side (worktree, branch) is left as it is.
+    pub fn remove_workspace_keep_both(&mut self, id: &str, cx: &mut Context<Self>) {
+        let Some(store) = self.workspace_store(id).cloned() else {
+            return;
+        };
+        let id = id.to_owned();
+        let lock = self.acquire_lock(cx);
+        cx.spawn(async move |this, cx| {
+            let locked = lock.await.unwrap_or_else(|_| Err("session store dropped".to_owned()));
+            if let Err(error) = locked {
+                match this.update(cx, |session, cx| {
+                    session.set_operation_error(&id, &store, error, cx);
+                }) {
+                    Ok(()) | Err(_) => {} // Err: store dropped
+                }
+                return;
+            }
+            let Ok((published, removed)) = this.update(cx, |session, cx| {
+                let removed = session.subtree(&id, cx);
+                for removed_id in &removed {
+                    if let Some(store) = session.workspace_store(removed_id).cloned() {
+                        store.update(cx, |w, cx| w.close_all_tabs(cx));
+                    }
+                    session.on_workspace_removed(removed_id, cx);
+                }
+                (session.sync_refs("removeWorkspace", cx), removed)
+            }) else {
+                return;
+            };
+            if published.await.is_err() {
+                return;
+            }
+            // Membership is the source of truth; deleting the files is cleanup after.
+            let Ok(deletes) = this.update(cx, |session, _| {
+                removed
+                    .iter()
+                    .map(|removed_id| (removed_id.clone(), session.conn.delete_body(&session.data_dir, &format!("{removed_id}.json"))))
+                    .collect::<Vec<_>>()
+            }) else {
+                return;
+            };
+            for (removed_id, delete) in deletes {
+                match delete.await {
+                    Ok(Ok(())) => {}
+                    Ok(Err(error)) => tracing::error!(workspace = %removed_id, %error, "failed to delete workspace file"),
+                    Err(lost) => tracing::error!(workspace = %removed_id, %lost, "failed to delete workspace file"),
+                }
+            }
+            let Ok(unlock) = this.update(cx, |session, cx| session.release_lock(cx)) else {
+                return;
+            };
+            if unlock.await.is_err() {
+                tracing::debug!("unlock dropped with the store");
+            }
+        })
+        .detach();
+    }
+
+    /// `id` and every workspace below it, children first.
+    fn subtree(&self, id: &str, cx: &App) -> Vec<String> {
+        let mut out = Vec::new();
+        let children: Vec<String> = self
+            .entries
+            .iter()
+            .filter_map(|(child, entry)| {
+                let parent = entry.store()?.read(cx).file().parent_id.clone()?;
+                (parent == id).then(|| child.clone())
+            })
+            .collect();
+        for child in children {
+            out.extend(self.subtree(&child, cx));
+        }
+        out.push(id.to_owned());
+        out
+    }
+
+    fn set_operation_error(&mut self, id: &str, store: &Entity<WorkspaceStore>, error: String, cx: &mut Context<Self>) {
+        if let Some(entry) = self.entries.get_mut(id) {
+            *entry = WorkspaceEntry::OperationError {
+                store: store.clone(),
+                error,
+            };
+            cx.notify();
+        }
     }
 
     /// Resolves once no write of the workspace's body is running or queued.

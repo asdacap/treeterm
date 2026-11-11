@@ -6,7 +6,8 @@
 //! top of the winner.
 
 use treeterm_proto::treeterm::{
-    FileWriteChunk, FileWriteData, FileWriteEnd, FileWriteHeader, file_write_chunk,
+    DeleteFileRequest, FileWriteChunk, FileWriteData, FileWriteEnd, FileWriteHeader,
+    file_write_chunk,
 };
 
 use crate::daemon::{ApiError, DaemonConnection, unary};
@@ -73,6 +74,23 @@ impl DaemonConnection {
             } else {
                 BodyWrite::Failed(response.error.unwrap_or_else(|| "unknown error".to_owned()))
             })
+        })
+    }
+
+    /// Delete a body file (after its workspace left the session).
+    pub fn delete_body(&self, data_dir: &str, file_name: &str) -> Fut<Result<(), ApiError>> {
+        let mut client = self.main.clone();
+        let request = DeleteFileRequest {
+            workspace_path: data_dir.to_owned(),
+            file_path: file_name.to_owned(),
+        };
+        self.rt.run(async move {
+            let response = unary(client.delete_file(request)).await?;
+            if response.success {
+                Ok(())
+            } else {
+                Err(ApiError::Operation(response.error.unwrap_or_else(|| "delete failed".to_owned())))
+            }
         })
     }
 }

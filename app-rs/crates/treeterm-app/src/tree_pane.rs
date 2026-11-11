@@ -2,7 +2,8 @@
 
 use std::collections::HashSet;
 
-use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
+use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
+use gpui_kit::component::{ActiveTheme as _, WindowExt as _, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{AnyElement, ClickEvent, Context, Entity, EventEmitter, SharedString, Window, div, px};
 use treeterm_model::keybinding_store::KeybindingStore;
@@ -126,6 +127,8 @@ impl TreePane {
         };
         let toggle_id = id.clone();
         let select_id = id.clone();
+        let menu_id = id.clone();
+        let session = self.session.clone();
         h_flex()
             .id(SharedString::from(format!("ws-row-{id}")))
             .w_full()
@@ -151,7 +154,13 @@ impl TreePane {
                         pane.toggle(&toggle_id, cx);
                     })),
             )
-            .child(div().truncate().text_color(label_color).child(label))
+            .child(div().truncate().text_color(label_color).child(label.clone()))
+            .context_menu(move |menu, _window, _cx| {
+                let (session, id, label) = (session.clone(), menu_id.clone(), label.clone());
+                menu.item(PopupMenuItem::new("Remove from TreeTerm (keep worktree and branch)").on_click(
+                    move |_, window, cx| confirm_remove(session.clone(), id.clone(), label.clone(), window, cx),
+                ))
+            })
     }
 }
 
@@ -179,6 +188,30 @@ impl Label {
             WorkspaceEntry::Error { error, .. } => Label::Error(error.clone().into()),
         }
     }
+}
+
+/// Removing kills the workspace's (and its children's) running programs, so ask first.
+fn confirm_remove(
+    session: Entity<SessionStore>,
+    id: String,
+    label: SharedString,
+    window: &mut gpui_kit::Window,
+    cx: &mut gpui_kit::App,
+) {
+    window.open_alert_dialog(cx, move |alert, _, _| {
+        let (session, id) = (session.clone(), id.clone());
+        alert
+            .title(format!("Remove “{label}”?"))
+            .description(
+                "Its tabs and those of its child workspaces are closed and their programs killed. \
+                 The directory, worktree and branch stay on disk.",
+            )
+            .show_cancel(true)
+            .on_ok(move |_, _, cx| {
+                session.update(cx, |s, cx| s.remove_workspace_keep_both(&id, cx));
+                true
+            })
+    });
 }
 
 fn status_line(text: impl Into<SharedString>, color: gpui_kit::Hsla) -> AnyElement {

@@ -24,6 +24,9 @@ pub enum ApiError {
     Protocol(&'static str),
     #[error("daemon did not answer within {}s", .0.as_secs())]
     DeadlineExceeded(Duration),
+    /// The daemon carried out the call and reported failure.
+    #[error("{0}")]
+    Operation(String),
 }
 
 /// Outcome of [`DaemonConnection::lock_session`], with the session after the call.
