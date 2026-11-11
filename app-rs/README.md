@@ -21,34 +21,40 @@ For an isolated sandbox (separate HOME, socket, daemon) and the automation socke
 Done (tested against a real in-process daemon unless noted):
 
 - **Plumbing (M0):** daemon as a library (`serve`), tonic client over UDS (main + session
-  channels), Electron-compatible socket path, local daemon autostart, reconnect with backoff.
+  channels), Electron-compatible socket path, local daemon autostart.
 - **Terminal (M1):** `alacritty_terminal` core fed from `PtyStream` (replay-aware query gating,
   OSC 52 rules), GPUI renderer (grid-forced shaping, wide chars, cursor, selection, IME
   preedit, width-limit strip, scrollbar), xterm.js-compatible keys/mouse/paste, links, scroll
   badge/pin, ALT SCREEN, size mismatch, overlays, refresh, status bar (activity, idle detector,
   col limit). 200k lines render in ~0.4 s.
-- **Session/workspace sync (M2, core):** full write side of `createSessionStore` (ref CAS with
+- **Session/workspace sync (M2):** full write side of `createSessionStore` (ref CAS with
   retry, body CAS with parentHash chain, echo suppression, conflict rewrite, watch reopen,
-  lock ops), workspace tabs (add/close/activate/state, PTY creation keyed by `ptyHandle`,
-  close-on-exit, kill-on-close), app registry from settings (terminal variants, AI harness,
-  custom runners), layout-ordered tab strip, new-tab menu, workspace removal (keep both).
-- **Keys (M3, part):** prefix mode + overlay, workspace focus, Cmd/Ctrl+1–9, app menu,
-  Exit and Kill Daemon.
-- **Settings (M3, part):** full `settings.json` model (load/save, unknown keys kept), live
-  reload when Electron edits it, Settings dialog (terminal + keyboard sections).
-- **Git and worktrees (M2):** exec/fs/git clients (full `gitClient.ts` port), open a directory
-  as a workspace, create child worktrees (live git output), merge/squash-merge into the
-  parent (keep or remove), remove with or without git cleanup; activity dots in the tree.
+  lock ops), tabs (add/close/activate/state, PTY creation keyed by `ptyHandle`, close-on-exit,
+  kill-on-close), app registry from settings, layout-ordered tab strip, new-tab menu.
+- **Git and worktrees (M2):** exec/fs/git clients, open a directory as a workspace, child
+  workspaces (new branch, existing branch, remote branch, existing worktree, quick fork; live
+  git output), merge/squash-merge (keep or remove), remove with or without git cleanup.
+- **Keys and settings (M3):** prefix mode + overlay, workspace focus, Cmd/Ctrl+1–9, app menu,
+  Exit and Kill Daemon; all 13 Settings sections; live reload when Electron edits
+  `settings.json`; close confirmation for unmerged workspaces; Window → Active Processes.
+- **Connections (M4):** local + SSH sessions on the core connection manager (bootstrap,
+  tunnel, reconnect with backoff, outdated-daemon refresh/accept), SSH connection picker with
+  saved connections, remote directory browser, session pane with logs and port forwards.
+  (SSH tested in core with a fake ssh host and contract tests; not yet against a real host.)
+- **AI harness (M5):** per-tab LLM analyzer (classification, auto-approve, titles, branch
+  names), activity states with transitions, unread attention markers with the ding.
+- **Files / editor (M6):** file tree, highlighted viewer, images, PDF (webview), editor tab.
+- **Review (M7):** committed / uncommitted / commits views, stage/unstage/commit.
+- **Web (M8):** Browser tabs in a native webview (localhost guard).
 
 Not yet:
 
-- Child creation from existing worktrees/recent/branch/remote/PR, quick fork, abandon,
-  worktree registry, git status polling and badges.
-- Remaining settings sections, close-confirm, tree drag/drop, favourites UI.
-- SSH/remote connections, port forwards, session info pane, CLI (M4).
-- AI harness analyzer/LLM/chat, attention (M5); filesystem/editor (M6); review/diff/GitHub (M7);
-  webview panes, PDF, 3D (M8); packaging (M9); parity sweep and cut-over (M10).
-- Linux build verification (CI job added, not yet seen green).
+- Git status polling and badges, PR indicators, GitHub app, review comments, viewed files,
+  search panel, go-to-definition (core logic ported; UI pending).
+- Analyzer history / prompt debugger, chat, prompt buttons (commit, rebase, review comments).
+- Tree drag/drop, favourites, abandon, worktree registry, auto-open worktrees.
+- Web apps (dev server with `$PORT`), 3D model viewer; CLI (`treeterm [dir]`, `treeterm ssh`).
+- Packaging (M9), parity sweep and cut-over (M10). Linux build verification (CI job added).
 
 ## Known differences from Electron (deliberate)
 
@@ -59,3 +65,5 @@ Not yet:
   skips them, failing the merge or losing new files with the deleted worktree).
 - Daemon fix: each gRPC connection now gets its own id, so the session lock actually excludes
   other connections (it was shared by all connections before).
+- The attention ding is the system bell (Electron synthesised an 880 Hz tone).
+- The analyzer reads the tab's own terminal; Electron attached a second, headless one.
