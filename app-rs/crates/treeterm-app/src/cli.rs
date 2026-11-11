@@ -23,7 +23,7 @@ pub enum Command {
     ShutdownDaemon,
     Gui {
         workspace: Option<PathBuf>,
-        ssh: Option<SshConnectionConfig>,
+        ssh: Option<Box<SshConnectionConfig>>,
     },
 }
 
@@ -60,7 +60,7 @@ pub fn parse(args: &[String], cwd: &Path, now_ms: u128) -> Result<Command, Strin
         Some("ssh") => {
             let target = args.get(1).ok_or("Usage: treeterm ssh user@host[:port]")?;
             let config = parse_ssh_target(target, now_ms).ok_or_else(|| format!("Invalid SSH target: {target}"))?;
-            Ok(Command::Gui { workspace: None, ssh: Some(config) })
+            Ok(Command::Gui { workspace: None, ssh: Some(Box::new(config)) })
         }
         _ => {
             let Some(dir) = args.iter().find(|arg| !arg.starts_with('-')) else {

@@ -171,7 +171,7 @@ fn main() {
         let settings = cx.new(|cx| SettingsStore::new(paths::user_data_dir().ok(), cx));
         let store = cx.new(|cx| AppStore::new(rt, spec, settings.clone(), cx));
         if let Some(config) = initial_ssh {
-            store.update(cx, |s, cx| s.connect_remote(config, treeterm_core::connection::OutdatedDaemon::Report, cx));
+            store.update(cx, |s, cx| s.connect_remote(*config, treeterm_core::connection::OutdatedDaemon::Report, cx));
         }
         menus::install(store.clone(), cx);
         let options = WindowOptions {
