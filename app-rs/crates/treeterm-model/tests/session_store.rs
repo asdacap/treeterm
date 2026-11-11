@@ -637,3 +637,19 @@ fn the_review_tab_stages_and_commits_uncommitted_changes(cx: &mut TestAppContext
     });
     assert!(repo.git(&["log", "--oneline"]).contains("add new file"));
 }
+
+#[gpui_kit::test]
+fn active_child_workspaces_count_as_unmerged(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    std::fs::write(h.daemon.workspaces_dir().join("root.json"), body("root", None)).unwrap();
+    std::fs::write(h.daemon.workspaces_dir().join("kid.json"), body("kid", Some("root"))).unwrap();
+    let mut merged: serde_json::Value = serde_json::from_str(&body("done", Some("root"))).unwrap();
+    merged["status"] = "merged".into();
+    std::fs::write(h.daemon.workspaces_dir().join("done.json"), merged.to_string()).unwrap();
+    publish(&h, &["root", "kid", "done"]);
+    let store = open_store(cx, &h, "client-a");
+    wait_until(cx, &store, |s| loaded(s, "root") && loaded(s, "kid") && loaded(s, "done"));
+    let unmerged = cx.read(|cx| store.read(cx).unmerged_sub_workspaces(cx));
+    assert_eq!(unmerged, vec![("kid".to_owned(), None)]);
+}

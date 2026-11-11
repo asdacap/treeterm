@@ -420,6 +420,18 @@ impl SessionStore {
         self.entries.get(id).and_then(WorkspaceEntry::store)
     }
 
+    /// Active worktree workspaces (not yet merged or abandoned), as `(name, branch)`: closing
+    /// the app asks first when there are any (`getUnmergedSubWorkspaces`).
+    pub fn unmerged_sub_workspaces(&self, cx: &App) -> Vec<(String, Option<String>)> {
+        self.entries
+            .values()
+            .filter_map(WorkspaceEntry::store)
+            .map(|store| store.read(cx).file())
+            .filter(|file| file.is_worktree && file.status == WorkspaceStatus::Active)
+            .map(|file| (file.name.clone(), file.git_branch.clone()))
+            .collect()
+    }
+
     /// Visible tree rows in display order; empty until the session is live.
     pub fn tree_rows(&self, collapsed: &HashSet<String>, cx: &App) -> Vec<TreeRow> {
         let SessionState::Live = self.state else {

@@ -1,5 +1,6 @@
 //! TreeTerm native app: one process, one UI, talking gRPC to the TreeTerm daemon.
 
+mod active_processes_view;
 mod app_view;
 mod child_dialog;
 #[cfg(feature = "automation")]
@@ -157,6 +158,21 @@ fn main() {
         })
         .expect("open the main window");
         intercept_shortcuts(keybindings, view.clone(), cx);
+        // Closing the window asks about unmerged workspaces; closing the last one quits, as
+        // Electron's `window-all-closed`.
+        let closing = view.clone();
+        match window.update(cx, |_, window, cx| {
+            window.on_window_should_close(cx, move |window, cx| closing.update(cx, |v, cx| v.request_close(window, cx)));
+        }) {
+            Ok(()) => {}
+            Err(error) => tracing::error!(%error, "could not watch the window closing"),
+        }
+        cx.on_window_closed(|cx, _| {
+            if cx.windows().is_empty() {
+                cx.quit();
+            }
+        })
+        .detach();
         #[cfg(feature = "automation")]
         if let Ok(path) = std::env::var("TREETERM_AUTOMATION_SOCKET") {
             automation::start(path.into(), window, view, &rt_for_automation, cx);

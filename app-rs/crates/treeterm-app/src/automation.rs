@@ -132,6 +132,12 @@ fn handle(line: &str, window: AnyWindowHandle, view: &Entity<AppView>, cx: &mut 
                 window.activate_window();
                 Ok(json!({ "ok": true }))
             }
+            "action" => {
+                // `action treeterm::ActiveProcesses`
+                let action = cx.build_action(rest, None).map_err(|e| e.to_string())?;
+                window.dispatch_action(action, cx);
+                Ok(json!({ "ok": true }))
+            }
             "click" => {
                 // `click <x> <y>` in window points (screenshot pixels / scale factor).
                 let mut coords = rest.split_whitespace().map(str::parse::<f32>);

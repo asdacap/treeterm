@@ -189,12 +189,37 @@ impl Render for AppView {
             .on_action(cx.listener(|view, _: &crate::menus::OpenSettings, window, cx| {
                 crate::settings_view::open(view.settings.clone(), window, cx);
             }))
+            .on_action(cx.listener(|view, _: &crate::menus::ActiveProcesses, window, cx| {
+                if let Body::Connected(connected) = &view.body {
+                    let settings = view.settings.read(cx).settings().terminal.clone();
+                    crate::active_processes_view::open(&connected.session, settings, window, cx);
+                }
+            }))
+            .on_action(cx.listener(|view, _: &crate::menus::Quit, window, cx| {
+                if view.request_close(window, cx) {
+                    cx.quit();
+                }
+            }))
             .child(content)
             .children(crate::keybinding_overlay::render(&self.keybindings, window, cx))
     }
 }
 
 impl AppView {
+    /// Whether the window may close now; when child workspaces are unmerged, asks first
+    /// (and quits if the user confirms).
+    pub fn request_close(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let unmerged = match &self.body {
+            Body::Connected(connected) => connected.session.read(cx).unmerged_sub_workspaces(cx),
+            Body::StartingDaemon | Body::Reconnecting { .. } | Body::Failed(_) => Vec::new(),
+        };
+        if unmerged.is_empty() {
+            return true;
+        }
+        crate::active_processes_view::confirm_close(unmerged, window, cx);
+        false
+    }
+
     /// The active workspace's store, if it is loaded.
     fn active_store(&self, cx: &App) -> Option<Entity<treeterm_model::workspace_store::WorkspaceStore>> {
         let Body::Connected(connected) = &self.body else {

@@ -6,7 +6,7 @@ use treeterm_model::app_store::AppStore;
 
 use crate::terminal_view;
 
-actions!(treeterm, [Quit, QuitAndKillDaemon, Minimize, OpenSettings]);
+actions!(treeterm, [Quit, QuitAndKillDaemon, Minimize, OpenSettings, ActiveProcesses]);
 pub fn install(store: Entity<AppStore>, cx: &mut App) {
     let mut bindings = Vec::new();
     if cfg!(target_os = "macos") {
@@ -20,6 +20,8 @@ pub fn install(store: Entity<AppStore>, cx: &mut App) {
     }
     cx.bind_keys(bindings);
 
+    // The window handles Quit first (it asks about unmerged workspaces); this runs only when
+    // no window is open.
     cx.on_action(|_: &Quit, cx| cx.quit());
     cx.on_action(move |_: &QuitAndKillDaemon, cx| {
         let shutdown = store.read(cx).shutdown_daemon(cx);
@@ -42,7 +44,11 @@ pub fn install(store: Entity<AppStore>, cx: &mut App) {
         MenuItem::os_action("Paste", terminal_view::Paste, OsAction::Paste),
         MenuItem::os_action("Select All", terminal_view::SelectAll, OsAction::SelectAll),
     ]);
-    let window = Menu::new("Window").items([MenuItem::action("Minimize", Minimize)]);
+    let window = Menu::new("Window").items([
+        MenuItem::action("Minimize", Minimize),
+        MenuItem::separator(),
+        MenuItem::action("Active Processes", ActiveProcesses),
+    ]);
     let menus = if cfg!(target_os = "macos") {
         vec![
             Menu::new("TreeTerm").items([
