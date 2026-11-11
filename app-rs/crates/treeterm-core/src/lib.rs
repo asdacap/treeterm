@@ -5,6 +5,7 @@
 //! tokio-driven work to any executor as plain futures and streams.
 
 pub mod daemon;
+pub mod keybinding;
 pub mod layout;
 pub mod local_daemon;
 pub mod paths;
