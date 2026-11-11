@@ -9181,6 +9181,7 @@ dependencies = [
  "futures",
  "gpui-kit",
  "gpui-webview",
+ "indexmap",
  "lb-wry",
  "serde_json",
  "tokio",

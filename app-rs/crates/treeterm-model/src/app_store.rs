@@ -1,55 +1,83 @@
-//! Root store: starts (or finds) the local daemon, owns the connected session, and
-//! reconnects when the daemon goes away.
+//! Root store: every connection (the local daemon and ssh remotes) and, for each connected
+//! one, its session store. Port of the session half of `src/renderer/store/app.ts` over
+//! `treeterm_core::connection::ConnectionManager` (Electron's `connectionManager.ts`).
 //!
-//! Reconnect follows the Electron connection manager for the local target: when the
-//! session watch fails, the dead session store is disposed (explicitly — a ghost store left
-//! alive keeps writing the same files as its replacement), then the daemon is ensured
-//! running again with exponential backoff (1 s · 2ⁿ, capped at 30 s, unbounded) and a fresh
-//! session store is built on a new connection generation.
+//! The manager owns connecting, liveness and reconnecting. Each `Connected` status carries a
+//! new connection generation; its session store is built on it. When a connection is lost
+//! the store is disposed explicitly — a ghost store left alive keeps writing the same files
+//! as its replacement — and a fresh one is built on the next generation.
 
-use std::time::Duration;
+use std::sync::Arc;
 
+use futures::StreamExt as _;
 use gpui_kit::{AppContext as _, Context, Entity, Subscription, Task};
+use indexmap::IndexMap;
+use treeterm_core::connection::dialer::GrpcDialer;
+use treeterm_core::connection::process::TokioSpawner;
+use treeterm_core::connection::ssh::DaemonBinaries;
+use treeterm_core::connection::{
+    ConnectPhase, ConnectionErrorKind, ConnectionId, ConnectionInfo, ConnectionManager, ConnectionStatus,
+    ConnectionTarget, OutdatedDaemon, SshEnvironment,
+};
 use treeterm_core::daemon::DaemonConnection;
-use treeterm_core::local_daemon::{LocalDaemonSpec, ensure_running};
+use treeterm_core::local_daemon::LocalDaemonSpec;
 use treeterm_core::rt::Rt;
+use treeterm_core::settings::SshConnectionConfig;
 
 use crate::session_store::{SessionEvent, SessionStore};
 use crate::settings_store::SettingsStore;
 
-const RECONNECT_BASE: Duration = Duration::from_secs(1);
-const RECONNECT_MAX: Duration = Duration::from_secs(30);
-
-pub enum AppState {
-    StartingDaemon,
+/// What a connection is doing, with its session store once connected.
+#[derive(Clone)]
+pub enum ConnState {
+    Connecting(ConnectPhase),
     Connected(Entity<SessionStore>),
-    /// The daemon went away; trying again.
-    Reconnecting { attempt: u32, last_error: String },
-    /// The first start failed.
-    Failed(String),
+    /// Lost; the manager retries with backoff.
+    Reconnecting { attempt: u32, error: String },
+    /// The first connect failed or reconnecting was stopped. `hash_mismatch`: the remote
+    /// daemon is outdated (offer refresh / connect anyway).
+    Failed { error: String, hash_mismatch: bool },
+}
+
+/// One connection in the sidebar.
+pub struct SessionSlot {
+    pub id: ConnectionId,
+    pub target: ConnectionTarget,
+    pub state: ConnState,
+    _events: Option<Subscription>,
+}
+
+impl SessionSlot {
+    /// "Local", or the ssh label / `user@host`.
+    pub fn name(&self) -> String {
+        match &self.target {
+            ConnectionTarget::Local => "Local".to_owned(),
+            ConnectionTarget::Remote(config) => config.display_name(),
+        }
+    }
+
+    pub fn is_local(&self) -> bool {
+        matches!(self.target, ConnectionTarget::Local)
+    }
+
+    pub fn session(&self) -> Option<&Entity<SessionStore>> {
+        match &self.state {
+            ConnState::Connected(session) => Some(session),
+            ConnState::Connecting(_) | ConnState::Reconnecting { .. } | ConnState::Failed { .. } => None,
+        }
+    }
 }
 
 pub struct AppStore {
-    rt: Rt,
     /// The LLM client every session's analyzers share (`None` if it could not be built).
     llm: Option<crate::analyzer::LlmService>,
-    spec: LocalDaemonSpec,
-    state: AppState,
     settings: Entity<SettingsStore>,
     /// Identifies this process to the daemon (`sender_id`, `listener_id`), so it can skip
     /// echoes of its own session updates. One per process: windows share stores.
     client_id: String,
-    /// Starting or reconnecting; dropping it cancels the attempt.
-    _connect: Option<Task<()>>,
-    _session_events: Option<Subscription>,
-}
-
-/// Backoff before reconnect attempt `attempt` (1-based).
-pub fn reconnect_delay(attempt: u32) -> Duration {
-    let factor = 1u32.checked_shl(attempt.saturating_sub(1)).unwrap_or(u32::MAX);
-    RECONNECT_BASE
-        .checked_mul(factor)
-        .map_or(RECONNECT_MAX, |delay| delay.min(RECONNECT_MAX))
+    manager: ConnectionManager<GrpcDialer>,
+    sessions: IndexMap<ConnectionId, SessionSlot>,
+    _status: Task<()>,
 }
 
 impl AppStore {
@@ -61,137 +89,192 @@ impl AppStore {
                 None
             }
         };
+        // Remote hosts get the musl daemons shipped next to the local one.
+        let daemon_dir = spec
+            .binary
+            .parent()
+            .map(std::path::Path::to_path_buf)
+            .unwrap_or_default();
+        let ssh = SshEnvironment {
+            daemon_binaries: DaemonBinaries::new(daemon_dir),
+            forward_socket_dir: treeterm_core::connection::socket_path::forward_socket_dir(
+                treeterm_core::paths::current_uid(),
+            ),
+        };
+        let mut manager =
+            ConnectionManager::new(rt.clone(), GrpcDialer::new(rt, spec), Arc::new(TokioSpawner), ssh);
+        // Subscribe before connecting so no status is missed.
+        let mut updates = manager.status_changes();
+        let status = cx.spawn(async move |this, cx| {
+            while let Some(info) = updates.next().await {
+                if this.update(cx, |store, cx| store.on_status(info, cx)).is_err() {
+                    return;
+                }
+            }
+        });
+        let local = manager.connect_local();
         let mut store = Self {
             llm,
-            rt,
-            spec,
-            state: AppState::StartingDaemon,
             settings,
             client_id: uuid::Uuid::new_v4().to_string(),
-            _connect: None,
-            _session_events: None,
+            manager,
+            sessions: IndexMap::new(),
+            _status: status,
         };
-        store.connect(Duration::ZERO, cx);
+        store.insert_slot(local.id().clone(), ConnectionTarget::Local);
         store
     }
 
-    pub fn state(&self) -> &AppState {
-        &self.state
+    fn insert_slot(&mut self, id: ConnectionId, target: ConnectionTarget) {
+        self.sessions.entry(id.clone()).or_insert(SessionSlot {
+            id,
+            target,
+            state: ConnState::Connecting(ConnectPhase::Daemon),
+            _events: None,
+        });
     }
 
-    /// Ensure the daemon runs and connect, after `delay`.
-    fn connect(&mut self, delay: Duration, cx: &mut Context<Self>) {
-        let rt = self.rt.clone();
-        let spec = self.spec.clone();
-        let executor = cx.background_executor().clone();
-        self._connect = Some(cx.spawn(async move |this, cx| {
-            if !delay.is_zero() {
-                executor.timer(delay).await;
-            }
-            let connect = rt.run({
-                let rt = rt.clone();
-                async move {
-                    let start = ensure_running(&spec).await.map_err(|e| e.to_string())?;
-                    tracing::info!(?start, socket = ?spec.socket_path, "local daemon ready");
-                    DaemonConnection::connect(rt, spec.socket_path)
-                        .await
-                        .map_err(|e| e.to_string())
-                }
-            });
-            let result = match connect.await {
-                Ok(Ok(conn)) => Ok(conn),
-                Ok(Err(error)) => Err(error),
-                Err(lost) => Err(lost.to_string()),
-            };
-            match this.update(cx, |store, cx| store.on_connected(result, cx)) {
-                Ok(()) => {}
-                Err(_released) => tracing::debug!("app store dropped while connecting"),
-            }
-        }));
+    /// Connections in sidebar order (local first, then remotes as connected).
+    pub fn sessions(&self) -> impl Iterator<Item = &SessionSlot> {
+        self.sessions.values()
     }
 
-    fn on_connected(&mut self, result: Result<DaemonConnection, String>, cx: &mut Context<Self>) {
-        match result {
-            Ok(conn) => {
-                self._connect = None;
-                let client_id = self.client_id.clone();
-                let settings = self.settings.clone();
-                let llm = self.llm.clone();
-                let session = cx.new(|cx| SessionStore::new(conn, client_id, settings, llm, cx));
-                cx.observe(&session, |_, _, cx| cx.notify()).detach();
-                self._session_events = Some(cx.subscribe(
-                    &session,
-                    |store, session, event: &SessionEvent, cx| match event {
-                        SessionEvent::Failed(reason) => store.on_session_failed(session, reason.clone(), cx),
-                        SessionEvent::WorkspaceRemoved(_) => {}
-                    },
-                ));
-                self.state = AppState::Connected(session);
-            }
-            Err(error) => {
-                tracing::error!(%error, "cannot reach the local daemon");
-                let next = match &self.state {
-                    AppState::Reconnecting { attempt, .. } => Some(attempt + 1),
-                    AppState::StartingDaemon | AppState::Connected(_) | AppState::Failed(_) => None,
-                };
-                self.state = match next {
-                    Some(attempt) => {
-                        self.connect(reconnect_delay(attempt), cx);
-                        AppState::Reconnecting {
-                            attempt,
-                            last_error: error,
-                        }
-                    }
-                    None => {
-                        self._connect = None;
-                        AppState::Failed(error)
-                    }
-                };
-            }
+    pub fn session_slot(&self, id: &ConnectionId) -> Option<&SessionSlot> {
+        self.sessions.get(id)
+    }
+
+    /// The local connection's session store, when connected.
+    pub fn local_session(&self) -> Option<Entity<SessionStore>> {
+        self.sessions.values().find(|slot| slot.is_local()).and_then(|slot| slot.session().cloned())
+    }
+
+    pub fn manager(&self) -> &ConnectionManager<GrpcDialer> {
+        &self.manager
+    }
+
+    pub fn settings(&self) -> &Entity<SettingsStore> {
+        &self.settings
+    }
+
+    /// Connect to an ssh host (`connectRemote`). An existing healthy connection is kept.
+    pub fn connect_remote(&mut self, config: SshConnectionConfig, outdated: OutdatedDaemon, cx: &mut Context<Self>) {
+        let target = ConnectionTarget::Remote(Arc::new(config.clone()));
+        let settled = self.manager.connect_remote(config, outdated);
+        let id = settled.id().clone();
+        // A replaced (failed) connection starts over as connecting.
+        if let Some(slot) = self.sessions.get_mut(&id)
+            && !matches!(slot.state, ConnState::Connected(_))
+        {
+            slot.state = ConnState::Connecting(ConnectPhase::Bootstrap);
+        }
+        self.insert_slot(id, target);
+        cx.notify();
+    }
+
+    /// Close a connection; its sidebar entry goes away (local reconnects stay possible
+    /// through the manager only on the next start).
+    pub fn disconnect(&mut self, id: &ConnectionId, cx: &mut Context<Self>) {
+        self.manager.disconnect(id);
+        if let Some(slot) = self.sessions.shift_remove(id) {
+            Self::retire(slot.state, cx);
         }
         cx.notify();
     }
 
-    /// The session's watch died: its connection generation is gone. Retire the store and
-    /// rebuild on a new connection.
-    fn on_session_failed(&mut self, session: Entity<SessionStore>, reason: String, cx: &mut Context<Self>) {
-        let AppState::Connected(current) = &self.state else {
+    /// Retry a failed connection.
+    pub fn reconnect(&self, id: &ConnectionId) {
+        self.manager.reconnect(id);
+    }
+
+    /// Skip the backoff wait.
+    pub fn reconnect_now(&self, id: &ConnectionId) {
+        self.manager.reconnect_now(id);
+    }
+
+    /// Stop retrying (the connection fails with "Reconnection cancelled").
+    pub fn cancel_reconnect(&self, id: &ConnectionId) {
+        self.manager.cancel_reconnect(id);
+    }
+
+    fn retire(state: ConnState, cx: &mut Context<Self>) {
+        if let ConnState::Connected(session) = state {
+            session.update(cx, |session, cx| session.dispose(cx));
+        }
+    }
+
+    fn on_status(&mut self, info: ConnectionInfo<DaemonConnection>, cx: &mut Context<Self>) {
+        let ConnectionInfo { id, target, status } = info;
+        if matches!(status, ConnectionStatus::Disconnected) {
+            if let Some(slot) = self.sessions.shift_remove(&id) {
+                Self::retire(slot.state, cx);
+            }
+            cx.notify();
+            return;
+        }
+        self.insert_slot(id.clone(), target);
+        let Some(slot) = self.sessions.get_mut(&id) else {
             return;
         };
-        if *current != session {
-            return; // already replaced
-        }
-        tracing::warn!(%reason, "lost the daemon; reconnecting");
-        session.update(cx, |session, cx| session.dispose(cx));
-        self._session_events = None;
-        self.state = AppState::Reconnecting {
-            attempt: 1,
-            last_error: reason,
+        let previous = std::mem::replace(&mut slot.state, ConnState::Connecting(ConnectPhase::Daemon));
+        slot._events = None;
+        // Every status change after Connected means that generation is gone.
+        Self::retire(previous, cx);
+        let next = match status {
+            ConnectionStatus::Connecting { phase } => ConnState::Connecting(phase),
+            ConnectionStatus::Connected { daemon } => {
+                tracing::info!(%id, "connected");
+                let (client_id, settings, llm) = (self.client_id.clone(), self.settings.clone(), self.llm.clone());
+                let session = cx.new(|cx| SessionStore::new(daemon, client_id, settings, llm, cx));
+                cx.observe(&session, |_, _, cx| cx.notify()).detach();
+                let owned = id.clone();
+                let events = cx.subscribe(&session, move |store, session, event: &SessionEvent, cx| match event {
+                    SessionEvent::Failed(reason) => store.on_session_failed(&owned, session, reason, cx),
+                    SessionEvent::WorkspaceRemoved(_) => {}
+                });
+                let Some(slot) = self.sessions.get_mut(&id) else {
+                    return;
+                };
+                slot._events = Some(events);
+                ConnState::Connected(session)
+            }
+            ConnectionStatus::Reconnecting { attempt, error } => {
+                tracing::warn!(%id, attempt, %error, "reconnecting");
+                ConnState::Reconnecting { attempt, error: error.to_string() }
+            }
+            ConnectionStatus::Error { error } => {
+                tracing::error!(%id, %error, "connection failed");
+                ConnState::Failed {
+                    hash_mismatch: error.kind() == ConnectionErrorKind::DaemonHashMismatch,
+                    error: error.to_string(),
+                }
+            }
+            ConnectionStatus::Disconnected => return, // handled above
         };
-        self.connect(reconnect_delay(1), cx);
+        if let Some(slot) = self.sessions.get_mut(&id) {
+            slot.state = next;
+        }
         cx.notify();
     }
 
-    /// "Exit and Kill Daemon": stop the local daemon (and with it every PTY).
+    /// The session store's own watch died before the manager noticed: force a new
+    /// generation (the store is retired when the status changes).
+    fn on_session_failed(&mut self, id: &ConnectionId, session: Entity<SessionStore>, reason: &str, cx: &mut Context<Self>) {
+        let current = self.sessions.get(id).and_then(SessionSlot::session);
+        if current != Some(&session) {
+            return; // already replaced
+        }
+        tracing::warn!(%id, %reason, "session watch lost; reconnecting");
+        if let Err(error) = self.manager.force_reconnect(id) {
+            tracing::error!(%error, "cannot reconnect");
+        }
+        cx.notify();
+    }
+
+    /// "Exit and Kill Daemon": stop the local daemon (and with it every local PTY).
     pub fn shutdown_daemon(
         &self,
         cx: &gpui_kit::App,
     ) -> Option<treeterm_core::rt::Fut<Result<(), treeterm_core::daemon::ApiError>>> {
-        match &self.state {
-            AppState::Connected(session) => Some(session.read(cx).connection().shutdown()),
-            AppState::StartingDaemon | AppState::Reconnecting { .. } | AppState::Failed(_) => None,
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn backoff_doubles_from_one_second_up_to_thirty() {
-        let delays: Vec<u64> = (1..=7).map(|n| reconnect_delay(n).as_secs()).collect();
-        assert_eq!(delays, vec![1, 2, 4, 8, 16, 30, 30]);
-        assert_eq!(reconnect_delay(500), Duration::from_secs(30));
+        self.local_session().map(|session| session.read(cx).connection().shutdown())
     }
 }

@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 
 use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
-use gpui_kit::component::{ActiveTheme as _, WindowExt as _, h_flex, v_flex};
+use gpui_kit::component::{WindowExt as _, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{AnyElement, ClickEvent, Context, Entity, EventEmitter, SharedString, Window, div, px};
 use treeterm_model::workspace_store::ActivityStyle as _;
@@ -18,6 +18,12 @@ pub struct WorkspaceSelected(pub String);
 pub struct TreePane {
     session: Entity<SessionStore>,
     keybindings: Entity<KeybindingStore>,
+    /// The connection's name ("Local", or the ssh label).
+    title: SharedString,
+    /// A remote session: "+" browses the remote filesystem instead of a local folder picker.
+    remote: bool,
+    /// The whole session's rows are hidden.
+    folded: bool,
     /// Per-window view state: which workspaces have their children hidden.
     collapsed: HashSet<String>,
     selected: Selection,
@@ -32,12 +38,21 @@ pub enum Selection {
 impl EventEmitter<WorkspaceSelected> for TreePane {}
 
 impl TreePane {
-    pub fn new(session: Entity<SessionStore>, keybindings: Entity<KeybindingStore>, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        session: Entity<SessionStore>,
+        keybindings: Entity<KeybindingStore>,
+        title: SharedString,
+        remote: bool,
+        cx: &mut Context<Self>,
+    ) -> Self {
         cx.observe(&session, |_, _, cx| cx.notify()).detach();
         cx.observe(&keybindings, |_, _, cx| cx.notify()).detach();
         Self {
             session,
             keybindings,
+            title,
+            remote,
+            folded: false,
             collapsed: HashSet::new(),
             selected: Selection::Nothing,
         }
@@ -48,6 +63,33 @@ impl TreePane {
             self.collapsed.insert(id.to_owned());
         }
         cx.notify();
+    }
+
+    /// Remote sessions: browse the remote filesystem for the directory.
+    fn open_remote_workspace(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let pane = cx.entity().downgrade();
+        let session = self.session.clone();
+        crate::remote_dir_dialog::open(
+            session,
+            std::rc::Rc::new(move |path, _window, cx| {
+                match pane.update(cx, |pane, cx| {
+                    let id = pane.session.update(cx, |s, cx| s.open_workspace(path, cx));
+                    pane.select(id, cx);
+                }) {
+                    Ok(()) | Err(_) => {} // Err: the pane closed
+                }
+            }),
+            window,
+            cx,
+        );
+    }
+
+    /// Another session's workspace was picked: this tree shows no selection.
+    pub fn clear_selection(&mut self, cx: &mut Context<Self>) {
+        if self.selected != Selection::Nothing {
+            self.selected = Selection::Nothing;
+            cx.notify();
+        }
     }
 
     /// Pick a directory and open it as a root workspace (`OpenWorkspaceDialog`, local only).
@@ -86,7 +128,7 @@ impl TreePane {
 impl Render for TreePane {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let c = colors(cx);
-        let (bg, text_secondary, error) = (c.bg_secondary, c.text_secondary, c.error);
+        let (text_secondary, error, hover) = (c.text_secondary, c.error, c.bg_hover);
         let session = self.session.read(cx);
         let rows: Result<Vec<RowData>, AnyElement> = match session.state() {
             SessionState::Waiting => Err(status_line("Loading session…", text_secondary)),
@@ -121,35 +163,45 @@ impl Render for TreePane {
                 list.into_any_element()
             }
         };
+        let remote = self.remote;
         v_flex()
-            .h_full()
-            .w(px(250.))
-            .flex_shrink_0()
-            .bg(bg)
-            .border_r_1()
-            .border_color(cx.theme().border)
-            // macOS traffic lights sit over the top 38px, as in Electron's `.tree-pane-content`.
-            .pt(px(38.))
+            .w_full()
             .child(
                 h_flex()
-                    .px_3()
-                    .pb_2()
-                    .justify_between()
-                    .text_xs()
-                    .text_color(text_secondary)
-                    .child("WORKSPACES")
+                    .id("session-header")
+                    .px_2()
+                    .py_1()
+                    .gap_1()
+                    .items_center()
+                    .text_sm()
+                    .cursor_pointer()
+                    .hover(move |d| d.bg(hover))
+                    .child(div().w(px(14.)).text_color(text_secondary).child(if self.folded { "▸" } else { "▾" }))
+                    .child(div().flex_1().truncate().child(self.title.clone()))
+                    .on_click(cx.listener(|pane, _: &ClickEvent, _, cx| {
+                        pane.folded = !pane.folded;
+                        cx.notify();
+                    }))
                     .child(
                         div()
                             .id("open-workspace")
                             .px_1()
                             .rounded_sm()
                             .cursor_pointer()
+                            .text_color(text_secondary)
                             .hover(|d| d.bg(colors(cx).bg_hover))
                             .child("+")
-                            .on_click(cx.listener(|pane, _: &ClickEvent, _, cx| pane.open_workspace(cx))),
+                            .on_click(cx.listener(move |pane, _: &ClickEvent, window, cx| {
+                                cx.stop_propagation();
+                                if remote {
+                                    pane.open_remote_workspace(window, cx);
+                                } else {
+                                    pane.open_workspace(cx);
+                                }
+                            })),
                     ),
             )
-            .child(div().id("tree-rows").flex_1().overflow_y_scroll().child(body))
+            .when(!self.folded, |d| d.child(body))
     }
 }
 

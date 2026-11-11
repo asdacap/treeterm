@@ -6,7 +6,9 @@ use gpui_kit::component::{h_flex, spinner::Spinner, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{AnyElement, App, Context, Entity, EntityId, SharedString, Subscription, Window, div, px};
 use treeterm_core::keybinding::{Action, PrefixAction};
-use treeterm_model::app_store::{AppState, AppStore};
+use indexmap::IndexMap;
+use treeterm_core::connection::ConnectionId;
+use treeterm_model::app_store::{AppStore, ConnState};
 use treeterm_model::keybinding_store::KeybindingStore;
 use treeterm_model::session_store::{SessionStore, WorkspaceEntry};
 use treeterm_model::workspace_store::{ActivityStyle as _, TabContent};
@@ -21,16 +23,12 @@ pub struct AppView {
     /// Holds keyboard focus when nothing inside does, so window-level shortcuts dispatch.
     focus: gpui_kit::FocusHandle,
     /// Owned, not just observed: an observation does not keep the store alive, and dropping
-    /// it cancels the daemon start-up and every watch it owns.
-    _store: Entity<AppStore>,
-    body: Body,
-}
-
-enum Body {
-    StartingDaemon,
-    Reconnecting { attempt: u32, last_error: SharedString },
-    Failed(SharedString),
-    Connected(Box<Connected>),
+    /// it cancels every connection and watch it owns.
+    store: Entity<AppStore>,
+    /// Each connected session's tree and views, in sidebar order.
+    sessions: IndexMap<ConnectionId, Connected>,
+    /// The session whose workspace the right side shows.
+    active: Option<ConnectionId>,
 }
 
 /// Per-window state for a connected session.
@@ -58,14 +56,6 @@ enum ActiveView {
     Workspace(String),
 }
 
-/// What the app store's state means for this window, read before mutating the view.
-enum Next {
-    StartingDaemon,
-    Reconnecting { attempt: u32, last_error: SharedString },
-    Failed(SharedString),
-    Connected(Entity<SessionStore>),
-}
-
 impl AppView {
     pub fn new(
         store: Entity<AppStore>,
@@ -79,49 +69,62 @@ impl AppView {
             keybindings,
             settings,
             focus: cx.focus_handle(),
-            _store: store.clone(),
-            body: Body::StartingDaemon,
+            store: store.clone(),
+            sessions: IndexMap::new(),
+            active: None,
         };
         view.sync(&store, cx);
         view
     }
 
+    /// Follow the store: a view per connected session (rebuilt for each new connection
+    /// generation), none for the others.
     fn sync(&mut self, store: &Entity<AppStore>, cx: &mut Context<Self>) {
-        let next = match store.read(cx).state() {
-            AppState::StartingDaemon => Next::StartingDaemon,
-            AppState::Reconnecting { attempt, last_error } => Next::Reconnecting {
-                attempt: *attempt,
-                last_error: last_error.clone().into(),
-            },
-            AppState::Failed(reason) => Next::Failed(reason.clone().into()),
-            AppState::Connected(session) => Next::Connected(session.clone()),
-        };
-        self.body = match next {
-            Next::StartingDaemon => Body::StartingDaemon,
-            Next::Reconnecting { attempt, last_error } => Body::Reconnecting { attempt, last_error },
-            Next::Failed(reason) => Body::Failed(reason),
-            Next::Connected(session) => {
-                if let Body::Connected(current) = &self.body
-                    && current.session == session
-                {
-                    return;
-                }
-                Body::Connected(Box::new(self.connect(session, cx)))
+        let wanted: Vec<(ConnectionId, Entity<SessionStore>, SharedString, bool)> = store
+            .read(cx)
+            .sessions()
+            .filter_map(|slot| match &slot.state {
+                ConnState::Connected(session) => Some((slot.id.clone(), session.clone(), slot.name().into(), !slot.is_local())),
+                ConnState::Connecting(_) | ConnState::Reconnecting { .. } | ConnState::Failed { .. } => None,
+            })
+            .collect();
+        self.sessions.retain(|id, connected| wanted.iter().any(|(w, session, ..)| w == id && *session == connected.session));
+        for (id, session, name, remote) in wanted {
+            if !self.sessions.contains_key(&id) {
+                let connected = self.connect(id.clone(), session, name, remote, cx);
+                self.sessions.insert(id, connected);
             }
-        };
+        }
+        // Keep sidebar order.
+        let order: Vec<ConnectionId> = store.read(cx).sessions().map(|slot| slot.id.clone()).collect();
+        self.sessions.sort_by(|a, _, b, _| {
+            let rank = |id: &ConnectionId| order.iter().position(|o| o == id).unwrap_or(usize::MAX);
+            rank(a).cmp(&rank(b))
+        });
+        if self.active.as_ref().is_none_or(|id| !self.sessions.contains_key(id)) {
+            self.active = self.sessions.keys().next().cloned();
+        }
         cx.notify();
     }
 
-    fn connect(&mut self, session: Entity<SessionStore>, cx: &mut Context<Self>) -> Connected {
+    fn connect(
+        &mut self,
+        id: ConnectionId,
+        session: Entity<SessionStore>,
+        name: SharedString,
+        remote: bool,
+        cx: &mut Context<Self>,
+    ) -> Connected {
         cx.observe(&session, |_, _, cx| cx.notify()).detach();
         let keybindings = self.keybindings.clone();
-        let tree = cx.new(|cx| TreePane::new(session.clone(), keybindings, cx));
-        let selection = cx.subscribe(&tree, |view, _, WorkspaceSelected(id), cx| {
-            if let Body::Connected(connected) = &mut view.body {
-                connected.active = ActiveView::Workspace(id.clone());
+        let tree = cx.new(|cx| TreePane::new(session.clone(), keybindings, name, remote, cx));
+        let selection = cx.subscribe(&tree, move |view, _, WorkspaceSelected(workspace), cx| {
+            view.activate_session(&id, cx);
+            if let Some(connected) = view.sessions.get_mut(&id) {
+                connected.active = ActiveView::Workspace(workspace.clone());
                 connected.focus_pending = true;
-                cx.notify();
             }
+            cx.notify();
         });
         Connected {
             session,
@@ -136,47 +139,202 @@ impl AppView {
             _selection: selection,
         }
     }
+
+    /// Show `id`'s session on the right; the other trees drop their selection.
+    fn activate_session(&mut self, id: &ConnectionId, cx: &mut Context<Self>) {
+        self.active = Some(id.clone());
+        for (other, connected) in &self.sessions {
+            if other != id {
+                connected.tree.update(cx, |tree, cx| tree.clear_selection(cx));
+            }
+        }
+    }
+
+    /// The session shown on the right.
+    fn current(&self) -> Option<&Connected> {
+        self.active.as_ref().and_then(|id| self.sessions.get(id))
+    }
+
+    fn current_mut(&mut self) -> Option<&mut Connected> {
+        let id = self.active.clone()?;
+        self.sessions.get_mut(&id)
+    }
+
+    /// The left column: every connection with its tree, status and actions.
+    fn sidebar(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let c = colors(cx);
+        let (bg, secondary, error, hover, border) = (c.bg_secondary, c.text_secondary, c.error, c.bg_hover, c.border);
+        let slots: Vec<(ConnectionId, String, ConnState, bool)> = self
+            .store
+            .read(cx)
+            .sessions()
+            .map(|slot| (slot.id.clone(), slot.name(), slot.state.clone(), slot.is_local()))
+            .collect();
+        let mut list = v_flex().w_full();
+        for (id, name, state, local) in slots {
+            let banner = |text: String, color| div().px_3().py_1().text_xs().text_color(color).child(text);
+            let button = |label: &'static str, key: String| {
+                gpui_kit::component::button::Button::new(SharedString::from(key)).label(label).xsmall()
+            };
+            use gpui_kit::component::Sizable as _;
+            use gpui_kit::component::button::ButtonVariants as _;
+            let section = match state {
+                ConnState::Connected(_) => match self.sessions.get(&id) {
+                    Some(connected) => connected.tree.clone().into_any_element(),
+                    None => banner(format!("{name}: starting…"), secondary).into_any_element(),
+                },
+                ConnState::Connecting(phase) => {
+                    let what = match phase {
+                        treeterm_core::connection::ConnectPhase::Bootstrap => "Bootstrapping…",
+                        treeterm_core::connection::ConnectPhase::Tunnel => "Establishing tunnel…",
+                        treeterm_core::connection::ConnectPhase::Daemon if local => "Starting daemon…",
+                        treeterm_core::connection::ConnectPhase::Daemon => "Connecting to daemon…",
+                    };
+                    v_flex()
+                        .child(div().px_2().py_1().text_sm().child(name.clone()))
+                        .child(h_flex().px_3().gap_2().text_xs().text_color(secondary).child(Spinner::new()).child(what))
+                        .into_any_element()
+                }
+                ConnState::Reconnecting { attempt, error: reason } => {
+                    let (now, stop) = (id.clone(), id.clone());
+                    v_flex()
+                        .child(div().px_2().py_1().text_sm().child(name.clone()))
+                        .child(banner(format!("Reconnecting (attempt {attempt})… {reason}"), secondary))
+                        .child(
+                            h_flex()
+                                .px_3()
+                                .gap_1()
+                                .child(button("Retry now", format!("retry-{id}")).ghost().on_click(cx.listener(
+                                    move |view, _, _, cx| view.store.read(cx).reconnect_now(&now),
+                                )))
+                                .child(button("Stop", format!("stop-{id}")).ghost().on_click(cx.listener(
+                                    move |view, _, _, cx| view.store.read(cx).cancel_reconnect(&stop),
+                                ))),
+                        )
+                        .into_any_element()
+                }
+                ConnState::Failed { error: reason, hash_mismatch } => {
+                    let (again, gone) = (id.clone(), id.clone());
+                    let mut actions = h_flex().px_3().gap_1().child(
+                        button("Reconnect", format!("reconnect-{id}")).ghost().on_click(cx.listener(
+                            move |view, _, _, cx| view.store.read(cx).reconnect(&again),
+                        )),
+                    );
+                    if hash_mismatch {
+                        let (refresh, accept) = (id.clone(), id.clone());
+                        actions = actions
+                            .child(button("Refresh daemon", format!("refresh-{id}")).ghost().on_click(cx.listener(
+                                move |view, _, _, cx| view.reconnect_outdated(&refresh, treeterm_core::connection::OutdatedDaemon::Refresh, cx),
+                            )))
+                            .child(button("Connect anyway", format!("accept-{id}")).ghost().on_click(cx.listener(
+                                move |view, _, _, cx| view.reconnect_outdated(&accept, treeterm_core::connection::OutdatedDaemon::Accept, cx),
+                            )));
+                    }
+                    if !local {
+                        actions = actions.child(button("Disconnect", format!("disconnect-{id}")).ghost().on_click(
+                            cx.listener(move |view, _, _, cx| view.store.update(cx, |s, cx| s.disconnect(&gone, cx))),
+                        ));
+                    }
+                    v_flex()
+                        .child(div().px_2().py_1().text_sm().child(name.clone()))
+                        .child(banner(reason, error))
+                        .child(actions)
+                        .into_any_element()
+                }
+            };
+            list = list.child(div().pb_2().child(section));
+        }
+        v_flex()
+            .h_full()
+            .w(px(250.))
+            .flex_shrink_0()
+            .bg(bg)
+            .border_r_1()
+            .border_color(border)
+            // macOS traffic lights sit over the top 38px, as in Electron's `.tree-pane-content`.
+            .pt(px(38.))
+            .child(
+                h_flex()
+                    .px_3()
+                    .pb_2()
+                    .justify_between()
+                    .text_xs()
+                    .text_color(secondary)
+                    .child("SESSIONS")
+                    .child(
+                        div()
+                            .id("connect-ssh")
+                            .px_1()
+                            .rounded_sm()
+                            .cursor_pointer()
+                            .hover(move |d| d.bg(hover))
+                            .child("⇄ SSH")
+                            .on_click(cx.listener(|view, _, window, cx| {
+                                crate::connection_picker::open(view.store.clone(), window, cx);
+                            })),
+                    ),
+            )
+            .child(div().id("sessions").flex_1().overflow_y_scroll().child(list))
+            .into_any_element()
+    }
+
+    /// Connect again to an outdated remote daemon, refreshing it or accepting it.
+    fn reconnect_outdated(
+        &mut self,
+        id: &ConnectionId,
+        outdated: treeterm_core::connection::OutdatedDaemon,
+        cx: &mut Context<Self>,
+    ) {
+        let config = match self.store.read(cx).session_slot(id).map(|slot| slot.target.clone()) {
+            Some(treeterm_core::connection::ConnectionTarget::Remote(config)) => (*config).clone(),
+            Some(treeterm_core::connection::ConnectionTarget::Local) | None => return,
+        };
+        self.store.update(cx, |s, cx| s.connect_remote(config, outdated, cx));
+    }
 }
 
 impl Render for AppView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let c = colors(cx);
         let (bg, fg, secondary, error) = (c.bg_primary, c.text_primary, c.text_secondary, c.error);
-        let content: AnyElement = match &mut self.body {
-            Body::StartingDaemon => centered(
-                h_flex()
-                    .gap_2()
-                    .text_color(secondary)
-                    .child(Spinner::new())
-                    .child("Starting TreeTerm daemon…"),
-            ),
-            Body::Reconnecting { attempt, last_error } => centered(
-                v_flex()
-                    .gap_2()
-                    .max_w(px(600.))
-                    .items_center()
-                    .child(
+        let sidebar = self.sidebar(cx);
+        let pane = match self.current_mut() {
+            Some(connected) => workspace_pane(connected, window, cx),
+            None => {
+                let starting = self.store.read(cx).sessions().next().map(|slot| slot.state.clone());
+                match starting {
+                    Some(ConnState::Failed { error: reason, .. }) => centered(
+                        v_flex()
+                            .gap_2()
+                            .max_w(px(600.))
+                            .child(div().text_color(error).child("Cannot reach the TreeTerm daemon"))
+                            .child(div().text_sm().text_color(secondary).child(reason)),
+                    ),
+                    Some(ConnState::Reconnecting { attempt, error: reason }) => centered(
+                        v_flex()
+                            .gap_2()
+                            .max_w(px(600.))
+                            .items_center()
+                            .child(
+                                h_flex()
+                                    .gap_2()
+                                    .text_color(secondary)
+                                    .child(Spinner::new())
+                                    .child(format!("Reconnecting to the TreeTerm daemon (attempt {attempt})…")),
+                            )
+                            .child(div().text_sm().text_color(secondary).child(reason)),
+                    ),
+                    Some(ConnState::Connecting(_) | ConnState::Connected(_)) | None => centered(
                         h_flex()
                             .gap_2()
                             .text_color(secondary)
                             .child(Spinner::new())
-                            .child(format!("Reconnecting to the TreeTerm daemon (attempt {attempt})…")),
-                    )
-                    .child(div().text_sm().text_color(secondary).child(last_error.clone())),
-            ),
-            Body::Failed(reason) => centered(
-                v_flex()
-                    .gap_2()
-                    .max_w(px(600.))
-                    .child(div().text_color(error).child("Cannot reach the TreeTerm daemon"))
-                    .child(div().text_sm().text_color(secondary).child(reason.clone())),
-            ),
-            Body::Connected(connected) => {
-                let tree = connected.tree.clone();
-                let pane = workspace_pane(connected, window, cx);
-                h_flex().size_full().child(tree).child(pane).into_any_element()
+                            .child("Starting TreeTerm daemon…"),
+                    ),
+                }
             }
         };
+        let content = h_flex().size_full().child(sidebar).child(pane).into_any_element();
         if window.focused(cx).is_none() {
             window.focus(&self.focus, cx);
         }
@@ -190,7 +348,7 @@ impl Render for AppView {
                 crate::settings_view::open(view.settings.clone(), window, cx);
             }))
             .on_action(cx.listener(|view, _: &crate::menus::ActiveProcesses, window, cx| {
-                if let Body::Connected(connected) = &view.body {
+                if let Some(connected) = view.current() {
                     let settings = view.settings.read(cx).settings().terminal.clone();
                     crate::active_processes_view::open(&connected.session, settings, window, cx);
                 }
@@ -209,10 +367,11 @@ impl AppView {
     /// Whether the window may close now; when child workspaces are unmerged, asks first
     /// (and quits if the user confirms).
     pub fn request_close(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
-        let unmerged = match &self.body {
-            Body::Connected(connected) => connected.session.read(cx).unmerged_sub_workspaces(cx),
-            Body::StartingDaemon | Body::Reconnecting { .. } | Body::Failed(_) => Vec::new(),
-        };
+        let unmerged: Vec<(String, Option<String>)> = self
+            .sessions
+            .values()
+            .flat_map(|connected| connected.session.read(cx).unmerged_sub_workspaces(cx))
+            .collect();
         if unmerged.is_empty() {
             return true;
         }
@@ -222,9 +381,7 @@ impl AppView {
 
     /// The active workspace's store, if it is loaded.
     fn active_store(&self, cx: &App) -> Option<Entity<treeterm_model::workspace_store::WorkspaceStore>> {
-        let Body::Connected(connected) = &self.body else {
-            return None;
-        };
+        let connected = self.current()?;
         let ActiveView::Workspace(id) = &connected.active else {
             return None;
         };
@@ -232,7 +389,7 @@ impl AppView {
     }
 
     fn focus_active_tab(&mut self, cx: &mut Context<Self>) {
-        if let Body::Connected(connected) = &mut self.body {
+        if let Some(connected) = self.current_mut() {
             connected.focus_pending = true;
         }
         cx.notify();
@@ -250,13 +407,13 @@ impl AppView {
                 }
             }
             Action::SetActiveWorkspace { workspace_id } => {
-                if let Body::Connected(connected) = &self.body {
+                if let Some(connected) = self.current() {
                     connected.tree.update(cx, |tree, cx| tree.select(workspace_id, cx));
                 }
             }
             Action::Prefix(PrefixAction::NewTab) => {
                 let Some(store) = self.active_store(cx) else { return };
-                let Body::Connected(connected) = &self.body else { return };
+                let Some(connected) = self.current() else { return };
                 let app = connected.session.read(cx).registry().default_app().map(|app| app.id.clone());
                 if let Some(app) = app {
                     store.update(cx, |w, cx| w.add_tab(&app, cx));
@@ -298,7 +455,7 @@ impl AppView {
                 }
             }
             Action::Prefix(PrefixAction::WorkspaceFocus) => {
-                let Body::Connected(connected) = &self.body else { return };
+                let Some(connected) = self.current() else { return };
                 let session = connected.session.read(cx);
                 let ids: Vec<String> = session
                     .tree_rows(&Default::default(), cx)
@@ -427,7 +584,7 @@ fn workspace_pane(connected: &mut Connected, window: &mut Window, cx: &mut Conte
                 .on_click(cx.listener(move |view, _, _, cx| {
                     let (workspace, tab) = &select;
                     workspace.update(cx, |w, cx| w.set_active_tab(tab, cx));
-                    if let Body::Connected(connected) = &mut view.body {
+                    if let Some(connected) = view.current_mut() {
                         connected.focus_pending = true;
                     }
                     cx.notify();
@@ -679,13 +836,23 @@ impl AppView {
     /// A JSON snapshot of what this window shows, for automation.
     pub fn automation_state(&self, window: &Window, cx: &gpui_kit::App) -> serde_json::Value {
         use serde_json::json;
-        match &self.body {
-            Body::StartingDaemon => json!({ "body": "starting" }),
-            Body::Reconnecting { attempt, last_error } => {
-                json!({ "body": "reconnecting", "attempt": attempt, "error": last_error.to_string() })
-            }
-            Body::Failed(reason) => json!({ "body": "failed", "reason": reason.to_string() }),
-            Body::Connected(connected) => {
+        let sessions: Vec<_> = self
+            .store
+            .read(cx)
+            .sessions()
+            .map(|slot| {
+                let state = match &slot.state {
+                    ConnState::Connecting(_) => "connecting".to_owned(),
+                    ConnState::Connected(_) => "connected".to_owned(),
+                    ConnState::Reconnecting { attempt, error } => format!("reconnecting ({attempt}): {error}"),
+                    ConnState::Failed { error, .. } => format!("failed: {error}"),
+                };
+                json!({ "id": slot.id.as_str(), "name": slot.name(), "state": state })
+            })
+            .collect();
+        match self.current() {
+            None => json!({ "body": "starting", "sessions": sessions }),
+            Some(connected) => {
                 let session = connected.session.read(cx);
                 let workspaces: Vec<_> = session
                     .workspace_ids()
@@ -733,6 +900,7 @@ impl AppView {
                     .collect();
                 json!({
                     "body": "connected",
+                    "sessions": sessions,
                     "version": session.version(),
                     "workspaces": workspaces,
                     "active": active,
@@ -743,14 +911,14 @@ impl AppView {
     }
 
     pub fn automation_select_workspace(&mut self, id: &str, cx: &mut Context<Self>) {
-        if let Body::Connected(connected) = &self.body {
+        if let Some(connected) = self.current() {
             let id = id.to_owned();
             connected.tree.update(cx, |tree, cx| tree.select(id, cx));
         }
     }
 
     pub fn automation_select_tab(&mut self, workspace: &str, tab: &str, cx: &mut Context<Self>) {
-        if let Body::Connected(connected) = &mut self.body {
+        if let Some(connected) = self.current_mut() {
             if let Some(store) = connected.session.read(cx).workspace_store(workspace).cloned() {
                 store.update(cx, |w, cx| w.set_active_tab(tab, cx));
             }
@@ -760,9 +928,7 @@ impl AppView {
     }
 
     pub fn automation_new_tab(&mut self, workspace: &str, app: &str, cx: &mut Context<Self>) -> Option<String> {
-        let Body::Connected(connected) = &mut self.body else {
-            return None;
-        };
+        let connected = self.current_mut()?;
         let store = connected.session.read(cx).workspace_store(workspace).cloned()?;
         let app = if app.is_empty() {
             connected.session.read(cx).registry().default_app()?.id.clone()
@@ -774,16 +940,11 @@ impl AppView {
     }
 
     pub fn automation_session(&self) -> Option<Entity<SessionStore>> {
-        match &self.body {
-            Body::Connected(connected) => Some(connected.session.clone()),
-            Body::StartingDaemon | Body::Reconnecting { .. } | Body::Failed(_) => None,
-        }
+        self.current().map(|connected| connected.session.clone())
     }
 
     pub fn automation_open_workspace(&mut self, path: String, cx: &mut Context<Self>) -> Option<String> {
-        let Body::Connected(connected) = &self.body else {
-            return None;
-        };
+        let connected = self.current()?;
         let id = connected.session.update(cx, |s, cx| s.open_workspace(path, cx));
         connected.tree.update(cx, |tree, cx| tree.select(id.clone(), cx));
         Some(id)
@@ -805,7 +966,7 @@ impl AppView {
     }
 
     pub fn automation_close_tab(&mut self, workspace: &str, tab: &str, cx: &mut Context<Self>) {
-        if let Body::Connected(connected) = &self.body
+        if let Some(connected) = self.current()
             && let Some(store) = connected.session.read(cx).workspace_store(workspace).cloned()
         {
             store.update(cx, |w, cx| w.remove_tab(tab, cx));

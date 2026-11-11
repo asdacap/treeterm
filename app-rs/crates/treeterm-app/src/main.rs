@@ -2,6 +2,8 @@
 
 mod active_processes_view;
 mod app_view;
+mod connection_picker;
+mod remote_dir_dialog;
 mod child_dialog;
 #[cfg(feature = "automation")]
 mod automation;
