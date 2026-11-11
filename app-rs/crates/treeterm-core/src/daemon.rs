@@ -12,7 +12,8 @@ use treeterm_proto::treeterm::{
 
 use crate::pty::{AttachKind, CreatePty, PtyAttachment};
 use crate::rt::{Fut, Rt, Sub, TaskLost};
-use crate::transport::{ConnectError, DaemonClient, connect_unix, daemon_client};
+use crate::traffic::ByteCounter;
+use crate::transport::{ConnectError, DaemonClient, connect_unix_metered, daemon_client};
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum ApiError {
@@ -68,18 +69,22 @@ pub struct DaemonConnection {
     socket_path: PathBuf,
     pub(crate) main: DaemonClient,
     session: DaemonClient,
+    /// Every byte received over both connections.
+    received: ByteCounter,
 }
 
 impl DaemonConnection {
     /// Open both connections. Must run on the tokio runtime behind `rt`.
     pub async fn connect(rt: Rt, socket_path: PathBuf) -> Result<Self, ConnectError> {
-        let main = connect_unix(&socket_path).await?;
-        let session = connect_unix(&socket_path).await?;
+        let received = ByteCounter::default();
+        let main = connect_unix_metered(&socket_path, received.clone()).await?;
+        let session = connect_unix_metered(&socket_path, received.clone()).await?;
         Ok(Self {
             rt,
             socket_path,
             main: daemon_client(main),
             session: daemon_client(session),
+            received,
         })
     }
 
@@ -222,6 +227,11 @@ impl DaemonConnection {
 
     pub fn socket_path(&self) -> &Path {
         &self.socket_path
+    }
+
+    /// Bytes received from the daemon so far on this connection generation.
+    pub fn received(&self) -> &ByteCounter {
+        &self.received
     }
 
     /// Session snapshots; the first event is the current state.

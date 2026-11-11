@@ -91,6 +91,8 @@ impl ActiveProcesses {
             keep_on_exit: true,
             width_limit: WidthLimit::Off,
             idle_timeout: None,
+            // A viewer, not a workspace: nobody meters it.
+            traffic: treeterm_core::traffic::ByteCounter::default(),
         };
         let conn = self.conn.clone();
         let terminal = cx.new(|cx| TerminalModel::new(conn, options, cx));

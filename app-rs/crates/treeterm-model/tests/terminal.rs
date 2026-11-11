@@ -38,6 +38,7 @@ fn options(pty_id: String) -> TerminalOptions {
         keep_on_exit: false,
         width_limit: WidthLimit::Capped(160),
         idle_timeout: None,
+        traffic: treeterm_core::traffic::ByteCounter::default(),
     }
 }
 
@@ -75,6 +76,29 @@ fn shows_the_shell_and_sends_focused_input(cx: &mut TestAppContext) {
     type_line(cx, &model, "echo tt-$((40+2))");
     wait_until(cx, &model, |m| m.screen_text().contains("tt-42"));
     assert!(!model.read_with(cx, |m, _| m.screen_text().contains("unfocused-2")));
+}
+
+#[gpui_kit::test]
+fn output_bytes_count_toward_the_workspace_meter_and_the_connection(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    let pty = spawn_shell(&h);
+    let counter = treeterm_core::traffic::ByteCounter::default();
+    let connection_before = h.conn.received().total();
+    let model = open(cx, &h, TerminalOptions { traffic: counter.clone(), ..options(pty) });
+    let after_prompt = counter.total();
+    assert!(after_prompt > 0, "the prompt counts");
+
+    model.update(cx, |m, cx| m.set_focused(true, cx));
+    type_line(cx, &model, "printf 'x%.0s' $(seq 1 2000); echo done-$((1+2))");
+    wait_until(cx, &model, |m| m.screen_text().contains("done-3"));
+    assert!(counter.total() >= after_prompt + 2000);
+    assert!(h.conn.received().total() >= connection_before + counter.total());
+
+    let meter = cx.new(|cx| treeterm_model::traffic::TrafficMeter::new(counter.clone(), cx));
+    cx.executor().advance_clock(treeterm_core::traffic::TRAFFIC_TICK);
+    cx.run_until_parked();
+    assert_eq!(meter.read_with(cx, |m, _| m.rate().total_bytes), counter.total());
 }
 
 #[gpui_kit::test]

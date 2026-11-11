@@ -10,6 +10,8 @@ use tokio::net::UnixStream;
 use tonic::transport::{Channel, Endpoint, Uri};
 use treeterm_proto::treeterm::tree_term_daemon_client::TreeTermDaemonClient;
 
+use crate::traffic::{ByteCounter, CountingStream};
+
 pub type DaemonClient = TreeTermDaemonClient<Channel>;
 
 /// Largest message either side sends; matches the daemon's limit.
@@ -41,6 +43,11 @@ pub enum ConnectError {
 /// a single-use connector every call on a dead channel fails instead, and the connection
 /// manager builds a fresh generation of channels.
 pub async fn connect_unix(path: &Path) -> Result<Channel, ConnectError> {
+    connect_unix_metered(path, ByteCounter::default()).await
+}
+
+/// [`connect_unix`], adding every byte received from the daemon to `received`.
+pub async fn connect_unix_metered(path: &Path, received: ByteCounter) -> Result<Channel, ConnectError> {
     if !path.exists() {
         return Err(ConnectError::SocketMissing(path.to_owned()));
     }
@@ -51,7 +58,7 @@ pub async fn connect_unix(path: &Path) -> Result<Channel, ConnectError> {
                 path: path.to_owned(),
                 source,
             })?;
-        let slot = Arc::new(Mutex::new(Some(stream)));
+        let slot = Arc::new(Mutex::new(Some(CountingStream::new(stream, received))));
         Endpoint::from_static("http://treeterm-daemon")
             .connect_with_connector(tower::service_fn(move |_: Uri| {
                 let taken = slot.lock().expect("connector slot poisoned").take();

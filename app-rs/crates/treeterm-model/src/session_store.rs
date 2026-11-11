@@ -353,6 +353,8 @@ pub struct SessionStore {
     github: Option<Arc<dyn treeterm_core::github::GitHubApi>>,
     github_settings: crate::git_controller::SharedGithubSettings,
     disposed: bool,
+    /// Every byte received from the daemon on this connection, and its rate.
+    traffic: Entity<crate::traffic::TrafficMeter>,
     _session_watch: Task<()>,
 }
 
@@ -393,6 +395,8 @@ impl SessionStore {
         let settings_events = cx.subscribe(&settings, |session, _, event: &SettingsEvent, cx| match event {
             SettingsEvent::Changed => session.on_settings_changed(cx),
         });
+        let received = conn.received().clone();
+        let traffic = cx.new(|cx| crate::traffic::TrafficMeter::new(received, cx));
         Self {
             conn,
             llm,
@@ -423,6 +427,7 @@ impl SessionStore {
             github,
             github_settings,
             disposed: false,
+            traffic,
             _session_watch: session_watch,
         }
     }
@@ -435,6 +440,11 @@ impl SessionStore {
 
     pub fn connection(&self) -> &DaemonConnection {
         &self.conn
+    }
+
+    /// The connection's download rate (`ConnectionTrafficBadge`).
+    pub fn traffic(&self) -> &Entity<crate::traffic::TrafficMeter> {
+        &self.traffic
     }
 
     pub fn registry(&self) -> &Rc<AppRegistry> {

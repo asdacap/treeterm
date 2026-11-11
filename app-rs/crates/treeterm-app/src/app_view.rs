@@ -56,6 +56,8 @@ struct Connected {
     browser_views: HashMap<(String, String), Entity<crate::browser_view::BrowserView>>,
     /// Each shown workspace's Run menu actions, by workspace id.
     run_actions: HashMap<String, Entity<treeterm_model::run_actions::RunActions>>,
+    /// Each shown workspace's download badge, by workspace id.
+    traffic_badges: HashMap<String, Entity<crate::traffic_badge::TrafficBadge>>,
     /// Web App tabs showing their shell instead of their page, by (workspace, tab).
     web_app_shell: std::collections::HashSet<(String, String)>,
     /// Focus the shown terminal on the next render (after a workspace or tab switch).
@@ -204,6 +206,7 @@ impl AppView {
             browser_views: HashMap::new(),
             web_app_shell: std::collections::HashSet::new(),
             run_actions: HashMap::new(),
+            traffic_badges: HashMap::new(),
             focus_pending: false,
             _selection: selection,
         }
@@ -801,6 +804,21 @@ fn merge_menu(
 
 /// "▶ Run" (`RunActionDropdown`): the workspace's detected actions by source, then the
 /// custom runners.
+/// The workspace's terminal download rate (`WorkspaceTrafficBadge`).
+fn traffic_badge(
+    connected: &mut Connected,
+    workspace: &Entity<treeterm_model::workspace_store::WorkspaceStore>,
+    workspace_id: &str,
+    cx: &mut Context<AppView>,
+) -> Entity<crate::traffic_badge::TrafficBadge> {
+    let meter = workspace.read(cx).traffic().clone();
+    connected
+        .traffic_badges
+        .entry(workspace_id.to_owned())
+        .or_insert_with(|| cx.new(|cx| crate::traffic_badge::TrafficBadge::new(meter, "workspace-traffic", cx)))
+        .clone()
+}
+
 fn run_menu(
     connected: &mut Connected,
     workspace: &Entity<treeterm_model::workspace_store::WorkspaceStore>,
@@ -1189,6 +1207,7 @@ fn workspace_pane(
         .when_some(connected.session.read(cx).git_controller(&id).cloned(), |d, controller| {
             d.children(git_status_items(&controller, cx))
         })
+        .child(traffic_badge(connected, &workspace, &id, cx))
         .child(run_menu(connected, &workspace, &id, cx))
         .children(merge_menu(connected, &workspace, &id, cx))
         .when_some(operation_error, |d, error| {

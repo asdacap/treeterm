@@ -20,5 +20,6 @@ pub mod settings_store;
 pub mod system_monitor;
 pub mod terminal;
 pub mod text_editor;
+pub mod traffic;
 pub mod web_app;
 pub mod workspace_store;

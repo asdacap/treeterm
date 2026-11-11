@@ -21,6 +21,7 @@ mod terminal_element;
 mod text_editor_view;
 mod terminal_view;
 mod theme;
+mod traffic_badge;
 mod tree_pane;
 
 use gpui_kit::{

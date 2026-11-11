@@ -18,6 +18,7 @@ use treeterm_core::daemon::{ApiError, DaemonConnection};
 use treeterm_core::pty::{AttachKind, PtyEvent, PtyInputHandle};
 use treeterm_core::rt::Sub;
 use treeterm_core::settings::{CursorStyle, TerminalSettings};
+use treeterm_core::traffic::ByteCounter;
 use treeterm_term::alacritty_terminal::grid::Scroll;
 use treeterm_term::alacritty_terminal::index::{Column, Line, Point, Side};
 use treeterm_term::alacritty_terminal::selection::{Selection, SelectionType};
@@ -50,6 +51,8 @@ pub struct TerminalOptions {
     pub width_limit: WidthLimit,
     /// `None` turns activity detection off for this terminal (e.g. one analysed by an LLM).
     pub idle_timeout: Option<Duration>,
+    /// Output bytes are added here (the workspace's download meter).
+    pub traffic: ByteCounter,
 }
 
 /// What covers the terminal, if anything.
@@ -229,6 +232,7 @@ impl TerminalModel {
         let parser = cx.background_executor().spawn(drive(
             core,
             attachment.events,
+            options.traffic.clone(),
             inbox.clone(),
             wake_tx,
             executor,
@@ -744,6 +748,7 @@ impl TerminalModel {
 async fn drive(
     mut core: TermCore,
     mut events: Sub<Result<PtyEvent, ApiError>>,
+    received: ByteCounter,
     inbox: Arc<Mutex<Batch>>,
     mut wake: mpsc::Sender<()>,
     executor: BackgroundExecutor,
@@ -769,7 +774,7 @@ async fn drive(
                 let mut applied = 0;
                 loop {
                     match item {
-                        Some(Ok(event)) => apply(&mut core, event, &mut batch),
+                        Some(Ok(event)) => apply(&mut core, event, &received, &mut batch),
                         Some(Err(error)) => {
                             batch.end = Some(StreamEnd::Failed(error.to_string()));
                             ended = true;
@@ -805,10 +810,11 @@ async fn drive(
     }
 }
 
-fn apply(core: &mut TermCore, event: PtyEvent, batch: &mut Batch) {
+fn apply(core: &mut TermCore, event: PtyEvent, received: &ByteCounter, batch: &mut Batch) {
     batch.received = true;
     match event {
         PtyEvent::Data(bytes) => {
+            received.add(bytes.len() as u64);
             batch.data = true;
             batch.notices.extend(core.feed(&bytes));
         }

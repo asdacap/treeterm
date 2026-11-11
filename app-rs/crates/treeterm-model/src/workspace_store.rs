@@ -176,6 +176,9 @@ pub struct WorkspaceStore {
     remote: Option<crate::web_app::RemoteHost>,
     /// Runs AI-harness analyzers; `None` leaves them off (tests, no LLM client).
     llm: Option<LlmService>,
+    /// PTY bytes received by this workspace's terminals, and their rate.
+    traffic: Entity<crate::traffic::TrafficMeter>,
+    traffic_counter: treeterm_core::traffic::ByteCounter,
     _git_refresh: Option<Task<()>>,
 }
 
@@ -209,6 +212,9 @@ impl WorkspaceStore {
         remote: Option<crate::web_app::RemoteHost>,
         cx: &mut Context<Self>,
     ) -> Self {
+        let traffic_counter = treeterm_core::traffic::ByteCounter::default();
+        let counter = traffic_counter.clone();
+        let traffic = cx.new(|cx| crate::traffic::TrafficMeter::new(counter, cx));
         let mut store = Self {
             workspace,
             conn,
@@ -224,6 +230,8 @@ impl WorkspaceStore {
             web_apps: HashMap::new(),
             remote,
             llm,
+            traffic,
+            traffic_counter,
             _git_refresh: None,
         };
         let tab_ids: Vec<String> = store.workspace.file.app_states.keys().cloned().collect();
@@ -235,6 +243,11 @@ impl WorkspaceStore {
 
     pub fn workspace(&self) -> &Workspace {
         &self.workspace
+    }
+
+    /// The download rate of this workspace's terminals (`WorkspaceTrafficBadge`).
+    pub fn traffic(&self) -> &Entity<crate::traffic::TrafficMeter> {
+        &self.traffic
     }
 
     pub fn file(&self) -> &WorkspaceFile {
@@ -733,6 +746,7 @@ impl WorkspaceStore {
             // Always detecting: the per-tab switch gates only the Working edge, read when it
             // fires, so turning it off still lets a pending Idle land.
             idle_timeout: Some(self.idle_timeout()),
+            traffic: self.traffic_counter.clone(),
         }
     }
 

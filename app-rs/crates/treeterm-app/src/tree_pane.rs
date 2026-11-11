@@ -30,6 +30,8 @@ pub struct TreePane {
     /// Per-window view state: which workspaces have their children hidden.
     collapsed: HashSet<String>,
     selected: Selection,
+    /// Bytes per second received from this connection's daemon.
+    traffic: Entity<crate::traffic_badge::TrafficBadge>,
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -81,7 +83,10 @@ impl TreePane {
     ) -> Self {
         cx.observe(&session, |_, _, cx| cx.notify()).detach();
         cx.observe(&keybindings, |_, _, cx| cx.notify()).detach();
+        let meter = session.read(cx).traffic().clone();
+        let traffic = cx.new(|cx| crate::traffic_badge::TrafficBadge::new(meter, "connection-traffic", cx));
         Self {
+            traffic,
             session,
             keybindings,
             title,
@@ -240,6 +245,7 @@ impl Render for TreePane {
                             })),
                     )
                     .child(div().flex_1().truncate().child(self.title.clone()))
+                    .child(self.traffic.clone())
                     .when(self.session.read(cx).is_locked(), |d| {
                         d.child(
                             div()
