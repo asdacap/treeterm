@@ -240,7 +240,7 @@ impl AppView {
             let session = connected.session.read(cx);
             let shown = match (&self.active, &connected.active) {
                 (Some(active_id), ActiveView::Workspace(id)) if active_id == conn_id => Some(id.clone()),
-                _ => None,
+                (Some(_), ActiveView::Workspace(_)) | (_, ActiveView::Nothing) | (None, ActiveView::Workspace(_)) => None,
             };
             for row in session.tree_rows(&Default::default(), cx) {
                 let Some(store) = session.workspace_store(&row.id) else { continue };
