@@ -1467,6 +1467,40 @@ impl SessionStore {
         Ok(id)
     }
 
+    /// `quickForkWorkspace`: a child with a readable random branch name that no local
+    /// branch has yet (three tries).
+    pub fn quick_fork(&mut self, workspace_id: &str, cx: &mut Context<Self>) -> Result<(), String> {
+        let root = self
+            .workspace_store(workspace_id)
+            .ok_or("Workspace not found")?
+            .read(cx)
+            .file()
+            .git_root_path
+            .clone()
+            .ok_or("Workspace has no git root path")?;
+        let git = self.conn.git();
+        let parent = workspace_id.to_owned();
+        cx.spawn(async move |this, cx| {
+            let existing = match git.list_local_branches(&root).await {
+                Ok(branches) => branches,
+                Err(error) => return tracing::error!(%error, "quick fork: cannot list branches"),
+            };
+            let Some(name) = (0..3)
+                .map(|_| treeterm_core::human_id::generate())
+                .find(|candidate| !existing.contains(candidate))
+            else {
+                return tracing::error!("quick fork: failed to generate a unique branch name");
+            };
+            match this.update(cx, |s, cx| s.add_child_workspace(&parent, name, false, None, cx)) {
+                Ok(Ok(_)) => {}
+                Ok(Err(error)) => tracing::error!(%error, "quick fork failed"),
+                Err(_) => {} // store dropped
+            }
+        })
+        .detach();
+        Ok(())
+    }
+
     /// Add an existing worktree of the parent's repository as a child workspace
     /// (`adoptExistingWorktree`). No git operation; refused if it is already open.
     pub fn adopt_existing_worktree(

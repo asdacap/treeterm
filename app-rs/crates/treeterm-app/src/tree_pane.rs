@@ -229,6 +229,15 @@ impl TreePane {
                     );
                 }))
                 .separator();
+                let menu = {
+                    let (session, id) = (session.clone(), id.clone());
+                    menu.item(PopupMenuItem::new("Quick fork").on_click(move |_, _, cx| {
+                        if let Err(error) = session.update(cx, |s, cx| s.quick_fork(&id, cx)) {
+                            tracing::error!(%error, "quick fork");
+                        }
+                    }))
+                    .separator()
+                };
                 let remove = |menu: gpui_kit::component::menu::PopupMenu, text: &'static str, mode: RemoveMode| {
                     let (session, id, label) = (session.clone(), id.clone(), label.clone());
                     menu.item(PopupMenuItem::new(text).on_click(move |_, window, cx| {

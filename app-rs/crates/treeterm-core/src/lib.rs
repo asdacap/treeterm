@@ -9,6 +9,7 @@ pub mod daemon;
 pub mod exec;
 pub mod fs;
 pub mod git;
+pub mod human_id;
 pub mod keybinding;
 pub mod layout;
 pub mod local_daemon;
