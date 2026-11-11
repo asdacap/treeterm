@@ -130,6 +130,8 @@ impl TerminalView {
         }
     }
 
+    /// For the automation socket's state snapshot.
+    #[cfg(feature = "automation")]
     pub fn model(&self) -> &Entity<TerminalModel> {
         &self.model
     }
