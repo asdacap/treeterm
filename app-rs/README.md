@@ -132,6 +132,23 @@ Not yet:
 - Parity sweep sign-off and cut-over (M10): remove `src/main`, `src/preload`,
   `src/renderer` once the checklist in the plan passes.
 
+## Appearance
+
+The chrome was matched to Electron's computed styles, measured side by side on one session
+(sizes, padding, fonts, colours, icons; Lucide icons through GPUI Kit). What still differs:
+
+- Text: GPUI renders the system font 1–3px wider per label and has no `letter-spacing`;
+  Chromium colour-manages saturated colours (same tokens, different pixels).
+- GPUI Kit limits: tooltips are not the native macOS ones; dialog shadows are lighter; the
+  diff view keeps 19.2px rows, its own fold rows and two columns for added/deleted files;
+  the editor has no minimap or between-line comment widgets; selects open a Kit menu, not
+  the native popup; textareas have no resize grip.
+- With the sidebar collapsed the header keeps clear of the macOS window buttons (Electron's
+  title runs under them).
+- Not ported: inline review comments in the Files viewer gutter, Cmd+F in Review, the merge
+  output inside the Review tab (it shows over the workspace), Markdown rendering of `.md`
+  pages in the browser, and the remote Browser tab's Port Forward sub-tab.
+
 ## Known differences from Electron (deliberate)
 
 - Placeholders for refs another window removed are dropped with the ref.
