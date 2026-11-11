@@ -40,6 +40,8 @@ pub struct FileBrowserView {
     model: Entity<FileBrowser>,
     /// The PDF shown, and the webview showing it.
     pdf: Option<(String, Entity<crate::browser_view::PdfView>)>,
+    /// Markdown files show their source instead of the preview.
+    markdown_source: bool,
     workspace: Entity<treeterm_model::workspace_store::WorkspaceStore>,
     /// The editor showing the current file, and which file it shows.
     editor: Option<(String, Entity<EditorState>)>,
@@ -112,6 +114,7 @@ impl FileBrowserView {
         Self {
             model,
             pdf: None,
+            markdown_source: false,
             workspace,
             editor: None,
             revealed: 0,
@@ -568,6 +571,40 @@ impl FileBrowserView {
                     .into_any_element(),
             ),
             FileView::Text { path, text } => {
+                // Markdown opens as a preview (`MarkdownPreview`), with a Source toggle.
+                let markdown = language_for(&path) == "markdown";
+                if markdown && !self.markdown_source {
+                    return v_flex()
+                        .size_full()
+                        .child(
+                            h_flex()
+                                .px_3()
+                                .py_1()
+                                .gap_2()
+                                .items_center()
+                                .text_xs()
+                                .text_color(secondary)
+                                .border_b_1()
+                                .border_color(border)
+                                .child(div().flex_1().truncate().child(path.clone()))
+                                .child(Button::new("md-source").xsmall().ghost().label("</> Source").on_click(cx.listener(
+                                    |view, _, _, cx| {
+                                        view.markdown_source = true;
+                                        cx.notify();
+                                    },
+                                ))),
+                        )
+                        .child(
+                            div()
+                                .id("md-preview")
+                                .flex_1()
+                                .min_h_0()
+                                .overflow_y_scroll()
+                                .p_4()
+                                .child(gpui_kit::component::text::TextView::markdown(SharedString::from(format!("md-{path}")), text)),
+                        )
+                        .into_any_element();
+                }
                 let editor = self.editor_for(&path, &text, window, cx);
                 self.sync_highlights(&editor, cx);
                 self.apply_reveal(&editor, window, cx);
@@ -589,6 +626,14 @@ impl FileBrowserView {
                             .border_b_1()
                             .border_color(border)
                             .child(div().flex_1().truncate().child(path.clone()))
+                            .when(markdown, |d| {
+                                d.child(Button::new("md-preview-toggle").xsmall().ghost().label("Preview").on_click(cx.listener(
+                                    |view, _, _, cx| {
+                                        view.markdown_source = false;
+                                        cx.notify();
+                                    },
+                                )))
+                            })
                             .child(Button::new("edit-file").xsmall().ghost().label("Edit").on_click(cx.listener(
                                 move |view, _, _, cx| {
                                     view.workspace.update(cx, |w, cx| w.open_in_editor(&edit_path, cx));
