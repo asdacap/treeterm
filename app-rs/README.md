@@ -87,7 +87,8 @@ Done (tested against a real in-process daemon unless noted):
   images, PDF (webview), download, search panel (in file / in repo), find, go to definition;
   editor tab.
 - **Review (M7):** committed / uncommitted / commits views, stage/unstage/commit, inline
-  comments (Electron's metadata format), viewed files, prompting the AI harness; live merge
+  comments (Electron's metadata format), viewed files, image diffs (before / after),
+  prompting the AI harness; live merge
   output; git status (uncommitted / conflicts / behind, Pull) and PR indicators.
 - **Web (M8):** Browser tabs in a native webview (localhost guard); Web App tabs (free port
   probed on the daemon's host, dev server with `$PORT`, page once it answers, ephemeral SSH
@@ -109,8 +110,7 @@ Done (tested against a real in-process daemon unless noted):
 
 Not yet:
 
-- 3D model viewer (needs three.js bundled into a webview page), image diffs in Review,
-  traffic badge (byte counter), session renaming, JSON debug view.
+- 3D model viewer (needs three.js bundled into a webview page), traffic badge (byte counter), session renaming, JSON debug view.
 - Linux build verification (CI jobs added, not yet run) and a real SSH host test.
 - Parity sweep sign-off and cut-over (M10): remove `src/main`, `src/preload`,
   `src/renderer` once the checklist in the plan passes.

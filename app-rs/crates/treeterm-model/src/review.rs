@@ -157,6 +157,9 @@ pub struct ReviewModel {
     notice: Notice,
     /// The file last selected or jumped to, where "next unviewed" starts from.
     focused_file: Option<String>,
+    /// Both sides of an image file (`ImageDiffViewer`), when one is selected.
+    image_diff: Option<ImageDiff>,
+    _image: Option<Task<()>>,
     _load: Option<Task<()>>,
     _op: Option<Task<()>>,
     _head: Option<Task<()>>,
@@ -166,6 +169,30 @@ pub struct ReviewModel {
 
 /// Git commands for review must not hang the tab forever on a huge repo.
 const GIT_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// An image file's two sides in Review.
+#[derive(Debug, Clone)]
+pub struct ImageDiff {
+    pub path: String,
+    pub sides: ImageSides,
+}
+
+#[derive(Debug, Clone)]
+pub enum ImageSides {
+    Loading,
+    /// `None`: the file does not exist on that side (added / deleted).
+    Loaded {
+        before: Option<std::sync::Arc<Vec<u8>>>,
+        after: Option<std::sync::Arc<Vec<u8>>>,
+    },
+    Failed(String),
+}
+
+/// Image files Review shows side by side (`isImagePath`).
+pub fn is_image_path(path: &str) -> bool {
+    let ext = path.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
+    matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "gif" | "webp" | "svg" | "bmp" | "ico")
+}
 
 /// Which way "next unviewed" goes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -225,6 +252,8 @@ impl ReviewModel {
             adding: GitOp::Idle,
             notice: Notice::Clear,
             focused_file: None,
+            image_diff: None,
+            _image: None,
             _load: None,
             _op: None,
             _head: None,
@@ -594,7 +623,84 @@ impl ReviewModel {
     /// The file a click in the list (or a jump) went to.
     pub fn focus_file(&mut self, path: &str, cx: &mut Context<Self>) {
         self.focused_file = Some(path.to_owned());
+        if is_image_path(path) {
+            self.load_image_diff(path, cx);
+        } else if self.image_diff.is_some() {
+            self.close_image_diff(cx);
+        }
         cx.notify();
+    }
+
+    pub fn image_diff(&self) -> Option<&ImageDiff> {
+        self.image_diff.as_ref()
+    }
+
+    pub fn close_image_diff(&mut self, cx: &mut Context<Self>) {
+        self.image_diff = None;
+        self._image = None;
+        cx.notify();
+    }
+
+    /// Load both sides of an image change: the parent branch against the branch in
+    /// Committed, the index / HEAD against the working tree in Uncommitted.
+    fn load_image_diff(&mut self, path: &str, cx: &mut Context<Self>) {
+        use treeterm_core::git::FileDiffContents;
+        let staged = match &self.content {
+            ReviewContent::Uncommitted(u) => u
+                .changes
+                .files
+                .iter()
+                .find(|f| f.entry.path == path)
+                .map(|f| f.entry.staged),
+            ReviewContent::Loading | ReviewContent::Committed(_) | ReviewContent::Commits(_) | ReviewContent::Failed(_) => None,
+        };
+        let (git, repo, base, mode, file) = (self.git.clone(), self.path.clone(), self.base.clone(), self.mode, path.to_owned());
+        self.image_diff = Some(ImageDiff { path: path.to_owned(), sides: ImageSides::Loading });
+        self._image = Some(cx.spawn(async move |this, cx| {
+            let contents = match (mode, base, staged) {
+                (ReviewMode::Uncommitted, _, staging) => {
+                    git.get_uncommitted_file_contents_for_diff(&repo, &file, staging.unwrap_or(Staging::Unstaged)).await
+                }
+                (ReviewMode::Committed | ReviewMode::Commits, ReviewBase::Branch(branch), _) => {
+                    git.get_file_contents_for_diff(&repo, &branch, &file).await
+                }
+                (ReviewMode::Committed | ReviewMode::Commits, ReviewBase::None, _) => {
+                    git.get_uncommitted_file_contents_for_diff(&repo, &file, Staging::Unstaged).await
+                }
+            };
+            let sides = match contents {
+                Ok(FileDiffContents::Image { original_base64, modified_base64 }) => {
+                    let decode = |b64: &str| -> Result<Option<std::sync::Arc<Vec<u8>>>, String> {
+                        use base64::Engine as _;
+                        if b64.is_empty() {
+                            return Ok(None);
+                        }
+                        base64::engine::general_purpose::STANDARD
+                            .decode(b64)
+                            .map(|bytes| Some(std::sync::Arc::new(bytes)))
+                            .map_err(|e| e.to_string())
+                    };
+                    match (decode(&original_base64), decode(&modified_base64)) {
+                        (Ok(before), Ok(after)) => ImageSides::Loaded { before, after },
+                        (Err(e), _) | (_, Err(e)) => ImageSides::Failed(e),
+                    }
+                }
+                Ok(FileDiffContents::Text { .. } | FileDiffContents::Binary) => {
+                    ImageSides::Failed("Not shown as an image".to_owned())
+                }
+                Err(error) => ImageSides::Failed(error.to_string()),
+            };
+            match this.update(cx, |model, cx| {
+                if let Some(diff) = &mut model.image_diff
+                    && diff.path == file
+                {
+                    diff.sides = sides;
+                    cx.notify();
+                }
+            }) {
+                Ok(()) | Err(_) => {}
+            }
+        }));
     }
 
     /// The next (or previous) file not viewed yet, from the focused file; it becomes the

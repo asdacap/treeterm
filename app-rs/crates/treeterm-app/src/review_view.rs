@@ -647,7 +647,90 @@ impl ReviewView {
             .into_any_element()
     }
 
+    /// `ImageDiffViewer`: the selected image's two sides, over the diff.
+    fn image_diff_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        use treeterm_model::review::ImageSides;
+        let diff = self.model.read(cx).image_diff()?.clone();
+        let c = colors(cx);
+        let (secondary, error, border) = (c.text_secondary, c.error, c.border);
+        let format_of = |path: &str| match path.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).as_deref() {
+            Some("png") => gpui_kit::ImageFormat::Png,
+            Some("jpg" | "jpeg") => gpui_kit::ImageFormat::Jpeg,
+            Some("gif") => gpui_kit::ImageFormat::Gif,
+            Some("webp") => gpui_kit::ImageFormat::Webp,
+            Some("svg") => gpui_kit::ImageFormat::Svg,
+            Some("bmp") => gpui_kit::ImageFormat::Bmp,
+            Some("ico") => gpui_kit::ImageFormat::Ico,
+            Some(_) | None => gpui_kit::ImageFormat::Png,
+        };
+        let format = format_of(&diff.path);
+        let side = move |label: &'static str, missing: &'static str, bytes: Option<std::sync::Arc<Vec<u8>>>| {
+            v_flex()
+                .flex_1()
+                .min_w_0()
+                .h_full()
+                .gap_1()
+                .child(div().text_xs().text_color(secondary).child(label))
+                .child(match bytes {
+                    Some(bytes) => {
+                        let image = std::sync::Arc::new(gpui_kit::Image::from_bytes(format, (*bytes).clone()));
+                        div()
+                            .flex_1()
+                            .min_h_0()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(gpui_kit::img(image).max_w_full().max_h_full().object_fit(gpui_kit::ObjectFit::Contain))
+                            .into_any_element()
+                    }
+                    None => div().flex_1().flex().items_center().justify_center().text_sm().text_color(secondary).child(missing).into_any_element(),
+                })
+        };
+        let body = match diff.sides {
+            ImageSides::Loading => div().p_3().text_sm().text_color(secondary).child("Loading images…").into_any_element(),
+            ImageSides::Failed(message) => div().p_3().text_sm().text_color(error).child(message).into_any_element(),
+            ImageSides::Loaded { before, after } => h_flex()
+                .size_full()
+                .gap_3()
+                .p_2()
+                .child(side("Before", "(added)", before))
+                .child(side("After", "(deleted)", after))
+                .into_any_element(),
+        };
+        let model = self.model.clone();
+        Some(
+            v_flex()
+                .h(px(280.))
+                .flex_shrink_0()
+                .border_b_1()
+                .border_color(border)
+                .child(
+                    h_flex()
+                        .px_3()
+                        .py_1()
+                        .gap_2()
+                        .text_xs()
+                        .text_color(secondary)
+                        .child(div().flex_1().truncate().child(diff.path.clone()))
+                        .child(Button::new("close-image-diff").xsmall().ghost().label("Close").on_click(move |_, _, cx| {
+                            model.update(cx, |m, cx| m.close_image_diff(cx));
+                        })),
+                )
+                .child(div().flex_1().min_h_0().child(body))
+                .into_any_element(),
+        )
+    }
+
     fn body(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let images = self.image_diff_panel(cx);
+        let content = self.body_content(window, cx);
+        match images {
+            Some(panel) => v_flex().size_full().child(panel).child(div().flex_1().min_h_0().child(content)).into_any_element(),
+            None => content,
+        }
+    }
+
+    fn body_content(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let c = colors(cx);
         let (secondary, error) = (c.text_secondary, c.error);
         let content = self.model.read(cx).content().clone();

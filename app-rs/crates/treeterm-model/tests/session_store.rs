@@ -940,3 +940,35 @@ fn a_file_downloads_to_a_local_path(cx: &mut TestAppContext) {
     wait_until(cx, &files, |f| *f.download_state() == treeterm_model::file_browser::DownloadState::Idle && destination.exists());
     assert_eq!(std::fs::read(&destination).unwrap(), vec![0u8, 1, 2, 255, 7]);
 }
+
+#[gpui_kit::test]
+fn review_shows_both_sides_of_a_changed_image(cx: &mut TestAppContext) {
+    use treeterm_model::review::{ImageSides, ReviewContent};
+    cx.executor().allow_parking();
+    let h = harness();
+    publish(&h, &[]);
+    let repo = TempRepo::new(&h);
+    // Not real PNGs: the review only moves the bytes.
+    std::fs::write(repo.path.join("logo.png"), b"\x89PNG-before").unwrap();
+    repo.git(&["add", "logo.png"]);
+    repo.git(&["commit", "-q", "-m", "logo"]);
+    std::fs::write(repo.path.join("logo.png"), b"\x89PNG-after!").unwrap();
+    let store = open_store(cx, &h, "client-a");
+    let root = open_repo_workspace(cx, &store, &repo);
+    let workspace = store.read_with(cx, |s, _| ws(s, &root));
+    let tab = workspace
+        .update(cx, |w, cx| w.add_tab_with("review", serde_json::json!({ "viewMode": "uncommitted" }), cx))
+        .unwrap();
+    let Some(TabContent::Review(review)) = workspace.read_with(cx, |w, _| w.tab_content(&tab)) else {
+        panic!("not a review tab");
+    };
+    wait_until(cx, &review, |r| matches!(r.content(), ReviewContent::Uncommitted(_)));
+    review.update(cx, |r, cx| r.focus_file("logo.png", cx));
+    wait_until(cx, &review, |r| r.image_diff().is_some_and(|d| !matches!(d.sides, ImageSides::Loading)));
+    let sides = review.read_with(cx, |r, _| r.image_diff().unwrap().sides.clone());
+    let ImageSides::Loaded { before, after } = sides else {
+        panic!("not loaded: {sides:?}");
+    };
+    assert_eq!(before.as_deref().map(Vec::as_slice), Some(&b"\x89PNG-before"[..]));
+    assert_eq!(after.as_deref().map(Vec::as_slice), Some(&b"\x89PNG-after!"[..]));
+}
