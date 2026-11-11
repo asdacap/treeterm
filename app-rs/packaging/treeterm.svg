@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- TreeTerm app icon: a shell prompt with a tree of terminals under it.
+       The body follows the macOS icon grid (824 px squircle-ish tile on a 1024 canvas). -->
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#313647"/>
+      <stop offset="1" stop-color="#171a23"/>
+    </linearGradient>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="184" fill="url(#tile)"/>
+  <rect x="100.5" y="100.5" width="823" height="823" rx="183.5" fill="none" stroke="#ffffff" stroke-opacity="0.08"/>
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M250 262 L340 322 L250 382" stroke="#a6e3a1" stroke-width="44"/>
+    <path d="M390 382 H560" stroke="#a6e3a1" stroke-width="44"/>
+    <path d="M290 462 V726 H392 M290 584 H392" stroke="#7f849c" stroke-width="32"/>
+  </g>
+  <rect x="430" y="546" width="320" height="76" rx="38" fill="#89b4fa"/>
+  <rect x="430" y="688" width="236" height="76" rx="38" fill="#f9e2af"/>
+</svg>

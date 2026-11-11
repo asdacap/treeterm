@@ -16,6 +16,46 @@ cargo build -p treeterm-app            # add --features automation for the contr
 For an isolated sandbox (separate HOME, socket, daemon) and the automation socket, see
 `AGENTS.md`.
 
+## Packaging
+
+`app-rs/xtask` packages the app with plain `cargo`/`std::process` (no packaging crates, nothing
+downloaded at build time). From `app-rs/`:
+
+```sh
+cargo run -p xtask -- build-daemons   # daemons into <repo>/out/daemon-rs/
+cargo run -p xtask -- bundle          # release build of the app + bundle, into target/dist/
+cargo run -p xtask -- dist            # both
+cargo run -p xtask -- bundle --debug  # bundle a debug build (quick check of the layout)
+```
+
+- **Daemons.** `build-daemons` builds `daemon-rs/` like `npm run build:daemon-rs` and
+  `build:daemon-rs:remote` do, with the daemon's own (default) toolchain: the local daemon for
+  this host (`treeterm-daemon`) and static musl daemons for remote Linux hosts
+  (`treeterm-daemon-x86_64-linux`, `treeterm-daemon-aarch64-linux`), which treeterm-core uploads
+  over ssh. A remote target is skipped, with the reason, when its Rust target is not installed
+  (`rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl`, in `daemon-rs/`)
+  or its linker is missing. The linkers are the `*-linux-musl-gcc` ones from
+  `daemon-rs/.cargo/config.toml` (macOS: `brew install filosottile/musl-cross/musl-cross`);
+  `CARGO_TARGET_<TRIPLE>_LINKER=rust-lld` (as CI does) needs nothing extra.
+- **macOS** (`bundle` on a Mac): `target/dist/TreeTerm.app` and
+  `TreeTerm-<version>-<arch>-macos.zip`. The bundle holds `Contents/MacOS/treeterm`, the daemons
+  in `Contents/Resources/daemon-rs/`, `Info.plist` (from `packaging/macos/Info.plist`) and an
+  icon rendered from `packaging/treeterm.svg` with `sips`/`iconutil`. It is signed ad-hoc only;
+  sharing it beyond your machines needs a Developer ID signature and notarization.
+- **Linux** (`bundle` on Linux): `target/dist/treeterm-<version>-<arch>-linux/` and its
+  `.tar.gz`, with the daemons next to `treeterm`, `share/applications/treeterm.desktop` and
+  `share/icons/hicolor/scalable/apps/treeterm.svg`. Unpack it anywhere, put `treeterm` on PATH
+  (a symlink is fine) and copy `share/` into `~/.local/share/` for the launcher entry. It needs
+  the same system libraries as the build (GTK 3, WebKitGTK 4.1, Vulkan, xkbcommon, Wayland/X11).
+  No AppImage: `appimagetool` would have to be downloaded.
+- **Nix** (Linux): `nix build .#treeterm-native` builds the app with the toolchain pinned in
+  `rust-toolchain.toml` and the local daemon next to it (no remote daemons).
+
+The app finds the local daemon at `$TREETERM_DAEMON_DIR/treeterm-daemon` (development), next to
+its executable (tarball, Nix), in `../Resources/daemon-rs/` (macOS bundle) or, in debug builds,
+in the repo's `out/daemon-rs/` (`treeterm-app/src/daemon_binary.rs`). The `native-app-bundle`
+CI job runs `dist` on macOS and Linux and uploads both archives.
+
 ## Status
 
 Done (tested against a real in-process daemon unless noted):

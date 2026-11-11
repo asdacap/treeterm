@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=TreeTerm
+GenericName=Terminal Manager
+Comment=Hierarchical terminal manager for AI agent workflows
+Exec=treeterm
+TryExec=treeterm
+Icon=treeterm
+Terminal=false
+Categories=Development;System;TerminalEmulator;
+Keywords=terminal;git;worktree;shell;

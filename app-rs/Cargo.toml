@@ -8,6 +8,15 @@ members = [
     "crates/treeterm-model",
     "crates/treeterm-app",
     "crates/treeterm-testkit",
+    "xtask",
+]
+# Packaging (`cargo run -p xtask -- …`) is not part of a plain `cargo build`.
+default-members = [
+    "crates/treeterm-core",
+    "crates/treeterm-term",
+    "crates/treeterm-model",
+    "crates/treeterm-app",
+    "crates/treeterm-testkit",
 ]
 
 [workspace.package]

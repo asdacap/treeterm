@@ -122,7 +122,109 @@
           '';
         };
 
+        # Native Rust/GPUI app (app-rs/), Linux only: macOS bundles come from
+        # `cargo run -p xtask -- bundle` (GPUI compiles its Metal shaders with Xcode's `metal`).
+        # GPUI needs a newer Rust than nixpkgs ships, so it builds with the toolchain app-rs
+        # pins, from rust-overlay.
+        appRustToolchain = pkgs.rust-bin.fromRustupToolchainFile ./app-rs/rust-toolchain.toml;
+        appRustPlatform = pkgs.makeRustPlatform {
+          cargo = appRustToolchain;
+          rustc = appRustToolchain;
+        };
+
+        # Loaded with dlopen at run time (GPU, display servers, keymaps): added to the RUNPATH.
+        nativeRuntimeLibs = with pkgs; [
+          vulkan-loader
+          libGL
+          wayland
+          libxkbcommon
+          libx11
+          libxcb
+          libxcursor
+          libxi
+          libxrandr
+        ];
+
+        treeterm-native = appRustPlatform.buildRustPackage {
+          pname = "treeterm-native";
+          version = "0.1.0";
+
+          src = pkgs.lib.cleanSourceWith {
+            src = ./.;
+            filter = path: type:
+              let
+                relPath = pkgs.lib.removePrefix (toString ./.) (toString path);
+                under = dir: relPath == dir || pkgs.lib.hasPrefix "${dir}/" relPath;
+              in
+              # app-rs/ with its path dependencies in daemon-rs/ and the proto they compile
+              relPath == ""
+              || relPath == "/src"
+              || under "/src/proto"
+              || (under "/app-rs" && !under "/app-rs/target")
+              || (under "/daemon-rs" && !under "/daemon-rs/target");
+          };
+
+          sourceRoot = "source/app-rs";
+
+          # Registry crates only (no git sources), so the lockfile alone vendors them.
+          cargoLock.lockFile = ./app-rs/Cargo.lock;
+          cargoBuildFlags = [ "-p" "treeterm-app" ];
+
+          # The tests need a daemon, sockets and a GPU; `cargo test` in app-rs/ runs them.
+          doCheck = false;
+
+          nativeBuildInputs = with pkgs; [
+            pkg-config
+            protobuf
+            wrapGAppsHook3
+          ];
+
+          buildInputs = with pkgs; [
+            fontconfig
+            freetype
+            libxkbcommon
+            wayland
+            vulkan-loader
+            libx11
+            libxcb
+            libxrandr
+            # Webview panes (wry): WebKitGTK 4.1 on GTK 3; glib-networking gives it TLS.
+            gtk3
+            webkitgtk_4_1
+            libsoup_3
+            glib-networking
+          ];
+
+          # Only the app gets the GTK environment, not the daemon next to it.
+          dontWrapGApps = true;
+
+          # Same layout as the Linux tarball: the daemon next to the executable, where
+          # treeterm-app's daemon_binary.rs looks (it resolves the bin/ symlink).
+          postInstall = ''
+            mkdir -p $out/libexec/treeterm
+            mv $out/bin/treeterm $out/libexec/treeterm/treeterm
+            cp ${treeterm-daemon}/bin/treeterm-daemon $out/libexec/treeterm/
+            ln -s ../libexec/treeterm/treeterm $out/bin/treeterm
+            install -Dm644 packaging/linux/treeterm.desktop $out/share/applications/treeterm.desktop
+            install -Dm644 packaging/treeterm.svg $out/share/icons/hicolor/scalable/apps/treeterm.svg
+          '';
+
+          # After the fixup phase's --shrink-rpath, which would drop the dlopen-only entries.
+          postFixup = ''
+            patchelf --add-rpath ${pkgs.lib.makeLibraryPath nativeRuntimeLibs} $out/libexec/treeterm/treeterm
+            wrapGApp $out/libexec/treeterm/treeterm
+          '';
+
+          meta = with pkgs.lib; {
+            description = "TreeTerm native app (Rust/GPUI)";
+            license = licenses.mit;
+            platforms = platforms.linux;
+            mainProgram = "treeterm";
+          };
+        };
+
       in
+      pkgs.lib.recursiveUpdate
       {
         # Development shell
         devShells.default = pkgs.mkShell {
@@ -239,5 +341,13 @@
           program = "${self.packages.${system}.default}/bin/treeterm";
         };
       }
+      (pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
+        # `nix build .#treeterm-native`, `nix run .#treeterm-native`
+        packages.treeterm-native = treeterm-native;
+        apps.treeterm-native = {
+          type = "app";
+          program = "${treeterm-native}/bin/treeterm";
+        };
+      })
     );
 }
