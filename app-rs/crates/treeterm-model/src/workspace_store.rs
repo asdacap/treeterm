@@ -54,6 +54,8 @@ pub trait ActivityStyle {
     fn label(self) -> &'static str;
     /// Badge colour.
     fn color(self) -> u32;
+    /// The tab / tree glyph (`ActivityIndicator`).
+    fn icon(self) -> &'static str;
 }
 
 impl ActivityStyle for ActivityState {
@@ -80,6 +82,17 @@ impl ActivityStyle for ActivityState {
             ActivityState::Completed => 0x23d18b,
             ActivityState::ApplicationError => 0xd16969,
             ActivityState::Error => 0xf44747,
+        }
+    }
+
+    fn icon(self) -> &'static str {
+        match self {
+            ActivityState::Idle => "○",
+            ActivityState::Working => "◌",
+            ActivityState::UserInputRequired => "▶",
+            ActivityState::PermissionRequest | ActivityState::SafePermissionRequested | ActivityState::Error => "●",
+            ActivityState::Completed => "✓",
+            ActivityState::ApplicationError => "✗",
         }
     }
 }

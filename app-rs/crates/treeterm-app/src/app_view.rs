@@ -864,6 +864,13 @@ fn workspace_pane(connected: &mut Connected, window: &mut Window, cx: &mut Conte
                 .when(is_active, |d| d.bg(active_bg).text_color(primary))
                 .when(!is_active, |d| d.text_color(secondary).hover(move |s| s.bg(hover)))
                 .cursor_pointer()
+                .when_some(
+                    Some(workspace.read(cx).activity(tab_id))
+                        .filter(|state| *state != treeterm_model::workspace_store::ActivityState::Idle),
+                    |d, state| {
+                        d.child(div().text_xs().flex_shrink_0().text_color(gpui_kit::rgb(state.color())).child(state.icon()))
+                    },
+                )
                 .child(tab.title.clone())
                 .when(!closable, |d| d.pr_2())
                 .when(closable, |d| d.child(

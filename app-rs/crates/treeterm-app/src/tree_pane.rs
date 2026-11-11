@@ -371,13 +371,7 @@ impl TreePane {
             // "New activity — open workspace to mark as read".
             .when(unread, |row| row.child(div().text_xs().text_color(c.accent).child("●")))
             .when(busy, |row| {
-                row.child(
-                    div()
-                        .size(px(7.))
-                        .flex_shrink_0()
-                        .rounded_full()
-                        .bg(gpui_kit::rgb(activity.color())),
-                )
+                row.child(div().text_xs().flex_shrink_0().text_color(gpui_kit::rgb(activity.color())).child(activity.icon()))
             })
             .context_menu(move |menu, _window, cx| {
                 let (session, id, label) = (session.clone(), menu_id.clone(), label.clone());
