@@ -826,6 +826,37 @@ impl SessionStore {
         self.remote = Some(remote);
     }
 
+    /// Whether another client (or a stuck operation) holds the session lock now.
+    pub fn is_locked(&self) -> bool {
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or_default();
+        self.lock.as_ref().is_some_and(|lock| lock.expires_at > now_ms)
+    }
+
+    /// Break the session lock (`forceUnlock`), e.g. after a client died holding it.
+    pub fn force_unlock(&mut self, cx: &mut Context<Self>) {
+        let unlock = self.conn.force_unlock_session();
+        cx.spawn(async move |this, cx| {
+            let result = match unlock.await {
+                Ok(Ok(session)) => Ok(session),
+                Ok(Err(error)) => Err(error.to_string()),
+                Err(lost) => Err(lost.to_string()),
+            };
+            match this.update(cx, |store, cx| match result {
+                Ok(session) => {
+                    store.lock = session.lock;
+                    cx.notify();
+                }
+                Err(error) => tracing::error!(%error, "force unlock failed"),
+            }) {
+                Ok(()) | Err(_) => {}
+            }
+        })
+        .detach();
+    }
+
     /// A workspace's git status.
     pub fn git_controller(&self, id: &str) -> Option<&Entity<crate::git_controller::GitController>> {
         self.git_controllers.get(id)

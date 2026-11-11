@@ -900,3 +900,21 @@ fn auto_open_adopts_worktrees_under_their_detected_parents(cx: &mut TestAppConte
     assert_eq!(file_of(&sub_id).display_name(), "Sub work");
     assert_eq!(file_of(&sub_id).metadata.get("branchIsUserDefined").map(String::as_str), Some("true"));
 }
+
+#[gpui_kit::test]
+fn a_lock_held_elsewhere_shows_and_can_be_forced_open(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    publish(&h, &[]);
+    let store = open_store(cx, &h, "client-a");
+    wait_until(cx, &store, |s| matches!(s.state(), SessionState::Live));
+    // Another connection takes the lock and never releases it.
+    let other = futures::executor::block_on(treeterm_core::daemon::DaemonConnection::open(&h.rt, h.daemon.socket_path()))
+        .unwrap()
+        .unwrap();
+    let locked = futures::executor::block_on(other.lock_session(std::time::Duration::from_secs(600))).unwrap().unwrap();
+    assert!(matches!(locked, treeterm_core::daemon::SessionLockResult::Acquired(_)));
+    wait_until(cx, &store, |s| s.is_locked());
+    store.update(cx, |s, cx| s.force_unlock(cx));
+    wait_until(cx, &store, |s| !s.is_locked());
+}

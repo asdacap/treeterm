@@ -240,6 +240,22 @@ impl Render for TreePane {
                             })),
                     )
                     .child(div().flex_1().truncate().child(self.title.clone()))
+                    .when(self.session.read(cx).is_locked(), |d| {
+                        d.child(
+                            div()
+                                .id("force-unlock")
+                                .px_1()
+                                .rounded_sm()
+                                .text_xs()
+                                .text_color(text_secondary)
+                                .hover(move |d| d.bg(hover))
+                                .child("🔓 Unlock")
+                                .on_click(cx.listener(|pane, _: &ClickEvent, _, cx| {
+                                    cx.stop_propagation();
+                                    pane.session.update(cx, |s, cx| s.force_unlock(cx));
+                                })),
+                        )
+                    })
                     .on_click(cx.listener(|_, _: &ClickEvent, _, cx| cx.emit(SessionInfoRequested)))
                     .child(
                         div()
