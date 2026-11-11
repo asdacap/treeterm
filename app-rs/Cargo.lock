@@ -7651,12 +7651,14 @@ dependencies = [
 name = "treeterm-core"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "dirs 6.0.0",
  "futures",
  "hex",
  "hyper-util",
  "indexmap",
  "libc",
+ "regex",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -7736,6 +7738,7 @@ name = "treeterm-testkit"
 version = "0.1.0"
 dependencies = [
  "futures",
+ "libc",
  "tempfile",
  "tokio",
  "treeterm-core",

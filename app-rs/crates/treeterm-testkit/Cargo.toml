@@ -16,6 +16,7 @@ treeterm-core.workspace = true
 treeterm-proto.workspace = true
 futures.workspace = true
 tempfile.workspace = true
+libc.workspace = true
 
 [lints]
 workspace = true

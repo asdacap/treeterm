@@ -4,7 +4,11 @@
 //! The GPUI layers (`treeterm-model`, `treeterm-app`) consume it through [`rt`], which hands
 //! tokio-driven work to any executor as plain futures and streams.
 
+pub mod concurrency;
 pub mod daemon;
+pub mod exec;
+pub mod fs;
+pub mod git;
 pub mod keybinding;
 pub mod layout;
 pub mod local_daemon;
