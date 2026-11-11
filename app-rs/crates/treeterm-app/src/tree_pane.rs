@@ -37,6 +37,11 @@ pub enum Selection {
 
 impl EventEmitter<WorkspaceSelected> for TreePane {}
 
+/// Emitted when the user clicks the session's name: show its session pane.
+pub struct SessionInfoRequested;
+
+impl EventEmitter<SessionInfoRequested> for TreePane {}
+
 impl TreePane {
     pub fn new(
         session: Entity<SessionStore>,
@@ -176,12 +181,20 @@ impl Render for TreePane {
                     .text_sm()
                     .cursor_pointer()
                     .hover(move |d| d.bg(hover))
-                    .child(div().w(px(14.)).text_color(text_secondary).child(if self.folded { "▸" } else { "▾" }))
+                    .child(
+                        div()
+                            .id("session-fold")
+                            .w(px(14.))
+                            .text_color(text_secondary)
+                            .child(if self.folded { "▸" } else { "▾" })
+                            .on_click(cx.listener(|pane, _: &ClickEvent, _, cx| {
+                                cx.stop_propagation();
+                                pane.folded = !pane.folded;
+                                cx.notify();
+                            })),
+                    )
                     .child(div().flex_1().truncate().child(self.title.clone()))
-                    .on_click(cx.listener(|pane, _: &ClickEvent, _, cx| {
-                        pane.folded = !pane.folded;
-                        cx.notify();
-                    }))
+                    .on_click(cx.listener(|_, _: &ClickEvent, _, cx| cx.emit(SessionInfoRequested)))
                     .child(
                         div()
                             .id("open-workspace")

@@ -44,6 +44,9 @@ pub struct SessionSlot {
     pub id: ConnectionId,
     pub target: ConnectionTarget,
     pub state: ConnState,
+    /// The saved port forwards were started (once per connection; the manager restarts
+    /// them after reconnects).
+    forwards_started: bool,
     _events: Option<Subscription>,
 }
 
@@ -130,6 +133,7 @@ impl AppStore {
             id,
             target,
             state: ConnState::Connecting(ConnectPhase::Daemon),
+            forwards_started: false,
             _events: None,
         });
     }
@@ -235,6 +239,13 @@ impl AppStore {
                     return;
                 };
                 slot._events = Some(events);
+                // `autoStartPortForwards`: a remote's saved forwards start on its first connect.
+                if !slot.forwards_started && !slot.is_local() {
+                    slot.forwards_started = true;
+                    if let Err(error) = self.manager.start_saved_port_forwards(&id) {
+                        tracing::error!(%error, "cannot start saved port forwards");
+                    }
+                }
                 ConnState::Connected(session)
             }
             ConnectionStatus::Reconnecting { attempt, error } => {
@@ -268,6 +279,23 @@ impl AppStore {
             tracing::error!(%error, "cannot reconnect");
         }
         cx.notify();
+    }
+
+    /// Write a remote connection's saved port forwards back to its saved connection in the
+    /// settings (`syncSavedPortForwards`).
+    pub fn save_port_forwards(&mut self, id: &ConnectionId, cx: &mut Context<Self>) {
+        let specs = self.manager.saved_port_forward_specs(id);
+        let key = id.as_str().to_owned();
+        self.settings.update(cx, |settings, cx| {
+            settings.update(
+                move |s| {
+                    if let Some(saved) = s.ssh.saved_connections.iter_mut().find(|c| c.id == key) {
+                        saved.port_forwards = specs;
+                    }
+                },
+                cx,
+            )
+        });
     }
 
     /// "Exit and Kill Daemon": stop the local daemon (and with it every local PTY).

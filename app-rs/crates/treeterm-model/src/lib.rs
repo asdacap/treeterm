@@ -11,6 +11,7 @@ pub mod apps;
 pub mod file_browser;
 pub mod keybinding_store;
 pub mod review;
+pub mod session_info;
 pub mod session_store;
 pub mod settings_store;
 pub mod terminal;

@@ -29,6 +29,10 @@ pub struct AppView {
     sessions: IndexMap<ConnectionId, Connected>,
     /// The session whose workspace the right side shows.
     active: Option<ConnectionId>,
+    /// The session pane, shown instead of a workspace after clicking a session's name.
+    info: Option<Entity<crate::session_info_view::SessionInfoView>>,
+    /// A session pane to open on the next render (it needs the window).
+    info_pending: Option<ConnectionId>,
 }
 
 /// Per-window state for a connected session.
@@ -72,6 +76,8 @@ impl AppView {
             store: store.clone(),
             sessions: IndexMap::new(),
             active: None,
+            info: None,
+            info_pending: None,
         };
         view.sync(&store, cx);
         view
@@ -118,7 +124,14 @@ impl AppView {
         cx.observe(&session, |_, _, cx| cx.notify()).detach();
         let keybindings = self.keybindings.clone();
         let tree = cx.new(|cx| TreePane::new(session.clone(), keybindings, name, remote, cx));
+        let info_id = id.clone();
+        cx.subscribe(&tree, move |view, _, _: &crate::tree_pane::SessionInfoRequested, cx| {
+            view.info_pending = Some(info_id.clone());
+            cx.notify();
+        })
+        .detach();
         let selection = cx.subscribe(&tree, move |view, _, WorkspaceSelected(workspace), cx| {
+            view.info = None;
             view.activate_session(&id, cx);
             if let Some(connected) = view.sessions.get_mut(&id) {
                 connected.active = ActiveView::Workspace(workspace.clone());
@@ -191,14 +204,14 @@ impl AppView {
                         treeterm_core::connection::ConnectPhase::Daemon => "Connecting to daemon…",
                     };
                     v_flex()
-                        .child(div().px_2().py_1().text_sm().child(name.clone()))
+                        .child(session_name(&id, name.clone(), hover, cx))
                         .child(h_flex().px_3().gap_2().text_xs().text_color(secondary).child(Spinner::new()).child(what))
                         .into_any_element()
                 }
                 ConnState::Reconnecting { attempt, error: reason } => {
                     let (now, stop) = (id.clone(), id.clone());
                     v_flex()
-                        .child(div().px_2().py_1().text_sm().child(name.clone()))
+                        .child(session_name(&id, name.clone(), hover, cx))
                         .child(banner(format!("Reconnecting (attempt {attempt})… {reason}"), secondary))
                         .child(
                             h_flex()
@@ -236,7 +249,7 @@ impl AppView {
                         ));
                     }
                     v_flex()
-                        .child(div().px_2().py_1().text_sm().child(name.clone()))
+                        .child(session_name(&id, name.clone(), hover, cx))
                         .child(banner(reason, error))
                         .child(actions)
                         .into_any_element()
@@ -278,6 +291,20 @@ impl AppView {
             .into_any_element()
     }
 
+    /// Open a pending session pane, or drop one whose session is gone.
+    fn sync_info(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(id) = self.info_pending.take() {
+            let app = self.store.clone();
+            self.info = Some(cx.new(|cx| crate::session_info_view::SessionInfoView::new(app, id, window, cx)));
+        }
+        if let Some(info) = &self.info {
+            let id = info.read(cx).connection(cx);
+            if self.store.read(cx).session_slot(&id).is_none() {
+                self.info = None;
+            }
+        }
+    }
+
     /// Connect again to an outdated remote daemon, refreshing it or accepting it.
     fn reconnect_outdated(
         &mut self,
@@ -297,8 +324,12 @@ impl Render for AppView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let c = colors(cx);
         let (bg, fg, secondary, error) = (c.bg_primary, c.text_primary, c.text_secondary, c.error);
+        self.sync_info(window, cx);
         let sidebar = self.sidebar(cx);
-        let pane = match self.current_mut() {
+        let info = self.info.clone();
+        let pane = match (info, self.current_mut()) {
+            (Some(info), _) => info.into_any_element(),
+            (None, current) => match current {
             Some(connected) => workspace_pane(connected, window, cx),
             None => {
                 let starting = self.store.read(cx).sessions().next().map(|slot| slot.state.clone());
@@ -333,6 +364,7 @@ impl Render for AppView {
                     ),
                 }
             }
+            },
         };
         let content = h_flex().size_full().child(sidebar).child(pane).into_any_element();
         if window.focused(cx).is_none() {
@@ -478,6 +510,23 @@ impl AppView {
             }
         }
     }
+}
+
+/// A session's name in the sidebar; clicking it opens the session pane.
+fn session_name(id: &ConnectionId, name: String, hover: gpui_kit::Hsla, cx: &mut Context<AppView>) -> impl IntoElement + use<> {
+    let id = id.clone();
+    div()
+        .id(SharedString::from(format!("session-name-{id}")))
+        .px_2()
+        .py_1()
+        .text_sm()
+        .cursor_pointer()
+        .hover(move |d| d.bg(hover))
+        .child(name)
+        .on_click(cx.listener(move |view, _, _, cx| {
+            view.info_pending = Some(id.clone());
+            cx.notify();
+        }))
 }
 
 fn centered(child: impl IntoElement) -> AnyElement {
