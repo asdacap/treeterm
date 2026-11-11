@@ -292,7 +292,7 @@ impl WorkspaceStore {
             },
             // Always detecting: the per-tab switch gates only the Working edge, read when it
             // fires, so turning it off still lets a pending Idle land.
-            idle_timeout: Some(settings.analyzer.idle_debounce),
+            idle_timeout: Some(settings.terminal_analyzer.idle_debounce),
         }
     }
 
