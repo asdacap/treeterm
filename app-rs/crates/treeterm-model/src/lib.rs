@@ -14,6 +14,7 @@ pub mod git_controller;
 pub mod harness_prompts;
 pub mod keybinding_store;
 pub mod review;
+pub mod review_tree;
 pub mod session_info;
 pub mod session_names;
 mod review_metadata;

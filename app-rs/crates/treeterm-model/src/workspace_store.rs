@@ -43,6 +43,10 @@ pub enum WorkspaceEvent {
     AttentionRecorded,
     /// The display name or description changed (the worktree registry keeps them).
     LabelsChanged,
+    /// Review's merge buttons: merge this workspace into its parent (the session runs it).
+    MergeRequested { squash: bool, after: crate::session_store::AfterMerge },
+    /// Review's "Close and Clean": remove this workspace.
+    RemoveRequested(crate::session_store::RemoveMode),
 }
 
 impl EventEmitter<WorkspaceEvent> for WorkspaceStore {}
@@ -335,7 +339,31 @@ impl WorkspaceStore {
     /// `promptHarness`: paste `text` into the workspace's first AI-harness tab (in tab
     /// order) whose terminal is attached, press Enter, and show that tab.
     pub fn prompt_harness(&mut self, text: &str, cx: &mut Context<Self>) -> Result<(), String> {
-        let target = self.workspace.file.app_states.iter().find_map(|(tab_id, tab)| {
+        let Some((tab_id, terminal)) = self.running_harness() else {
+            return Err("No AI harness is running in this workspace".to_owned());
+        };
+        terminal.update(cx, |terminal, cx| {
+            terminal.paste(text, cx);
+            terminal.send_unfocused(b"\r");
+        });
+        self.set_active_tab(&tab_id, cx);
+        Ok(())
+    }
+
+    /// `findRunningHarness`: an AI-harness tab is attached to its terminal (the prompt
+    /// buttons show).
+    pub fn has_running_harness(&self) -> bool {
+        self.running_harness().is_some()
+    }
+
+    /// The daemon's file API, for the workspace's own tabs (Review's favourites).
+    pub fn fs_client(&self) -> treeterm_core::fs::FsClient {
+        self.conn.fs_client()
+    }
+
+    /// The first AI-harness tab (in tab order) whose terminal is attached.
+    fn running_harness(&self) -> Option<(String, Entity<TerminalModel>)> {
+        self.workspace.file.app_states.iter().find_map(|(tab_id, tab)| {
             let app = self.registry.get(&tab.application_id)?;
             let AppKind::AiHarness { .. } = app.kind else {
                 return None;
@@ -352,16 +380,7 @@ impl WorkspaceStore {
                 )
                 | None => None,
             }
-        });
-        let Some((tab_id, terminal)) = target else {
-            return Err("No AI harness is running in this workspace".to_owned());
-        };
-        terminal.update(cx, |terminal, cx| {
-            terminal.paste(text, cx);
-            terminal.send_unfocused(b"\r");
-        });
-        self.set_active_tab(&tab_id, cx);
-        Ok(())
+        })
     }
 
     /// The status bar's "Auto-approve safe" switch, persisted per tab.
@@ -697,7 +716,21 @@ impl WorkspaceStore {
                         crate::review::ReviewEvent::StateChanged(next) => {
                             store.merge_tab_state(&owned_tab, next.clone(), cx);
                         }
+                        crate::review::ReviewEvent::StateRemoved(key) => store.update_tab_state(
+                            &owned_tab,
+                            |state| {
+                                if let Value::Object(state) = state {
+                                    state.remove(*key);
+                                }
+                            },
+                            cx,
+                        ),
                         crate::review::ReviewEvent::Committed => {}
+                        crate::review::ReviewEvent::CloseRequested => store.remove_tab(&owned_tab, cx),
+                        crate::review::ReviewEvent::MergeRequested { squash, after } => {
+                            cx.emit(WorkspaceEvent::MergeRequested { squash: *squash, after: *after });
+                        }
+                        crate::review::ReviewEvent::RemoveRequested(mode) => cx.emit(WorkspaceEvent::RemoveRequested(*mode)),
                     }
                 });
                 self.tabs.insert(tab_id.to_owned(), TabRef::Review { model, _events: events });
@@ -1035,7 +1068,7 @@ impl WorkspaceStore {
             AppState {
                 application_id: application_id.to_owned(),
                 title: format!("{} {}", app.name, existing + 1),
-                state: app.initial_state(),
+                state: self.initial_tab_state(&app),
             },
         );
         self.workspace.file.active_tab_id = Some(tab_id.clone());
@@ -1043,6 +1076,18 @@ impl WorkspaceStore {
         self.changed(cx);
         self.init_tab(&tab_id, cx);
         Some(tab_id)
+    }
+
+    /// A new tab's state. A child's Review tab names its parent (`parentWorkspaceId`), which
+    /// Electron's Review reads to compare and merge against it.
+    fn initial_tab_state(&self, app: &crate::apps::AppDef) -> Value {
+        let mut state = app.initial_state();
+        let file = &self.workspace.file;
+        let parent = file.parent_id.as_deref().filter(|id| !id.is_empty() && file.is_worktree);
+        if let (AppKind::Review, Some(parent), Value::Object(state)) = (&app.kind, parent, &mut state) {
+            state.entry("parentWorkspaceId").or_insert_with(|| Value::String(parent.to_owned()));
+        }
+        state
     }
 
     /// Merge `next`'s keys over the tab's state (keys the other app wrote survive).
@@ -1072,7 +1117,7 @@ impl WorkspaceStore {
             .values()
             .filter(|tab| tab.application_id == application_id)
             .count();
-        let mut state = app.initial_state();
+        let mut state = self.initial_tab_state(&app);
         if let (Value::Object(state), Value::Object(overrides)) = (&mut state, overrides) {
             for (key, value) in overrides {
                 state.insert(key, value);

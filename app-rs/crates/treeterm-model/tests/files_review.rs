@@ -491,6 +491,7 @@ fn review_comments_are_added_addressed_prompted_and_deleted(cx: &mut TestAppCont
     assert_eq!(review.read_with(cx, |r, cx| r.comments(cx).unwrap()[0].resolution), Resolution::Open);
 
     // Without a harness the prompt fails and nothing is marked.
+    assert!(!review.read_with(cx, |r, cx| r.header(cx).harness));
     review.update(cx, |r, cx| r.prompt_open_comments(cx));
     assert!(matches!(review.read_with(cx, |r, _| r.notice().clone()), Notice::Error(e) if e.contains("No AI harness")));
     assert_eq!(review.read_with(cx, |r, cx| r.comments(cx).unwrap()[0].resolution), Resolution::Open);
@@ -503,6 +504,7 @@ fn review_comments_are_added_addressed_prompted_and_deleted(cx: &mut TestAppCont
     });
     workspace.update(cx, |w, cx| w.set_active_tab(&review_tab, cx));
     wait_until_app(cx, &workspace, |w, _| matches!(w.tab_content(&bot), Some(TabContent::Terminal(_))));
+    assert!(review.read_with(cx, |r, cx| r.header(cx).harness));
     review.update(cx, |r, cx| r.prompt_open_comments(cx));
     assert_eq!(review.read_with(cx, |r, _| r.notice().clone()), Notice::Clear);
     assert_eq!(review.read_with(cx, |r, cx| r.comments(cx).unwrap()[0].resolution), Resolution::Addressed);
@@ -522,4 +524,97 @@ fn review_comments_are_added_addressed_prompted_and_deleted(cx: &mut TestAppCont
     review.update(cx, |r, cx| r.delete_comment(&comment.id, cx));
     assert!(review.read_with(cx, |r, cx| r.comments(cx).unwrap()).is_empty());
     assert_eq!(metadata(cx, &workspace, "reviewComments"), Some(serde_json::json!([])));
+}
+
+/// A Review tab with `state` (e.g. a base override) on the repo's workspace, and its tab id.
+fn open_review_with(cx: &mut TestAppContext, workspace: &Entity<WorkspaceStore>, state: serde_json::Value) -> (String, Entity<ReviewModel>) {
+    let tab = workspace.update(cx, |w, cx| w.add_tab_with("review", state, cx)).unwrap();
+    let Some(TabContent::Review(review)) = workspace.read_with(cx, |w, _| w.tab_content(&tab)) else {
+        panic!("not a review tab");
+    };
+    (tab, review)
+}
+
+fn tab_state(cx: &mut TestAppContext, workspace: &Entity<WorkspaceStore>, tab: &str) -> serde_json::Value {
+    workspace.read_with(cx, |w, _| w.file().app_states[tab].state.clone())
+}
+
+#[gpui_kit::test]
+fn review_counts_views_lists_commits_and_shows_a_commits_changes(cx: &mut TestAppContext) {
+    use treeterm_model::review::{CommitDiff, Loaded, ReviewEvent, ReviewMode};
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let repo = TempRepo::new(&h);
+    repo.write("a.txt", "one\ntwo\n");
+    repo.commit_all("base");
+    repo.git(&["checkout", "-q", "-b", "feature"]);
+    repo.write("a.txt", "one\nTWO\n");
+    repo.write("dir/b.txt", "bee\n");
+    repo.commit_all("first");
+    repo.write("a.txt", "one  \nTWO\n");
+    repo.commit_all("second");
+    repo.write("c.txt", "uncommitted\n");
+    let store = open_store(cx, &h);
+    let workspace = open_repo_workspace(cx, &h, &store, &repo);
+    let (tab, review) =
+        open_review_with(cx, &workspace, serde_json::json!({ "viewMode": "committed", "baseBranchOverride": "main" }));
+    let events = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let seen = events.clone();
+    let _events = cx.update(|cx| {
+        cx.subscribe(&review, move |_, event: &ReviewEvent, _| seen.borrow_mut().push(event.clone()))
+    });
+
+    // Every view's count arrives whatever is shown; the summary names both branches.
+    wait_review(cx, &review, "counts", |r, _| r.overview().committed == 2 && r.overview().uncommitted == 1);
+    wait_review(cx, &review, "committed", |r, _| matches!(r.content(), ReviewContent::Committed(_)));
+    let ReviewContent::Committed(committed) = review.read_with(cx, |r, _| r.content().clone()) else { unreachable!() };
+    assert_eq!((committed.base_branch.as_str(), committed.head_branch.as_str()), ("main", "feature"));
+    assert_eq!((committed.total_additions, committed.total_deletions), (3, 2));
+    // Patches carry whole files (here all of `a.txt`), so unchanged lines can be revealed.
+    assert!(committed.patch.contains("@@ -1,2 +1,2 @@\n-one\n-two\n+one  \n+TWO"), "{}", committed.patch);
+    assert!(review.read_with(cx, |r, cx| r.is_base_overridden(cx)));
+
+    // Whitespace-only changes drop out with `-w`.
+    review.update(cx, |r, cx| r.set_ignore_whitespace(true, cx));
+    wait_review(cx, &review, "-w", |r, _| matches!(r.content(), ReviewContent::Committed(c) if !c.patch.contains("+one  ")));
+    assert!(review.read_with(cx, |r, _| r.ignore_whitespace()));
+    review.update(cx, |r, cx| r.set_ignore_whitespace(false, cx));
+
+    // Commits: listed since the base, newest first; a picked one shows its files and patch,
+    // and its files can be marked viewed together.
+    review.update(cx, |r, cx| r.set_mode(ReviewMode::Commits, cx));
+    wait_review(cx, &review, "commits", |r, _| matches!(r.content(), ReviewContent::Commits(c) if c.len() == 2));
+    assert_eq!((review.read_with(cx, |r, _| r.overview().commits), review.read_with(cx, |r, _| r.overview().more_commits)), (2, false));
+    let ReviewContent::Commits(commits) = review.read_with(cx, |r, _| r.content().clone()) else { unreachable!() };
+    assert_eq!(commits[0].message, "second");
+    review.update(cx, |r, cx| r.select_commit(&commits[1].hash, cx));
+    wait_review(cx, &review, "commit diff", |r, _| matches!(r.selected_commit().map(|s| &s.diff), Some(Loaded::Ready(_))));
+    let Some(Loaded::Ready(CommitDiff { files, patch })) = review.read_with(cx, |r, _| r.selected_commit().map(|s| s.diff.clone())) else {
+        unreachable!()
+    };
+    let mut paths: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
+    paths.sort();
+    assert_eq!(paths, ["a.txt", "dir/b.txt"]);
+    assert!(patch.contains("+++ b/dir/b.txt"), "{patch}");
+    let all = vec!["a.txt".to_owned(), "dir/b.txt".to_owned()];
+    review.update(cx, |r, cx| r.set_files_viewed(&all, true, cx));
+    assert_eq!(review.read_with(cx, |r, cx| r.viewed_count(cx).unwrap()), (2, 2));
+    review.update(cx, |r, cx| r.set_files_viewed(&all[..1], false, cx));
+    assert_eq!(review.read_with(cx, |r, cx| r.viewed_count(cx).unwrap()), (1, 2));
+
+    // Resetting the base drops the override from the tab state (Electron's `undefined`); with
+    // no parent there is then no base, and the Commits view lists the whole history.
+    review.update(cx, |r, cx| r.set_base(None, cx));
+    assert!(tab_state(cx, &workspace, &tab).get("baseBranchOverride").is_none(), "{}", tab_state(cx, &workspace, &tab));
+    assert_eq!(review.read_with(cx, |r, _| r.base().clone()), treeterm_model::review::ReviewBase::None);
+    wait_review(cx, &review, "all commits", |r, _| matches!(r.content(), ReviewContent::Commits(c) if c.len() == 4));
+    review.update(cx, |r, cx| r.set_base(Some("main".into()), cx));
+    assert_eq!(tab_state(cx, &workspace, &tab)["baseBranchOverride"], "main");
+
+    // "Cancel" / "Close" closes the tab.
+    review.update(cx, |r, cx| r.close(cx));
+    cx.run_until_parked();
+    assert!(events.borrow().contains(&ReviewEvent::CloseRequested));
+    assert!(workspace.read_with(cx, |w, _| !w.file().app_states.contains_key(&tab)));
 }

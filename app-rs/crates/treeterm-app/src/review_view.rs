@@ -1,100 +1,75 @@
-//! The Review tab. Port of the view side of `ReviewBrowser.tsx` (`@pierre/diffs` → GPUI Kit's
-//! virtualized `Diff` with tree-sitter highlighting), `CommentsList.tsx` and the prompt
-//! buttons.
-//!
-//! Comments show as annotations under their diff line; the `+` beside a hovered line starts
-//! one. Files are marked viewed from the file list or their diff header.
+//! The Review tab. Port of the view side of `ReviewBrowser.tsx`: the header (branch → base
+//! picker, refresh, prompt and merge buttons), the conflict banner, the view tabs, and per
+//! view the summary, `DiffToolbar`, the file tree (`DiffFileTree`) beside the stacked diff
+//! (`StackedDiffList` / `FileDiffSection`, here GPUI Kit's virtualized `Diff`) and the
+//! commit box. Sizes and colours are `index.css`'s.
+
+mod files;
+mod parts;
+mod stacked;
 
 use std::collections::HashSet;
-use std::rc::Rc;
 
-use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::diff::{
-    Diff, DiffAnnotation, DiffFile, DiffLinePosition, DiffLineRange, DiffMode, DiffSide, DiffState,
-};
-use gpui_kit::component::input::{Input, InputEvent, InputState};
-use gpui_kit::component::{Disableable as _, Sizable as _, h_flex, v_flex};
+use gpui_kit::assets::IconName;
+use gpui_kit::component::input::{InputEvent, InputState};
+use gpui_kit::component::{WindowExt as _, h_flex, v_flex};
 use gpui_kit::prelude::*;
-use gpui_kit::{AnyElement, App, Context, ElementId, Entity, Hsla, SharedString, Subscription, Window, div, px, rgb};
-use treeterm_core::git::{FileChangeStats, FileChangeStatus, Staging, UncommittedFile};
-use treeterm_core::review::{Freshness, Resolution, ReviewComment, Side};
-use treeterm_model::review::{
-    CommentDraft, Committed, Direction, GitOp, Notice, ReviewBase, ReviewContent, ReviewEvent, ReviewMode, ReviewModel,
-    StageTarget, Uncommitted,
+use gpui_kit::{
+    AnyElement, App, ClickEvent, Focusable as _, Context, Entity, FontWeight, MouseButton, MouseMoveEvent, ScrollHandle, SharedString,
+    Subscription, Window, deferred, div, px, rgb, rgba,
 };
+use treeterm_core::git::{GitLogCommit, Staging};
+use treeterm_model::review::{
+    ConflictCheck, GitOp, Loaded, Notice, ReviewBase, ReviewContent, ReviewEvent, ReviewHeader, ReviewMode,
+    ReviewModel, StageTarget,
+};
+use treeterm_model::session_store::AfterMerge;
 
-use crate::file_browser_view::language_for;
 use crate::theme::colors;
+use parts::{ERROR_RED, MONO, action_button, branch_pill, plain_icon, spinner, toolbar_button, totals};
+use stacked::{DiffCache, ListedFile};
+
+/// The advance of 12px Menlo (0.6em).
+const MONO_12_ADVANCE: f32 = 7.224;
 
 pub struct ReviewView {
     model: Entity<ReviewModel>,
-    /// The parsed patch currently shown, keyed by its text.
-    diff: Option<(String, Entity<DiffState>)>,
+    /// The stacked diff of what is shown, rebuilt when the patch or the filter changes.
+    diff: Option<DiffCache>,
+    /// `isSplitView` (Electron starts split).
     split: bool,
-    /// The commit message box, made on first render (it needs the window).
+    /// `hideUnchangedRegions`.
+    hide_unchanged: bool,
+    /// The file list's width (`fileListWidth`, 150–500), dragged by the divider.
+    list_width: f32,
+    /// The divider is being dragged: the x where the content row starts.
+    resizing: Option<f32>,
+    /// "Filter to this folder" (`dirFilter`).
+    dir_filter: Option<String>,
+    /// The "Filter files..." box, made on first render (it needs the window).
+    search: Option<(Entity<InputState>, Subscription)>,
+    query: String,
+    /// Directories folded in the file tree (all start open).
+    closed_dirs: HashSet<String>,
+    /// Binary files folded in the diff (their `DiffState` entry stays collapsed).
+    closed_binary: HashSet<String>,
+    /// The last "Collapse all" / "Expand all" (`collapseAll.collapsed`).
+    all_collapsed: bool,
+    /// The commit message box.
     message: Option<(Entity<InputState>, Subscription)>,
+    message_text: String,
     /// A commit succeeded: empty the message box on the next render.
     clear_message: bool,
-    /// The box the draft comment is typed in, and the draft it belongs to.
-    draft_input: Option<(CommentDraft, Entity<InputState>, Subscription)>,
-    /// The comments list beside the diff.
-    comments_open: bool,
-    /// Which comments the list shows: not yet sent to the harness (`Open`) or sent.
-    comment_filter: Resolution,
+    draft_input: Option<stacked::DraftInput>,
+    /// The base branch picker, when open: its filter box.
+    base_picker: Option<(Entity<InputState>, Subscription)>,
+    base_query: String,
+    /// The merge button's menu is open.
+    merge_menu: bool,
+    commits_scroll: ScrollHandle,
     _observe: Subscription,
     _events: Subscription,
 }
-
-/// Status letter and colour of a changed file (Electron's `getStatusIcon`).
-fn status_badge(status: FileChangeStatus) -> (&'static str, Hsla) {
-    match status {
-        FileChangeStatus::Added => ("A", rgb(0x81b88b).into()),
-        FileChangeStatus::Modified => ("M", rgb(0xe2c08d).into()),
-        FileChangeStatus::Deleted => ("D", rgb(0xc74e39).into()),
-        FileChangeStatus::Renamed => ("R", rgb(0x73c991).into()),
-        FileChangeStatus::Untracked => ("U", rgb(0x73c991).into()),
-    }
-}
-
-fn stats_label(stats: FileChangeStats) -> String {
-    match stats {
-        FileChangeStats::Text { additions, deletions } => format!("+{additions} −{deletions}"),
-        FileChangeStats::Binary { byte_change } => format!("{byte_change:+} B"),
-        FileChangeStats::Unknown => String::new(),
-    }
-}
-
-fn diff_side(side: Side) -> DiffSide {
-    match side {
-        Side::Original => DiffSide::Original,
-        Side::Modified => DiffSide::Modified,
-    }
-}
-
-fn comment_side(side: DiffSide) -> Side {
-    match side {
-        DiffSide::Original => Side::Original,
-        DiffSide::Modified => Side::Modified,
-    }
-}
-
-/// The line a new comment goes under: the last line of the range.
-fn comment_target(range: &DiffLineRange) -> (Side, u32) {
-    let line = if range.side() == range.end_side() { range.start().max(range.end()) } else { range.end() };
-    (comment_side(range.end_side()), u32::try_from(line).unwrap_or(u32::MAX))
-}
-
-fn comment_position(comment: &ReviewComment) -> DiffLinePosition {
-    DiffLinePosition::new(comment.file_path.clone(), diff_side(comment.side), comment.line_number as usize)
-}
-
-/// What an annotation under a diff line shows.
-enum Annotated {
-    Comment(ReviewComment),
-    Draft,
-}
-
-const DRAFT_ID: &str = "review-comment-draft";
 
 impl ReviewView {
     pub fn new(model: Entity<ReviewModel>, cx: &mut Context<Self>) -> Self {
@@ -104,835 +79,1271 @@ impl ReviewView {
                 view.clear_message = true;
                 cx.notify();
             }
-            ReviewEvent::StateChanged(_) => {}
+            ReviewEvent::StateChanged(_)
+            | ReviewEvent::StateRemoved(_)
+            | ReviewEvent::CloseRequested
+            | ReviewEvent::MergeRequested { .. }
+            | ReviewEvent::RemoveRequested(_) => {}
         });
         Self {
             model,
             diff: None,
-            split: false,
+            split: true,
+            hide_unchanged: true,
+            list_width: 250.,
+            resizing: None,
+            dir_filter: None,
+            search: None,
+            query: String::new(),
+            closed_dirs: HashSet::new(),
+            closed_binary: HashSet::new(),
+            all_collapsed: false,
             message: None,
+            message_text: String::new(),
             clear_message: false,
             draft_input: None,
-            comments_open: false,
-            comment_filter: Resolution::Open,
+            base_picker: None,
+            base_query: String::new(),
+            merge_menu: false,
+            commits_scroll: ScrollHandle::new(),
             _observe: observe,
             _events: events,
         }
     }
 
-    fn message_input(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Entity<InputState> {
-        if let Some((input, _)) = &self.message {
-            if self.clear_message {
-                self.clear_message = false;
-                input.update(cx, |state, cx| state.set_value("", window, cx));
-            }
-            return input.clone();
-        }
-        let input = cx.new(|cx| InputState::new(window, cx).placeholder("Commit message"));
-        let enter = cx.subscribe_in(&input, window, |view, input, event: &InputEvent, _, cx| {
-            if let InputEvent::PressEnter { .. } = event {
-                let text = input.read(cx).value().to_string();
-                view.model.update(cx, |m, cx| m.commit(&text, cx));
-            }
-        });
-        self.message = Some((input.clone(), enter));
-        self.clear_message = false;
-        input
+    // ---- header ------------------------------------------------------------------------
+
+    /// `.review-header`: name, `branch → base`, then the actions.
+    fn header(&mut self, header: &ReviewHeader, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let selector = self.base_selector(header, window, cx);
+        let actions = self.header_actions(header, cx);
+        let c = colors(cx);
+        let (secondary, primary) = (c.text_secondary, c.text_primary);
+        let info = h_flex()
+            .gap(px(12.))
+            .items_center()
+            .min_w_0()
+            .child(
+                div()
+                    .flex_shrink_0()
+                    .text_size(px(14.))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(primary)
+                    .child(header.name.clone()),
+            )
+            .child(
+                h_flex()
+                    .gap(px(8.))
+                    .items_center()
+                    .text_size(px(12.))
+                    .line_height(px(14.))
+                    .child(branch_pill(cx).border_1().border_color(gpui_kit::transparent_black()).child(header.branch.clone()))
+                    .child(div().w(px(11.)).flex_shrink_0().text_color(secondary).child("→"))
+                    .child(selector),
+            );
+        h_flex()
+            .flex_shrink_0()
+            .items_center()
+            .justify_between()
+            .px(px(20.))
+            .py(px(12.))
+            .bg(c.bg_secondary)
+            .border_b_1()
+            .border_color(c.border)
+            .child(info)
+            .child(actions)
+            .into_any_element()
     }
 
-    /// The box for the model's draft comment, made when the draft changes; `None` without one.
-    fn draft_input(&mut self, focus: bool, window: &mut Window, cx: &mut Context<Self>) -> Option<Entity<InputState>> {
-        let Some(draft) = self.model.read(cx).draft().cloned() else {
-            self.draft_input = None;
-            return None;
+    /// `BaseBranchSelector`: the base as a pill with a chevron; the dropdown filters local
+    /// and remote branches, takes any ref typed, and resets an override.
+    fn base_selector(&mut self, header: &ReviewHeader, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let c = colors(cx);
+        let (secondary, accent, border, tertiary) = (c.text_secondary, c.accent, c.border, c.bg_tertiary);
+        let (base, overridden) = {
+            let model = self.model.read(cx);
+            (model.base().clone(), model.is_base_overridden(cx))
         };
-        if let Some((shown, input, _)) = &self.draft_input
-            && *shown == draft
-        {
-            return Some(input.clone());
+        let current = match &base {
+            ReviewBase::Branch(branch) => Some(branch.clone()),
+            ReviewBase::None => None,
+        };
+        let label: SharedString = match &current {
+            Some(base) if base.chars().count() > 20 => format!("{}…", base.chars().take(12).collect::<String>()).into(),
+            Some(base) => base.clone().into(),
+            None => "Pick base branch".into(),
+        };
+        let empty = current.is_none();
+        let button = branch_pill(cx)
+            .id("review-base-selector")
+            .flex()
+            .items_center()
+            .gap(px(4.))
+            .border_1()
+            .border_color(gpui_kit::transparent_black())
+            .cursor_pointer()
+            .when(overridden, |d| d.border_color(accent).italic())
+            .when(empty, |d| d.text_color(secondary).bg(tertiary).border_color(border).italic())
+            .hover(|d| d.bg(rgba(0x0078d440)))
+            .child(label)
+            .child(plain_icon(IconName::ChevronDown, 12.))
+            .on_click(cx.listener(|view, _: &ClickEvent, window, cx| view.toggle_base_picker(window, cx)));
+        let mut selector = div().relative().child(button);
+        if self.base_picker.is_some() {
+            // `top: 100%; left: 0; margin-top: 4px`, painted over the page.
+            let dropdown = self.base_dropdown(header, current, overridden, window, cx);
+            selector = selector.child(deferred(div().absolute().top_full().left_0().child(dropdown)).with_priority(1));
         }
-        let input = cx.new(|cx| InputState::new(window, cx).placeholder("Leave a comment (Enter to save)"));
-        let enter = cx.subscribe_in(&input, window, |view, input, event: &InputEvent, _, cx| {
-            if let InputEvent::PressEnter { .. } = event {
-                let text = input.read(cx).value().to_string();
-                view.model.update(cx, |m, cx| m.submit_comment(&text, cx));
+        selector.into_any_element()
+    }
+
+    fn toggle_base_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.base_picker.take().is_some() {
+            cx.notify();
+            return;
+        }
+        let input = cx.new(|cx| InputState::new(window, cx).placeholder("Filter branches or paste a commit..."));
+        let changed = cx.subscribe_in(&input, window, |view, input, event: &InputEvent, _, cx| {
+            if let InputEvent::Change = event {
+                view.base_query = input.read(cx).value().to_string();
+                cx.notify();
             }
         });
-        if focus {
-            input.update(cx, |input, cx| input.focus(window, cx));
+        input.update(cx, |input, cx| input.focus(window, cx));
+        self.base_picker = Some((input, changed));
+        self.base_query.clear();
+        if !matches!(self.model.read(cx).branches(), Loaded::Ready(_)) {
+            self.model.update(cx, |m, cx| m.load_branches(cx));
         }
-        self.draft_input = Some((draft, input.clone(), enter));
-        Some(input)
+        cx.notify();
     }
 
-    /// The `+` beside a line: start a comment there and type into it.
-    fn start_comment(&mut self, range: &DiffLineRange, window: &mut Window, cx: &mut Context<Self>) {
-        let (side, line) = comment_target(range);
-        let path = range.path().to_string();
-        self.model.update(cx, |m, cx| m.start_comment(&path, side, line, cx));
-        let _focused = self.draft_input(true, window, cx);
+    fn choose_base(&mut self, branch: Option<String>, cx: &mut Context<Self>) {
+        self.base_picker = None;
+        self.base_query.clear();
+        self.diff = None;
+        self.model.update(cx, |m, cx| m.set_base(branch, cx));
     }
 
-    fn scroll_to_file(&self, path: &str, cx: &mut Context<Self>) {
-        if let Some((_, state)) = &self.diff {
-            state.update(cx, |s, cx| s.scroll_to_file(path, cx));
-        }
-    }
-
-    fn jump_unviewed(&mut self, direction: Direction, cx: &mut Context<Self>) {
-        if let Some(path) = self.model.update(cx, |m, cx| m.jump_unviewed(direction, cx)) {
-            self.scroll_to_file(&path, cx);
-        }
-    }
-
-    /// One file of the Committed list.
-    fn committed_row(&self, index: usize, file: &treeterm_core::git::DiffFile, viewed: &HashSet<String>, cx: &mut Context<Self>) -> AnyElement {
-        let (letter, color) = status_badge(file.status);
-        self.file_row(("committed", index), &file.path, letter, color, file.stats, viewed, None, cx)
-    }
-
-    /// One changed file in a list: status, name, stats, the viewed toggle and, for uncommitted
-    /// files, staging.
-    #[allow(clippy::too_many_arguments)]
-    fn file_row(
-        &self,
-        id: (&'static str, usize),
-        path: &str,
-        letter: &'static str,
-        color: Hsla,
-        stats: FileChangeStats,
-        viewed: &HashSet<String>,
-        staging: Option<AnyElement>,
+    /// `.base-branch-dropdown`.
+    fn base_dropdown(
+        &mut self,
+        header: &ReviewHeader,
+        current: Option<String>,
+        overridden: bool,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let c = colors(cx);
-        let is_viewed = viewed.contains(path);
-        let focused = self.model.read(cx).focused_file() == Some(path);
-        let (toggle_path, scroll_to) = (path.to_owned(), path.to_owned());
-        let (dir, name) = match path.rsplit_once('/') {
-            Some((dir, name)) => (dir.to_owned(), name.to_owned()),
-            None => (String::new(), path.to_owned()),
+        let (secondary, primary, accent, border, hover, bg) =
+            (c.text_secondary, c.text_primary, c.accent, c.border, c.bg_hover, c.bg_secondary);
+        let Some((input, _)) = &self.base_picker else {
+            return div().into_any_element();
         };
-        let viewed_toggle = Button::new(SharedString::from(format!("viewed-{}-{}", id.0, id.1)))
-            .xsmall()
-            .ghost()
-            .label(if is_viewed { "☑" } else { "☐" })
-            .on_click(cx.listener(move |view, _, _, cx| {
-                cx.stop_propagation(); // not a click on the row
-                view.model.update(cx, |m, cx| m.toggle_viewed(&toggle_path, cx));
-            }));
-        h_flex()
-            .id(SharedString::from(format!("file-{}-{}", id.0, id.1)))
-            .px_2()
-            .gap_2()
-            .items_center()
-            .text_sm()
-            .cursor_pointer()
-            .when(focused, |d| d.bg(c.bg_active))
-            .when(!focused, |d| d.hover(move |d| d.bg(c.bg_hover)))
-            .child(viewed_toggle)
-            .child(div().w(px(12.)).text_xs().text_color(color).child(letter))
+        let search = div()
+            .p(px(6.))
+            .border_b_1()
+            .border_color(border)
             .child(
-                h_flex()
-                    .flex_1()
-                    .min_w_0()
-                    .gap_2()
-                    .when(is_viewed, |d| d.opacity(0.6))
-                    .child(div().flex_none().child(name))
-                    .child(div().min_w_0().truncate().text_xs().text_color(c.text_secondary).child(dir)),
-            )
-            .child(div().text_xs().text_color(c.text_secondary).child(stats_label(stats)))
-            .children(staging)
-            .on_click(cx.listener(move |view, _, _, cx| {
-                view.model.update(cx, |m, cx| m.focus_file(&scroll_to, cx));
-                view.scroll_to_file(&scroll_to, cx);
-            }))
-            .into_any_element()
-    }
-
-    /// One changed file in the Staged or Unstaged list.
-    fn uncommitted_row(&self, index: usize, file: &UncommittedFile, busy: bool, viewed: &HashSet<String>, cx: &mut Context<Self>) -> AnyElement {
-        let (letter, color) = status_badge(file.entry.status);
-        let staged = file.entry.staged == Staging::Staged;
-        let target = StageTarget::File(file.entry.path.clone());
-        let action = Button::new(SharedString::from(format!("stage-{index}")))
-            .xsmall()
-            .ghost()
-            .label(if staged { "Unstage" } else { "Stage" })
-            .disabled(busy)
-            .on_click(cx.listener(move |view, _, _, cx| {
-                let target = target.clone();
-                view.model.update(cx, |m, cx| if staged { m.unstage(target, cx) } else { m.stage(target, cx) });
-            }))
-            .into_any_element();
-        self.file_row(("uncommitted", index), &file.entry.path, letter, color, file.stats, viewed, Some(action), cx)
-    }
-
-    /// The viewed paths, or the error reading them (shown in the list header).
-    fn viewed_set(&self, cx: &App) -> Result<HashSet<String>, String> {
-        match self.model.read(cx).viewed_files(cx) {
-            Ok(viewed) => Ok(viewed.into_keys().collect()),
-            Err(error) => Err(error.to_string()),
-        }
-    }
-
-    /// The Committed view: the changed files beside the patch.
-    fn committed(&mut self, committed: Committed, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let (secondary, error, border) = {
-            let c = colors(cx);
-            (c.text_secondary, c.error, c.border)
-        };
-        if committed.patch.trim().is_empty() {
-            return div().p_4().text_color(secondary).child("No changes").into_any_element();
-        }
-        let (viewed, viewed_error) = match self.viewed_set(cx) {
-            Ok(viewed) => (viewed, None),
-            Err(message) => (HashSet::new(), Some(message)),
-        };
-        let mut list = v_flex().id("committed-files").flex_1().min_h_0().overflow_y_scroll().py_1();
-        for (index, file) in committed.files.iter().enumerate() {
-            list = list.child(self.committed_row(index, file, &viewed, cx));
-        }
-        let side = v_flex()
-            .w(px(300.))
-            .h_full()
-            .border_r_1()
-            .border_color(border)
-            .when_some(viewed_error, |d, text| d.child(div().px_2().py_1().text_xs().text_color(error).child(text)))
-            .child(list);
-        let diff = self.diff_view(&committed.patch, &viewed, window, cx);
-        h_flex().size_full().child(side).child(div().flex_1().min_w_0().h_full().child(diff)).into_any_element()
-    }
-
-    /// The Uncommitted view: file list with staging and the commit box, the patch beside it.
-    fn uncommitted(&mut self, uncommitted: Uncommitted, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let (secondary, error, border) = {
-            let c = colors(cx);
-            (c.text_secondary, c.error, c.border)
-        };
-        let (staging, commit) = {
-            let model = self.model.read(cx);
-            (model.staging().clone(), model.commit_op().clone())
-        };
-        let busy = staging == GitOp::Running || commit == GitOp::Running;
-        if uncommitted.changes.files.is_empty() {
-            return div().p_4().text_color(secondary).child("No uncommitted changes").into_any_element();
-        }
-        let (viewed, viewed_error) = match self.viewed_set(cx) {
-            Ok(viewed) => (viewed, None),
-            Err(message) => (HashSet::new(), Some(message)),
-        };
-        let header = h_flex()
-            .px_2()
-            .py_1()
-            .gap_1()
-            .items_center()
-            .text_xs()
-            .border_b_1()
-            .border_color(border)
-            .child(div().text_color(rgb(0x81b88b)).child(format!("+{}", uncommitted.changes.total_additions)))
-            .child(div().text_color(rgb(0xc74e39)).child(format!("−{}", uncommitted.changes.total_deletions)))
-            .child(div().flex_1())
-            .child(Button::new("prompt-commit").xsmall().ghost().label("Prompt Commit").on_click(
-                cx.listener(|view, _, _, cx| view.model.update(cx, |m, cx| m.prompt_commit(cx))),
-            ))
-            .child(Button::new("stage-all").xsmall().ghost().label("Stage All").disabled(busy).on_click(
-                cx.listener(|view, _, _, cx| view.model.update(cx, |m, cx| m.stage(StageTarget::All, cx))),
-            ))
-            .child(Button::new("unstage-all").xsmall().ghost().label("Unstage All").disabled(busy).on_click(
-                cx.listener(|view, _, _, cx| view.model.update(cx, |m, cx| m.unstage(StageTarget::All, cx))),
-            ));
-        let section = |title: &'static str| {
-            div().px_2().pt_2().pb_1().text_xs().text_color(secondary).child(title)
-        };
-        let mut list = v_flex().id("uncommitted-files").flex_1().min_h_0().overflow_y_scroll();
-        for (title, side) in [("Staged", Staging::Staged), ("Unstaged", Staging::Unstaged)] {
-            let files: Vec<(usize, &UncommittedFile)> = uncommitted
-                .changes
-                .files
-                .iter()
-                .enumerate()
-                .filter(|(_, f)| f.entry.staged == side)
-                .collect();
-            if files.is_empty() {
-                continue;
-            }
-            list = list.child(section(title));
-            for (index, file) in files {
-                list = list.child(self.uncommitted_row(index, file, busy, &viewed, cx));
-            }
-        }
-        let mut side = v_flex()
-            .w(px(340.))
-            .h_full()
-            .border_r_1()
-            .border_color(border)
-            .child(header)
-            .when_some(match &staging {
-                GitOp::Failed(text) => Some(text.clone()),
-                GitOp::Idle | GitOp::Running => None,
-            }, |d, text| d.child(div().px_2().py_1().text_xs().text_color(error).child(text)))
-            .when_some(viewed_error, |d, text| d.child(div().px_2().py_1().text_xs().text_color(error).child(text)))
-            .child(list);
-        if uncommitted.has_staged() {
-            let input = self.message_input(window, cx);
-            let message = input.clone();
-            side = side.child(
-                v_flex()
-                    .p_2()
-                    .gap_1()
-                    .border_t_1()
-                    .border_color(border)
-                    .child(Input::new(&input).small())
-                    .child(
-                        Button::new("commit")
-                            .small()
-                            .primary()
-                            .label(if commit == GitOp::Running { "Committing…" } else { "Commit" })
-                            .disabled(busy)
-                            .on_click(cx.listener(move |view, _, _, cx| {
-                                let text = message.read(cx).value().to_string();
-                                view.model.update(cx, |m, cx| m.commit(&text, cx));
-                            })),
-                    )
-                    .when_some(match &commit {
-                        GitOp::Failed(text) => Some(text.clone()),
-                        GitOp::Idle | GitOp::Running => None,
-                    }, |d, text| d.child(div().text_xs().text_color(error).child(text))),
+                parts::framed_input(input, 24., (6., 6.), 12., 3., border, cx)
+                    // No `:focus` rule: Chromium's focus ring.
+                    .when(input.read(cx).focus_handle(cx).is_focused(window), |d| parts::focus_ring(d, 3.)),
             );
-        }
-        let diff = self.diff_view(&uncommitted.patch, &viewed, window, cx);
-        h_flex()
-            .size_full()
-            .child(side)
-            .child(div().flex_1().min_w_0().h_full().child(diff))
-            .into_any_element()
-    }
-
-    fn diff_state(&mut self, patch: &str, cx: &mut Context<Self>) -> Result<Entity<DiffState>, String> {
-        if let Some((shown, state)) = &self.diff
-            && shown == patch
-        {
-            return Ok(state.clone());
-        }
-        let files = DiffFile::parse(patch).map_err(|e| e.to_string())?;
-        let files: Vec<DiffFile> = files
-            .into_iter()
-            .map(|file| {
-                let language = language_for(file.path());
-                file.with_language(language)
-            })
-            .collect();
-        let mode = if self.split { DiffMode::Split } else { DiffMode::Unified };
-        let state = cx.new(|cx| DiffState::new(files, cx).with_mode(mode));
-        self.diff = Some((patch.to_owned(), state.clone()));
-        Ok(state)
-    }
-
-    /// The patch, with its comments under their lines, the draft's box, and a viewed toggle
-    /// in each file header.
-    fn diff_view(&mut self, patch: &str, viewed: &HashSet<String>, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let state = match self.diff_state(patch, cx) {
-            Ok(state) => state,
-            Err(text) => {
-                return div().p_4().text_color(colors(cx).error).child(format!("Cannot show this diff: {text}")).into_any_element();
-            }
-        };
-        let c = colors(cx);
-        let (secondary, error, border, card) = (c.text_secondary, c.error, c.border, c.bg_secondary);
-        // A metadata error is shown by the comments list and the notice; the diff still shows.
-        let comments = self.model.read(cx).comments(cx).unwrap_or_default();
-        let draft = self.model.read(cx).draft().cloned();
-        let adding = self.model.read(cx).adding().clone();
-        let draft_input = self.draft_input(false, window, cx);
-
-        let mut annotations: Vec<DiffAnnotation> = Vec::new();
-        let mut items: Vec<(ElementId, Annotated)> = Vec::new();
-        for comment in comments {
-            let id = ElementId::from(SharedString::from(comment.id.clone()));
-            annotations.push(DiffAnnotation::line(id.clone(), comment_position(&comment)));
-            items.push((id, Annotated::Comment(comment)));
-        }
-        if let Some(draft) = &draft {
-            let id = ElementId::from(SharedString::from(DRAFT_ID));
-            let position = DiffLinePosition::new(draft.file_path.clone(), diff_side(draft.side), draft.line_number as usize);
-            annotations.push(DiffAnnotation::line(id.clone(), position));
-            items.push((id, Annotated::Draft));
-        }
-        let items = Rc::new(items);
-        let model = self.model.clone();
-        let render_model = model.clone();
-        let header_model = model.clone();
-        let viewed = Rc::new(viewed.clone());
-        let this = cx.weak_entity();
-        Diff::new(&state)
-            .line_number(true)
-            .syntax_highlight(true)
-            .annotations(annotations)
-            .render_annotation(move |annotation, _, _| {
-                let model = render_model.clone();
-                let Some((_, item)) = items.iter().find(|(id, _)| id == annotation.id()) else {
-                    return div().into_any_element();
-                };
-                let frame = v_flex().mx_2().my_1().p_2().gap_1().rounded_md().border_1().border_color(border).bg(card);
-                match item {
-                    Annotated::Draft => {
-                        let Some(input) = &draft_input else {
-                            return div().into_any_element();
-                        };
-                        let (save_model, cancel_model, text) = (model.clone(), model.clone(), input.clone());
-                        frame
-                            .child(Input::new(input).small())
-                            .child(
-                                h_flex()
-                                    .gap_1()
-                                    .items_center()
-                                    .child(
-                                        Button::new("comment-save")
-                                            .xsmall()
-                                            .primary()
-                                            .label(if adding == GitOp::Running { "Saving…" } else { "Comment" })
-                                            .disabled(adding == GitOp::Running)
-                                            .on_click(move |_, _, cx| {
-                                                let text = text.read(cx).value().to_string();
-                                                save_model.update(cx, |m, cx| m.submit_comment(&text, cx));
-                                            }),
-                                    )
-                                    .child(
-                                        Button::new("comment-cancel")
-                                            .xsmall()
-                                            .ghost()
-                                            .label("Cancel")
-                                            .on_click(move |_, _, cx| cancel_model.update(cx, |m, cx| m.cancel_comment(cx))),
-                                    )
-                                    .when_some(
-                                        match &adding {
-                                            GitOp::Failed(message) => Some(message.clone()),
-                                            GitOp::Idle | GitOp::Running => None,
-                                        },
-                                        |d, message| d.child(div().text_xs().text_color(error).child(message)),
-                                    ),
-                            )
-                            .into_any_element()
-                    }
-                    Annotated::Comment(comment) => frame
-                        .child(comment_actions(comment, &model, secondary))
-                        .child(div().text_sm().child(comment.text.clone()))
-                        .into_any_element(),
-                }
-            })
-            .on_add_annotation(move |range, window, cx| {
-                let range = range.clone();
-                match this.update(cx, |view, cx| view.start_comment(&range, window, cx)) {
-                    Ok(()) | Err(_) => {} // Err: the tab closed
-                }
-            })
-            .render_header_suffix(move |file, _, _| {
-                let path = file.path().to_string();
-                let is_viewed = viewed.contains(&path);
-                let model = header_model.clone();
-                Button::new(SharedString::from(format!("header-viewed-{path}")))
-                    .xsmall()
-                    .ghost()
-                    .label(if is_viewed { "☑ Viewed" } else { "☐ Viewed" })
-                    .on_click(move |_, _, cx| model.update(cx, |m, cx| m.toggle_viewed(&path, cx)))
-            })
-            .into_any_element()
-    }
-
-    /// The comments list (`CommentsList.tsx`), filtered to unprompted or prompted comments.
-    fn comments_panel(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        let c = colors(cx);
-        let (secondary, error, border, card, accent) = (c.text_secondary, c.error, c.border, c.bg_secondary, c.accent);
-        let comments = match self.model.read(cx).comments(cx) {
-            Ok(comments) => comments,
-            Err(message) => {
-                return v_flex()
-                    .w(px(340.))
-                    .h_full()
-                    .border_l_1()
-                    .border_color(border)
-                    .p_2()
-                    .child(div().text_xs().text_color(error).child(message.to_string()))
-                    .into_any_element();
-            }
-        };
-        let unprompted = comments.iter().filter(|c| c.resolution == Resolution::Open).count();
-        let prompted = comments.len() - unprompted;
-        let filter = self.comment_filter;
-        let tab = |id: &'static str, label: String, target: Resolution, cx: &mut Context<Self>| {
-            let button = Button::new(id).xsmall().label(label);
-            let button = if filter == target { button.primary() } else { button.ghost() };
-            button.on_click(cx.listener(move |view, _, _, cx| {
-                view.comment_filter = target;
-                cx.notify();
-            }))
-        };
-        let header = h_flex()
-            .p_1()
-            .gap_1()
-            .items_center()
-            .border_b_1()
-            .border_color(border)
-            .child(tab("comments-unprompted", format!("Unprompted ({unprompted})"), Resolution::Open, cx))
-            .child(tab("comments-prompted", format!("Prompted ({prompted})"), Resolution::Addressed, cx))
-            .child(div().flex_1())
-            .child(Button::new("comments-close").xsmall().ghost().label("×").on_click(cx.listener(|view, _, _, cx| {
-                view.comments_open = false;
-                cx.notify();
-            })));
-        let shown: Vec<&ReviewComment> = comments.iter().filter(|c| c.resolution == filter).collect();
-        let mut list = v_flex().id("comments-list").flex_1().min_h_0().overflow_y_scroll().p_2().gap_2();
-        if shown.is_empty() {
-            let empty = match (comments.is_empty(), filter) {
-                (true, _) => "No review comments yet",
-                (false, Resolution::Open) => "No unprompted comments",
-                (false, Resolution::Addressed) => "No prompted comments",
-            };
-            list = list.child(div().text_xs().text_color(secondary).child(empty));
-        }
-        for comment in shown {
-            let position = comment_position(comment);
-            let go_id = SharedString::from(format!("goto-{}", comment.id));
-            list = list.child(
-                v_flex()
-                    .p_2()
-                    .gap_1()
-                    .rounded_md()
-                    .border_1()
-                    .border_color(border)
-                    .bg(card)
-                    .child(
-                        h_flex()
-                            .gap_2()
-                            .text_xs()
-                            .child(div().flex_1().truncate().text_color(accent).child(comment.file_path.clone()))
-                            .child(div().text_color(secondary).child(format!("L{} ({})", comment.line_number, comment.side.as_str()))),
-                    )
-                    .child(div().text_sm().child(comment.text.clone()))
-                    .child(
-                        h_flex()
-                            .child(comment_actions(comment, &self.model, secondary))
-                            .child(Button::new(go_id).xsmall().ghost().label("Go to").on_click(cx.listener(
-                                move |view, _, _, cx| {
-                                    if let Some((_, state)) = &view.diff {
-                                        let position = position.clone();
-                                        state.update(cx, |s, cx| s.scroll_to_line(position, cx));
-                                    }
-                                },
-                            ))),
-                    ),
-            );
-        }
-        v_flex()
-            .w(px(340.))
-            .h_full()
-            .flex_shrink_0()
-            .border_l_1()
-            .border_color(border)
-            .child(header)
-            .child(list)
-            .when(unprompted > 0, |d| {
-                d.child(
-                    div().p_2().border_t_1().border_color(border).child(
-                        Button::new("address-comments-list")
-                            .small()
-                            .primary()
-                            .w_full()
-                            .label(format!("Address {unprompted} comment(s)"))
-                            .on_click(cx.listener(|view, _, _, cx| view.model.update(cx, |m, cx| m.prompt_open_comments(cx)))),
-                    ),
-                )
-            })
-            .into_any_element()
-    }
-
-    /// `ImageDiffViewer`: the selected image's two sides, over the diff.
-    fn image_diff_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        use treeterm_model::review::ImageSides;
-        let diff = self.model.read(cx).image_diff()?.clone();
-        let c = colors(cx);
-        let (secondary, error, border) = (c.text_secondary, c.error, c.border);
-        let format_of = |path: &str| match path.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).as_deref() {
-            Some("png") => gpui_kit::ImageFormat::Png,
-            Some("jpg" | "jpeg") => gpui_kit::ImageFormat::Jpeg,
-            Some("gif") => gpui_kit::ImageFormat::Gif,
-            Some("webp") => gpui_kit::ImageFormat::Webp,
-            Some("svg") => gpui_kit::ImageFormat::Svg,
-            Some("bmp") => gpui_kit::ImageFormat::Bmp,
-            Some("ico") => gpui_kit::ImageFormat::Ico,
-            Some(_) | None => gpui_kit::ImageFormat::Png,
-        };
-        let format = format_of(&diff.path);
-        let side = move |label: &'static str, missing: &'static str, bytes: Option<std::sync::Arc<Vec<u8>>>| {
-            v_flex()
-                .flex_1()
-                .min_w_0()
-                .h_full()
-                .gap_1()
-                .child(div().text_xs().text_color(secondary).child(label))
-                .child(match bytes {
-                    Some(bytes) => {
-                        let image = std::sync::Arc::new(gpui_kit::Image::from_bytes(format, (*bytes).clone()));
-                        div()
-                            .flex_1()
-                            .min_h_0()
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .child(gpui_kit::img(image).max_w_full().max_h_full().object_fit(gpui_kit::ObjectFit::Contain))
-                            .into_any_element()
-                    }
-                    None => div().flex_1().flex().items_center().justify_center().text_sm().text_color(secondary).child(missing).into_any_element(),
-                })
-        };
-        let body = match diff.sides {
-            ImageSides::Loading => div().p_3().text_sm().text_color(secondary).child("Loading images…").into_any_element(),
-            ImageSides::Failed(message) => div().p_3().text_sm().text_color(error).child(message).into_any_element(),
-            ImageSides::Loaded { before, after } => h_flex()
-                .size_full()
-                .gap_3()
-                .p_2()
-                .child(side("Before", "(added)", before))
-                .child(side("After", "(deleted)", after))
-                .into_any_element(),
-        };
-        let model = self.model.clone();
-        Some(
-            v_flex()
-                .h(px(280.))
+        let item = |id: SharedString| {
+            div()
+                .id(id)
                 .flex_shrink_0()
-                .border_b_1()
-                .border_color(border)
-                .child(
-                    h_flex()
-                        .px_3()
-                        .py_1()
-                        .gap_2()
-                        .text_xs()
-                        .text_color(secondary)
-                        .child(div().flex_1().truncate().child(diff.path.clone()))
-                        .child(Button::new("close-image-diff").xsmall().ghost().label("Close").on_click(move |_, _, cx| {
-                            model.update(cx, |m, cx| m.close_image_diff(cx));
-                        })),
-                )
-                .child(div().flex_1().min_h_0().child(body))
-                .into_any_element(),
-        )
-    }
-
-    fn body(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let images = self.image_diff_panel(cx);
-        let content = self.body_content(window, cx);
-        match images {
-            Some(panel) => v_flex().size_full().child(panel).child(div().flex_1().min_h_0().child(content)).into_any_element(),
-            None => content,
-        }
-    }
-
-    fn body_content(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let c = colors(cx);
-        let (secondary, error) = (c.text_secondary, c.error);
-        let content = self.model.read(cx).content().clone();
-        let message = |text: String, color| div().p_4().text_color(color).child(text).into_any_element();
-        match content {
-            ReviewContent::Loading => message("Loading…".into(), secondary),
-            ReviewContent::Failed(text) => message(text, error),
-            ReviewContent::Committed(committed) => self.committed(committed, window, cx),
-            ReviewContent::Uncommitted(uncommitted) => self.uncommitted(uncommitted, window, cx),
-            ReviewContent::Commits(commits) if commits.is_empty() => message("No commits on this branch yet".into(), secondary),
-            ReviewContent::Commits(commits) => {
-                let mut list = v_flex().id("commits").size_full().overflow_y_scroll().p_2().gap_1();
-                for commit in commits {
-                    let subject = commit.message.lines().next().unwrap_or_default().to_owned();
+                .w_full()
+                .px(px(10.))
+                .py(px(6.))
+                .font_family(MONO)
+                .text_size(px(12.))
+                .text_color(primary)
+                .truncate()
+                .cursor_pointer()
+                .hover(move |d| d.bg(hover))
+        };
+        let message = |text: String, color| div().p(px(12.)).text_size(px(12.)).text_color(color).flex().justify_center().child(text);
+        let query = self.base_query.trim().to_owned();
+        let body = match self.model.read(cx).branches().clone() {
+            Loaded::Loading => message("Loading branches...".into(), secondary).into_any_element(),
+            Loaded::Failed(error) => message(error, rgb(ERROR_RED).into()).into_any_element(),
+            Loaded::Ready(branches) => {
+                let needle = query.to_lowercase();
+                let filtered: Vec<&String> =
+                    branches.iter().filter(|b| needle.is_empty() || b.to_lowercase().contains(&needle)).collect();
+                let mut list = v_flex().id("base-branch-list").flex_1().min_h_0().overflow_y_scroll();
+                if let (true, Some(default)) = (overridden, header.parent_branch.clone()) {
                     list = list.child(
-                        h_flex()
-                            .gap_3()
-                            .text_sm()
-                            .child(div().font_family("Menlo").text_color(c.accent).child(commit.short_hash.clone()))
-                            .child(div().flex_1().truncate().child(subject))
-                            .child(div().text_xs().text_color(secondary).child(commit.author.clone())),
+                        item("base-reset".into())
+                            .border_b_1()
+                            .border_color(border)
+                            .text_color(secondary)
+                            .italic()
+                            .child(format!("Reset to default ({default})"))
+                            .on_click(cx.listener(|view, _: &ClickEvent, _, cx| view.choose_base(None, cx))),
+                    );
+                }
+                if !query.is_empty() && !branches.contains(&query) {
+                    let custom = query.clone();
+                    list = list.child(
+                        item("base-custom".into())
+                            .border_b_1()
+                            .border_color(border)
+                            .text_color(secondary)
+                            .flex()
+                            .child("Compare against commit/ref: ")
+                            .child(div().text_color(accent).child(query.clone()))
+                            .on_click(cx.listener(move |view, _: &ClickEvent, _, cx| view.choose_base(Some(custom.clone()), cx))),
+                    );
+                }
+                if filtered.is_empty() {
+                    list = list.child(message(if query.is_empty() { "No branches found" } else { "No branches match" }.into(), secondary));
+                }
+                for (index, branch) in filtered.into_iter().enumerate() {
+                    let selected = current.as_ref() == Some(branch);
+                    let chosen = branch.clone();
+                    list = list.child(
+                        item(SharedString::from(format!("base-{index}")))
+                            .when(selected, |d| d.text_color(accent).font_weight(FontWeight::SEMIBOLD))
+                            .child(branch.clone())
+                            .on_click(cx.listener(move |view, _: &ClickEvent, _, cx| view.choose_base(Some(chosen.clone()), cx))),
                     );
                 }
                 list.into_any_element()
             }
+        };
+        // As wide as its longest branch (12px Menlo, 10px padding each side, a 10px
+        // scrollbar), 240–360px. Its border names an unset variable, so it has none.
+        let longest = match self.model.read(cx).branches() {
+            Loaded::Ready(branches) => branches.iter().map(|b| b.chars().count()).max().unwrap_or(0),
+            Loaded::Loading | Loaded::Failed(_) => 0,
+        };
+        let width = (longest as f32 * MONO_12_ADVANCE + 30.).clamp(240., 360.);
+        v_flex()
+            .id("base-branch-dropdown")
+            .occlude()
+            .mt(px(4.))
+            .w(px(width))
+            .max_h(px(320.))
+            .bg(bg)
+            .rounded(px(4.))
+            .shadow_lg()
+            .text_size(px(12.))
+            .line_height(gpui_kit::relative(1.2))
+            .child(search)
+            .child(body)
+            .on_mouse_down_out(cx.listener(|view, _, _, cx| {
+                view.base_picker = None;
+                cx.notify();
+            }))
+            .into_any_element()
+    }
+
+    /// `.review-header-actions`.
+    fn header_actions(&mut self, header: &ReviewHeader, cx: &mut Context<Self>) -> AnyElement {
+        let c = colors(cx);
+        let (secondary, tertiary, hover, primary, accent) = (c.text_secondary, c.bg_tertiary, c.bg_hover, c.text_primary, c.accent);
+        let (overview, conflicts, refreshing) = {
+            let model = self.model.read(cx);
+            (model.overview(), model.conflicts().clone(), model.is_refreshing())
+        };
+        let has_uncommitted = overview.uncommitted > 0;
+        let white = gpui_kit::white();
+        let mut actions = h_flex().gap(px(8.)).items_center().flex_shrink_0();
+        if conflicts == ConflictCheck::Checking {
+            actions = actions.child(div().text_size(px(12.)).italic().text_color(secondary).child("Checking for conflicts..."));
+        }
+        actions = actions.child(
+            div()
+                .id("review-refresh")
+                .flex()
+                .items_center()
+                .px(px(6.))
+                .py(px(4.))
+                .bg(tertiary)
+                .text_color(primary)
+                .border_1()
+                .border_color(c.border)
+                .rounded(px(4.))
+                .when(refreshing, |d| d.opacity(0.5))
+                .when(!refreshing, |d| d.cursor_pointer().hover(move |d| d.bg(hover)))
+                .child(if refreshing { spinner(14., primary) } else { plain_icon(IconName::RefreshCw, 14.).into_any_element() })
+                .on_click(cx.listener(|view, _: &ClickEvent, _, cx| view.model.update(cx, |m, cx| m.refresh(cx)))),
+        );
+        let prompt_commit = (has_uncommitted && header.harness).then(|| {
+            action_button("review-prompt-commit", rgb(0x6366f1).into(), rgb(0x7c7ff7).into(), white, true)
+                .child("Prompt Commit")
+                .on_click(cx.listener(|view, _: &ClickEvent, _, cx| view.model.update(cx, |m, cx| m.prompt_commit(cx))))
+        });
+        let cancel = |label: &'static str, cx: &mut Context<Self>| {
+            action_button("review-cancel", tertiary, hover, primary, true)
+                .child(label)
+                .on_click(cx.listener(|view, _: &ClickEvent, _, cx| view.model.update(cx, |m, cx| m.close(cx))))
+        };
+        match (&header.parent_branch, header.detached) {
+            (None, _) => {
+                actions = actions.children(prompt_commit).child(cancel("Close", cx));
+            }
+            (Some(_), true) => {
+                actions = actions
+                    .children(prompt_commit)
+                    .child(
+                        action_button("review-close-and-clean", rgb(0x0066cc).into(), rgb(0x0077ee).into(), white, true)
+                            .child("Close and Clean")
+                            .on_click(cx.listener(|view, _: &ClickEvent, window, cx| view.confirm_close_and_clean(window, cx))),
+                    )
+                    .child(cancel("Cancel", cx));
+            }
+            (Some(parent), false) => {
+                let (has_conflicts, parent_moved) = match &conflicts {
+                    ConflictCheck::Checked { conflicts, parent_has_new_commits } => (conflicts.has_conflicts, *parent_has_new_commits),
+                    ConflictCheck::Idle | ConflictCheck::Checking | ConflictCheck::Failed(_) => (false, false),
+                };
+                let violet = (rgb(0x8b5cf6).into(), rgb(0xa78bfa).into());
+                actions = actions
+                    .children(prompt_commit)
+                    .when(has_conflicts && header.harness, |d| {
+                        d.child(
+                            action_button("review-prompt-rebase", violet.0, violet.1, white, true)
+                                .child("Prompt Rebase")
+                                .on_click(cx.listener(|view, _: &ClickEvent, _, cx| view.model.update(cx, |m, cx| m.prompt_rebase(cx)))),
+                        )
+                    })
+                    .when(parent_moved && header.harness, |d| {
+                        d.child(
+                            action_button("review-prompt-update", violet.0, violet.1, white, true)
+                                .tooltip({
+                                    let tip = SharedString::from(format!("Ask the AI harness to merge {parent} into this branch"));
+                                    move |window, cx| gpui_kit::component::tooltip::Tooltip::new(tip.clone()).build(window, cx)
+                                })
+                                .child("Prompt Update from Parent")
+                                .on_click(cx.listener(|view, _: &ClickEvent, _, cx| {
+                                    view.model.update(cx, |m, cx| m.prompt_update_from_parent(cx))
+                                })),
+                        )
+                    })
+                    .child(self.merge_group(has_conflicts, has_uncommitted, accent, cx))
+                    .child(cancel("Cancel", cx));
+            }
+        }
+        actions.into_any_element()
+    }
+
+    /// `.merge-btn-group`: "Merge" and a chevron opening the other merges.
+    fn merge_group(&mut self, has_conflicts: bool, has_uncommitted: bool, accent: gpui_kit::Hsla, cx: &mut Context<Self>) -> AnyElement {
+        let c = colors(cx);
+        let (hover, primary, bg) = (c.bg_hover, c.text_primary, c.bg_secondary);
+        let enabled = !has_conflicts;
+        let white = gpui_kit::white();
+        let blue_hover: gpui_kit::Hsla = rgb(0x006cbf).into();
+        let main = action_button("review-merge", accent, blue_hover, white, enabled)
+            .rounded_r(px(0.))
+            .child(if has_conflicts { "Merge (has conflicts)" } else { "Merge" })
+            .when(enabled, |d| {
+                d.on_click(cx.listener(move |view, _: &ClickEvent, window, cx| view.start_merge(false, AfterMerge::Remove, has_uncommitted, window, cx)))
+            });
+        let toggle = action_button("review-merge-more", accent, blue_hover, white, enabled)
+            .px(px(6.))
+            .rounded_l(px(0.))
+            .border_l_1()
+            .border_color(rgba(0xffffff4d))
+            .child(plain_icon(IconName::ChevronDown, 14.))
+            .when(enabled, |d| {
+                d.on_click(cx.listener(|view, _: &ClickEvent, _, cx| {
+                    view.merge_menu = !view.merge_menu;
+                    cx.notify();
+                }))
+            });
+        let mut group = h_flex().relative().child(main).child(toggle);
+        if self.merge_menu {
+            let suffix = if has_conflicts { " (has conflicts)" } else { "" };
+            let item = |id: &'static str, label: &'static str, squash: bool, after: AfterMerge, cx: &mut Context<Self>| {
+                div()
+                    .id(id)
+                    .w_full()
+                    .px(px(12.))
+                    .py(px(8.))
+                    .text_size(px(13.))
+                    .text_color(primary)
+                    .whitespace_nowrap()
+                    .cursor_pointer()
+                    .hover(move |d| d.bg(hover))
+                    .child(format!("{label}{suffix}"))
+                    .on_click(cx.listener(move |view, _: &ClickEvent, window, cx| {
+                        view.merge_menu = false;
+                        view.start_merge(squash, after, has_uncommitted, window, cx);
+                    }))
+            };
+            let menu = v_flex()
+                .id("merge-dropdown")
+                .occlude()
+                .mt(px(4.))
+                .min_w(px(160.))
+                .bg(bg)
+                // `border: 1px solid var(--border)` names an unset variable: no border.
+                .rounded(px(4.))
+                .shadow_lg()
+                .line_height(gpui_kit::relative(1.2))
+                .child(item("merge-squash", "Squash Merge", true, AfterMerge::Remove, cx))
+                .child(item("merge-keep", "Merge and Keep", false, AfterMerge::Keep, cx))
+                .child(item("merge-squash-keep", "Squash Merge and Keep", true, AfterMerge::Keep, cx))
+                .on_mouse_down_out(cx.listener(|view, _, _, cx| {
+                    view.merge_menu = false;
+                    cx.notify();
+                }));
+            // `top: 100%; right: 0; margin-top: 4px`, painted over the page.
+            group = group.child(deferred(div().absolute().top_full().right_0().child(menu)).with_priority(1));
+        }
+        group.into_any_element()
+    }
+
+    /// `handleMerge` / `handleMergeAndKeep`: a merge that removes the workspace first asks
+    /// whether its uncommitted files may be committed.
+    fn start_merge(&mut self, squash: bool, after: AfterMerge, has_uncommitted: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let count = self.model.read(cx).overview().uncommitted;
+        if !(has_uncommitted && after == AfterMerge::Remove) {
+            self.model.update(cx, |m, cx| m.merge(squash, after, cx));
+            return;
+        }
+        let model = self.model.clone();
+        window.open_alert_dialog(cx, move |alert, _, _| {
+            let model = model.clone();
+            alert
+                .title("Uncommitted changes")
+                .description(format!(
+                    "You have {count} uncommitted file{}. These changes will be auto-committed before merging. Continue?",
+                    if count == 1 { "" } else { "s" }
+                ))
+                .show_cancel(true)
+                .on_ok(move |_, _, cx| {
+                    model.update(cx, |m, cx| m.merge(squash, after, cx));
+                    true
+                })
+        });
+    }
+
+    fn confirm_close_and_clean(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let model = self.model.clone();
+        window.open_alert_dialog(cx, move |alert, _, _| {
+            let model = model.clone();
+            alert
+                .title("Close and Clean")
+                .description("Close this workspace? The worktree will be removed but the branch will be kept.")
+                .show_cancel(true)
+                .on_ok(move |_, _, cx| {
+                    model.update(cx, |m, cx| m.close_and_clean(cx));
+                    true
+                })
+        });
+    }
+
+    // ---- banners and tabs --------------------------------------------------------------
+
+    /// `.review-load-error`, `.review-conflict-error`, `.review-conflict-banner`.
+    fn banners(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let c = colors(cx);
+        let (secondary, primary) = (c.text_secondary, c.text_primary);
+        let mut banners = Vec::new();
+        if let Notice::Error(text) = self.model.read(cx).notice().clone() {
+            banners.push(
+                h_flex()
+                    .text_size(px(13.))
+                    .text_color(primary)
+                    .child(div().flex_1().child(text))
+                    .child(
+                        div()
+                            .id("dismiss-notice")
+                            .px(px(6.))
+                            .cursor_pointer()
+                            .text_color(secondary)
+                            .child("×")
+                            .on_click(cx.listener(|view, _: &ClickEvent, _, cx| view.model.update(cx, |m, cx| m.dismiss_notice(cx)))),
+                    )
+                    .into_any_element(),
+            );
+        }
+        match self.model.read(cx).conflicts().clone() {
+            ConflictCheck::Failed(error) => banners.push(
+                div().text_size(px(13.)).text_color(primary).child(format!("Could not check for conflicts: {error}")).into_any_element(),
+            ),
+            ConflictCheck::Checked { conflicts, .. } if conflicts.has_conflicts => {
+                let files = &conflicts.conflicted_files;
+                let mut listed = files.iter().take(3).cloned().collect::<Vec<_>>().join(", ");
+                if files.len() > 3 {
+                    listed.push_str(&format!(" and {} more", files.len() - 3));
+                }
+                banners.push(
+                    h_flex()
+                        .items_start()
+                        .gap(px(12.))
+                        .px(px(20.))
+                        .py(px(12.))
+                        .bg(rgba(0xf0a0001a))
+                        .border_b_1()
+                        .border_color(rgba(0xf0a0004d))
+                        // Chromium draws "⚠️" in its outline text form, 19×24.
+                        .child(
+                            div()
+                                .w(px(19.))
+                                .h(px(24.))
+                                .flex_shrink_0()
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .child(crate::ui::icon(IconName::TriangleAlert, 16., primary)),
+                        )
+                        .child(
+                            v_flex()
+                                .flex_1()
+                                .text_size(px(13.))
+                                .child(
+                                    div()
+                                        .mb(px(4.))
+                                        .font_weight(FontWeight::BOLD)
+                                        .text_color(rgb(0xf0a000))
+                                        .child(format!("{} conflict(s) detected", files.len())),
+                                )
+                                .child(div().text_size(px(12.)).font_family(MONO).text_color(secondary).child(listed)),
+                        )
+                        .into_any_element(),
+                );
+            }
+            ConflictCheck::Idle | ConflictCheck::Checking | ConflictCheck::Checked { .. } => {}
+        }
+        banners
+    }
+
+    /// `.diff-tabs`: Committed Changes / Uncommitted / Commits, each with its count.
+    fn view_tabs(&self, mode: ReviewMode, has_base: bool, cx: &mut Context<Self>) -> AnyElement {
+        let c = colors(cx);
+        let (secondary, primary, hover, accent, active_bg) = (c.text_secondary, c.text_primary, c.bg_hover, c.accent, c.bg_active);
+        let overview = self.model.read(cx).overview();
+        let tab = |target: ReviewMode, label: &'static str, count: Option<String>, cx: &mut Context<Self>| {
+            let active = mode == target;
+            div()
+                .id(SharedString::from(format!("review-tab-{}", target.as_str())))
+                .flex()
+                .items_center()
+                .gap(px(8.))
+                .px(px(16.))
+                .pt(px(10.))
+                .pb(px(10.))
+                .mb(px(-1.))
+                .border_b_2()
+                .border_color(if active { accent } else { gpui_kit::transparent_black() })
+                .text_size(px(13.))
+                .text_color(if active { primary } else { secondary })
+                .cursor_pointer()
+                .hover(move |d| d.text_color(primary).bg(hover))
+                .child(label)
+                .when_some(count, |d, count| {
+                    d.child(
+                        div()
+                            .min_w(px(18.))
+                            .px(px(6.))
+                            .py(px(2.))
+                            .rounded(px(10.))
+                            .bg(active_bg)
+                            .text_size(px(11.))
+                            .flex()
+                            .justify_center()
+                            .child(count),
+                    )
+                })
+                .on_click(cx.listener(move |view, _: &ClickEvent, _, cx| {
+                    view.model.update(cx, |m, cx| m.set_mode(target, cx));
+                }))
+        };
+        let count = |n: usize| (n > 0).then(|| n.to_string());
+        h_flex()
+            .flex_shrink_0()
+            .bg(c.bg_secondary)
+            .border_b_1()
+            .border_color(c.border)
+            .when(has_base, |d| d.child(tab(ReviewMode::Committed, "Committed Changes", count(overview.committed), cx)))
+            .child(tab(ReviewMode::Uncommitted, "Uncommitted", count(overview.uncommitted), cx))
+            .child(tab(
+                ReviewMode::Commits,
+                "Commits",
+                (overview.commits > 0).then(|| format!("{}{}", overview.commits, if overview.more_commits { "+" } else { "" })),
+                cx,
+            ))
+            .into_any_element()
+    }
+
+    // ---- shared pieces -----------------------------------------------------------------
+
+    /// `.diff-summary`: a row of pills and totals.
+    fn summary(&self, cx: &App) -> gpui_kit::Div {
+        let c = colors(cx);
+        h_flex()
+            .flex_shrink_0()
+            .items_center()
+            .gap(px(8.))
+            .px(px(20.))
+            .py(px(12.))
+            .bg(c.bg_primary)
+            .border_b_1()
+            .border_color(c.border)
+            .text_size(px(13.))
+            // Chromium's `normal` for 13px Menlo.
+            .line_height(px(15.))
+    }
+
+    /// `DiffToolbar`.
+    fn toolbar(&self, viewed: (usize, usize), comments: usize, navigate: bool, cx: &mut Context<Self>) -> AnyElement {
+        let c = colors(cx);
+        let (secondary, primary, accent, hover) = (c.text_secondary, c.text_primary, c.accent, c.bg_hover);
+        let (done, total) = viewed;
+        let unviewed = done < total;
+        let progress = h_flex()
+            .gap(px(8.))
+            .items_center()
+            .min_w_0()
+            .when(total > 0, |d| {
+                d.child(
+                    h_flex()
+                        .gap(px(4.))
+                        .items_center()
+                        .px(px(6.))
+                        .py(px(2.))
+                        .text_size(px(11.))
+                        .text_color(secondary)
+                        .child(plain_icon(IconName::CircleCheck, 14.))
+                        .child(format!("{done}/{total} files viewed")),
+                )
+            })
+            .when_some(self.dir_filter.clone(), |d, dir| {
+                d.child(
+                    h_flex()
+                        .gap(px(4.))
+                        .items_center()
+                        .max_w(px(320.))
+                        .pl(px(8.))
+                        .pr(px(4.))
+                        .py(px(2.))
+                        .text_size(px(11.))
+                        .text_color(primary)
+                        .bg(c.bg_primary)
+                        .border_1()
+                        .border_color(accent)
+                        .rounded(px(10.))
+                        .child(plain_icon(IconName::Funnel, 12.))
+                        .child(div().truncate().child(dir))
+                        .child(
+                            div()
+                                .id("clear-dir-filter")
+                                .p(px(1.))
+                                .rounded_full()
+                                .text_color(secondary)
+                                .cursor_pointer()
+                                .hover(move |d| d.bg(hover).text_color(primary))
+                                .child(plain_icon(IconName::X, 12.))
+                                .on_click(cx.listener(|view, _: &ClickEvent, _, cx| {
+                                    view.dir_filter = None;
+                                    cx.notify();
+                                })),
+                        ),
+                )
+            });
+        let mut controls = h_flex().gap(px(4.)).items_center();
+        if navigate {
+            controls = controls
+                .child(toolbar_button("prev-unviewed", IconName::ChevronUp, false, unviewed, cx).when(unviewed, |d| {
+                    d.on_click(cx.listener(|view, _: &ClickEvent, _, cx| view.jump_unviewed(treeterm_model::review::Direction::Previous, cx)))
+                }))
+                .child(toolbar_button("next-unviewed", IconName::ChevronDown, false, unviewed, cx).when(unviewed, |d| {
+                    d.on_click(cx.listener(|view, _: &ClickEvent, _, cx| view.jump_unviewed(treeterm_model::review::Direction::Next, cx)))
+                }));
+        }
+        let ignore = self.model.read(cx).ignore_whitespace();
+        controls = controls
+            .child(
+                toolbar_button("toggle-split", if self.split { IconName::Columns2 } else { IconName::TextAlignJustify }, self.split, true, cx)
+                    .on_click(cx.listener(|view, _: &ClickEvent, _, cx| view.toggle_split(cx))),
+            )
+            .child(
+                toolbar_button("toggle-unchanged", if self.hide_unchanged { IconName::EyeOff } else { IconName::Eye }, self.hide_unchanged, true, cx)
+                    .on_click(cx.listener(|view, _: &ClickEvent, _, cx| view.toggle_unchanged(cx))),
+            )
+            .child(
+                toolbar_button("toggle-whitespace", IconName::Space, ignore, true, cx).on_click(cx.listener(move |view, _: &ClickEvent, _, cx| {
+                    view.diff = None;
+                    view.model.update(cx, |m, cx| m.set_ignore_whitespace(!ignore, cx));
+                })),
+            )
+            .when(comments > 0, |d| {
+                d.child(
+                    h_flex()
+                        .gap(px(3.))
+                        .items_center()
+                        .px(px(6.))
+                        .py(px(2.))
+                        .text_size(px(11.))
+                        .text_color(secondary)
+                        .child(plain_icon(IconName::MessageSquare, 14.))
+                        .child(comments.to_string()),
+                )
+            });
+        h_flex()
+            .flex_shrink_0()
+            .items_center()
+            .justify_between()
+            .px(px(8.))
+            .py(px(4.))
+            .bg(c.bg_secondary)
+            .border_b_1()
+            .border_color(c.border)
+            .child(progress)
+            .child(controls)
+            .into_any_element()
+    }
+
+    fn toggle_split(&mut self, cx: &mut Context<Self>) {
+        self.split = !self.split;
+        let mode = if self.split { gpui_kit::component::diff::DiffMode::Split } else { gpui_kit::component::diff::DiffMode::Unified };
+        if let Some(diff) = &self.diff {
+            diff.state.update(cx, |s, cx| s.set_mode(mode, cx));
+        }
+        cx.notify();
+    }
+
+    fn toggle_unchanged(&mut self, cx: &mut Context<Self>) {
+        self.hide_unchanged = !self.hide_unchanged;
+        let hide = self.hide_unchanged;
+        if let Some(diff) = &self.diff {
+            diff.state.update(cx, |s, cx| if hide { s.collapse_unchanged(cx) } else { s.expand_unchanged(cx) });
+        }
+        cx.notify();
+    }
+
+    fn jump_unviewed(&mut self, direction: treeterm_model::review::Direction, cx: &mut Context<Self>) {
+        let Some(diff) = &self.diff else {
+            return;
+        };
+        // `navigateUnviewed` walks the files in the diff's (tree, filtered) order.
+        let order = diff.paths();
+        let viewed = self.model.read(cx).viewed_files(cx).unwrap_or_default();
+        let current = self.model.read(cx).focused_file().map(str::to_owned);
+        let target = treeterm_model::review::unviewed_from(&order, &viewed, current.as_deref(), direction).map(str::to_owned);
+        if let Some(path) = target {
+            self.select_file(&path, cx);
+        }
+    }
+
+    /// A click in the file list (or a jump): the diff scrolls to the file, expanded.
+    fn select_file(&mut self, path: &str, cx: &mut Context<Self>) {
+        self.model.update(cx, |m, cx| m.focus_file(path, cx));
+        if let Some(diff) = &self.diff {
+            let path = path.to_owned();
+            diff.state.update(cx, |s, cx| s.scroll_to_file(&path, cx));
+        }
+        cx.notify();
+    }
+
+    /// `.review-loading` / `.review-error` / `.diff-empty`.
+    fn message(text: impl Into<SharedString>, color: gpui_kit::Hsla, pad_y: f32) -> AnyElement {
+        div()
+            .w_full()
+            .flex()
+            .justify_center()
+            .px(px(20.))
+            .py(px(pad_y))
+            .text_size(px(13.))
+            .text_color(color)
+            .child(text.into())
+            .into_any_element()
+    }
+
+    /// `.diff-content`: the file list, the divider and the diff.
+    fn content_row(&mut self, list: AnyElement, right: AnyElement, cx: &mut Context<Self>) -> AnyElement {
+        let c = colors(cx);
+        let (border, accent) = (c.border, c.accent);
+        let dragging = self.resizing.is_some();
+        h_flex()
+            .id("review-diff-content")
+            .flex_1()
+            .min_h_0()
+            .items_stretch()
+            .child(
+                v_flex()
+                    .id("review-file-list")
+                    .w(px(self.list_width))
+                    .flex_shrink_0()
+                    .h_full()
+                    .overflow_y_scroll()
+                    .border_r_1()
+                    .border_color(border)
+                    .child(list),
+            )
+            .child(
+                div()
+                    .id("review-divider")
+                    .w(px(4.))
+                    .h_full()
+                    .flex_shrink_0()
+                    .bg(if dragging { accent } else { border })
+                    .cursor_col_resize()
+                    .hover(move |d| d.bg(accent))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|view, event: &gpui_kit::MouseDownEvent, _, cx| {
+                            view.resizing = Some(f32::from(event.position.x) - view.list_width - 1.);
+                            cx.notify();
+                        }),
+                    ),
+            )
+            .child(div().flex_1().min_w_0().h_full().child(right))
+            .on_mouse_move(cx.listener(|view, event: &MouseMoveEvent, _, cx| {
+                if let Some(start) = view.resizing {
+                    if event.pressed_button != Some(MouseButton::Left) {
+                        view.resizing = None;
+                    } else {
+                        view.list_width = (f32::from(event.position.x) - start).clamp(150., 500.);
+                    }
+                    cx.notify();
+                }
+            }))
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(|view, _, _, cx| {
+                    if view.resizing.take().is_some() {
+                        cx.notify();
+                    }
+                }),
+            )
+            .into_any_element()
+    }
+
+    /// The "Filter files..." box (`.file-tree-search`).
+    fn search_box(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let input = match &self.search {
+            Some((input, _)) => input.clone(),
+            None => {
+                let input = cx.new(|cx| InputState::new(window, cx).placeholder("Filter files..."));
+                let changed = cx.subscribe_in(&input, window, |view, input, event: &InputEvent, _, cx| {
+                    if let InputEvent::Change = event {
+                        view.query = input.read(cx).value().to_string();
+                        cx.notify();
+                    }
+                });
+                self.search = Some((input.clone(), changed));
+                input
+            }
+        };
+        let c = colors(cx);
+        let (secondary, primary, hover) = (c.text_secondary, c.text_primary, c.bg_hover);
+        let focused = input.read(cx).focus_handle(cx).is_focused(window);
+        let clear = input.clone();
+        div()
+            .relative()
+            .p(px(8.))
+            .border_b_1()
+            .border_color(c.border)
+            .child(
+                // `:focus { border-color: var(--accent-color) }` names an unset variable, so the
+                // border takes the text colour.
+                parts::framed_input(&input, 30., (10., 28.), 13., 4., if focused { c.text_primary } else { c.border }, cx),
+            )
+            .when(!self.query.is_empty(), |d| {
+                d.child(
+                    div()
+                        .id("clear-file-filter")
+                        .absolute()
+                        .right(px(12.))
+                        .top(px(14.))
+                        .px(px(6.))
+                        .py(px(2.))
+                        .rounded(px(3.))
+                        .text_size(px(12.))
+                        .text_color(secondary)
+                        .cursor_pointer()
+                        .hover(move |d| d.bg(hover).text_color(primary))
+                        .child("\u{2715}")
+                        .on_click(cx.listener(move |view, _: &ClickEvent, window, cx| {
+                            clear.update(cx, |input, cx| input.set_value("", window, cx));
+                            view.query.clear();
+                            cx.notify();
+                        })),
+                )
+            })
+            .into_any_element()
+    }
+
+    // ---- the three views ---------------------------------------------------------------
+
+    fn committed(&mut self, committed: treeterm_model::review::Committed, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let c = colors(cx);
+        let secondary = c.text_secondary;
+        let has_changes = !committed.files.is_empty();
+        let listed: Vec<ListedFile> = committed.files.iter().map(ListedFile::committed).collect();
+        let shown = self.filtered(&listed);
+        let viewed = self.viewed(cx);
+        let comments = self.model.read(cx).comments(cx).map(|c| c.len()).unwrap_or(0);
+        let mut column = v_flex().size_full();
+        if has_changes {
+            let shown_viewed = listed.iter().filter(|f| viewed.contains(&f.path)).count();
+            column = column
+                .child(
+                    self.summary(cx)
+                        .child(branch_pill(cx).child(committed.base_branch.clone()))
+                        .child(div().text_color(secondary).child("..."))
+                        .child(branch_pill(cx).child(committed.head_branch.clone()))
+                        .child(
+                            h_flex()
+                                .ml_auto()
+                                .gap(px(8.))
+                                .font_family(MONO)
+                                .children(totals(committed.total_additions, committed.total_deletions)),
+                        ),
+                )
+                .child(self.toolbar((shown_viewed, listed.len()), comments, true, cx));
+        }
+        let search = self.search_box(window, cx);
+        let tree = files::tree(self, "committed", &shown, &viewed, None, false, cx);
+        let favourites = files::favourites(self, &listed, cx);
+        let list = v_flex().child(search).children(favourites).when(has_changes, |d| d.child(tree)).into_any_element();
+        let right = if has_changes {
+            self.stacked(&committed.patch, &shown, &viewed, true, window, cx)
+        } else {
+            Self::message("No committed changes to show", secondary, 20.)
+        };
+        column.child(self.content_row(list, right, cx)).into_any_element()
+    }
+
+    fn uncommitted(&mut self, uncommitted: treeterm_model::review::Uncommitted, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let c = colors(cx);
+        let secondary = c.text_secondary;
+        let (staging, commit) = {
+            let model = self.model.read(cx);
+            (model.staging().clone(), model.commit_op().clone())
+        };
+        let busy = staging == GitOp::Running;
+        let changes = &uncommitted.changes;
+        let has_changes = !changes.files.is_empty();
+        let listed: Vec<ListedFile> = changes.files.iter().map(ListedFile::uncommitted).collect();
+        let viewed = self.viewed(cx);
+        let comments = self.model.read(cx).comments(cx).map(|c| c.len()).unwrap_or(0);
+        let mut column = v_flex().size_full();
+        if has_changes {
+            let shown_viewed = listed.iter().filter(|f| viewed.contains(&f.path)).count();
+            let label = if busy { "Processing..." } else { "Stage All" };
+            let unlabel = if busy { "Processing..." } else { "Unstage All" };
+            column = column
+                .child(
+                    self.summary(cx)
+                        .child(branch_pill(cx).child("Working directory"))
+                        .child(
+                            h_flex()
+                                .ml_auto()
+                                .gap(px(8.))
+                                .font_family(MONO)
+                                .children(totals(changes.total_additions, changes.total_deletions)),
+                        )
+                        .child(
+                            h_flex()
+                                .ml_auto()
+                                .gap(px(8.))
+                                .child(squeezed_button("stage-all", label, !busy, cx).when(!busy, |d| {
+                                    d.on_click(cx.listener(|view, _: &ClickEvent, _, cx| view.model.update(cx, |m, cx| m.stage(StageTarget::All, cx))))
+                                }))
+                                .child(squeezed_button("unstage-all", unlabel, !busy, cx).when(!busy, |d| {
+                                    d.on_click(cx.listener(|view, _: &ClickEvent, _, cx| view.model.update(cx, |m, cx| m.unstage(StageTarget::All, cx))))
+                                })),
+                        ),
+                )
+                .when_some(
+                    match &staging {
+                        GitOp::Failed(text) => Some(text.clone()),
+                        GitOp::Idle | GitOp::Running => None,
+                    },
+                    |d, text| d.child(div().text_size(px(13.)).child(text)),
+                )
+                .child(self.toolbar((shown_viewed, listed.len()), comments, true, cx));
+        }
+        let search = self.search_box(window, cx);
+        let mut list = v_flex().child(search).children(files::favourites(self, &listed, cx));
+        let mut shown_all: Vec<ListedFile> = Vec::new();
+        for (title, side) in [("Staged", Staging::Staged), ("Unstaged", Staging::Unstaged)] {
+            let section: Vec<ListedFile> = listed.iter().filter(|f| f.staged == Some(side)).cloned().collect();
+            let shown = self.filtered(&section);
+            if shown.is_empty() {
+                continue;
+            }
+            list = list.child(files::section_title(title, cx)).child(files::tree(self, title, &shown, &viewed, Some(busy), true, cx));
+            shown_all.extend(shown);
+        }
+        let right = if has_changes {
+            self.stacked(&uncommitted.patch, &shown_all, &viewed, true, window, cx)
+        } else {
+            Self::message("No uncommitted changes", secondary, 20.)
+        };
+        column = column.child(self.content_row(list.into_any_element(), right, cx));
+        if uncommitted.has_staged() {
+            column = column.child(self.commit_box(&commit, window, cx));
+        }
+        column.into_any_element()
+    }
+
+    /// `.review-commit-section`.
+    fn commit_box(&mut self, commit: &GitOp, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let input = match &self.message {
+            Some((input, _)) => input.clone(),
+            None => {
+                let input = cx.new(|cx| InputState::new(window, cx).placeholder("Commit message..."));
+                let sub = cx.subscribe_in(&input, window, |view, input, event: &InputEvent, _, cx| match event {
+                    InputEvent::PressEnter { shift: false, .. } => {
+                        let text = input.read(cx).value().to_string();
+                        view.model.update(cx, |m, cx| m.commit(&text, cx));
+                    }
+                    InputEvent::Change => {
+                        view.message_text = input.read(cx).value().to_string();
+                        cx.notify();
+                    }
+                    InputEvent::PressEnter { .. } | InputEvent::Focus | InputEvent::Blur => {}
+                });
+                self.message = Some((input.clone(), sub));
+                input
+            }
+        };
+        if self.clear_message {
+            self.clear_message = false;
+            self.message_text.clear();
+            input.update(cx, |state, cx| state.set_value("", window, cx));
+        }
+        let c = colors(cx);
+        let (secondary, active) = (c.text_secondary, c.bg_active);
+        let committing = *commit == GitOp::Running;
+        let enabled = !committing && !self.message_text.trim().is_empty();
+        let focused = input.read(cx).focus_handle(cx).is_focused(window);
+        let message = input.clone();
+        h_flex()
+            .flex_shrink_0()
+            .items_center()
+            .gap(px(8.))
+            .px(px(16.))
+            .py(px(12.))
+            .bg(c.bg_secondary)
+            .border_b_1()
+            .border_color(c.border)
+            .child(
+                parts::framed_input(&input, 34., (12., 12.), 13., 4., if focused { c.accent } else { c.border }, cx).flex_1(),
+            )
+            .child(
+                div()
+                    .id("review-commit")
+                    .flex_shrink_0()
+                    .px(px(16.))
+                    .py(px(8.))
+                    .rounded(px(4.))
+                    .text_size(px(13.))
+                    .line_height(px(16.))
+                    .whitespace_nowrap()
+                    .when(enabled, |d| {
+                        d.bg(rgb(0x238636)).text_color(gpui_kit::white()).cursor_pointer().hover(|d| d.bg(rgb(0x2ea043)))
+                    })
+                    .when(!enabled, |d| d.bg(active).text_color(secondary))
+                    .child(if committing { "Committing..." } else { "Commit" })
+                    .when(enabled, |d| {
+                        d.on_click(cx.listener(move |view, _: &ClickEvent, _, cx| {
+                            let text = message.read(cx).value().to_string();
+                            view.model.update(cx, |m, cx| m.commit(&text, cx));
+                        }))
+                    }),
+            )
+            .when_some(
+                match commit {
+                    GitOp::Failed(text) => Some(text.clone()),
+                    GitOp::Idle | GitOp::Running => None,
+                },
+                |d, text| d.child(div().text_size(px(12.)).text_color(rgb(parts::DELETED)).child(text)),
+            )
+            .into_any_element()
+    }
+
+    fn commits(&mut self, commits: Vec<GitLogCommit>, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let c = colors(cx);
+        let (secondary, primary, accent, hover, active, border) =
+            (c.text_secondary, c.text_primary, c.accent, c.bg_hover, c.bg_active, c.border);
+        let (selected, loading_more, more) = {
+            let model = self.model.read(cx);
+            (model.selected_commit().cloned(), model.loading_more_commits(), model.overview().more_commits)
+        };
+        let pane = if commits.is_empty() {
+            Self::message("No commits on this branch", secondary, 20.)
+        } else {
+            let mut list = v_flex().id("commits-list").track_scroll(&self.commits_scroll).max_h(px(160.)).overflow_y_scroll();
+            for commit in &commits {
+                let is_selected = selected.as_ref().is_some_and(|s| s.commit.hash == commit.hash);
+                let hash = commit.hash.clone();
+                list = list.child(
+                    h_flex()
+                        .id(SharedString::from(format!("commit-{}", commit.hash)))
+                        .items_center()
+                        .gap(px(12.))
+                        .px(px(12.))
+                        .py(px(4.))
+                        .text_size(px(12.))
+                        .line_height(px(14.))
+                        .border_b_1()
+                        .border_color(rgba(0xffffff0d))
+                        .cursor_pointer()
+                        .when(is_selected, |d| d.bg(active))
+                        .when(!is_selected, |d| d.hover(move |d| d.bg(hover)))
+                        .child(div().flex_shrink_0().font_family(MONO).text_size(px(11.)).text_color(accent).child(commit.short_hash.clone()))
+                        .child(div().flex_1().min_w_0().truncate().text_color(primary).child(commit.message.lines().next().unwrap_or_default().to_owned()))
+                        .child(div().flex_shrink_0().text_size(px(11.)).text_color(secondary).child(commit.author.clone()))
+                        .child(div().flex_shrink_0().text_size(px(11.)).text_color(secondary).child(stacked::locale_date(&commit.date)))
+                        .on_click(cx.listener(move |view, _: &ClickEvent, _, cx| {
+                            view.diff = None;
+                            view.model.update(cx, |m, cx| m.select_commit(&hash, cx));
+                        })),
+                );
+            }
+            if more {
+                list = list.child(
+                    div()
+                        .min_h(px(12.))
+                        .px(px(12.))
+                        .py(px(6.))
+                        .flex()
+                        .justify_center()
+                        .text_size(px(12.))
+                        .text_color(secondary)
+                        .child(if loading_more { "Loading more commits..." } else { "" }),
+                );
+                // The sentinel: within 200px of the end, the next page loads.
+                let handle = &self.commits_scroll;
+                let (offset, max) = (handle.offset().y, handle.max_offset().y);
+                if !loading_more && f32::from(max) - f32::from(-offset) < 200. {
+                    let model = self.model.clone();
+                    cx.defer(move |cx| model.update(cx, |m, cx| m.load_more_commits(cx)));
+                }
+            }
+            list.on_scroll(cx.listener(|_, _, _, cx| cx.notify())).into_any_element()
+        };
+        let mut column = v_flex()
+            .size_full()
+            .child(div().flex_shrink_0().border_b_1().border_color(border).child(pane));
+        if let Some(selected) = selected {
+            let viewed = self.viewed(cx);
+            let (listed, body): (Vec<ListedFile>, Option<String>) = match &selected.diff {
+                Loaded::Ready(diff) => (diff.files.iter().map(ListedFile::committed).collect(), Some(diff.patch.clone())),
+                Loaded::Loading | Loaded::Failed(_) => (Vec::new(), None),
+            };
+            let shown = self.filtered(&listed);
+            let shown_viewed = listed.iter().filter(|f| viewed.contains(&f.path)).count();
+            column = column.child(self.toolbar((shown_viewed, listed.len()), 0, false, cx));
+            let search = self.search_box(window, cx);
+            let tree = match &selected.diff {
+                Loaded::Loading => div()
+                    .w_full()
+                    .flex()
+                    .justify_center()
+                    .p(px(20.))
+                    .text_size(px(13.))
+                    .text_color(secondary)
+                    .child("Loading...")
+                    .into_any_element(),
+                Loaded::Failed(error) => Self::message(error.clone(), rgb(ERROR_RED).into(), 20.),
+                Loaded::Ready(_) => files::tree(self, "commit", &shown, &viewed, None, false, cx),
+            };
+            let list = v_flex().child(search).children(files::favourites(self, &listed, cx)).child(tree).into_any_element();
+            let right = match body {
+                Some(patch) => self.stacked(&patch, &shown, &viewed, false, window, cx),
+                None => div().into_any_element(),
+            };
+            column = column.child(self.content_row(list, right, cx));
+        }
+        column.into_any_element()
+    }
+
+    /// The viewed paths (a metadata read error shows as the tab's notice).
+    fn viewed(&self, cx: &App) -> HashSet<String> {
+        self.model.read(cx).viewed_files(cx).map(|v| v.into_keys().collect()).unwrap_or_default()
+    }
+
+    /// The files the filters keep, in their list order.
+    fn filtered(&self, files: &[ListedFile]) -> Vec<ListedFile> {
+        files
+            .iter()
+            .filter(|f| treeterm_model::review_tree::file_matches(&f.path, self.dir_filter.as_deref(), &self.query))
+            .cloned()
+            .collect()
+    }
+
+    fn body(&mut self, mode: ReviewMode, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let secondary = colors(cx).text_secondary;
+        let content = self.model.read(cx).content().clone();
+        match content {
+            ReviewContent::Loading => Self::message(
+                match mode {
+                    ReviewMode::Commits => "Loading commits...",
+                    ReviewMode::Committed | ReviewMode::Uncommitted => "Loading changes...",
+                },
+                secondary,
+                40.,
+            ),
+            ReviewContent::Failed(text) => Self::message(text, rgb(ERROR_RED).into(), 40.),
+            ReviewContent::Committed(committed) => self.committed(committed, window, cx),
+            ReviewContent::Uncommitted(uncommitted) => self.uncommitted(uncommitted, window, cx),
+            ReviewContent::Commits(commits) => self.commits(commits, window, cx),
         }
     }
 }
 
-/// A comment's state and actions: outdated, prompt / re-prompt, addressed, delete.
-fn comment_actions(comment: &ReviewComment, model: &Entity<ReviewModel>, secondary: Hsla) -> impl IntoElement {
-    let addressed = comment.resolution == Resolution::Addressed;
-    let id = comment.id.clone();
-    let (prompt_model, address_model, delete_model) = (model.clone(), model.clone(), model.clone());
-    let (prompt_id, address_id, delete_id) = (id.clone(), id.clone(), id.clone());
-    h_flex()
-        .gap_1()
+/// `.diff-action-btn` as Electron draws it: two rules share the class, so the button keeps
+/// the first rule's 20×20 box (with the second's padding and border, 26×20) and its bold
+/// label overflows it, one word per line, centred.
+fn squeezed_button(id: &'static str, label: &'static str, enabled: bool, cx: &App) -> gpui_kit::Stateful<gpui_kit::Div> {
+    let c = colors(cx);
+    let (hover, primary) = (c.bg_hover, c.text_primary);
+    div()
+        .id(id)
+        .w(px(26.))
+        .h(px(20.))
+        .flex_shrink_0()
+        .flex()
         .items_center()
-        .text_xs()
-        .when(comment.freshness == Freshness::Outdated, |d| {
-            d.child(div().px_1().rounded_sm().bg(rgb(0x5a4a1a)).child("Outdated"))
-        })
-        .when(addressed, |d| d.child(div().text_color(secondary).child("Prompted")))
-        .child(div().flex_1())
+        .justify_center()
+        .border_1()
+        .border_color(c.border)
+        .rounded(px(4.))
+        .text_size(px(11.))
+        .line_height(px(13.))
+        .font_weight(FontWeight::BOLD)
+        .text_color(c.text_secondary)
+        .when(!enabled, |d| d.cursor_default())
+        .when(enabled, |d| d.cursor_pointer().hover(move |d| d.bg(hover).text_color(primary)))
         .child(
-            Button::new(SharedString::from(format!("prompt-{id}")))
-                .xsmall()
-                .ghost()
-                .label(if addressed { "Re-prompt" } else { "Prompt" })
-                .on_click(move |_, _, cx| prompt_model.update(cx, |m, cx| m.prompt_comment(&prompt_id, cx))),
-        )
-        .child(
-            Button::new(SharedString::from(format!("address-{id}")))
-                .xsmall()
-                .ghost()
-                .label(if addressed { "Reopen" } else { "Mark addressed" })
-                .on_click(move |_, _, cx| address_model.update(cx, |m, cx| m.toggle_addressed(&address_id, cx))),
-        )
-        .child(
-            Button::new(SharedString::from(format!("delete-{id}")))
-                .xsmall()
-                .ghost()
-                .label("×")
-                .on_click(move |_, _, cx| delete_model.update(cx, |m, cx| m.delete_comment(&delete_id, cx))),
+            v_flex()
+                .flex_shrink_0()
+                .items_center()
+                .whitespace_nowrap()
+                .children(label.split(' ').map(|word| div().child(word))),
         )
 }
 
 impl Render for ReviewView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let c = colors(cx);
-        let (border, secondary, error) = (c.border, c.text_secondary, c.error);
-        let (mode, base, notice) = {
+        let (mode, base, header) = {
             let model = self.model.read(cx);
-            (model.mode(), model.base().clone(), model.notice().clone())
+            (model.mode(), model.base().clone(), model.header(cx))
         };
-        let modes: &[(ReviewMode, &str)] = match base {
-            ReviewBase::Branch(_) => &[
-                (ReviewMode::Committed, "Committed"),
-                (ReviewMode::Uncommitted, "Uncommitted"),
-                (ReviewMode::Commits, "Commits"),
-            ],
-            ReviewBase::None => &[(ReviewMode::Uncommitted, "Uncommitted")],
-        };
-        let mut bar = h_flex().px_2().py_1().gap_1().items_center().border_b_1().border_color(border);
-        for (target, label) in modes {
-            let target = *target;
-            let button = Button::new(SharedString::from(format!("review-{label}"))).label(*label).xsmall();
-            let button = if mode == target { button.primary() } else { button.ghost() };
-            bar = bar.child(button.on_click(cx.listener(move |view, _, _, cx| {
-                view.model.update(cx, |m, cx| m.set_mode(target, cx));
-            })));
-        }
-        let base_label: SharedString = match &base {
-            ReviewBase::Branch(branch) => format!("against {branch}").into(),
-            ReviewBase::None => "top-level workspace".into(),
-        };
-        let viewed = self.model.read(cx).viewed_count(cx);
-        let open_comments = self
-            .model
-            .read(cx)
-            .comments(cx)
-            .map(|comments| comments.iter().filter(|c| c.resolution == Resolution::Open).count());
-        let comment_total = self.model.read(cx).comments(cx).map(|comments| comments.len()).unwrap_or(0);
-        bar = bar.child(div().pl_2().text_xs().text_color(secondary).child(base_label)).child(div().flex_1());
-        match viewed {
-            Ok((_, 0)) => {}
-            Ok((done, total)) => {
-                bar = bar
-                    .child(div().text_xs().text_color(secondary).child(format!("Viewed {done}/{total}")))
-                    .child(Button::new("prev-unviewed").xsmall().ghost().label("↑ Unviewed").disabled(done == total).on_click(
-                        cx.listener(|view, _, _, cx| view.jump_unviewed(Direction::Previous, cx)),
-                    ))
-                    .child(Button::new("next-unviewed").xsmall().ghost().label("↓ Unviewed").disabled(done == total).on_click(
-                        cx.listener(|view, _, _, cx| view.jump_unviewed(Direction::Next, cx)),
-                    ));
-            }
-            Err(message) => bar = bar.child(div().text_xs().text_color(error).child(message.to_string())),
-        }
-        if let Ok(open) = open_comments
-            && open > 0
-        {
-            bar = bar.child(Button::new("address-comments").xsmall().primary().label("Address Comments").on_click(
-                cx.listener(|view, _, _, cx| view.model.update(cx, |m, cx| m.prompt_open_comments(cx))),
-            ));
-        }
-        bar = bar
-            .child(
-                Button::new("review-comments")
-                    .xsmall()
-                    .ghost()
-                    .label(format!("Comments ({comment_total})"))
-                    .on_click(cx.listener(|view, _, _, cx| {
-                        view.comments_open = !view.comments_open;
-                        cx.notify();
-                    })),
-            )
-            .child(
-                Button::new("review-split")
-                    .xsmall()
-                    .ghost()
-                    .label(if self.split { "Unified" } else { "Split" })
-                    .on_click(cx.listener(|view, _, _, cx| {
-                        view.split = !view.split;
-                        view.diff = None; // rebuilt in the new mode
-                        cx.notify();
-                    })),
-            )
-            .child(Button::new("review-refresh").xsmall().ghost().label("Refresh").on_click(cx.listener(
-                |view, _, _, cx| view.model.update(cx, |m, cx| m.refresh(cx)),
-            )));
-        let notice = match notice {
-            Notice::Clear => None,
-            Notice::Error(text) => Some(
-                h_flex()
-                    .px_2()
-                    .py_1()
-                    .gap_2()
-                    .items_center()
-                    .text_xs()
-                    .border_b_1()
-                    .border_color(border)
-                    .child(div().flex_1().text_color(error).child(text))
-                    .child(Button::new("dismiss-notice").xsmall().ghost().label("×").on_click(
-                        cx.listener(|view, _, _, cx| view.model.update(cx, |m, cx| m.dismiss_notice(cx))),
-                    )),
-            ),
-        };
-        let body = self.body(window, cx);
-        let comments = if self.comments_open { Some(self.comments_panel(cx)) } else { None };
+        let has_base = base != ReviewBase::None;
+        let header_el = self.header(&header, window, cx);
+        let banners = self.banners(cx);
+        let tabs = self.view_tabs(mode, has_base, cx);
+        let body = self.body(mode, window, cx);
         v_flex()
             .size_full()
-            .child(bar)
-            .children(notice)
-            .child(
-                h_flex()
-                    .flex_1()
-                    .min_h_0()
-                    .child(div().flex_1().min_w_0().h_full().child(body))
-                    .children(comments),
-            )
             .min_w(px(0.))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_comment_goes_under_the_last_line_of_the_range() {
-        let single = DiffLineRange::new("a.rs", DiffSide::Modified, 7, 7);
-        assert_eq!(comment_target(&single), (Side::Modified, 7));
-        let upwards = DiffLineRange::new("a.rs", DiffSide::Original, 9, 4);
-        assert_eq!(comment_target(&upwards), (Side::Original, 9));
-        let across = DiffLineRange::new("a.rs", DiffSide::Original, 3, 5).with_end_side(DiffSide::Modified);
-        assert_eq!(comment_target(&across), (Side::Modified, 5));
-    }
-
-    #[test]
-    fn sides_map_both_ways() {
-        for side in [Side::Original, Side::Modified] {
-            assert_eq!(comment_side(diff_side(side)), side);
-        }
+            .overflow_hidden()
+            .bg(colors(cx).bg_primary)
+            .child(header_el)
+            .children(banners)
+            .child(tabs)
+            .child(div().flex_1().min_h_0().child(body))
     }
 }

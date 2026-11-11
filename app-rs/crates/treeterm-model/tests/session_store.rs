@@ -456,7 +456,14 @@ fn merging_a_child_brings_its_commits_into_the_parent_and_removes_it(cx: &mut Te
     std::fs::write(child_dir.join("feature.txt"), "done\n").unwrap();
     std::process::Command::new("git").args(["config", "user.email", "t@t"]).current_dir(&repo).status().unwrap();
     std::process::Command::new("git").args(["config", "user.name", "t"]).current_dir(&repo).status().unwrap();
-    store.update(cx, |s, cx| s.merge_workspace(&child, false, AfterMerge::Remove, cx));
+    // From the child's Review tab, which names its parent for Electron (`parentWorkspaceId`).
+    let child_ws = store.read_with(cx, |s, _| ws(s, &child));
+    let tab = child_ws.update(cx, |w, cx| w.add_tab("review", cx)).unwrap();
+    assert_eq!(child_ws.read_with(cx, |w, _| w.file().app_states[&tab].state["parentWorkspaceId"].clone()), serde_json::json!(root));
+    let Some(TabContent::Review(review)) = child_ws.read_with(cx, |w, _| w.tab_content(&tab)) else {
+        panic!("not a review tab");
+    };
+    review.update(cx, |r, cx| r.merge(false, AfterMerge::Remove, cx));
     wait_until(cx, &store, |s| s.entry(&child).is_none() || matches!(s.entry(&child), Some(WorkspaceEntry::OperationError { .. })));
     if let Some(error) = store.read_with(cx, |s, _| match s.entry(&child) {
         Some(WorkspaceEntry::OperationError { error, .. }) => Some(error.clone()),
@@ -989,6 +996,8 @@ fn review_shows_both_sides_of_a_changed_image(cx: &mut TestAppContext) {
         panic!("not a review tab");
     };
     wait_until(cx, &review, |r| matches!(r.content(), ReviewContent::Uncommitted(_)));
+    // Every image file shown loads inline under its header.
+    wait_until(cx, &review, |r| matches!(r.image("logo.png"), Some(ImageSides::Loaded { .. })));
     review.update(cx, |r, cx| r.focus_file("logo.png", cx));
     wait_until(cx, &review, |r| r.image_diff().is_some_and(|d| !matches!(d.sides, ImageSides::Loading)));
     let sides = review.read_with(cx, |r, _| r.image_diff().unwrap().sides.clone());

@@ -850,6 +850,8 @@ impl SessionStore {
             WorkspaceEvent::Changed => session.enqueue_content_sync(&owned, cx),
             WorkspaceEvent::AttentionRecorded => cx.emit(SessionEvent::AttentionRecorded(owned.clone())),
             WorkspaceEvent::LabelsChanged => session.save_registry_entry(&owned, cx),
+            WorkspaceEvent::MergeRequested { squash, after } => session.merge_workspace(&owned, *squash, *after, cx),
+            WorkspaceEvent::RemoveRequested(mode) => session.remove_workspace(&owned, *mode, cx),
         });
         let viewed = self.viewed.as_deref() == Some(id.as_str());
         if let Some(github) = self.github.clone() {
