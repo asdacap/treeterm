@@ -12,11 +12,10 @@ mod instance_list;
 mod sections;
 mod widgets;
 
-use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::input::{InputEvent, InputState, TextareaState};
-use gpui_kit::component::{WindowExt as _, h_flex, v_flex};
 use gpui_kit::prelude::*;
-use gpui_kit::{App, Context, Entity, SharedString, Subscription, Window, div, px};
+use gpui_kit::{App, Context, Entity, FocusHandle, SharedString, Subscription, Window, canvas, div, px};
 use treeterm_core::keybinding::Os;
 use treeterm_core::settings::{
     AiHarnessInstance, BrowserInstance, CustomRunnerInstance, Settings, TerminalInstance, WebAppInstance,
@@ -26,6 +25,20 @@ use treeterm_model::settings_store::SettingsStore;
 use self::form::{Lists, SandboxSupport, Section, Texts};
 use self::instance_list::InstanceList;
 use crate::theme::colors;
+use crate::ui;
+
+/// A keybinding button waiting for its key (Electron's `RecordingState`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Recording {
+    Prefix,
+    /// The action's index in `PrefixAction::ALL`.
+    Action(usize),
+}
+
+/// `.settings-dialog-header` (62px) and `.settings-dialog-actions` (64.5px) around the content.
+const CHROME_HEIGHT: f32 = 126.5;
+/// The tab list's height (8px padding, 13 tabs of 35.5px): the content is never shorter.
+const TABS_HEIGHT: f32 = 477.5;
 
 pub struct SettingsView {
     store: Entity<SettingsStore>,
@@ -42,6 +55,15 @@ pub struct SettingsView {
     web_apps: InstanceList<WebAppInstance>,
     browsers: InstanceList<BrowserInstance>,
     error: Option<SharedString>,
+    recording: Option<Recording>,
+    /// Takes the keystrokes while recording.
+    intercept: Option<Subscription>,
+    /// Focused while recording, so no input takes the keys too.
+    focus: FocusHandle,
+    /// The shown section's natural height, measured after layout: the dialog grows with it
+    /// up to 80% of the window, as Electron's does.
+    body_height: f32,
+    scroll: gpui_kit::ScrollHandle,
 }
 
 /// The single-value text fields; see [`Texts`] for what each holds.
@@ -61,8 +83,10 @@ struct Inputs {
     buffer_lines: Entity<InputState>,
     idle_debounce: Entity<InputState>,
     idle_debounce_unread: Entity<InputState>,
+    /// Filled by recording (the buttons show it); never shown as a text field.
     prefix_key: Entity<InputState>,
     prefix_timeout: Entity<InputState>,
+    /// As `prefix_key`.
     action_keys: [Entity<InputState>; 6],
     github_pat: Entity<InputState>,
     /// Re-render on typing a criterion, for its "Reset to default".
@@ -86,10 +110,11 @@ impl Inputs {
         let buffer_lines = line(texts.buffer_lines, "", false);
         let idle_debounce = line(texts.idle_debounce, "", false);
         let idle_debounce_unread = line(texts.idle_debounce_unread, "", false);
-        let prefix_key = line(texts.prefix_key, "Control+B", false);
+        let prefix_key = line(texts.prefix_key, "", false);
         let prefix_timeout = line(texts.prefix_timeout, "", false);
         let action_keys = texts.action_keys.map(|key| line(key, "", false));
         let github_pat = line(texts.github_pat, "ghp_...", true);
+        // `rows`: 4, 2 and 3 lines, growing as Electron's `resize: vertical` lets one drag.
         let mut area = |text: String, rows: usize| {
             cx.new(|cx| TextareaState::new(window, cx).auto_grow(rows, 12).default_value(text))
         };
@@ -178,6 +203,11 @@ impl SettingsView {
             web_apps,
             browsers,
             error: None,
+            recording: None,
+            intercept: None,
+            focus: cx.focus_handle(),
+            body_height: 0.,
+            scroll: gpui_kit::ScrollHandle::new(),
         }
     }
 
@@ -218,21 +248,75 @@ impl SettingsView {
         }
     }
 
+    /// Start (or, clicked again, stop) recording a keybinding button's key. While recording,
+    /// every keystroke goes to the recorder first (before key bindings such as Tab's focus
+    /// move or Escape's close), as Electron's `preventDefault` + `stopPropagation` do.
+    fn toggle_recording(&mut self, target: Recording, window: &mut Window, cx: &mut Context<Self>) {
+        self.recording = if self.recording == Some(target) { None } else { Some(target) };
+        self.intercept = self.recording.map(|_| {
+            let view = cx.entity().downgrade();
+            cx.intercept_keystrokes(move |event, window, cx| {
+                if event.keystroke.is_modifier_key() {
+                    return;
+                }
+                let keystroke = event.keystroke.clone();
+                match view.update(cx, |view, cx| view.record_key(&keystroke, window, cx)) {
+                    Ok(true) => cx.stop_propagation(),
+                    Ok(false) => {}
+                    Err(error) => tracing::debug!(%error, "settings closed"),
+                }
+            })
+        });
+        window.focus(&self.focus, cx);
+        cx.notify();
+    }
+
+    /// `handleKeyDown`: a key pressed while recording becomes the binding. Returns whether
+    /// it was taken.
+    fn record_key(&mut self, keystroke: &gpui_kit::Keystroke, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let Some(target) = self.recording.take() else {
+            return false;
+        };
+        let key = form::dom_key(&keystroke.key, keystroke.key_char.as_deref());
+        let (state, value) = match target {
+            Recording::Prefix => {
+                let m = keystroke.modifiers;
+                (&self.inputs.prefix_key, form::recorded_prefix_key(&key, m.platform || m.control, m.alt, m.shift))
+            }
+            Recording::Action(index) => (&self.inputs.action_keys[index], form::recorded_action_key(&key)),
+        };
+        state.update(cx, |input, cx| input.set_value(value, window, cx));
+        self.intercept = None;
+        cx.notify();
+        true
+    }
+
+    /// `.settings-tabs`: 140px, 8px vertical padding, a right border; `.settings-tab` rows of
+    /// 13px text with 10px 16px padding, the active one bg-active.
     fn sidebar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let c = colors(cx);
         let (active_bg, hover_bg, primary, secondary) = (c.bg_active, c.bg_hover, c.text_primary, c.text_secondary);
-        let mut list = v_flex().w(px(150.)).h_full().flex_none().py_2().border_r_1().border_color(c.border);
+        let mut list = div()
+            .flex()
+            .flex_col()
+            .w(px(140.))
+            .h_full()
+            .flex_none()
+            .py(px(8.))
+            .border_r_1()
+            .border_color(c.border);
         for section in Section::ALL {
             let active = section == self.section;
             list = list.child(
                 div()
                     .id(section.label())
-                    .px_3()
-                    .py_1()
-                    .text_sm()
+                    .px(px(16.))
+                    .py(px(10.))
+                    .text_size(px(ui::BODY))
+                    .line_height(px(15.5))
                     .cursor_pointer()
                     .when(active, |item| item.bg(active_bg).text_color(primary))
-                    .when(!active, |item| item.text_color(secondary).hover(|style| style.bg(hover_bg)))
+                    .when(!active, |item| item.text_color(secondary).hover(move |s| s.bg(hover_bg).text_color(primary)))
                     .child(section.label())
                     .on_click(cx.listener(move |view, _, _, cx| {
                         view.section = section;
@@ -245,7 +329,7 @@ impl SettingsView {
 }
 
 impl Render for SettingsView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let body = match self.section {
             Section::General => self.render_general(cx),
             Section::Terminal => self.render_terminal(cx),
@@ -261,50 +345,93 @@ impl Render for SettingsView {
             Section::Github => self.render_github(cx),
             Section::Debug => self.render_debug(cx),
         };
+        // `.settings-dialog`: max-height 80vh, the content (flex: 1) at least as tall as the
+        // tab list; past that the panel scrolls.
+        let max_content = f32::from(window.viewport_size().height) * 0.8 - CHROME_HEIGHT;
+        let natural = self.body_height + 32.;
+        let content_height = natural.max(TABS_HEIGHT).min(max_content);
+        let overflows = natural > content_height + 0.5;
+        let measured = cx.entity().downgrade();
+        let measure = canvas(
+            move |bounds, _, cx| {
+                let height = f32::from(bounds.size.height);
+                if let Err(error) = measured.update(cx, |view, cx| {
+                    if (view.body_height - height).abs() > 0.5 {
+                        view.body_height = height;
+                        cx.notify();
+                    }
+                }) {
+                    tracing::debug!(%error, "settings closed");
+                }
+            },
+            |_, _, _, _| {},
+        )
+        .absolute()
+        .top_0()
+        .left_0()
+        .size_full();
         let error = colors(cx).error;
-        v_flex()
-            .w_full()
-            .gap_2()
+        ui::dialog_root(cx)
+            .track_focus(&self.focus)
+            .child(ui::dialog_header("Settings", "×", colors(cx).text_primary, cx))
             .child(
-                h_flex().w_full().h(px(520.)).items_start().child(self.sidebar(cx)).child(
+                div().flex().w_full().h(px(content_height)).overflow_hidden().child(self.sidebar(cx)).child(
                     div()
-                        .id("settings-panel")
+                        .relative()
                         .flex_1()
                         // Without a zero minimum, wide inputs and long help lines size the
                         // panel past the dialog's edge.
                         .min_w_0()
                         .h_full()
-                        .overflow_y_scroll()
-                        .pl_4()
-                        .pr_2()
-                        .py_2()
-                        .child(body),
+                        .child(
+                            div()
+                                .id("settings-panel")
+                                .size_full()
+                                .overflow_y_scroll()
+                                .track_scroll(&self.scroll)
+                                .on_scroll(cx.listener(|_, _, _, cx| cx.notify()))
+                                .pl(px(20.))
+                                // The scrollbar's 10px gutter when the section overflows.
+                                .pr(px(if overflows { 30. } else { 20. }))
+                                .py(px(16.))
+                                .child(div().relative().child(body).child(measure)),
+                        )
+                        .when(overflows, |panel| {
+                            panel.child(ui::scrollbar_thumb(&self.scroll, content_height, natural, cx))
+                        }),
                 ),
             )
-            .when_some(self.error.clone(), |d, message| d.child(div().text_sm().text_color(error).child(message)))
+            .child(
+                ui::dialog_actions(cx)
+                    // Not in Electron (it does not validate): why Save did not close.
+                    .when_some(self.error.clone(), |d, message| {
+                        d.child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .self_center()
+                                .text_size(px(ui::BODY))
+                                .text_color(error)
+                                .child(message),
+                        )
+                    })
+                    .child(
+                        ui::dialog_button("cancel-settings", "Cancel", ui::ButtonKind::Secondary, false, cx)
+                            .on_click(|_, window, cx| window.close_dialog(cx)),
+                    )
+                    .child(ui::dialog_button("save-settings", "Save", ui::ButtonKind::Primary, false, cx).on_click(
+                        cx.listener(|view, _, window, cx| {
+                            if view.save(cx) {
+                                window.close_dialog(cx);
+                            }
+                        }),
+                    )),
+            )
     }
 }
 
 /// Open the dialog in `window`.
 pub fn open(store: Entity<SettingsStore>, window: &mut Window, cx: &mut App) {
     let view = cx.new(|cx| SettingsView::new(store, window, cx));
-    window.open_dialog(cx, move |dialog, _window, _cx| {
-        let save = view.clone();
-        dialog.title("Settings").w(px(760.)).child(view.clone()).footer(
-            h_flex()
-                .justify_end()
-                .gap_2()
-                .child(
-                    Button::new("cancel-settings")
-                        .ghost()
-                        .label("Cancel")
-                        .on_click(|_, window, cx| window.close_dialog(cx)),
-                )
-                .child(Button::new("save-settings").primary().label("Save").on_click(move |_, window, cx| {
-                    if save.update(cx, |view, cx| view.save(cx)) {
-                        window.close_dialog(cx);
-                    }
-                })),
-        )
-    });
+    window.open_dialog(cx, move |dialog, _window, cx| ui::dialog_frame(dialog, 600., cx).child(view.clone()));
 }

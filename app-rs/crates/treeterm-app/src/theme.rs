@@ -2,7 +2,7 @@
 //! as in Electron). Component colours come from GPUI Kit's theme, recoloured to match.
 
 use gpui_kit::component::{Theme, ThemeMode};
-use gpui_kit::{App, Global, Hsla, rgb};
+use gpui_kit::{App, Global, Hsla, hsla, px, rgb};
 
 pub struct Colors {
     pub bg_primary: Hsla,
@@ -43,19 +43,38 @@ pub fn colors(cx: &App) -> &Colors {
 pub fn install(cx: &mut App) {
     Theme::change(ThemeMode::Dark, None, cx);
     let c = Colors::dark();
-    let theme = Theme::global_mut(cx);
-    theme.background = c.bg_primary;
-    theme.foreground = c.text_primary;
-    theme.border = c.border;
-    theme.muted_foreground = c.text_secondary;
-    theme.sidebar = c.bg_secondary;
-    theme.sidebar_foreground = c.text_primary;
-    theme.sidebar_border = c.border;
-    theme.list_hover = c.bg_hover;
-    theme.list_active = c.bg_active;
-    theme.accent = c.bg_hover;
-    theme.primary = c.accent;
-    theme.title_bar = c.bg_secondary;
-    theme.title_bar_border = c.border;
+    // `update` (not `global_mut`) so the derived tokens — the popover and dialog surfaces,
+    // tooltips — follow the colours set here.
+    Theme::update(cx, |theme| {
+        theme.background = c.bg_primary;
+        theme.foreground = c.text_primary;
+        theme.border = c.border;
+        theme.muted_foreground = c.text_secondary;
+        theme.sidebar = c.bg_secondary;
+        theme.sidebar_foreground = c.text_primary;
+        theme.sidebar_border = c.border;
+        theme.list_hover = c.bg_hover;
+        theme.list_active = c.bg_active;
+        theme.accent = c.bg_hover;
+        theme.primary = c.accent;
+        theme.title_bar = c.bg_secondary;
+        theme.title_bar_border = c.border;
+        // `.context-menu`: bg-tertiary, text-primary, 6px radius (GPUI Kit's default); its
+        // items highlight in bg-hover (`accent` above).
+        theme.popover = c.bg_tertiary;
+        theme.popover_foreground = c.text_primary;
+        // `.dialog-overlay`: rgba(0, 0, 0, 0.6).
+        theme.overlay = hsla(0., 0., 0., 0.6);
+        // Inputs: a 1px border-color border that turns accent on focus
+        // (`.settings-input:focus`), no ring outside it.
+        theme.input = c.border;
+        theme.ring = c.accent;
+        theme.focus_ring = false;
+        // `.notification-error`: bottom-left, 12px from the edges, at most 480px wide.
+        theme.notification.placement = gpui_kit::Anchor::BottomLeft;
+        let margins = &mut theme.notification.margins;
+        (margins.top, margins.right, margins.bottom, margins.left) = (px(12.), px(12.), px(12.), px(12.));
+        theme.notification.width = px(480.);
+    });
     cx.set_global(c);
 }

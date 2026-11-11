@@ -1,8 +1,7 @@
 //! "Window → Active Processes" dialog. Port of `ActiveProcessesDialog.tsx`; the live view
 //! is the native terminal (Electron's `PtyViewer`).
 
-use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants as _};
-use gpui_kit::component::{Sizable as _, WindowExt as _, h_flex, v_flex};
+use gpui_kit::component::WindowExt as _;
 use gpui_kit::prelude::*;
 use gpui_kit::{AnyElement, App, Context, Entity, SharedString, Subscription, Window, div, px};
 use treeterm_model::active_processes::{ActiveProcesses, ProcessList, display_name, relative_time};
@@ -10,6 +9,7 @@ use treeterm_model::session_store::SessionStore;
 
 use crate::terminal_view::TerminalView;
 use crate::theme::colors;
+use crate::ui;
 
 pub struct ActiveProcessesView {
     model: Entity<ActiveProcesses>,
@@ -60,16 +60,16 @@ impl ActiveProcessesView {
         }
     }
 
+    /// `.active-processes-list`: 260px, a right border; one `.active-processes-item` per PTY.
     fn list(&self, cx: &mut Context<Self>) -> AnyElement {
         let c = colors(cx);
         let model = self.model.read(cx);
-        let empty = |text: &str| div().p_3().text_sm().text_color(c.text_secondary).child(text.to_owned()).into_any_element();
         let sessions = match model.list() {
-            ProcessList::Loading => return empty("Loading…"),
-            ProcessList::Failed(error) => {
-                return div().p_3().text_sm().text_color(c.error).child(error.clone()).into_any_element();
+            ProcessList::Loading => return empty("Loading…", c.text_secondary),
+            ProcessList::Failed(error) => return empty(error.clone(), c.error),
+            ProcessList::Loaded(sessions) if sessions.is_empty() => {
+                return empty("No active PTY sessions", c.text_secondary);
             }
-            ProcessList::Loaded(sessions) if sessions.is_empty() => return empty("No active PTY sessions"),
             ProcessList::Loaded(sessions) => sessions.clone(),
         };
         let selected = model.selected().map(|(id, _)| id.to_owned());
@@ -77,30 +77,38 @@ impl ActiveProcessesView {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis() as i64)
             .unwrap_or_default();
-        let mut list = v_flex().id("process-list").size_full().overflow_y_scroll();
+        let mut list = div().id("process-list").flex().flex_col().size_full().overflow_y_scroll();
         for session in sessions {
             let is_selected = selected.as_deref() == Some(session.id.as_str());
             let id = session.id.clone();
+            let (active, hover) = (c.bg_active, c.bg_hover);
             list = list.child(
-                v_flex()
+                div()
                     .id(SharedString::from(format!("process-{}", session.id)))
-                    .px_3()
-                    .py_2()
-                    .gap_0p5()
+                    .flex_shrink_0()
+                    .px(px(16.))
+                    .py(px(10.))
                     .cursor_pointer()
                     .border_b_1()
                     .border_color(c.border)
-                    .when(is_selected, |d| d.bg(c.bg_active))
-                    .when(!is_selected, |d| d.hover(move |d| d.bg(c.bg_hover)))
-                    .child(div().text_sm().truncate().child(display_name(&session.cwd, &self.workspaces)))
+                    .when(is_selected, |d| d.bg(active))
+                    .when(!is_selected, |d| d.hover(move |d| d.bg(hover)))
                     .child(
-                        h_flex()
-                            .gap_2()
-                            .text_xs()
+                        div()
+                            .mb(px(4.))
+                            .text_size(px(ui::BODY))
+                            .font_weight(gpui_kit::FontWeight::MEDIUM)
+                            .text_color(c.text_primary)
+                            .truncate()
+                            .child(display_name(&session.cwd, &self.workspaces)),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .gap(px(8.))
+                            .text_size(px(ui::SMALL))
                             .text_color(c.text_secondary)
-                            // Electron shows the first 8 characters, which are the same for
-                            // every `pty-<timestamp>-<n>` id; the whole id tells them apart.
-                            .child(session.id.clone())
+                            .child(session.id.chars().take(8).collect::<String>())
                             .child(relative_time(session.created_at, now)),
                     )
                     .on_click(cx.listener(move |view, _, _, cx| view.model.update(cx, |m, cx| m.select(&id, cx)))),
@@ -108,6 +116,20 @@ impl ActiveProcessesView {
         }
         list.into_any_element()
     }
+}
+
+/// `.active-processes-empty`: 13px secondary text, centred.
+fn empty(text: impl Into<SharedString>, color: gpui_kit::Hsla) -> AnyElement {
+    let text: SharedString = text.into();
+    div()
+        .size_full()
+        .flex()
+        .items_center()
+        .justify_center()
+        .text_size(px(ui::BODY))
+        .text_color(color)
+        .child(text)
+        .into_any_element()
 }
 
 impl Render for ActiveProcessesView {
@@ -119,40 +141,54 @@ impl Render for ActiveProcessesView {
         let list = self.list(cx);
         let stop_error = self.model.read(cx).stop_error().map(str::to_owned);
         let detail = match self.terminal_view(window, cx) {
-            Some(terminal) => v_flex()
-                .size_full()
-                .child(
-                    h_flex().p_1().justify_end().child(
-                        Button::new("stop-process")
-                            .small()
-                            .with_variant(ButtonVariant::Danger)
-                            .label("Stop Process")
-                            .on_click(cx.listener(|view, _, _, cx| view.model.update(cx, |m, cx| m.stop(cx)))),
-                    ),
-                )
-                .child(div().flex_1().min_h_0().child(terminal))
-                .into_any_element(),
-            None => div()
-                .size_full()
+            Some(terminal) => div()
                 .flex()
-                .items_center()
-                .justify_center()
-                .text_sm()
-                .text_color(secondary)
-                .child("Select a process to view its terminal")
+                .flex_col()
+                .size_full()
+                // `.active-processes-toolbar`: 8px 12px, a bottom border; the red Stop button.
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(8.))
+                        .px(px(12.))
+                        .py(px(8.))
+                        .border_b_1()
+                        .border_color(border)
+                        .child(
+                            div()
+                                .id("stop-process")
+                                .px(px(12.))
+                                .py(px(4.))
+                                .rounded(px(4.))
+                                .bg(gpui_kit::rgb(0xe74c3c))
+                                .text_color(gpui_kit::white())
+                                .text_size(px(12.))
+                                .line_height(px(14.))
+                                .cursor_pointer()
+                                .hover(|d| d.opacity(0.9))
+                                .child("Stop Process")
+                                .on_click(cx.listener(|view, _, _, cx| view.model.update(cx, |m, cx| m.stop(cx)))),
+                        )
+                        .when_some(stop_error, |d, text| {
+                            d.child(div().text_size(px(12.)).text_color(error).truncate().child(text))
+                        }),
+                )
+                .child(div().flex_1().min_h_0().p(px(4.)).child(terminal))
                 .into_any_element(),
+            None => empty("Select a process to view its terminal", secondary),
         };
-        v_flex()
-            .size_full()
-            .min_h(px(480.))
-            .when_some(stop_error, |d, text| d.child(div().pb_1().text_sm().text_color(error).child(text)))
+        // `.active-processes-dialog`: 70vh tall; the header, then the list beside the detail.
+        let height = f32::from(window.viewport_size().height) * 0.7;
+        ui::dialog_root(cx)
+            .h(px(height))
+            .child(ui::dialog_header("Active Processes", "×", colors(cx).text_primary, cx))
             .child(
-                h_flex()
+                div()
+                    .flex()
                     .flex_1()
                     .min_h_0()
-                    .border_1()
-                    .border_color(border)
-                    .child(div().w(px(220.)).h_full().border_r_1().border_color(border).child(list))
+                    .child(div().w(px(260.)).flex_shrink_0().h_full().border_r_1().border_color(border).child(list))
                     .child(div().flex_1().min_w_0().h_full().child(detail)),
             )
     }
@@ -160,39 +196,80 @@ impl Render for ActiveProcessesView {
 
 pub fn open(session: &Entity<SessionStore>, settings: treeterm_core::settings::TerminalSettings, window: &mut Window, cx: &mut App) {
     let view = cx.new(|cx| ActiveProcessesView::new(session, settings, cx));
-    window.open_dialog(cx, move |dialog, _window, _cx| {
-        dialog.title("Active Processes").w(px(900.)).child(view.clone())
-    });
+    // `width: 90%; max-width: 1000px`.
+    let width = (f32::from(window.viewport_size().width) * 0.9).min(1000.);
+    window.open_dialog(cx, move |dialog, _window, cx| ui::dialog_frame(dialog, width, cx).child(view.clone()));
 }
 
 /// Ask before closing when child workspaces are still unmerged (`CloseConfirmDialog.tsx`).
 pub fn confirm_close(unmerged: Vec<(String, Option<String>)>, window: &mut Window, cx: &mut App) {
-    let secondary = colors(cx).text_secondary;
-    window.open_alert_dialog(cx, move |alert, _, _| {
-        let mut list = v_flex().gap_1().py_2();
+    window.open_dialog(cx, move |dialog, _, cx| {
+        let c = colors(cx);
+        // `.close-confirm-list`: bg-tertiary, 4px radius, 8px 12px padding, at most 200px.
+        let mut list = div()
+            .id("close-confirm-list")
+            .flex()
+            .flex_col()
+            .max_h(px(200.))
+            .overflow_y_scroll()
+            .px(px(12.))
+            .py(px(8.))
+            .rounded(px(4.))
+            .bg(c.bg_tertiary);
         for (name, branch) in &unmerged {
             list = list.child(
-                h_flex()
-                    .gap_2()
-                    .child(div().child(format!("• {name}")))
-                    .when_some(branch.clone(), |d, branch| d.child(div().text_color(secondary).child(format!("({branch})")))),
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.))
+                    .py(px(6.))
+                    .text_size(px(ui::BODY))
+                    .child(
+                        div().font_weight(gpui_kit::FontWeight::MEDIUM).text_color(c.text_primary).child(name.clone()),
+                    )
+                    .when_some(branch.clone(), |d, branch| {
+                        d.child(
+                            div()
+                                .font_family("Menlo")
+                                .text_size(px(12.))
+                                .text_color(c.accent)
+                                .child(format!("({branch})")),
+                        )
+                    }),
             );
         }
-        alert
-            .title("Unmerged Workspaces")
-            .description(
-                v_flex()
-                    .gap_1()
-                    .child("The following sub-workspaces have not been merged:")
-                    .child(list)
-                    .child("Closing the application will not delete these workspaces, but their work remains unmerged."),
+        let body = div()
+            .p(px(20.))
+            .child(
+                div()
+                    .mb(px(12.))
+                    .text_size(px(14.))
+                    .text_color(c.text_secondary)
+                    .child("The following sub-workspaces have not been merged:"),
             )
-            .show_cancel(true)
-            .ok_text("Close Anyway")
-            .ok_variant(ButtonVariant::Danger)
-            .on_ok(|_, _, cx| {
-                cx.quit();
-                true
-            })
+            .child(list)
+            .child(
+                div()
+                    .mt(px(12.))
+                    .text_size(px(12.))
+                    .italic()
+                    .text_color(c.text_secondary)
+                    .child("Closing the application will not delete these workspaces, but their work remains unmerged."),
+            );
+        let actions = ui::dialog_actions(cx)
+            .child(
+                ui::dialog_button("close-cancel", "Cancel", ui::ButtonKind::Secondary, false, cx)
+                    .on_click(|_, window, cx| window.close_dialog(cx)),
+            )
+            .child(
+                ui::dialog_button("close-anyway", "Close Anyway", ui::ButtonKind::Warning, false, cx)
+                    .on_click(|_, _, cx| cx.quit()),
+            );
+        ui::dialog_frame(dialog, 450., cx).child(
+            ui::dialog_root(cx)
+                .child(ui::dialog_header("Unmerged Workspaces", "x", gpui_kit::rgb(0xf0a000), cx))
+                .child(body)
+                .child(actions),
+        )
     });
 }

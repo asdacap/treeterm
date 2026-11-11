@@ -4,9 +4,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::checkbox::Checkbox;
-use gpui_kit::component::{Sizable as _, WindowExt as _, h_flex, v_flex};
+use gpui_kit::component::WindowExt as _;
 use gpui_kit::prelude::*;
 use gpui_kit::{App, Context, Entity, SharedString, Task, Window, div, px};
 use treeterm_core::worktree_hierarchy::{WorktreeRef, detect_worktree_hierarchy};
@@ -14,6 +12,7 @@ use treeterm_core::worktree_registry::WorktreeRegistryEntry;
 use treeterm_model::session_store::{AutoOpenItem, SessionStore};
 
 use crate::theme::colors;
+use crate::ui;
 
 struct Row {
     path: String,
@@ -35,6 +34,8 @@ pub struct AutoOpenDialog {
     include_unknown: bool,
     detection: Detection,
     checked: HashSet<String>,
+    /// Why opening failed.
+    error: Option<SharedString>,
     _load: Option<Task<()>>,
 }
 
@@ -65,6 +66,7 @@ impl AutoOpenDialog {
             include_unknown: false,
             detection: Detection::Loading,
             checked: HashSet::new(),
+            error: None,
             _load: None,
         };
         dialog.load(cx);
@@ -140,13 +142,32 @@ impl AutoOpenDialog {
         let Detection::Loaded(rows) = &self.detection else {
             return false;
         };
+        let parents: HashMap<&str, Option<&str>> =
+            rows.iter().map(|r| (r.path.as_str(), r.parent_path.as_deref())).collect();
+        // A node whose detected parent is unchecked hangs from its nearest checked ancestor
+        // (or the root), so the opened tree stays connected (`resolveParent`).
+        let resolve = |path: &str| -> Option<String> {
+            let mut parent = parents.get(path).copied().flatten();
+            let mut hops = 0;
+            while let Some(candidate) = parent {
+                hops += 1;
+                if self.checked.contains(candidate) {
+                    return Some(candidate.to_owned());
+                }
+                if hops > rows.len() {
+                    return None;
+                }
+                parent = parents.get(candidate).copied().flatten();
+            }
+            None
+        };
         let items: Vec<AutoOpenItem> = rows
             .iter()
             .filter(|r| self.checked.contains(&r.path))
             .map(|r| AutoOpenItem {
                 path: r.path.clone(),
                 branch: r.branch.clone(),
-                parent_path: r.parent_path.clone(),
+                parent_path: resolve(&r.path),
                 display_name: r.entry.as_ref().and_then(|e| e.display_name.clone()),
                 description: r.entry.as_ref().and_then(|e| e.description.clone()),
             })
@@ -158,91 +179,218 @@ impl AutoOpenDialog {
         match self.session.update(cx, |s, cx| s.auto_open_worktrees(&root, items, cx)) {
             Ok(()) => true,
             Err(error) => {
-                self.detection = Detection::Failed(error);
+                self.error = Some(error.into());
                 cx.notify();
                 false
             }
         }
+    }
+
+    /// The rows in tree order (each followed by its children), with their depth.
+    fn ordered(rows: &[Row]) -> Vec<&Row> {
+        fn walk<'a>(parent: Option<&str>, rows: &'a [Row], out: &mut Vec<&'a Row>) {
+            for row in rows.iter().filter(|r| r.parent_path.as_deref() == parent) {
+                if out.iter().any(|seen| seen.path == row.path) {
+                    continue;
+                }
+                out.push(row);
+                walk(Some(&row.path), rows, out);
+            }
+        }
+        let mut out = Vec::with_capacity(rows.len());
+        walk(None, rows, &mut out);
+        // Rows whose parent is not listed still show, at the end.
+        for row in rows {
+            if !out.iter().any(|seen| seen.path == row.path) {
+                out.push(row);
+            }
+        }
+        out
     }
 }
 
 impl Render for AutoOpenDialog {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let c = colors(cx);
-        let (secondary, error) = (c.text_secondary, c.error);
-        let body = match &self.detection {
-            Detection::Loading => div().text_sm().text_color(secondary).child("Detecting worktrees…").into_any_element(),
-            Detection::Failed(message) => div().text_sm().text_color(error).child(message.clone()).into_any_element(),
-            Detection::Loaded(rows) if rows.is_empty() => div()
-                .text_sm()
-                .text_color(secondary)
-                .child("No recent worktrees to open.")
-                .into_any_element(),
+        let (primary, secondary, border, hover, accent, tertiary, bg) =
+            (c.text_primary, c.text_secondary, c.border, c.bg_hover, c.accent, c.bg_tertiary, c.bg_primary);
+        let root_name = self
+            .session
+            .read(cx)
+            .workspace_store(&self.root_id)
+            .map(|w| w.read(cx).file().name.clone())
+            .unwrap_or_default();
+        let message = |text: &'static str| {
+            div().p(px(16.)).flex().justify_center().text_size(px(ui::BODY)).text_color(secondary).child(text).into_any_element()
+        };
+        let rows: Vec<gpui_kit::AnyElement> = match &self.detection {
+            Detection::Loading => vec![message("Detecting worktrees...")],
+            Detection::Failed(_) => vec![message("No recent worktrees found")],
+            Detection::Loaded(rows) if rows.is_empty() => vec![message("No recent worktrees found")],
             Detection::Loaded(rows) => {
-                let mut list = v_flex().id("auto-open-rows").max_h(px(360.)).overflow_y_scroll().gap_1();
-                for (i, row) in rows.iter().enumerate() {
-                    let path = row.path.clone();
-                    let label = row
-                        .entry
-                        .as_ref()
-                        .and_then(|e| e.display_name.clone())
-                        .filter(|n| !n.is_empty())
-                        .unwrap_or_else(|| row.branch.clone());
-                    list = list.child(
-                        h_flex()
-                            .pl(px(16. * row.depth as f32))
-                            .gap_2()
+                let ordered = Self::ordered(rows);
+                let count = ordered.len();
+                ordered
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, row)| {
+                        let path = row.path.clone();
+                        let name = row
+                            .entry
+                            .as_ref()
+                            .and_then(|e| e.display_name.clone())
+                            .unwrap_or_else(|| row.branch.clone());
+                        let checked = self.checked.contains(&row.path);
+                        // `.create-child-worktree-item`, indented 20px per level; the whole
+                        // row toggles its (default, 13px) checkbox.
+                        div()
+                            .id(SharedString::from(format!("auto-open-{i}")))
+                            .flex()
+                            .items_center()
+                            .pl(px(12. + 20. * row.depth as f32))
+                            .pr(px(12.))
+                            .py(px(10.))
+                            .when(i + 1 < count, |d| d.border_b_1().border_color(border))
+                            .cursor_pointer()
+                            .hover(move |d| d.bg(hover))
+                            .child(div().mr(px(8.)).child(ui::checkbox_box(checked, false, 13.)))
                             .child(
-                                Checkbox::new(SharedString::from(format!("auto-open-{i}")))
-                                    .checked(self.checked.contains(&row.path))
-                                    .on_click(cx.listener(move |dialog, checked: &bool, _, cx| {
-                                        if *checked {
-                                            dialog.checked.insert(path.clone());
-                                        } else {
-                                            dialog.checked.remove(&path);
-                                        }
-                                        cx.notify();
-                                    })),
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .truncate()
+                                    .text_size(px(ui::BODY))
+                                    .line_height(px(15.5))
+                                    .font_weight(gpui_kit::FontWeight::MEDIUM)
+                                    .text_color(primary)
+                                    .child(name),
                             )
-                            .child(div().text_sm().child(label))
-                            .child(div().text_xs().text_color(secondary).truncate().child(row.path.clone()))
-                            .when(row.entry.is_none(), |d| d.child(div().text_xs().text_color(secondary).child("(not recent)"))),
-                    );
-                }
-                list.into_any_element()
+                            .child(div().max_w(px(180.)).truncate().text_size(px(ui::SMALL)).text_color(accent).child(row.branch.clone()))
+                            .when(row.entry.is_none(), |d| {
+                                d.child(
+                                    div()
+                                        .ml(px(8.))
+                                        .flex_shrink_0()
+                                        .px(px(6.))
+                                        .py(px(2.))
+                                        .rounded(px(3.))
+                                        .bg(tertiary)
+                                        .text_size(px(10.))
+                                        .line_height(px(12.))
+                                        .text_color(secondary)
+                                        .child("unknown"),
+                                )
+                            })
+                            .on_click(cx.listener(move |dialog, _, _, cx| {
+                                if !dialog.checked.remove(&path) {
+                                    dialog.checked.insert(path.clone());
+                                }
+                                cx.notify();
+                            }))
+                            .into_any_element()
+                    })
+                    .collect()
             }
         };
-        v_flex()
-            .gap_3()
+        let error = match (&self.error, &self.detection) {
+            (Some(error), _) => Some(error.clone()),
+            (None, Detection::Failed(error)) => Some(SharedString::from(error.clone())),
+            (None, _) => None,
+        };
+        let loading = matches!(self.detection, Detection::Loading);
+        let count = match &self.detection {
+            Detection::Loaded(rows) => rows.iter().filter(|r| self.checked.contains(&r.path)).count(),
+            Detection::Loading | Detection::Failed(_) => 0,
+        };
+        let include = self.include_unknown;
+        let disabled = loading || count == 0;
+        ui::dialog_root(cx)
+            .child(ui::dialog_header("Auto Open All Recent Worktrees", "x", primary, cx))
             .child(
-                Checkbox::new("include-unknown")
-                    .label("Include worktrees that are not in the recent list")
-                    .checked(self.include_unknown)
-                    .on_click(cx.listener(|dialog, checked: &bool, _, cx| {
-                        dialog.include_unknown = *checked;
-                        dialog.load(cx);
-                    })),
+                div()
+                    .p(px(20.))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(8.))
+                            .mb(px(16.))
+                            .px(px(12.))
+                            .py(px(8.))
+                            .rounded(px(4.))
+                            .bg(tertiary)
+                            .text_size(px(ui::BODY))
+                            .child(div().text_color(secondary).child("Under:"))
+                            .child(div().text_color(primary).font_weight(gpui_kit::FontWeight::MEDIUM).child(root_name)),
+                    )
+                    .child(
+                        div()
+                            .id("auto-open-rows")
+                            .flex()
+                            .flex_col()
+                            .max_h(px(200.))
+                            .overflow_y_scroll()
+                            .border_1()
+                            .border_color(border)
+                            .rounded(px(4.))
+                            .bg(bg)
+                            .children(rows),
+                    )
+                    .child(
+                        div()
+                            .id("include-unknown")
+                            .mt(px(12.))
+                            .mb(px(4.))
+                            .flex()
+                            .items_center()
+                            .gap(px(8.))
+                            .text_size(px(ui::BODY))
+                            .text_color(secondary)
+                            .cursor_pointer()
+                            .child(ui::checkbox_box(include, false, 14.))
+                            .child("Include unknown worktrees (not in recent history)")
+                            .on_click(cx.listener(move |dialog, _, _, cx| {
+                                dialog.include_unknown = !include;
+                                dialog.load(cx);
+                            })),
+                    )
+                    .when_some(error, |d, error| {
+                        d.child(
+                            div()
+                                .mt(px(12.))
+                                .px(px(12.))
+                                .py(px(8.))
+                                .rounded(px(4.))
+                                .bg(gpui_kit::rgba(0xf14c4c1a))
+                                .text_color(gpui_kit::rgb(0xf14c4c))
+                                .text_size(px(ui::BODY))
+                                .child(error),
+                        )
+                    }),
             )
-            .child(body)
+            .child(
+                ui::dialog_actions(cx)
+                    .child(
+                        ui::dialog_button("auto-open-cancel", "Cancel", ui::ButtonKind::Secondary, false, cx)
+                            .on_click(|_, window, cx| window.close_dialog(cx)),
+                    )
+                    .child(
+                        ui::dialog_button("auto-open-ok", format!("Ok ({count})"), ui::ButtonKind::Primary, disabled, cx)
+                            .when(!disabled, |b| {
+                                b.on_click(cx.listener(|dialog, _, window, cx| {
+                                    if dialog.confirm(cx) {
+                                        window.close_dialog(cx);
+                                    }
+                                }))
+                            }),
+                    ),
+            )
     }
 }
 
 pub fn open(session: Entity<SessionStore>, root_id: String, window: &mut Window, cx: &mut App) {
     let view = cx.new(|cx| AutoOpenDialog::new(session, root_id, cx));
-    window.open_dialog(cx, move |dialog, _window, _cx| {
-        let confirm = view.clone();
-        dialog
-            .title("Auto Open Recent Worktrees")
-            .w(px(620.))
-            .child(view.clone())
-            .footer(h_flex().justify_end().child(Button::new("auto-open").primary().small().label("Open").on_click(
-                move |_, window, cx| {
-                    if confirm.update(cx, |dialog, cx| dialog.confirm(cx)) {
-                        window.close_dialog(cx);
-                    }
-                },
-            )))
-    });
+    window.open_dialog(cx, move |dialog, _window, cx| ui::dialog_frame(dialog, 400., cx).child(view.clone()));
 }
 
 #[cfg(test)]

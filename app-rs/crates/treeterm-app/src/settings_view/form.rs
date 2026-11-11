@@ -411,12 +411,12 @@ pub struct AppChoice {
     pub label: String,
 }
 
-/// The applications new worktrees can open with: those of the new-tab menu, given the
-/// edited instance lists.
+/// The applications new worktrees can open with: every registered one, given the edited
+/// instance lists, by name (Electron lists `applications.values()`).
 pub fn default_app_choices(settings: &Settings) -> Vec<AppChoice> {
     AppRegistry::from_settings(settings)
-        .new_tab_menu()
-        .map(|app| AppChoice { id: app.id.clone(), label: format!("{}  {}", app.icon, app.name) })
+        .all()
+        .map(|app| AppChoice { id: app.id.clone(), label: app.name.clone() })
         .collect()
 }
 
@@ -476,6 +476,73 @@ fn is_executable(path: &Path) -> bool {
 }
 
 /// An id for a new instance: Electron's `<prefix>-<Date.now()>`, moved past ids in use.
+/// A pressed key as the DOM's `KeyboardEvent.key` names it, from GPUI's key name and the
+/// character it types (Electron's keybinding recorder stores DOM names).
+pub fn dom_key(key: &str, key_char: Option<&str>) -> String {
+    let named = match key {
+        "tab" => "Tab",
+        "enter" => "Enter",
+        "escape" => "Escape",
+        "space" => " ",
+        "backspace" => "Backspace",
+        "delete" => "Delete",
+        "insert" => "Insert",
+        "up" => "ArrowUp",
+        "down" => "ArrowDown",
+        "left" => "ArrowLeft",
+        "right" => "ArrowRight",
+        "home" => "Home",
+        "end" => "End",
+        "pageup" => "PageUp",
+        "pagedown" => "PageDown",
+        _ => "",
+    };
+    if !named.is_empty() {
+        return named.to_owned();
+    }
+    if let Some(n) = key.strip_prefix('f').filter(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit())) {
+        return format!("F{n}");
+    }
+    match key_char {
+        Some(typed) if typed.chars().count() == 1 => typed.to_owned(),
+        _ => key.to_owned(),
+    }
+}
+
+/// `handleKeyDown` recording an action key: one key, lower-cased if it is a character.
+pub fn recorded_action_key(dom_key: &str) -> String {
+    if dom_key.chars().count() == 1 { dom_key.to_lowercase() } else { dom_key.to_owned() }
+}
+
+/// `handleKeyDown` recording the prefix key: `CommandOrControl` (Cmd or Ctrl), `Alt`,
+/// `Shift`, then the key, upper-cased if it is a character.
+pub fn recorded_prefix_key(dom_key: &str, command_or_control: bool, alt: bool, shift: bool) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    if command_or_control {
+        parts.push("CommandOrControl".to_owned());
+    }
+    if alt {
+        parts.push("Alt".to_owned());
+    }
+    if shift {
+        parts.push("Shift".to_owned());
+    }
+    parts.push(if dom_key.chars().count() == 1 { dom_key.to_uppercase() } else { dom_key.to_owned() });
+    parts.join("+")
+}
+
+/// `formatKeybinding`: an accelerator as the prefix key button shows it.
+pub fn format_prefix_key(binding: &str, os: Os) -> String {
+    if binding.is_empty() {
+        return "(none)".to_owned();
+    }
+    let command = match os {
+        Os::MacOs => "Cmd",
+        Os::Linux => "Ctrl",
+    };
+    binding.replacen("CommandOrControl", command, 1).replacen("Control", "Ctrl", 1).replace('+', " + ")
+}
+
 pub fn new_id(prefix: &str, now_ms: u128, taken: impl Fn(&str) -> bool) -> String {
     (now_ms..)
         .map(|ms| format!("{prefix}-{ms}"))
@@ -488,6 +555,23 @@ mod tests {
     use treeterm_core::settings::{ClassifierProvider, CursorStyle, ReasoningEffort, Theme};
 
     use super::*;
+
+    #[test]
+    fn recorded_keys_follow_electrons_recorder() {
+        assert_eq!(dom_key("tab", None), "Tab");
+        assert_eq!(dom_key("f2", None), "F2");
+        assert_eq!(dom_key("up", None), "ArrowUp");
+        assert_eq!(dom_key("a", Some("A")), "A");
+        assert_eq!(dom_key(",", Some(",")), ",");
+        assert_eq!(recorded_action_key("C"), "c");
+        assert_eq!(recorded_action_key("Tab"), "Tab");
+        assert_eq!(recorded_prefix_key("b", true, false, true), "CommandOrControl+Shift+B");
+        assert_eq!(recorded_prefix_key("F2", false, true, false), "Alt+F2");
+        assert_eq!(format_prefix_key("Control+B", Os::MacOs), "Ctrl + B");
+        assert_eq!(format_prefix_key("CommandOrControl+K", Os::MacOs), "Cmd + K");
+        assert_eq!(format_prefix_key("CommandOrControl+K", Os::Linux), "Ctrl + K");
+        assert_eq!(format_prefix_key("", Os::MacOs), "(none)");
+    }
 
     fn texts() -> Texts {
         Texts::from_settings(&Settings::default())
@@ -664,11 +748,24 @@ mod tests {
         assert_eq!(
             ids,
             [
-                "terminal", "filesystem", "review", "comments", "chat", "system-prompt-debugger", "github", "tty-list",
-                "ssh-upload", "terminal-term-1", "aiharness-claude"
+                "terminal",
+                "ghostty-terminal",
+                "filesystem",
+                "review",
+                "editor",
+                "comments",
+                "chat",
+                "system-prompt-debugger",
+                "analyzer-history",
+                "workspace-settings",
+                "github",
+                "tty-list",
+                "ssh-upload",
+                "terminal-term-1",
+                "aiharness-claude"
             ]
         );
-        assert_eq!(default_app_label(&choices, "terminal-term-1"), ">  Zsh");
+        assert_eq!(default_app_label(&choices, "terminal-term-1"), "Zsh");
         assert_eq!(default_app_label(&choices, "webapp-next"), "webapp-next (not available)");
     }
 

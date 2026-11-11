@@ -1,17 +1,15 @@
 //! "SSH Connections": connect to a saved host or a new one (saved for next time). Port of
 //! `ConnectionPicker.tsx`.
 
-use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::checkbox::Checkbox;
-use gpui_kit::component::input::{Input, InputState};
-use gpui_kit::component::{Sizable as _, WindowExt as _, h_flex, v_flex};
+use gpui_kit::component::WindowExt as _;
+use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::prelude::*;
-use gpui_kit::{App, Context, Entity, SharedString, Window, div, px};
+use gpui_kit::{App, Context, Div, Entity, SharedString, Subscription, Window, div, px, rgb};
 use treeterm_core::connection::OutdatedDaemon;
 use treeterm_core::settings::{ConnectionLabel, IdentityFile, PortForwardSpec, SshConnectionConfig};
 use treeterm_model::app_store::AppStore;
 
-use crate::theme::colors;
+use crate::ui;
 
 /// What the form holds, as typed.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -77,6 +75,8 @@ pub struct ConnectionPicker {
     refresh_daemon: bool,
     allow_outdated: bool,
     error: Option<SharedString>,
+    /// Enter connects (`handleKeyDown`); typing host or user re-renders Connect.
+    _subscriptions: Vec<Subscription>,
 }
 
 impl ConnectionPicker {
@@ -86,20 +86,40 @@ impl ConnectionPicker {
             let value = value.to_owned();
             cx.new(|cx| InputState::new(window, cx).placeholder(placeholder).default_value(value))
         };
+        let (host, user, port) = (input("hostname or IP", ""), input("username", ""), input("22", "22"));
+        let (identity_file, label) = (input("~/.ssh/id_rsa", ""), input("display name", ""));
+        let forward_local = input("local port", "");
+        let forward_host = input("remote host", "localhost");
+        let forward_remote = input("remote port", "");
+        let _subscriptions = [&host, &user, &port, &identity_file, &label, &forward_local, &forward_host, &forward_remote]
+            .into_iter()
+            .map(|state| {
+                cx.subscribe_in(state, window, |picker, _, event: &InputEvent, window, cx| match event {
+                    InputEvent::PressEnter { .. } => {
+                        if picker.connect_new(cx) {
+                            window.close_dialog(cx);
+                        }
+                    }
+                    InputEvent::Change => cx.notify(),
+                    InputEvent::Focus | InputEvent::Blur => {}
+                })
+            })
+            .collect();
         Self {
-            host: input("example.com", ""),
-            user: input("user", ""),
-            port: input("22", "22"),
-            identity_file: input("~/.ssh/id_ed25519 (optional)", ""),
-            label: input("Label (optional)", ""),
-            forward_local: input("Local port", ""),
-            forward_host: input("Remote host", "localhost"),
-            forward_remote: input("Remote port", ""),
+            host,
+            user,
+            port,
+            identity_file,
+            label,
+            forward_local,
+            forward_host,
+            forward_remote,
             store,
             port_forwards: Vec::new(),
             refresh_daemon: false,
             allow_outdated: false,
             error: None,
+            _subscriptions,
         }
     }
 
@@ -202,57 +222,147 @@ impl ConnectionPicker {
     }
 }
 
+/// `ConnectionPicker.tsx`'s inline styles (Catppuccin colours, unlike the other dialogs).
+mod look {
+    pub const BG: u32 = 0x1e1e2e;
+    pub const BORDER: u32 = 0x333333;
+    pub const TEXT: u32 = 0xcdd6f4;
+    pub const SUBTLE: u32 = 0xa6adc8;
+    pub const FIELD: u32 = 0x313244;
+    pub const FIELD_BORDER: u32 = 0x45475a;
+    pub const DANGER: u32 = 0xf44336;
+    pub const CONNECT: u32 = 0x89b4fa;
+}
+
+/// `inputStyle`: 6px 8px padding, #313244 on #45475a, 13px; no focus style.
+fn field_input(state: &Entity<InputState>) -> Input {
+    gpui_kit::Styled::h(Input::new(state), px(30.))
+        .focus_bordered(false)
+        .px(px(8.))
+        .py(px(6.))
+        .text_size(px(13.))
+        .bg(rgb(look::FIELD))
+        .border_color(rgb(look::FIELD_BORDER))
+        .rounded(px(4.))
+}
+
+/// `labelStyle`: 12px, 4px above the input.
+fn labelled(label: &'static str, input: Input) -> Div {
+    div()
+        .flex_1()
+        .min_w_0()
+        .child(div().mb(px(4.)).text_size(px(12.)).line_height(px(14.)).text_color(rgb(look::SUBTLE)).child(label))
+        .child(input)
+}
+
+/// `smallButtonStyle`: 2px 8px, transparent with a #45475a border, 12px.
+fn small_button(id: impl Into<gpui_kit::ElementId>, label: &'static str, color: u32) -> gpui_kit::Stateful<Div> {
+    div()
+        .id(id)
+        .flex_shrink_0()
+        .px(px(8.))
+        .py(px(2.))
+        .border_1()
+        .border_color(rgb(look::FIELD_BORDER))
+        .rounded(px(4.))
+        .text_size(px(12.))
+        .line_height(px(14.))
+        .text_color(rgb(color))
+        .cursor_pointer()
+        .child(label)
+}
+
+/// The checkboxes: a 13px box, 8px gap, 13px label.
+fn check_row(id: &'static str, checked: bool, disabled: bool, label: &'static str) -> gpui_kit::Stateful<Div> {
+    div()
+        .id(id)
+        .mb(px(8.))
+        .flex()
+        .items_center()
+        .gap(px(8.))
+        .text_size(px(13.))
+        .line_height(px(15.))
+        .text_color(rgb(look::SUBTLE))
+        .when(disabled, |d| d.opacity(0.5))
+        .when(!disabled, |d| d.cursor_pointer())
+        .child(ui::checkbox_box(checked, disabled, 13.))
+        .child(label)
+}
+
 impl Render for ConnectionPicker {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let c = colors(cx);
-        let (secondary, error, row_bg) = (c.text_secondary, c.error, c.bg_tertiary);
-        let heading = move |text: &'static str| div().text_sm().text_color(secondary).child(text);
-        let mut saved_list = v_flex().gap_1();
-        for (i, config) in self.saved(cx).into_iter().enumerate() {
+        let saved = self.saved(cx);
+        let mut saved_list = div();
+        for (i, config) in saved.iter().cloned().enumerate() {
             let forwards = config.port_forwards.len();
             let (connect, fill, remove) = (config.clone(), config.clone(), config.id.clone());
             saved_list = saved_list.child(
-                h_flex()
-                    .px_3()
-                    .py_1()
-                    .gap_2()
-                    .rounded_sm()
-                    .bg(row_bg)
+                div()
+                    .flex()
                     .items_center()
-                    .child(div().flex_1().truncate().child(config.display_name()))
-                    .when(forwards > 0, |d| {
-                        d.child(div().text_xs().text_color(secondary).child(format!(
-                            "({forwards} port fwd{})",
-                            if forwards > 1 { "s" } else { "" }
-                        )))
-                    })
-                    .child(Button::new(SharedString::from(format!("fill-{i}"))).xsmall().ghost().label("Fill").on_click(
-                        cx.listener(move |picker, _, window, cx| picker.fill(&fill, window, cx)),
-                    ))
+                    .justify_between()
+                    .mb(px(4.))
+                    .px(px(12.))
+                    .py(px(6.))
+                    .rounded(px(4.))
+                    .bg(rgb(look::FIELD))
                     .child(
-                        Button::new(SharedString::from(format!("connect-{i}")))
-                            .xsmall()
-                            .primary()
-                            .label("Connect")
-                            .on_click(cx.listener(move |picker, _, window, cx| {
-                                picker.connect_saved(connect.clone(), cx);
-                                window.close_dialog(cx);
-                            })),
+                        div()
+                            .flex()
+                            .items_baseline()
+                            .min_w_0()
+                            .child(div().truncate().child(config.display_name()))
+                            .when(forwards > 0, |d| {
+                                d.child(div().ml(px(6.)).text_size(px(11.)).text_color(rgb(look::SUBTLE)).child(format!(
+                                    "({forwards} port fwd{})",
+                                    if forwards > 1 { "s" } else { "" }
+                                )))
+                            }),
                     )
-                    .child(Button::new(SharedString::from(format!("remove-{i}"))).xsmall().ghost().label("×").on_click(
-                        cx.listener(move |picker, _, _, cx| picker.remove_saved(remove.clone(), cx)),
-                    )),
+                    .child(
+                        div()
+                            .flex()
+                            .gap(px(4.))
+                            .child(
+                                small_button(SharedString::from(format!("fill-{i}")), "Fill", look::TEXT)
+                                    .on_click(cx.listener(move |picker, _, window, cx| picker.fill(&fill, window, cx))),
+                            )
+                            .child(small_button(SharedString::from(format!("connect-{i}")), "Connect", look::TEXT).on_click(
+                                cx.listener(move |picker, _, window, cx| {
+                                    picker.connect_saved(connect.clone(), cx);
+                                    window.close_dialog(cx);
+                                }),
+                            ))
+                            .child(
+                                small_button(SharedString::from(format!("remove-{i}")), "Remove", look::DANGER)
+                                    .on_click(cx.listener(move |picker, _, _, cx| picker.remove_saved(remove.clone(), cx))),
+                            ),
+                    ),
             );
         }
-        let has_saved = !self.saved(cx).is_empty();
-        let mut forwards = v_flex().gap_1();
+        let heading = |text: &'static str| {
+            div()
+                .mb(px(8.))
+                .text_size(px(14.))
+                .line_height(px(17.))
+                .font_weight(gpui_kit::FontWeight::BOLD)
+                .text_color(rgb(look::SUBTLE))
+                .child(text)
+        };
+        let mut forwards = div();
         for (i, forward) in self.port_forwards.iter().enumerate() {
             forwards = forwards.child(
-                h_flex()
-                    .gap_2()
-                    .text_sm()
-                    .child(format!("localhost:{} → {}:{}", forward.local_port, forward.remote_host, forward.remote_port))
-                    .child(Button::new(SharedString::from(format!("pf-remove-{i}"))).xsmall().ghost().label("×").on_click(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(6.))
+                    .mb(px(4.))
+                    .text_size(px(12.))
+                    .child(div().flex_1().child(format!(
+                        "localhost:{} → {}:{}",
+                        forward.local_port, forward.remote_host, forward.remote_port
+                    )))
+                    .child(small_button(SharedString::from(format!("pf-remove-{i}")), "x", look::DANGER).px(px(6.)).py_0().on_click(
                         cx.listener(move |picker, _, _, cx| {
                             picker.port_forwards.remove(i);
                             cx.notify();
@@ -260,68 +370,137 @@ impl Render for ConnectionPicker {
                     )),
             );
         }
-        v_flex()
-            .gap_3()
-            .when(has_saved, |d| d.child(v_flex().gap_1().child(heading("Saved Connections")).child(saved_list)))
+        let sep = |text: &'static str| div().text_size(px(12.)).text_color(rgb(look::SUBTLE)).child(text);
+        let (refresh, allow) = (self.refresh_daemon, self.allow_outdated);
+        let missing = self.host.read(cx).value().is_empty() || self.user.read(cx).value().is_empty();
+        ui::dialog_root(cx)
+            .p(px(24.))
+            .text_color(rgb(look::TEXT))
+            .text_size(px(16.))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .mb(px(16.))
+                    .child(
+                        div()
+                            .text_size(px(18.))
+                            .line_height(px(22.))
+                            .font_weight(gpui_kit::FontWeight::BOLD)
+                            .child("SSH Connections"),
+                    )
+                    .child(
+                        div()
+                            .id("ssh-close")
+                            .px(px(4.))
+                            .text_size(px(18.))
+                            .line_height(px(21.))
+                            .text_color(rgb(0x666666))
+                            .cursor_pointer()
+                            .child("x")
+                            .on_click(|_, window, cx| window.close_dialog(cx)),
+                    ),
+            )
+            .when(!saved.is_empty(), |d| d.child(div().mb(px(16.)).child(heading("Saved Connections")).child(saved_list)))
             .child(heading("New Connection"))
+            // A two-column grid, 8px gaps.
             .child(
-                h_flex()
-                    .gap_2()
-                    .child(div().flex_1().child(Input::new(&self.user).small()))
-                    .child("@")
-                    .child(div().flex_1().child(Input::new(&self.host).small()))
-                    .child(div().w(px(70.)).child(Input::new(&self.port).small())),
+                div()
+                    .mb(px(12.))
+                    .flex()
+                    .flex_col()
+                    .gap(px(8.))
+                    .child(
+                        div()
+                            .flex()
+                            .gap(px(8.))
+                            .child(labelled("User", field_input(&self.user)))
+                            .child(labelled("Host", field_input(&self.host))),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .gap(px(8.))
+                            .child(labelled("Port", field_input(&self.port)))
+                            .child(labelled("Label (optional)", field_input(&self.label))),
+                    )
+                    .child(labelled("Identity File (optional)", field_input(&self.identity_file))),
             )
-            .child(Input::new(&self.identity_file).small())
-            .child(Input::new(&self.label).small())
-            .child(heading("Port Forwards"))
-            .child(forwards)
             .child(
-                h_flex()
-                    .gap_2()
-                    .child(div().w(px(90.)).child(Input::new(&self.forward_local).small()))
-                    .child("→")
-                    .child(div().flex_1().child(Input::new(&self.forward_host).small()))
-                    .child(div().w(px(90.)).child(Input::new(&self.forward_remote).small()))
-                    .child(Button::new("pf-add").xsmall().ghost().label("Add").on_click(
-                        cx.listener(|picker, _, window, cx| picker.add_forward(window, cx)),
-                    )),
+                div()
+                    .mb(px(12.))
+                    .child(div().mb(px(4.)).text_size(px(12.)).line_height(px(14.)).text_color(rgb(look::SUBTLE)).child("Port Forwards"))
+                    .child(forwards)
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(4.))
+                            .child(div().w(px(80.)).child(field_input(&self.forward_local)))
+                            .child(sep("→"))
+                            .child(div().w(px(120.)).child(field_input(&self.forward_host)))
+                            .child(sep(":"))
+                            .child(div().w(px(80.)).child(field_input(&self.forward_remote)))
+                            .child(small_button("pf-add", "Add", look::TEXT).on_click(
+                                cx.listener(|picker, _, window, cx| picker.add_forward(window, cx)),
+                            )),
+                    ),
             )
+            .child(check_row("refresh-daemon", refresh, false, "Refresh remote daemon").on_click(cx.listener(
+                move |picker, _, _, cx| {
+                    picker.refresh_daemon = !refresh;
+                    cx.notify();
+                },
+            )))
+            .child(check_row("allow-outdated", allow, refresh, "Allow outdated daemon").when(!refresh, |d| {
+                d.on_click(cx.listener(move |picker, _, _, cx| {
+                    picker.allow_outdated = !allow;
+                    cx.notify();
+                }))
+            }))
+            .when_some(self.error.clone(), |d, message| {
+                d.child(div().mb(px(8.)).text_size(px(13.)).text_color(rgb(look::DANGER)).child(message))
+            })
             .child(
-                h_flex()
-                    .gap_4()
-                    .child(Checkbox::new("refresh-daemon").label("Refresh remote daemon").checked(self.refresh_daemon).on_click(
-                        cx.listener(|picker, checked: &bool, _, cx| {
-                            picker.refresh_daemon = *checked;
-                            cx.notify();
-                        }),
-                    ))
-                    .child(Checkbox::new("allow-outdated").label("Allow outdated daemon").checked(self.allow_outdated).on_click(
-                        cx.listener(|picker, checked: &bool, _, cx| {
-                            picker.allow_outdated = *checked;
-                            cx.notify();
-                        }),
-                    )),
+                div()
+                    .id("ssh-connect")
+                    .flex()
+                    .justify_center()
+                    .px(px(16.))
+                    .py(px(8.))
+                    .rounded(px(4.))
+                    // `opacity: 0.5` fades the button as one layer: the fill over the dialog,
+                    // the text unchanged.
+                    .bg(rgb(if missing { 0x54_69_94 } else { look::CONNECT }))
+                    .text_color(rgb(look::BG))
+                    .text_size(px(14.))
+                    .line_height(px(16.))
+                    .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                    .when(!missing, |d| d.cursor_pointer())
+                    .child("Connect")
+                    .when(!missing, |d| {
+                        d.on_click(cx.listener(|picker, _, window, cx| {
+                            if picker.connect_new(cx) {
+                                window.close_dialog(cx);
+                            }
+                        }))
+                    }),
             )
-            .when_some(self.error.clone(), |d, message| d.child(div().text_sm().text_color(error).child(message)))
     }
 }
 
 pub fn open(store: Entity<AppStore>, window: &mut Window, cx: &mut App) {
     let view = cx.new(|cx| ConnectionPicker::new(store, window, cx));
-    window.open_dialog(cx, move |dialog, _window, _cx| {
-        let connect = view.clone();
-        dialog
-            .title("SSH Connections")
-            .w(px(560.))
+    // `autoFocus` on User, once the dialog has taken the focus.
+    let user = view.read(cx).user.clone();
+    window.defer(cx, move |window, cx| user.update(cx, |state, cx| state.focus(window, cx)));
+    window.open_dialog(cx, move |dialog, _window, cx| {
+        ui::dialog_frame(dialog, 500., cx)
+            .bg(rgb(look::BG))
+            .border_1()
+            .border_color(rgb(look::BORDER))
             .child(view.clone())
-            .footer(h_flex().justify_end().child(Button::new("ssh-connect").primary().label("Connect").on_click(
-                move |_, window, cx| {
-                    if connect.update(cx, |picker, cx| picker.connect_new(cx)) {
-                        window.close_dialog(cx);
-                    }
-                },
-            )))
     });
 }
 

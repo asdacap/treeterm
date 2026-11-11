@@ -149,6 +149,9 @@ impl ChildSource {
 pub struct ChildOptions {
     pub detached: bool,
     pub description: Option<String>,
+    /// The child's own default application (`WorktreeSettings.defaultApplicationId`, the
+    /// dialog's "Use custom default application"); `None` inherits.
+    pub default_application_id: Option<String>,
 }
 
 /// What happens to a child after its branch is merged into the parent.
@@ -1583,7 +1586,7 @@ impl SessionStore {
         self.create_child(
             parent_id,
             ChildSource::NewBranch { name },
-            ChildOptions { detached, description },
+            ChildOptions { detached, description, default_application_id: None },
             cx,
         )
     }
@@ -1692,7 +1695,8 @@ impl SessionStore {
             let published = this.update(cx, |s, cx| match created {
                 Ok(info) => {
                     let metadata = source.metadata(options.description.clone());
-                    Some(s.finish_child(&child_id, &parent, name.clone(), info, options.detached, metadata, cx))
+                    let own_default = options.default_application_id.clone();
+                    Some(s.finish_child(&child_id, &parent, name.clone(), info, options.detached, metadata, own_default, cx))
                 }
                 Err(error) => {
                     s.fail_child(&child_id, &name, error.to_string(), cx);
@@ -1802,7 +1806,7 @@ impl SessionStore {
                 }
                 return;
             }
-            let published = this.update(cx, |s, cx| s.finish_child(&child_id, &parent, name, worktree, false, metadata, cx));
+            let published = this.update(cx, |s, cx| s.finish_child(&child_id, &parent, name, worktree, false, metadata, None, cx));
             if let Ok(Some(published)) = published
                 && published.await.is_err()
             {
@@ -1837,6 +1841,7 @@ impl SessionStore {
         info: treeterm_core::git::WorktreeInfo,
         detached: bool,
         extra_metadata: std::collections::BTreeMap<String, String>,
+        own_default: Option<String>,
         cx: &mut Context<Self>,
     ) -> Option<oneshot::Receiver<()>> {
         use treeterm_core::wire::workspace_file::{AppState, WorkspaceStatus};
@@ -1852,7 +1857,10 @@ impl SessionStore {
         let global_default = self.settings.read(cx).settings().global_default_application_id.clone();
         let mut app_states = IndexMap::new();
         let mut active_tab_id = None;
-        let candidates = std::iter::once(settings.default_application_id.as_str())
+        let candidates = own_default
+            .as_deref()
+            .into_iter()
+            .chain(std::iter::once(settings.default_application_id.as_str()))
             .filter(|id| !id.is_empty())
             .chain(inherited.iter().map(String::as_str));
         if let Some(app) = self.registry.default_for_workspace(candidates, &global_default) {
@@ -1882,7 +1890,10 @@ impl SessionStore {
             app_states,
             active_tab_id,
             metadata,
-            settings: Default::default(),
+            settings: match &own_default {
+                Some(id) => treeterm_core::wire::workspace_file::WorktreeSettings { default_application_id: id.clone() },
+                None => Default::default(),
+            },
             favourite_paths: Vec::new(),
             created_at: now,
             last_activity: now,
@@ -1901,6 +1912,11 @@ impl SessionStore {
     }
 
     /// The worktree registry of this session's host, when the app gave it one.
+    /// The PR lookup client, if one could be built (`useGitHubApi`).
+    pub fn github_api(&self) -> Option<Arc<dyn treeterm_core::github::GitHubApi>> {
+        self.github.clone()
+    }
+
     pub fn worktree_registry(&self) -> Option<treeterm_core::worktree_registry::WorktreeRegistry> {
         self.registry_api.clone()
     }

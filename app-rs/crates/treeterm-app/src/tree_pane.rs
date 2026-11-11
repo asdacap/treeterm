@@ -676,7 +676,9 @@ impl Label {
 }
 
 /// Removing kills the workspace's (and its children's) running programs, and possibly
-/// deletes their worktrees and branches, so ask first.
+/// deletes their worktrees and branches, so ask first — with Electron's `confirm()` texts
+/// (`WorkspacePane`'s abandon menu for a child workspace, `SessionPanel`'s Remove for a
+/// root one), in the platform's message box as `confirm()` shows them.
 pub(crate) fn confirm_remove(
     session: Entity<SessionStore>,
     id: String,
@@ -685,28 +687,30 @@ pub(crate) fn confirm_remove(
     window: &mut gpui_kit::Window,
     cx: &mut gpui_kit::App,
 ) {
-    let consequence = match mode {
-        RemoveMode::DeleteWorktreeAndBranch => {
-            "Its worktree directory is deleted along with its branch (unless detached). Uncommitted work is lost."
+    let (is_child, name) = session.read(cx).workspace_store(&id).map_or((false, label.to_string()), |store| {
+        let file = store.read(cx).file();
+        (file.is_worktree && file.parent_id.as_deref().is_some_and(|p| !p.is_empty()), file.name.clone())
+    });
+    let message = match (is_child, mode) {
+        (true, RemoveMode::DeleteWorktreeAndBranch) => {
+            "Are you sure you want to abandon this workspace? All changes will be discarded.".to_owned()
         }
-        RemoveMode::KeepBranch => "Its worktree directory is deleted; the branch stays.",
-        RemoveMode::KeepWorktreeAndBranch => "The directory, worktree and branch stay on disk.",
+        (true, RemoveMode::KeepBranch) => {
+            "Abandon this workspace but keep the branch? The worktree will be removed but the branch will be kept."
+                .to_owned()
+        }
+        (true, RemoveMode::KeepWorktreeAndBranch) => "Abandon this workspace but keep both the worktree and branch? \
+             They will remain but will no longer be tracked in TreeTerm."
+            .to_owned(),
+        (false, _) => format!("Remove workspace \"{name}\"?"),
     };
-    window.open_alert_dialog(cx, move |alert, _, _| {
-        let (session, id) = (session.clone(), id.clone());
-        alert
-            .title(format!("Remove “{label}”?"))
-            .description(format!(
-                "Its tabs and those of its child workspaces are closed and their programs killed. {consequence}"
-            ))
-            .show_cancel(true)
-            .on_ok(move |_, _, cx| {
-                session.update(cx, |s, cx| s.remove_workspace(&id, mode, cx));
-                true
-            })
+    ui::confirm(message, window, cx, move |_, cx| {
+        session.update(cx, |s, cx| s.remove_workspace(&id, mode, cx));
     });
 }
 
+/// Merging from the tree's menu (which Electron does from the Review tab, asking only about
+/// uncommitted work): asked in the same platform message box.
 pub(crate) fn confirm_merge(
     session: Entity<SessionStore>,
     id: String,
@@ -719,20 +723,14 @@ pub(crate) fn confirm_merge(
     let how = if squash { "squash-merged (staged, not committed)" } else { "merged" };
     let then = match after {
         AfterMerge::Remove => {
-            " Its uncommitted work is committed first; afterwards its tabs are closed and its worktree and branch deleted."
+            " Uncommitted changes will be auto-committed before merging; afterwards its worktree and branch are deleted."
         }
-        AfterMerge::Keep => " Only committed work is merged; the workspace stays.",
+        AfterMerge::Keep => " Only committed changes are merged; the workspace stays.",
     };
-    window.open_alert_dialog(cx, move |alert, _, _| {
-        let (session, id) = (session.clone(), id.clone());
-        alert
-            .title(format!("Merge “{label}” into its parent?"))
-            .description(format!("Its branch is {how} into the parent's branch.{then}"))
-            .show_cancel(true)
-            .on_ok(move |_, _, cx| {
-                session.update(cx, |s, cx| s.merge_workspace(&id, squash, after, cx));
-                true
-            })
+    let message =
+        format!("Merge \"{label}\" into its parent? Its branch is {how} into the parent's branch.{then} Continue?");
+    ui::confirm(message, window, cx, move |_, cx| {
+        session.update(cx, |s, cx| s.merge_workspace(&id, squash, after, cx));
     });
 }
 
@@ -754,23 +752,51 @@ fn upstream_guard(
         return;
     }
     let proceed = std::rc::Rc::new(proceed);
-    window.open_alert_dialog(cx, move |alert, _, _| {
+    window.open_dialog(cx, move |dialog, _, cx| {
         let proceed = proceed.clone();
-        alert
-            .title("Upstream Updates Available")
-            .description(format!(
-                "{name} is {behind} commit{} behind upstream. Forking now means the new worktree will be based on an \
-                 outdated branch. Consider pulling the latest changes before forking to avoid merge conflicts.",
-                if behind > 1 { "s" } else { "" }
-            ))
-            .show_cancel(true)
-            .ok_text("Fork Anyway")
-            .on_ok(move |_, window, cx| {
-                // After this dialog closes, so a second dialog can open.
-                let proceed = proceed.clone();
-                window.defer(cx, move |window, cx| proceed(window, cx));
-                true
-            })
+        let secondary = colors(cx).text_secondary;
+        // `.upstream-warning-text`: 14px secondary text, the name in bold.
+        let text = format!(
+            "{name} is {behind} commit{} behind upstream. Forking now means the new worktree will be based on an \
+             outdated branch.",
+            if behind > 1 { "s" } else { "" }
+        );
+        let bold = gpui_kit::HighlightStyle { font_weight: Some(gpui_kit::FontWeight::BOLD), ..Default::default() };
+        let body = div()
+            .p(px(20.))
+            .child(
+                div()
+                    .mb(px(12.))
+                    .text_size(px(14.))
+                    .text_color(secondary)
+                    .child(gpui_kit::StyledText::new(text).with_highlights([(0..name.len(), bold)])),
+            )
+            .child(
+                div()
+                    .text_size(px(12.))
+                    .italic()
+                    .text_color(secondary)
+                    .child("Consider pulling the latest changes before forking to avoid potential merge conflicts."),
+            );
+        let actions = ui::dialog_actions(cx)
+            .child(
+                ui::dialog_button("upstream-cancel", "Cancel", ui::ButtonKind::Secondary, false, cx)
+                    .on_click(|_, window, cx| window.close_dialog(cx)),
+            )
+            .child(ui::dialog_button("upstream-fork", "Fork Anyway", ui::ButtonKind::Warning, false, cx).on_click(
+                move |_, window, cx| {
+                    window.close_dialog(cx);
+                    // After this dialog closes, so a second dialog can open.
+                    let proceed = proceed.clone();
+                    window.defer(cx, move |window, cx| proceed(window, cx));
+                },
+            ));
+        ui::dialog_frame(dialog, 450., cx).child(
+            ui::dialog_root(cx)
+                .child(ui::dialog_header("Upstream Updates Available", "x", gpui_kit::rgb(0xf0a000), cx))
+                .child(body)
+                .child(actions),
+        )
     });
 }
 

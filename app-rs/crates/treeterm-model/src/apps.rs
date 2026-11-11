@@ -384,6 +384,11 @@ impl AppRegistry {
             .or_else(|| self.default_app())
     }
 
+    /// Every registered application, in registration order.
+    pub fn all(&self) -> impl Iterator<Item = &AppDef> {
+        self.apps.iter()
+    }
+
     pub fn new_tab_menu(&self) -> impl Iterator<Item = &AppDef> {
         self.apps.iter().filter(|app| app.show_in_new_tab_menu)
     }
