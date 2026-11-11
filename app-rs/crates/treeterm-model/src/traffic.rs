@@ -8,6 +8,8 @@ pub struct TrafficMeter {
     counter: ByteCounter,
     window: RateWindow,
     rate: TrafficRate,
+    /// A sample has been taken (`ConnectionTraffic` is Loading until then).
+    sampled: bool,
     _tick: Task<()>,
 }
 
@@ -27,12 +29,17 @@ impl TrafficMeter {
             counter,
             window: RateWindow::default(),
             rate: TrafficRate::default(),
+            sampled: false,
             _tick: tick,
         }
     }
 
     fn sample(&mut self, cx: &mut Context<Self>) {
         let rate = self.window.sample(cx.background_executor().now(), self.counter.total());
+        if !self.sampled {
+            self.sampled = true;
+            cx.notify();
+        }
         if rate != self.rate {
             self.rate = rate;
             cx.notify();
@@ -46,5 +53,9 @@ impl TrafficMeter {
 
     pub fn rate(&self) -> TrafficRate {
         self.rate
+    }
+
+    pub fn is_sampled(&self) -> bool {
+        self.sampled
     }
 }

@@ -22,8 +22,15 @@ impl TrafficBadge {
 
 impl Render for TrafficBadge {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let rate = self.meter.read(cx).rate();
+        let meter = self.meter.read(cx);
+        let rate = meter.rate();
         let total = format_bytes(rate.total_bytes);
+        // `ConnectionTrafficBadge` reads "↓ …" until the first sample; a workspace starts at 0.
+        let text = if self.id.as_ref() == "connection-traffic" && !meter.is_sampled() {
+            "↓ …".to_owned()
+        } else {
+            format!("↓ {}", format_rate(rate.bytes_per_sec))
+        };
         div()
             .id(self.id.clone())
             .flex_shrink_0()
@@ -33,7 +40,7 @@ impl Render for TrafficBadge {
             .font_features(gpui_kit::FontFeatures(std::sync::Arc::new(vec![("tnum".into(), 1)])))
             .whitespace_nowrap()
             .text_color(colors(cx).text_secondary)
-            .child(format!("↓ {}", format_rate(rate.bytes_per_sec)))
+            .child(text)
             .tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(total.clone()).build(window, cx))
     }
 }
