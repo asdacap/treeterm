@@ -132,6 +132,20 @@ Not yet:
 - Parity sweep sign-off and cut-over (M10): remove `src/main`, `src/preload`,
   `src/renderer` once the checklist in the plan passes.
 
+## Vendored crates
+
+`vendor/gpui-component` is GPUI Kit's `gpui-component` 0.9.1 as published on crates.io,
+swapped in with `[patch.crates-io]` (and excluded from the workspace, so its tests and lints
+are not ours). Its changes are marked `TreeTerm patch` (`grep -rn "TreeTerm patch" vendor/`;
+`diff -r` against the registry copy shows nothing else):
+
+- `src/diff/mod.rs`: a Unified row has one line-number gutter, numbering the line it shows
+  (the new number for unchanged and added lines, the old one for removed lines), as Pierre's
+  unified diff in Electron's Review tab does; the Kit draws an old and a new gutter.
+
+When `gpui-kit` is upgraded, copy the new `gpui-component` over this directory and re-apply
+the marked changes (or drop the patch if the Kit gained the option).
+
 ## Appearance
 
 The chrome was matched to Electron's computed styles, measured side by side on one session

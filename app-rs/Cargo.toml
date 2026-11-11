@@ -18,6 +18,8 @@ default-members = [
     "crates/treeterm-app",
     "crates/treeterm-testkit",
 ]
+# Patched third-party crates (see [patch.crates-io]): not ours to test or lint.
+exclude = ["vendor/gpui-component"]
 
 [workspace.package]
 version = "0.1.0"
@@ -54,6 +56,11 @@ libc = "0.2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tempfile = "3"
+
+[patch.crates-io]
+# GPUI Kit's components with one line-number gutter on Unified diff rows, as Electron's Review
+# diff (Pierre) draws them. Changes are marked `TreeTerm patch`; see README "Vendored crates".
+gpui-component = { path = "vendor/gpui-component" }
 
 [workspace.lints.rust]
 unused_must_use = "deny"
