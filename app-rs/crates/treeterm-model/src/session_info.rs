@@ -5,13 +5,13 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use futures::StreamExt as _;
-use gpui_kit::{Context, Entity, Task, WeakEntity};
+use gpui_kit::{App, Context, Entity, Task, WeakEntity};
 use treeterm_core::connection::{
-    ConnectionId, OutputKind, Persistence, PortForwardConfig, PortForwardId, PortForwardInfo,
+    ConnectionId, ConnectionTarget, OutputKind, Persistence, PortForwardConfig, PortForwardId, PortForwardInfo,
 };
 use treeterm_core::settings::PortForwardSpec;
 
-use crate::app_store::AppStore;
+use crate::app_store::{AppStore, ConnState};
 
 /// Lines kept per log.
 const MAX_LINES: usize = 2000;
@@ -68,6 +68,72 @@ impl SessionInfo {
 
     pub fn id(&self) -> &ConnectionId {
         &self.id
+    }
+
+    /// The Info tab: session id, how the connection is made, and its status.
+    pub fn info_lines(&self, cx: &App) -> Vec<String> {
+        let Some(app) = self.app.upgrade() else {
+            return Vec::new();
+        };
+        let Some(slot) = app.read(cx).session_slot(&self.id) else {
+            return vec!["Disconnected".to_owned()];
+        };
+        let mut lines = Vec::new();
+        if let Some(session) = slot.session() {
+            lines.push(format!("Session ID: {}", session.read(cx).session_id()));
+        }
+        match &slot.target {
+            ConnectionTarget::Local => lines.push("Connection: Local".to_owned()),
+            ConnectionTarget::Remote(config) => {
+                lines.push("Connection: SSH".to_owned());
+                lines.push(format!("Host: {}", config.host));
+                lines.push(format!("User: {}", config.user));
+                lines.push(format!("Port: {}", config.port));
+                match &config.identity_file {
+                    treeterm_core::settings::IdentityFile::Path(path) => lines.push(format!("Identity File: {path}")),
+                    treeterm_core::settings::IdentityFile::SshDefault => {}
+                }
+                let (status, error) = match &slot.state {
+                    ConnState::Connecting(_) => ("connecting", None),
+                    ConnState::Connected(_) => ("connected", None),
+                    ConnState::Reconnecting { error, .. } => ("reconnecting", Some(error)),
+                    ConnState::Failed { error, .. } => ("error", Some(error)),
+                };
+                lines.push(format!("Status: {status}"));
+                lines.extend(error.map(|error| format!("Error: {error}")));
+            }
+        }
+        lines
+    }
+
+    /// The JSON tab: the session's state with its connection; `Null` while not connected.
+    pub fn debug_json(&self, cx: &App) -> serde_json::Value {
+        let Some(app) = self.app.upgrade() else {
+            return serde_json::Value::Null;
+        };
+        let Some(slot) = app.read(cx).session_slot(&self.id) else {
+            return serde_json::Value::Null;
+        };
+        let Some(session) = slot.session() else {
+            return serde_json::Value::Null;
+        };
+        let mut value = session.read(cx).debug_json(cx);
+        let connection = match &slot.target {
+            ConnectionTarget::Local => serde_json::json!({ "id": self.id.to_string(), "target": { "type": "local" } }),
+            ConnectionTarget::Remote(config) => {
+                serde_json::json!({ "id": self.id.to_string(), "target": { "type": "remote", "config": &**config } })
+            }
+        };
+        if let Some(object) = value.as_object_mut() {
+            object.insert("connection".to_owned(), connection);
+        }
+        value
+    }
+
+    /// The session these logs belong to, while connected (the TTYs tab lists its PTYs).
+    pub fn session(&self, cx: &App) -> Option<Entity<crate::session_store::SessionStore>> {
+        let app = self.app.upgrade()?;
+        app.read(cx).session_slot(&self.id)?.session().cloned()
     }
 
     pub fn log(&self, kind: OutputKind) -> &[String] {

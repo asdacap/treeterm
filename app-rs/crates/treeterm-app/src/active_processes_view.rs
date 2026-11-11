@@ -20,7 +20,7 @@ pub struct ActiveProcessesView {
 }
 
 impl ActiveProcessesView {
-    fn new(session: &Entity<SessionStore>, settings: treeterm_core::settings::TerminalSettings, cx: &mut Context<Self>) -> Self {
+    pub(crate) fn new(session: &Entity<SessionStore>, settings: treeterm_core::settings::TerminalSettings, cx: &mut Context<Self>) -> Self {
         let (conn, workspaces) = {
             let session = session.read(cx);
             let workspaces = session
@@ -143,7 +143,8 @@ impl Render for ActiveProcessesView {
                 .into_any_element(),
         };
         v_flex()
-            .h(px(480.))
+            .size_full()
+            .min_h(px(480.))
             .when_some(stop_error, |d, text| d.child(div().pb_1().text_sm().text_color(error).child(text)))
             .child(
                 h_flex()

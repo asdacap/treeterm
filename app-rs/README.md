@@ -99,8 +99,8 @@ Done (tested against a real in-process daemon unless noted):
 - **Tree and sidebar:** sessions, favourites, drag and drop (reorder / reparent), unread
   markers, PR badges, collapsible rail, title/branch refresh, Auto Open All Recent
   Worktrees (worktree registry shared with Electron), upstream warning before forking,
-  force-unlock of a held session lock; session pane with logs, port forwards and a system
-  monitor.
+  force-unlock of a held session lock; session pane with info, logs, port forwards, a system
+  monitor, the session as JSON and its TTYs.
 - **Tool tabs:** GitHub PR details (reviews, checks, unresolved threads), review comments
   (prompt the harness, push to GitHub), analyzer history and system-prompt debugger (from
   the activity badge's right-click menu), Chat, TTY list with orphan kill, workspace
@@ -117,7 +117,7 @@ Done (tested against a real in-process daemon unless noted):
 
 Not yet:
 
-- 3D model viewer (needs three.js bundled into a webview page), session renaming, JSON debug view.
+- 3D model viewer (needs three.js bundled into a webview page), session renaming.
 - Linux build verification (CI jobs added, not yet run) and a real SSH host test.
 - Parity sweep sign-off and cut-over (M10): remove `src/main`, `src/preload`,
   `src/renderer` once the checklist in the plan passes.

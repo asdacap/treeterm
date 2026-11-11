@@ -105,6 +105,27 @@ fn mirrors_refs_and_loads_workspace_bodies(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn the_debug_json_shows_each_entry_with_its_status(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    std::fs::write(h.daemon.workspaces_dir().join("root.json"), body("root", None)).unwrap();
+    publish(&h, &["root", "broken"]);
+
+    let store = open_store(cx, &h, "client-a");
+    wait_until(cx, &store, |s| {
+        loaded(s, "root") && matches!(s.entry("broken"), Some(WorkspaceEntry::Error { .. }))
+    });
+
+    let json = cx.update(|cx| store.read(cx).debug_json(cx));
+    assert!(json["sessionId"].as_str().is_some_and(|id| !id.is_empty()), "{json}");
+    assert_eq!(json["workspaces"]["root"]["status"], "loaded");
+    assert_eq!(json["workspaces"]["root"]["data"]["id"], "root");
+    assert_eq!(json["workspaces"]["root"]["data"]["name"], "root");
+    assert_eq!(json["workspaces"]["broken"]["status"], "error");
+    assert!(json["workspaces"]["broken"]["error"].is_string());
+}
+
+#[gpui_kit::test]
 fn follows_ref_removal_and_body_changes(cx: &mut TestAppContext) {
     cx.executor().allow_parking();
     let h = harness();

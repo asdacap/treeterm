@@ -13,6 +13,7 @@ mod automation;
 mod browser_view;
 mod daemon_binary;
 mod file_browser_view;
+mod json_view;
 mod keybinding_overlay;
 mod menus;
 mod review_view;

@@ -353,6 +353,8 @@ pub struct SessionStore {
     github: Option<Arc<dyn treeterm_core::github::GitHubApi>>,
     github_settings: crate::git_controller::SharedGithubSettings,
     disposed: bool,
+    /// The daemon's id for the session (from the last snapshot).
+    session_id: String,
     /// Every byte received from the daemon on this connection, and its rate.
     traffic: Entity<crate::traffic::TrafficMeter>,
     _session_watch: Task<()>,
@@ -427,6 +429,7 @@ impl SessionStore {
             github,
             github_settings,
             disposed: false,
+            session_id: String::new(),
             traffic,
             _session_watch: session_watch,
         }
@@ -440,6 +443,48 @@ impl SessionStore {
 
     pub fn connection(&self) -> &DaemonConnection {
         &self.conn
+    }
+
+    /// The daemon's id for this session; empty until the first snapshot.
+    pub fn session_id(&self) -> &str {
+        &self.session_id
+    }
+
+    /// The session as the session pane's JSON tab shows it (`SessionInfoPane` `sessionData`).
+    pub fn debug_json(&self, cx: &gpui_kit::App) -> serde_json::Value {
+        let workspace_json = |store: &Entity<WorkspaceStore>| {
+            let workspace = store.read(cx).workspace();
+            let mut data = serde_json::to_value(&workspace.file).unwrap_or_default();
+            if let Some(object) = data.as_object_mut() {
+                object.insert("id".to_owned(), workspace.id.clone().into());
+                object.insert("path".to_owned(), workspace.path.clone().into());
+            }
+            data
+        };
+        let workspaces: serde_json::Map<String, serde_json::Value> = self
+            .entries
+            .iter()
+            .map(|(id, entry)| {
+                let value = match entry {
+                    WorkspaceEntry::Loaded(store) => serde_json::json!({ "status": "loaded", "data": workspace_json(store) }),
+                    WorkspaceEntry::OperationError { store, error } => {
+                        serde_json::json!({ "status": "operation_error", "error": error, "data": workspace_json(store) })
+                    }
+                    WorkspaceEntry::Loading { name, message, .. } => {
+                        serde_json::json!({ "status": "loading", "name": name, "message": message })
+                    }
+                    WorkspaceEntry::Error { name, error } => serde_json::json!({ "status": "error", "name": name, "error": error }),
+                };
+                (id.clone(), value)
+            })
+            .collect();
+        serde_json::json!({
+            "sessionId": self.session_id,
+            "activeWorkspaceId": self.viewed,
+            "sessionVersion": self.version,
+            "workspaceDataDir": self.data_dir,
+            "workspaces": workspaces,
+        })
     }
 
     /// The connection's download rate (`ConnectionTrafficBadge`).
@@ -527,6 +572,7 @@ impl SessionStore {
             return; // overtaken by a newer snapshot
         }
         self.version = session.version;
+        self.session_id = session.id;
         self.lock = session.lock;
         self.data_dir = session.workspace_data_dir;
         self.state = SessionState::Live;
@@ -1303,6 +1349,7 @@ impl SessionStore {
         let version_ok = session.version == expected + 1;
         let accepted = version_ok && returned == sent;
         self.version = session.version;
+        self.session_id = session.id.clone();
         self.lock = session.lock;
         self.data_dir = session.workspace_data_dir.clone();
         if accepted {

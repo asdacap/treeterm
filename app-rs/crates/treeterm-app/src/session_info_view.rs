@@ -16,9 +16,12 @@ use crate::theme::colors;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Tab {
+    Info,
     Log(OutputKind),
     PortForwards,
     Monitor,
+    Json,
+    Ttys,
 }
 
 pub struct SessionInfoView {
@@ -31,6 +34,11 @@ pub struct SessionInfoView {
     save_forward: bool,
     /// Polls only while the Monitor tab is shown.
     monitor: Option<(Entity<treeterm_model::system_monitor::SystemMonitor>, Subscription)>,
+    /// JSON tab: paths flipped from their default fold, and the session it follows while shown.
+    json_toggled: std::collections::HashSet<String>,
+    json_follow: Option<Subscription>,
+    /// TTYs tab: the session's PTYs with a live viewer (Active Processes, embedded).
+    processes: Option<Entity<crate::active_processes_view::ActiveProcessesView>>,
     _observe: [Subscription; 2],
 }
 
@@ -74,6 +82,9 @@ impl SessionInfoView {
             tab: if remote { Tab::Log(OutputKind::Bootstrap) } else { Tab::Log(OutputKind::Daemon) },
             save_forward: true,
             monitor: None,
+            json_toggled: std::collections::HashSet::new(),
+            json_follow: None,
+            processes: None,
             _observe: observe,
         }
     }
@@ -295,6 +306,60 @@ impl SessionInfoView {
     }
 }
 
+impl SessionInfoView {
+    fn info_view(&self, cx: &mut Context<Self>) -> AnyElement {
+        let mut list = v_flex().p_2().gap_1().font_family("Menlo").text_size(px(12.));
+        for line in self.info.read(cx).info_lines(cx) {
+            list = list.child(div().child(line));
+        }
+        list.into_any_element()
+    }
+
+    fn json_view(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        if self.json_follow.is_none()
+            && let Some(session) = self.info.read(cx).session(cx)
+        {
+            self.json_follow = Some(cx.observe(&session, |_, _, cx| cx.notify()));
+        }
+        let value = self.info.read(cx).debug_json(cx);
+        let lines = crate::json_view::flatten(&value, &self.json_toggled);
+        let view = cx.entity().downgrade();
+        let rows = crate::json_view::render(lines, move |path, _, cx| {
+            match view.update(cx, |view, cx| {
+                if !view.json_toggled.remove(&path) {
+                    view.json_toggled.insert(path);
+                }
+                cx.notify();
+            }) {
+                Ok(()) | Err(_) => {} // Err: the pane closed
+            }
+        });
+        v_flex()
+            .id("session-json")
+            .size_full()
+            .overflow_y_scroll()
+            .p_2()
+            .font_family("Menlo")
+            .text_size(px(12.))
+            .children(rows)
+            .into_any_element()
+    }
+
+    fn ttys_view(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        if self.processes.is_none()
+            && let Some(session) = self.info.read(cx).session(cx)
+        {
+            let settings = self.app.read(cx).settings().read(cx).settings().terminal.clone();
+            self.processes =
+                Some(cx.new(|cx| crate::active_processes_view::ActiveProcessesView::new(&session, settings, cx)));
+        }
+        match &self.processes {
+            Some(view) => div().size_full().p_2().child(view.clone()).into_any_element(),
+            None => div().p_2().text_color(colors(cx).text_secondary).child("Not connected").into_any_element(),
+        }
+    }
+}
+
 impl Render for SessionInfoView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let c = colors(cx);
@@ -331,17 +396,22 @@ impl Render for SessionInfoView {
                 },
             )));
         }
-        let tabs: Vec<(Tab, &str)> = if remote {
-            vec![
+        let connected = matches!(state, Some(ConnState::Connected(_)));
+        let mut tabs: Vec<(Tab, &str)> = vec![(Tab::Info, "Info")];
+        if remote {
+            tabs.extend([
                 (Tab::Log(OutputKind::Bootstrap), "Bootstrap"),
                 (Tab::Log(OutputKind::Tunnel), "Tunnel"),
                 (Tab::Log(OutputKind::Daemon), "Daemon"),
                 (Tab::PortForwards, "Port Forwards"),
-                (Tab::Monitor, "Monitor"),
-            ]
+            ]);
         } else {
-            vec![(Tab::Log(OutputKind::Daemon), "Daemon"), (Tab::Monitor, "Monitor")]
-        };
+            tabs.push((Tab::Log(OutputKind::Daemon), "Daemon"));
+        }
+        tabs.push((Tab::Monitor, "Monitor"));
+        if connected {
+            tabs.extend([(Tab::Json, "JSON"), (Tab::Ttys, "TTYs")]);
+        }
         let mut tab_bar = h_flex().px_2().py_1().gap_1().border_b_1().border_color(border);
         for (tab, label) in tabs {
             let button = Button::new(SharedString::from(format!("info-tab-{label}"))).xsmall().label(label);
@@ -351,16 +421,23 @@ impl Render for SessionInfoView {
                 cx.notify();
             })));
         }
+        // Pollers and followers live only while their tab is shown.
+        if self.tab != Tab::Monitor {
+            self.monitor = None;
+        }
+        if self.tab != Tab::Json {
+            self.json_follow = None;
+        }
+        if self.tab != Tab::Ttys {
+            self.processes = None;
+        }
         let body = match self.tab {
-            Tab::Log(kind) => {
-                self.monitor = None;
-                self.log_view(kind, cx)
-            }
-            Tab::PortForwards => {
-                self.monitor = None;
-                self.forwards_view(remote, cx)
-            }
+            Tab::Info => self.info_view(cx),
+            Tab::Log(kind) => self.log_view(kind, cx),
+            Tab::PortForwards => self.forwards_view(remote, cx),
             Tab::Monitor => self.monitor_view(&state, cx),
+            Tab::Json => self.json_view(cx),
+            Tab::Ttys => self.ttys_view(cx),
         };
         v_flex()
             .flex_1()
