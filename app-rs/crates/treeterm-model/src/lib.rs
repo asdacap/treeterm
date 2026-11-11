@@ -14,6 +14,7 @@ pub mod keybinding_store;
 pub mod review;
 pub mod session_info;
 mod review_metadata;
+pub mod run_actions;
 pub mod session_store;
 pub mod settings_store;
 pub mod terminal;

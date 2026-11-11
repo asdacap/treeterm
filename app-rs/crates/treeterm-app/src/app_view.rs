@@ -52,6 +52,8 @@ struct Connected {
     review_views: HashMap<EntityId, Entity<crate::review_view::ReviewView>>,
     /// Browser views by (workspace, tab): they own native webviews, hidden when not shown.
     browser_views: HashMap<(String, String), Entity<crate::browser_view::BrowserView>>,
+    /// Each shown workspace's Run menu actions, by workspace id.
+    run_actions: HashMap<String, Entity<treeterm_model::run_actions::RunActions>>,
     /// Web App tabs showing their shell instead of their page, by (workspace, tab).
     web_app_shell: std::collections::HashSet<(String, String)>,
     /// Focus the shown terminal on the next render (after a workspace or tab switch).
@@ -198,6 +200,7 @@ impl AppView {
             review_views: HashMap::new(),
             browser_views: HashMap::new(),
             web_app_shell: std::collections::HashSet::new(),
+            run_actions: HashMap::new(),
             focus_pending: false,
             _selection: selection,
         }
@@ -623,6 +626,84 @@ impl AppView {
     }
 }
 
+/// "▶ Run" (`RunActionDropdown`): the workspace's detected actions by source, then the
+/// custom runners.
+fn run_menu(
+    connected: &mut Connected,
+    workspace: &Entity<treeterm_model::workspace_store::WorkspaceStore>,
+    workspace_id: &str,
+    cx: &mut Context<AppView>,
+) -> AnyElement {
+    use gpui_kit::component::Sizable as _;
+    use gpui_kit::component::button::{Button, ButtonVariants as _};
+    use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
+    use treeterm_model::run_actions::{Detection, RunActions};
+    let conn = connected.session.read(cx).connection().clone();
+    let model = connected
+        .run_actions
+        .entry(workspace_id.to_owned())
+        .or_insert_with(|| cx.new(|cx| RunActions::new(&conn, workspace, cx)))
+        .clone();
+    let runners: Vec<(String, String)> = connected
+        .session
+        .read(cx)
+        .registry()
+        .new_tab_menu()
+        .filter(|app| app.id.starts_with("customrunner-"))
+        .map(|app| (app.id.clone(), app.name.clone()))
+        .collect();
+    let error = model.read(cx).error().map(str::to_owned);
+    let (menu_model, menu_workspace) = (model.clone(), workspace.clone());
+    h_flex()
+        .gap_1()
+        .child(
+            Button::new(SharedString::from(format!("run-{workspace_id}")))
+                .xsmall()
+                .ghost()
+                .label("▶ Run")
+                .dropdown_menu(move |menu, _window, cx| {
+                    let mut menu = menu;
+                    let detection = menu_model.read(cx).detection().clone();
+                    match detection {
+                        Detection::Detecting => return menu.item(PopupMenuItem::label("Loading…")),
+                        Detection::Done(actions) => {
+                            if actions.is_empty() && runners.is_empty() {
+                                return menu.item(PopupMenuItem::label("No actions found"));
+                            }
+                            let mut source = None;
+                            for action in actions {
+                                if source != Some(action.source) {
+                                    source = Some(action.source);
+                                    menu = menu.item(PopupMenuItem::label(action.source.as_str()));
+                                }
+                                let (model, label) = (menu_model.clone(), action.name.clone());
+                                menu = menu.item(PopupMenuItem::new(label).on_click(move |_, _, cx| {
+                                    model.update(cx, |m, cx| m.run(&action, cx));
+                                }));
+                            }
+                        }
+                    }
+                    if !runners.is_empty() {
+                        menu = menu.separator().item(PopupMenuItem::label("Custom Runners"));
+                        for (app_id, name) in &runners {
+                            let (workspace, app_id) = (menu_workspace.clone(), app_id.clone());
+                            menu = menu.item(PopupMenuItem::new(name.clone()).on_click(move |_, _, cx| {
+                                workspace.update(cx, |w, cx| {
+                                    w.add_tab(&app_id, cx);
+                                });
+                            }));
+                        }
+                    }
+                    let refresh = menu_model.clone();
+                    menu.separator().item(PopupMenuItem::new("Refresh").on_click(move |_, _, cx| {
+                        refresh.update(cx, |m, cx| m.detect(cx));
+                    }))
+                }),
+        )
+        .when_some(error, |d, error| d.child(div().text_xs().text_color(colors(cx).error).child(error)))
+        .into_any_element()
+}
+
 /// The header's git status button (`GitStatusButton`), behind count and PR link.
 fn git_status_items(
     controller: &Entity<treeterm_model::git_controller::GitController>,
@@ -853,6 +934,7 @@ fn workspace_pane(connected: &mut Connected, window: &mut Window, cx: &mut Conte
         .when_some(connected.session.read(cx).git_controller(&id).cloned(), |d, controller| {
             d.children(git_status_items(&controller, cx))
         })
+        .child(run_menu(connected, &workspace, &id, cx))
         .when_some(operation_error, |d, error| {
             d.child(div().text_sm().text_color(colors(cx).error).child(format!("⚠ {error}")))
         });
