@@ -31,3 +31,6 @@ automation = ["dep:futures", "gpui-kit/test-support"]
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

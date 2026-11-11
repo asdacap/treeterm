@@ -6,6 +6,7 @@ mod connection_picker;
 mod remote_dir_dialog;
 mod session_info_view;
 mod child_dialog;
+mod cli;
 #[cfg(feature = "automation")]
 mod automation;
 mod browser_view;
@@ -105,6 +106,19 @@ fn main() {
         )
         .init();
 
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or_default();
+    let command = match cli::parse(&args, &cwd, now_ms) {
+        Ok(command) => command,
+        Err(message) => {
+            eprintln!("{message}");
+            std::process::exit(1);
+        }
+    };
     let spec = match local_daemon_spec() {
         Ok(spec) => spec,
         Err(error) => {
@@ -118,6 +132,34 @@ fn main() {
         .build()
         .expect("start the I/O runtime");
     let rt = Rt::new(tokio.handle().clone());
+    let (initial_workspace, initial_ssh) = match command {
+        cli::Command::Help => {
+            println!("{}", cli::USAGE);
+            return;
+        }
+        cli::Command::ShutdownDaemon => {
+            let socket = spec.socket_path.clone();
+            let result = tokio.block_on(async {
+                let conn = treeterm_core::daemon::DaemonConnection::connect(rt.clone(), socket)
+                    .await
+                    .map_err(|e| format!("daemon is not running: {e}"))?;
+                match conn.shutdown().await {
+                    Ok(Ok(())) => Ok(()),
+                    Ok(Err(error)) => Err(error.to_string()),
+                    Err(lost) => Err(lost.to_string()),
+                }
+            });
+            match result {
+                Ok(()) => println!("Daemon shut down"),
+                Err(error) => {
+                    eprintln!("{error}");
+                    std::process::exit(1);
+                }
+            }
+            return;
+        }
+        cli::Command::Gui { workspace, ssh } => (workspace, ssh),
+    };
 
     #[cfg(feature = "automation")]
     let rt_for_automation = rt.clone();
@@ -128,6 +170,9 @@ fn main() {
         text_editor_view::bind_keys(cx);
         let settings = cx.new(|cx| SettingsStore::new(paths::user_data_dir().ok(), cx));
         let store = cx.new(|cx| AppStore::new(rt, spec, settings.clone(), cx));
+        if let Some(config) = initial_ssh {
+            store.update(cx, |s, cx| s.connect_remote(config, treeterm_core::connection::OutdatedDaemon::Report, cx));
+        }
         menus::install(store.clone(), cx);
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
@@ -161,6 +206,9 @@ fn main() {
         })
         .expect("open the main window");
         intercept_shortcuts(keybindings, view.clone(), cx);
+        if let Some(path) = initial_workspace {
+            view.update(cx, |v, cx| v.open_on_start(path.to_string_lossy().into_owned(), cx));
+        }
         // Closing the window asks about unmerged workspaces; closing the last one quits, as
         // Electron's `window-all-closed`.
         let closing = view.clone();

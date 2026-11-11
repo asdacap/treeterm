@@ -9184,6 +9184,7 @@ dependencies = [
  "indexmap",
  "lb-wry",
  "serde_json",
+ "tempfile",
  "tokio",
  "tracing",
  "tracing-subscriber",

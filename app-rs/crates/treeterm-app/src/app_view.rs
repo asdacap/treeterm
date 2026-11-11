@@ -33,6 +33,8 @@ pub struct AppView {
     info: Option<Entity<crate::session_info_view::SessionInfoView>>,
     /// A session pane to open on the next render (it needs the window).
     info_pending: Option<ConnectionId>,
+    /// `treeterm <dir>`: open (or select) this workspace once the local session is live.
+    open_on_start: Option<String>,
 }
 
 /// Per-window state for a connected session.
@@ -89,6 +91,7 @@ impl AppView {
             active: None,
             info: None,
             info_pending: None,
+            open_on_start: None,
         };
         view.sync(&store, cx);
         view
@@ -121,7 +124,38 @@ impl AppView {
         if self.active.as_ref().is_none_or(|id| !self.sessions.contains_key(id)) {
             self.active = self.sessions.keys().next().cloned();
         }
+        self.open_pending_workspace(cx);
         cx.notify();
+    }
+
+    /// Open `path` in the local session as soon as it is live (the CLI's directory).
+    pub fn open_on_start(&mut self, path: String, cx: &mut Context<Self>) {
+        self.open_on_start = Some(path);
+        self.open_pending_workspace(cx);
+    }
+
+    /// The initial workspace (`getInitialWorkspace`): an open workspace with the path is
+    /// selected, otherwise the directory is opened.
+    fn open_pending_workspace(&mut self, cx: &mut Context<Self>) {
+        let Some(path) = self.open_on_start.clone() else {
+            return;
+        };
+        let local = self.store.read(cx).sessions().find(|slot| slot.is_local()).map(|slot| slot.id.clone());
+        let Some(connected) = local.and_then(|id| self.sessions.get(&id)) else {
+            return;
+        };
+        let session = connected.session.read(cx);
+        if !matches!(session.state(), treeterm_model::session_store::SessionState::Live) {
+            return;
+        }
+        self.open_on_start = None;
+        let existing = session.workspace_for_path(&path);
+        let (session, tree) = (connected.session.clone(), connected.tree.clone());
+        let id = match existing {
+            Some(id) => id,
+            None => session.update(cx, |s, cx| s.open_workspace(path, cx)),
+        };
+        tree.update(cx, |tree, cx| tree.select(id, cx));
     }
 
     fn connect(

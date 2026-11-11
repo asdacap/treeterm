@@ -801,6 +801,14 @@ impl SessionStore {
         store
     }
 
+    /// The workspace at `path`, from the session's refs (known before bodies load).
+    pub fn workspace_for_path(&self, path: &str) -> Option<String> {
+        self.known_refs
+            .iter()
+            .find(|(_, ref_path)| ref_path.as_str() == path)
+            .map(|(id, _)| id.clone())
+    }
+
     /// A workspace's git status.
     pub fn git_controller(&self, id: &str) -> Option<&Entity<crate::git_controller::GitController>> {
         self.git_controllers.get(id)
