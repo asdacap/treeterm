@@ -559,3 +559,34 @@ fn an_existing_worktree_can_be_adopted_once(cx: &mut TestAppContext) {
     wait_for_disk(cx, || h.daemon.workspaces_dir().join(format!("{child}.json")).exists());
     assert_eq!(file_on_disk(&h, &child)["gitBranch"], "side");
 }
+
+#[gpui_kit::test]
+fn an_editor_tab_loads_edits_and_saves_a_file(cx: &mut TestAppContext) {
+    use treeterm_model::text_editor::EditorDoc;
+    cx.executor().allow_parking();
+    let h = harness();
+    std::fs::write(h.daemon.workspaces_dir().join("a.json"), body("a", None)).unwrap();
+    publish(&h, &["a"]);
+    let file = h.daemon.root().join("notes.txt");
+    std::fs::write(&file, "hello\n").unwrap();
+    let store = open_store(cx, &h, "client-a");
+    wait_until(cx, &store, |s| loaded(s, "a"));
+    let workspace = store.read_with(cx, |s, _| ws(s, "a"));
+
+    let path = file.to_string_lossy().into_owned();
+    let tab = workspace.update(cx, |w, cx| w.open_in_editor(&path, cx)).unwrap();
+    let Some(TabContent::Editor(editor)) = workspace.read_with(cx, |w, _| w.tab_content(&tab)) else {
+        panic!("not an editor tab");
+    };
+    wait_until(cx, &editor, |e| matches!(e.doc(), EditorDoc::Ready { .. }));
+    editor.update(cx, |e, cx| e.set_content("hello world\n".into(), cx));
+    assert!(editor.read_with(cx, |e, _| e.is_dirty()));
+    editor.update(cx, |e, cx| e.save(cx));
+    wait_until(cx, &editor, |e| !e.is_dirty());
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "hello world\n");
+    wait_for_disk(cx, || {
+        let state = &file_on_disk(&h, "a")["appStates"][&tab]["state"];
+        state["status"] == "ready" && state["isDirty"] == false && state["currentContent"] == "hello world\n"
+    });
+    assert_eq!(file_on_disk(&h, "a")["appStates"][&tab]["title"], "notes.txt");
+}

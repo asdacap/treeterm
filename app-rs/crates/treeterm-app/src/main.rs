@@ -10,6 +10,7 @@ mod keybinding_overlay;
 mod menus;
 mod settings_view;
 mod terminal_element;
+mod text_editor_view;
 mod terminal_view;
 mod theme;
 mod tree_pane;
@@ -118,6 +119,7 @@ fn main() {
         gpui_kit::init(cx);
         theme::install(cx);
         terminal_view::bind_keys(cx);
+        text_editor_view::bind_keys(cx);
         let settings = cx.new(|cx| SettingsStore::new(paths::user_data_dir().ok(), cx));
         let store = cx.new(|cx| AppStore::new(rt, spec, settings.clone(), cx));
         menus::install(store.clone(), cx);

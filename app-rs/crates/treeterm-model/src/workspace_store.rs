@@ -84,6 +84,7 @@ impl ActivityState {
 pub enum TabContent {
     Terminal(Entity<TerminalModel>),
     Files(Entity<crate::file_browser::FileBrowser>),
+    Editor(Entity<crate::text_editor::TextEditor>),
     /// The tab's PTY is being created.
     StartingTerminal,
     Failed(String),
@@ -96,6 +97,10 @@ enum TabRef {
     Terminal(TerminalTab),
     Files {
         model: Entity<crate::file_browser::FileBrowser>,
+        _events: Subscription,
+    },
+    Editor {
+        model: Entity<crate::text_editor::TextEditor>,
         _events: Subscription,
     },
 }
@@ -181,6 +186,7 @@ impl WorkspaceStore {
             Some(TabRef::Terminal(TerminalTab::Creating { .. })) => TabContent::StartingTerminal,
             Some(TabRef::Terminal(TerminalTab::Failed(error))) => TabContent::Failed(error.clone()),
             Some(TabRef::Files { model, .. }) => TabContent::Files(model.clone()),
+            Some(TabRef::Editor { model, .. }) => TabContent::Editor(model.clone()),
             None => TabContent::NotPorted(tab.application_id.clone()),
         })
     }
@@ -263,7 +269,9 @@ impl WorkspaceStore {
     pub fn terminals(&self) -> impl Iterator<Item = &Entity<TerminalModel>> {
         self.tabs.values().filter_map(|tab| match tab {
             TabRef::Terminal(TerminalTab::Attached { model, .. }) => Some(model),
-            TabRef::Terminal(TerminalTab::Creating { .. } | TerminalTab::Failed(_)) | TabRef::Files { .. } => None,
+            TabRef::Terminal(TerminalTab::Creating { .. } | TerminalTab::Failed(_))
+            | TabRef::Files { .. }
+            | TabRef::Editor { .. } => None,
         })
     }
 
@@ -295,20 +303,21 @@ impl WorkspaceStore {
                 let owned_tab = tab_id.to_owned();
                 let events = cx.subscribe(&model, move |store, _, event: &crate::file_browser::FileBrowserEvent, cx| {
                     let crate::file_browser::FileBrowserEvent::StateChanged(next) = event;
-                    let next = next.clone();
-                    store.update_tab_state(
-                        &owned_tab,
-                        |state| {
-                            if let (Value::Object(state), Value::Object(next)) = (state, next) {
-                                for (key, value) in next {
-                                    state.insert(key, value);
-                                }
-                            }
-                        },
-                        cx,
-                    );
+                    store.merge_tab_state(&owned_tab, next.clone(), cx);
                 });
                 self.tabs.insert(tab_id.to_owned(), TabRef::Files { model, _events: events });
+            }
+            AppKind::Editor => {
+                let fs = self.conn.fs_client();
+                let root = self.workspace.path.clone();
+                let state = tab.state.clone();
+                let model = cx.new(|cx| crate::text_editor::TextEditor::new(fs, root, &state, cx));
+                let owned_tab = tab_id.to_owned();
+                let events = cx.subscribe(&model, move |store, _, event: &crate::text_editor::TextEditorEvent, cx| {
+                    let crate::text_editor::TextEditorEvent::StateChanged(next) = event;
+                    store.merge_tab_state(&owned_tab, next.clone(), cx);
+                });
+                self.tabs.insert(tab_id.to_owned(), TabRef::Editor { model, _events: events });
             }
             AppKind::Terminal { .. } | AppKind::AiHarness { .. } | AppKind::CustomRunner { .. } => {
                 let terminal = match tab.state.get("ptyId") {
@@ -481,6 +490,61 @@ impl WorkspaceStore {
         Some(tab_id)
     }
 
+    /// Merge `next`'s keys over the tab's state (keys the other app wrote survive).
+    fn merge_tab_state(&mut self, tab_id: &str, next: Value, cx: &mut Context<Self>) {
+        self.update_tab_state(
+            tab_id,
+            |state| {
+                if let (Value::Object(state), Value::Object(next)) = (state, next) {
+                    for (key, value) in next {
+                        state.insert(key, value);
+                    }
+                }
+            },
+            cx,
+        );
+    }
+
+    /// Add a tab with `overrides` merged over the application's initial state
+    /// (`addTab(applicationId, initialState)`), e.g. an editor for a given file.
+    pub fn add_tab_with(&mut self, application_id: &str, overrides: Value, cx: &mut Context<Self>) -> Option<String> {
+        let app = self.registry.get(application_id)?.clone();
+        let tab_id = new_tab_id();
+        let existing = self
+            .workspace
+            .file
+            .app_states
+            .values()
+            .filter(|tab| tab.application_id == application_id)
+            .count();
+        let mut state = app.initial_state();
+        if let (Value::Object(state), Value::Object(overrides)) = (&mut state, overrides) {
+            for (key, value) in overrides {
+                state.insert(key, value);
+            }
+        }
+        self.workspace.file.app_states.insert(
+            tab_id.clone(),
+            AppState {
+                application_id: application_id.to_owned(),
+                title: format!("{} {}", app.name, existing + 1),
+                state,
+            },
+        );
+        self.workspace.file.active_tab_id = Some(tab_id.clone());
+        self.changed(cx);
+        self.init_tab(&tab_id, cx);
+        Some(tab_id)
+    }
+
+    /// Open `path` in an Editor tab, titled after the file.
+    pub fn open_in_editor(&mut self, path: &str, cx: &mut Context<Self>) -> Option<String> {
+        let tab = self.add_tab_with("editor", serde_json::json!({ "status": "loading", "filePath": path }), cx)?;
+        let title = path.rsplit('/').next().unwrap_or(path).to_owned();
+        self.update_tab_title(&tab, &title, cx);
+        Some(tab)
+    }
+
     /// Close a tab the user asked to close: kill its PTY, then drop it from the body.
     /// Applications that cannot close (or are not ported) are left alone.
     pub fn remove_tab(&mut self, tab_id: &str, cx: &mut Context<Self>) {
@@ -501,7 +565,7 @@ impl WorkspaceStore {
                 // Its creation finds the tab gone and kills the PTY (`on_pty_created`).
                 tracing::debug!(%handle, "tab closed while its PTY was starting");
             }
-            Some(TabRef::Terminal(TerminalTab::Failed(_)) | TabRef::Files { .. }) | None => {}
+            Some(TabRef::Terminal(TerminalTab::Failed(_)) | TabRef::Files { .. } | TabRef::Editor { .. }) | None => {}
         }
         self.dispose_tab(tab_id);
 
@@ -657,7 +721,9 @@ impl WorkspaceStore {
                     model.update(cx, |model, cx| model.kill(cx));
                 }
                 // A PTY still starting is killed by its creation finding the tab gone.
-                TabRef::Terminal(TerminalTab::Creating { .. } | TerminalTab::Failed(_)) | TabRef::Files { .. } => {}
+                TabRef::Terminal(TerminalTab::Creating { .. } | TerminalTab::Failed(_))
+                | TabRef::Files { .. }
+                | TabRef::Editor { .. } => {}
             }
         }
     }

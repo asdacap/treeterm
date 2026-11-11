@@ -12,6 +12,7 @@ use crate::theme::colors;
 
 pub struct FileBrowserView {
     model: Entity<FileBrowser>,
+    workspace: Entity<treeterm_model::workspace_store::WorkspaceStore>,
     /// The editor showing the current file, and which file it shows.
     editor: Option<(String, Entity<EditorState>)>,
     _observe: Subscription,
@@ -68,10 +69,15 @@ fn format_size(bytes: u64) -> String {
 }
 
 impl FileBrowserView {
-    pub fn new(model: Entity<FileBrowser>, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        model: Entity<FileBrowser>,
+        workspace: Entity<treeterm_model::workspace_store::WorkspaceStore>,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let observe = cx.observe(&model, |_, _, cx| cx.notify());
         Self {
             model,
+            workspace,
             editor: None,
             _observe: observe,
         }
@@ -165,17 +171,25 @@ impl FileBrowserView {
             ),
             FileView::Text { path, text } => {
                 let editor = self.editor_for(&path, &text, window, cx);
+                let edit_path = path.clone();
                 v_flex()
                     .size_full()
                     .child(
-                        div()
+                        h_flex()
                             .px_3()
                             .py_1()
+                            .gap_2()
+                            .items_center()
                             .text_xs()
                             .text_color(secondary)
                             .border_b_1()
                             .border_color(border)
-                            .child(path.clone()),
+                            .child(div().flex_1().truncate().child(path.clone()))
+                            .child(Button::new("edit-file").xsmall().ghost().label("Edit").on_click(cx.listener(
+                                move |view, _, _, cx| {
+                                    view.workspace.update(cx, |w, cx| w.open_in_editor(&edit_path, cx));
+                                },
+                            ))),
                     )
                     .child(div().flex_1().min_h_0().child(Editor::new(&editor).readonly(true).bordered(false).h_full()))
                     .into_any_element()

@@ -42,6 +42,8 @@ struct Connected {
     terminal_views: HashMap<EntityId, Entity<TerminalView>>,
     /// Views of Files tabs, by model.
     file_views: HashMap<EntityId, Entity<crate::file_browser_view::FileBrowserView>>,
+    /// Views of Editor tabs, by model.
+    editor_views: HashMap<EntityId, Entity<crate::text_editor_view::TextEditorView>>,
     /// Focus the shown terminal on the next render (after a workspace or tab switch).
     focus_pending: bool,
     _selection: Subscription,
@@ -123,6 +125,7 @@ impl AppView {
             active: ActiveView::Nothing,
             terminal_views: HashMap::new(),
             file_views: HashMap::new(),
+            editor_views: HashMap::new(),
             focus_pending: false,
             _selection: selection,
         }
@@ -468,7 +471,17 @@ fn workspace_pane(connected: &mut Connected, window: &mut Window, cx: &mut Conte
                 let view = connected
                     .file_views
                     .entry(model.entity_id())
-                    .or_insert_with(|| cx.new(|cx| crate::file_browser_view::FileBrowserView::new(model.clone(), cx)))
+                    .or_insert_with(|| {
+                        cx.new(|cx| crate::file_browser_view::FileBrowserView::new(model.clone(), workspace.clone(), cx))
+                    })
+                    .clone();
+                div().size_full().child(view).into_any_element()
+            }
+            Some(TabContent::Editor(model)) => {
+                let view = connected
+                    .editor_views
+                    .entry(model.entity_id())
+                    .or_insert_with(|| cx.new(|cx| crate::text_editor_view::TextEditorView::new(model.clone(), cx)))
                     .clone();
                 div().size_full().child(view).into_any_element()
             }

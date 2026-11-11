@@ -24,6 +24,8 @@ pub enum AppKind {
     CustomRunner { command_template: String },
     /// The file browser (`filesystem`).
     Files,
+    /// One file being edited (`editor`); opened from the file viewer.
+    Editor,
 }
 
 impl AppKind {
@@ -31,7 +33,7 @@ impl AppKind {
     pub fn is_terminal(&self) -> bool {
         match self {
             AppKind::Terminal { .. } | AppKind::AiHarness { .. } | AppKind::CustomRunner { .. } => true,
-            AppKind::Files => false,
+            AppKind::Files | AppKind::Editor => false,
         }
     }
 }
@@ -61,6 +63,10 @@ impl AppDef {
                 "widthLimitDisabled": false,
             }),
             AppKind::Files => json!({ "selectedPath": null, "expandedDirs": [] }),
+            AppKind::Editor => json!({
+                "status": "ready", "filePath": "", "originalContent": "", "currentContent": "",
+                "language": "plaintext", "isDirty": false, "viewMode": "editor"
+            }),
             AppKind::AiHarness {
                 keep_on_exit,
                 enable_sandbox,
@@ -86,7 +92,7 @@ impl AppDef {
             AppKind::CustomRunner { command_template } => {
                 Some(command_template.replace("{{workspace_path}}", workspace_path))
             }
-            AppKind::Files => None,
+            AppKind::Files | AppKind::Editor => None,
         }
     }
 
@@ -94,7 +100,7 @@ impl AppDef {
     pub fn background(&self) -> Option<&str> {
         match &self.kind {
             AppKind::AiHarness { background, .. } => Some(background),
-            AppKind::Terminal { .. } | AppKind::CustomRunner { .. } | AppKind::Files => None,
+            AppKind::Terminal { .. } | AppKind::CustomRunner { .. } | AppKind::Files | AppKind::Editor => None,
         }
     }
 }
@@ -129,6 +135,15 @@ impl AppRegistry {
                 can_close: true,
                 show_in_new_tab_menu: true,
                 is_default: true,
+            },
+            AppDef {
+                id: "editor".to_owned(),
+                name: "Editor".to_owned(),
+                icon: "\u{270F}".to_owned(),
+                kind: AppKind::Editor,
+                can_close: true,
+                show_in_new_tab_menu: false,
+                is_default: false,
             },
         ];
         for instance in &settings.terminal.instances {
