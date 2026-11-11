@@ -17,6 +17,7 @@ use crate::tree_pane::{TreePane, WorkspaceSelected};
 
 pub struct AppView {
     keybindings: Entity<KeybindingStore>,
+    settings: Entity<treeterm_model::settings_store::SettingsStore>,
     /// Holds keyboard focus when nothing inside does, so window-level shortcuts dispatch.
     focus: gpui_kit::FocusHandle,
     /// Owned, not just observed: an observation does not keep the store alive, and dropping
@@ -58,11 +59,17 @@ enum Next {
 }
 
 impl AppView {
-    pub fn new(store: Entity<AppStore>, keybindings: Entity<KeybindingStore>, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        store: Entity<AppStore>,
+        keybindings: Entity<KeybindingStore>,
+        settings: Entity<treeterm_model::settings_store::SettingsStore>,
+        cx: &mut Context<Self>,
+    ) -> Self {
         cx.observe(&store, |view, store, cx| view.sync(&store, cx)).detach();
         cx.observe(&keybindings, |_, _, cx| cx.notify()).detach();
         let mut view = Self {
             keybindings,
+            settings,
             focus: cx.focus_handle(),
             _store: store.clone(),
             body: Body::StartingDaemon,
@@ -167,6 +174,9 @@ impl Render for AppView {
             .bg(bg)
             .text_color(fg)
             .on_action(|_: &crate::menus::Minimize, window, _| window.minimize_window())
+            .on_action(cx.listener(|view, _: &crate::menus::OpenSettings, window, cx| {
+                crate::settings_view::open(view.settings.clone(), window, cx);
+            }))
             .child(content)
             .children(crate::keybinding_overlay::render(&self.keybindings, window, cx))
     }
@@ -192,7 +202,7 @@ impl AppView {
     }
 
     /// Perform a shortcut decided by the keybinding machine (`WorkspacePane`'s handlers).
-    pub fn perform(&mut self, action: Action, cx: &mut Context<Self>) {
+    pub fn perform(&mut self, action: Action, window: &mut Window, cx: &mut Context<Self>) {
         match action {
             Action::SwitchToTab { index } => {
                 let Some(store) = self.active_store(cx) else { return };
@@ -270,7 +280,7 @@ impl AppView {
                 }
             }
             Action::Prefix(PrefixAction::OpenSettings) => {
-                tracing::info!("settings dialog is not available in the native app yet");
+                crate::settings_view::open(self.settings.clone(), window, cx);
             }
         }
     }

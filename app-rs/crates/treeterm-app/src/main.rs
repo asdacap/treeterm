@@ -6,6 +6,7 @@ mod automation;
 mod daemon_binary;
 mod keybinding_overlay;
 mod menus;
+mod settings_view;
 mod terminal_element;
 mod terminal_view;
 mod theme;
@@ -51,7 +52,7 @@ fn keybinding_settings(settings: &treeterm_core::settings::Settings) -> Keybindi
 /// Every keystroke passes the shortcut machine before the focused view (a terminal) sees
 /// it, so the prefix key and its follow-up never reach the PTY.
 fn intercept_shortcuts(keybindings: Entity<KeybindingStore>, view: Entity<AppView>, cx: &mut App) {
-    cx.intercept_keystrokes(move |event, _window, cx| {
+    cx.intercept_keystrokes(move |event, window, cx| {
         let k = &event.keystroke;
         let m = k.modifiers;
         let press = KeyPress::from_gpui(
@@ -70,7 +71,7 @@ fn intercept_shortcuts(keybindings: Entity<KeybindingStore>, view: Entity<AppVie
             KeyOutcome::Consumed => cx.stop_propagation(),
             KeyOutcome::Perform(action) => {
                 cx.stop_propagation();
-                view.update(cx, |view, cx| view.perform(action, cx));
+                view.update(cx, |view, cx| view.perform(action, window, cx));
             }
         }
     })
@@ -145,8 +146,8 @@ fn main() {
         })
         .detach();
         let (window, view) = gpui_kit::open_window(options, cx, {
-            let keybindings = keybindings.clone();
-            |_, cx| cx.new(|cx| AppView::new(store, keybindings, cx))
+            let (keybindings, settings) = (keybindings.clone(), settings.clone());
+            |_, cx| cx.new(|cx| AppView::new(store, keybindings, settings, cx))
         })
         .expect("open the main window");
         intercept_shortcuts(keybindings, view.clone(), cx);

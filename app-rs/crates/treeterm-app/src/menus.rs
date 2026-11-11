@@ -6,14 +6,16 @@ use treeterm_model::app_store::AppStore;
 
 use crate::terminal_view;
 
-actions!(treeterm, [Quit, QuitAndKillDaemon, Minimize]);
+actions!(treeterm, [Quit, QuitAndKillDaemon, Minimize, OpenSettings]);
 pub fn install(store: Entity<AppStore>, cx: &mut App) {
     let mut bindings = Vec::new();
     if cfg!(target_os = "macos") {
+        bindings.push(KeyBinding::new("cmd-,", OpenSettings, None));
         bindings.push(KeyBinding::new("cmd-q", Quit, None));
         bindings.push(KeyBinding::new("cmd-shift-q", QuitAndKillDaemon, None));
         bindings.push(KeyBinding::new("cmd-m", Minimize, None));
     } else {
+        bindings.push(KeyBinding::new("ctrl-,", OpenSettings, None));
         bindings.push(KeyBinding::new("ctrl-shift-q", QuitAndKillDaemon, None));
     }
     cx.bind_keys(bindings);
@@ -43,14 +45,23 @@ pub fn install(store: Entity<AppStore>, cx: &mut App) {
     let window = Menu::new("Window").items([MenuItem::action("Minimize", Minimize)]);
     let menus = if cfg!(target_os = "macos") {
         vec![
-            Menu::new("TreeTerm").items([MenuItem::action("Quit TreeTerm", Quit)]),
+            Menu::new("TreeTerm").items([
+                MenuItem::action("Preferences…", OpenSettings),
+                MenuItem::separator(),
+                MenuItem::action("Quit TreeTerm", Quit),
+            ]),
             Menu::new("File").items([quit_and_kill]),
             edit,
             window,
         ]
     } else {
         vec![
-            Menu::new("File").items([MenuItem::action("Quit", Quit), quit_and_kill]),
+            Menu::new("File").items([
+                MenuItem::action("Settings", OpenSettings),
+                MenuItem::separator(),
+                MenuItem::action("Quit", Quit),
+                quit_and_kill,
+            ]),
             edit,
             window,
         ]
