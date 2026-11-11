@@ -166,6 +166,7 @@ impl TreePane {
         let select_id = id.clone();
         let menu_id = id.clone();
         let session = self.session.clone();
+        let pane = cx.entity();
         h_flex()
             .id(SharedString::from(format!("ws-row-{id}")))
             .w_full()
@@ -194,7 +195,24 @@ impl TreePane {
             .child(div().truncate().text_color(label_color).child(label.clone()))
             .context_menu(move |menu, _window, _cx| {
                 let (session, id, label) = (session.clone(), menu_id.clone(), label.clone());
-                menu.item(PopupMenuItem::new("Remove from TreeTerm (keep worktree and branch)").on_click(
+                let (child_session, child_parent, child_label, pane) =
+                    (session.clone(), id.clone(), label.clone(), pane.clone());
+                menu.item(PopupMenuItem::new("New child workspace…").on_click(move |_, window, cx| {
+                    let pane = pane.clone();
+                    let on_created: crate::child_dialog::OnCreated = std::rc::Rc::new(move |id, _, cx| {
+                        pane.update(cx, |pane, cx| pane.select(id, cx));
+                    });
+                    crate::child_dialog::open(
+                        child_session.clone(),
+                        child_parent.clone(),
+                        child_label.clone(),
+                        on_created,
+                        window,
+                        cx,
+                    );
+                }))
+                .separator()
+                .item(PopupMenuItem::new("Remove from TreeTerm (keep worktree and branch)").on_click(
                     move |_, window, cx| confirm_remove(session.clone(), id.clone(), label.clone(), window, cx),
                 ))
             })

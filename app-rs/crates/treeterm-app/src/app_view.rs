@@ -311,8 +311,24 @@ fn workspace_pane(connected: &mut Connected, window: &mut Window, cx: &mut Conte
     let workspace = match connected.session.read(cx).entry(&id) {
         // The selection can outlive its workspace when another window removes it.
         None => return centered(div().text_color(secondary).child("Workspace was removed")),
-        Some(WorkspaceEntry::Loading { message, .. }) => {
-            return centered(div().text_color(secondary).child(message.clone()));
+        Some(WorkspaceEntry::Loading { message, output, .. }) => {
+            // Git's output while a worktree is being created.
+            let tail: Vec<String> = output.iter().rev().take(30).rev().cloned().collect();
+            return v_flex()
+                .flex_1()
+                .h_full()
+                .p_4()
+                .pt(px(38.))
+                .gap_2()
+                .child(h_flex().gap_2().text_color(secondary).child(Spinner::new()).child(message.clone()))
+                .child(
+                    v_flex()
+                        .font_family("Menlo")
+                        .text_size(px(12.))
+                        .text_color(secondary)
+                        .children(tail.into_iter().map(|line| div().child(line))),
+                )
+                .into_any_element();
         }
         Some(WorkspaceEntry::Error { error: reason, .. }) => {
             return centered(div().text_color(error).child(reason.clone()));

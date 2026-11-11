@@ -19,6 +19,8 @@ tracing.workspace = true
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
+dirs = "6"
+uuid = { version = "1", features = ["v4"] }
 tempfile.workspace = true
 gpui-kit = { workspace = true, features = ["test-support"] }
 treeterm-testkit.workspace = true

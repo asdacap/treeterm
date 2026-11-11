@@ -1145,7 +1145,8 @@ impl SessionStore {
             last_activity: now,
             extra: Default::default(),
         };
-        self.add_workspace(Workspace { id, path, file }, cx);
+        // Opening does not wait for the publish; the ref sync retries on its own.
+        drop(self.add_workspace(Workspace { id, path, file }, cx));
     }
 
     /// One past the largest `sortOrder` among a parent's children (or the roots).
@@ -1156,7 +1157,7 @@ impl SessionStore {
             .filter_map(|entry| entry.store())
             .map(|store| store.read(cx).file())
             .filter(|file| file.parent_id.as_deref() == parent)
-            .map(|file| tree::sort_order(file))
+            .map(tree::sort_order)
             .max();
         match max {
             Some(max) => (max + 1).to_string(),
@@ -1178,7 +1179,9 @@ impl SessionStore {
 
     /// Add a workspace built here (`createWorkspaceFile` + ref sync): write its first body
     /// (must-not-exist CAS), open its watch, then publish it.
-    pub fn add_workspace(&mut self, workspace: Workspace, cx: &mut Context<Self>) -> Entity<WorkspaceStore> {
+    /// Returns a receiver that resolves once the membership including it is published.
+    pub fn add_workspace(&mut self, workspace: Workspace, cx: &mut Context<Self>) -> oneshot::Receiver<()> {
+        let (published_tx, published_rx) = oneshot::channel();
         let id = workspace.id.clone();
         self.unpublished.insert(id.clone());
         self.ref_sync_attempts = 0;
@@ -1202,10 +1205,219 @@ impl SessionStore {
             if published.await.is_err() {
                 tracing::debug!("ref sync dropped with the store");
             }
+            published_tx.send(()).ok(); // the caller may not wait
         })
         .detach();
+        drop(store);
         cx.notify();
-        store
+        published_rx
+    }
+
+    /// Create a git worktree under `parent_id` and add it as a child workspace
+    /// (`addChildWorkspace` → `createChildWithLoading`). The new worktree branches from the
+    /// parent's current branch. Returns the child's id at once; it shows as Loading with the
+    /// git output until done, or as an Error.
+    pub fn add_child_workspace(
+        &mut self,
+        parent_id: &str,
+        name: String,
+        detached: bool,
+        description: Option<String>,
+        cx: &mut Context<Self>,
+    ) -> Result<String, String> {
+        let parent = self
+            .workspace_store(parent_id)
+            .ok_or("Parent workspace not found")?
+            .clone();
+        let (parent_path, root_path) = {
+            let ws = parent.read(cx).workspace();
+            match (ws.file.is_git_repo, ws.file.git_root_path.clone()) {
+                (true, Some(root)) => (ws.path.clone(), root),
+                (true, None) | (false, _) => return Err("Parent workspace is not a git repository".to_owned()),
+            }
+        };
+        let id = new_workspace_id();
+        self.entries.insert(
+            id.clone(),
+            WorkspaceEntry::Loading {
+                name: name.clone(),
+                message: "Creating worktree...".to_owned(),
+                output: Vec::new(),
+            },
+        );
+        cx.notify();
+        let lock = self.acquire_lock(cx);
+        let git = self.conn.git();
+        let child_id = id.clone();
+        cx.spawn(async move |this, cx| {
+            let locked = lock.await.unwrap_or_else(|_| Err("session store dropped".to_owned()));
+            if let Err(error) = locked {
+                match this.update(cx, |s, cx| s.fail_child(&child_id, &name, error, cx)) {
+                    Ok(()) | Err(_) => {}
+                }
+                return;
+            }
+            // The parent may have switched branches since it was last read.
+            if let treeterm_core::git::GitInfo::Repo { branch, .. } = git.get_info(&parent_path).await {
+                match this.update(cx, |_, cx| parent.update(cx, |p, cx| p.set_git_branch(&branch, cx))) {
+                    Ok(()) | Err(_) => {}
+                }
+            }
+            let base = match this.update(cx, |_, cx| parent.read(cx).file().git_branch.clone()) {
+                Ok(Some(branch)) => treeterm_core::git::WorktreeBase::Ref(branch),
+                Ok(None) | Err(_) => treeterm_core::git::WorktreeBase::Head,
+            };
+            // Git's output goes to the Loading row as it arrives.
+            let (lines_tx, mut lines_rx) = futures::channel::mpsc::unbounded::<String>();
+            let report = move |line: &str| {
+                lines_tx.unbounded_send(line.to_owned()).ok(); // the row may be gone
+            };
+            let drain = {
+                let child_id = child_id.clone();
+                this.update(cx, |_, cx| {
+                    cx.spawn(async move |this, cx| {
+                        while let Some(line) = lines_rx.next().await {
+                            match this.update(cx, |s, cx| s.append_output(&child_id, line, cx)) {
+                                Ok(()) => {}
+                                Err(_) => return,
+                            }
+                        }
+                    })
+                })
+            };
+            let created = git
+                .create_worktree(&root_path, &name, base, treeterm_core::git::Progress::Report(&report))
+                .await;
+            drop(report);
+            drop(drain);
+            let published = this.update(cx, |s, cx| match created {
+                Ok(info) => Some(s.finish_child(&child_id, &parent, name.clone(), info, detached, description, cx)),
+                Err(error) => {
+                    s.fail_child(&child_id, &name, error.to_string(), cx);
+                    None
+                }
+            });
+            if let Ok(Some(Some(published))) = published
+                && published.await.is_err()
+            {
+                tracing::debug!("child publish dropped with the store");
+            }
+            let Ok(unlock) = this.update(cx, |s, cx| s.release_lock(cx)) else {
+                return;
+            };
+            if unlock.await.is_err() {
+                tracing::debug!("unlock dropped with the store");
+            }
+        })
+        .detach();
+        Ok(id)
+    }
+
+    fn append_output(&mut self, id: &str, line: String, cx: &mut Context<Self>) {
+        if let Some(WorkspaceEntry::Loading { output, .. }) = self.entries.get_mut(id) {
+            output.push(line);
+            cx.notify();
+        }
+    }
+
+    fn fail_child(&mut self, id: &str, name: &str, error: String, cx: &mut Context<Self>) {
+        if self.entries.contains_key(id) {
+            self.entries.insert(id.to_owned(), WorkspaceEntry::Error { name: name.to_owned(), error });
+            cx.notify();
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn finish_child(
+        &mut self,
+        id: &str,
+        parent: &Entity<WorkspaceStore>,
+        name: String,
+        info: treeterm_core::git::WorktreeInfo,
+        detached: bool,
+        description: Option<String>,
+        cx: &mut Context<Self>,
+    ) -> Option<oneshot::Receiver<()>> {
+        use treeterm_core::wire::workspace_file::{AppState, WorkspaceStatus};
+        // Dismissed while git ran.
+        if !matches!(self.entries.get(id), Some(WorkspaceEntry::Loading { .. })) {
+            return None;
+        }
+        let (parent_id, git_root_path, settings) = {
+            let ws = parent.read(cx).workspace();
+            (ws.id.clone(), ws.file.git_root_path.clone(), ws.file.settings.clone())
+        };
+        let inherited = self.inherited_default_apps(&parent_id, cx);
+        let global_default = self.settings.read(cx).settings().global_default_application_id.clone();
+        let mut app_states = IndexMap::new();
+        let mut active_tab_id = None;
+        let candidates = std::iter::once(settings.default_application_id.as_str())
+            .filter(|id| !id.is_empty())
+            .chain(inherited.iter().map(String::as_str));
+        if let Some(app) = self.registry.default_for_workspace(candidates, &global_default) {
+            let tab_id = crate::workspace_store::new_tab_id();
+            app_states.insert(
+                tab_id.clone(),
+                AppState {
+                    application_id: app.id.clone(),
+                    title: app.name.clone(),
+                    state: app.initial_state(),
+                },
+            );
+            active_tab_id = Some(tab_id);
+        }
+        let mut metadata = std::collections::BTreeMap::new();
+        metadata.insert("sortOrder".to_owned(), self.next_sort_order(Some(&parent_id), cx));
+        if let Some(description) = description.filter(|d| !d.is_empty()) {
+            metadata.insert("description".to_owned(), description);
+        }
+        let now = now_millis();
+        let file = WorkspaceFile {
+            name,
+            parent_id: Some(parent_id),
+            status: WorkspaceStatus::Active,
+            is_git_repo: true,
+            git_branch: Some(info.branch),
+            git_root_path,
+            is_worktree: true,
+            is_detached: Some(detached),
+            app_states,
+            active_tab_id,
+            metadata,
+            settings: Default::default(),
+            favourite_paths: Vec::new(),
+            created_at: now,
+            last_activity: now,
+            extra: Default::default(),
+        };
+        Some(self.add_workspace(
+            Workspace {
+                id: id.to_owned(),
+                path: info.path,
+                file,
+            },
+            cx,
+        ))
+    }
+
+    /// Default application ids set on a workspace and its ancestors, nearest first
+    /// (`getInheritedDefaultApplicationIds`).
+    fn inherited_default_apps(&self, id: &str, cx: &App) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut seen = HashSet::new();
+        let mut current = Some(id.to_owned());
+        while let Some(next) = current.take() {
+            if !seen.insert(next.clone()) {
+                break;
+            }
+            let Some(store) = self.workspace_store(&next) else { break };
+            let file = store.read(cx).file();
+            if !file.settings.default_application_id.is_empty() {
+                out.push(file.settings.default_application_id.clone());
+            }
+            current = file.parent_id.clone();
+        }
+        out
     }
 
     /// Remove a workspace and its descendants from the session (`removeWorkspaceKeepBoth`):

@@ -1,6 +1,7 @@
 //! TreeTerm native app: one process, one UI, talking gRPC to the TreeTerm daemon.
 
 mod app_view;
+mod child_dialog;
 #[cfg(feature = "automation")]
 mod automation;
 mod daemon_binary;

@@ -234,7 +234,7 @@ fn an_added_workspace_is_written_then_published(cx: &mut TestAppContext) {
                 extra: Default::default(),
             },
         };
-        s.add_workspace(workspace, cx);
+        drop(s.add_workspace(workspace, cx));
     });
     // The other window learns of it through the session and loads its body.
     wait_until_app(cx, &second, |s, cx| {
@@ -310,7 +310,7 @@ fn opening_a_directory_adds_a_root_workspace_with_git_info_and_a_terminal(cx: &m
     wait_until(cx, &first, |s| matches!(s.state(), SessionState::Live));
     let path = repo.to_string_lossy().into_owned();
     let id = first.update(cx, |s, cx| s.open_workspace(path.clone(), cx));
-    assert!(matches!(first.read_with(cx, |s, _| matches!(s.entry(&id), Some(WorkspaceEntry::Loading { .. }))), true));
+    assert!(first.read_with(cx, |s, _| matches!(s.entry(&id), Some(WorkspaceEntry::Loading { .. }))));
 
     wait_until_app(cx, &second, |s, cx| s.workspace_store(&id).is_some_and(|w| w.read(cx).file().name == "repo"));
     let disk = file_on_disk(&h, &id);
@@ -320,4 +320,64 @@ fn opening_a_directory_adds_a_root_workspace_with_git_info_and_a_terminal(cx: &m
     let tab = disk["activeTabId"].as_str().unwrap().to_owned();
     assert_eq!(disk["appStates"][&tab]["applicationId"], "terminal");
     wait_for_disk(cx, || file_on_disk(&h, &id)["appStates"][&tab]["state"]["ptyId"].is_string());
+}
+
+#[gpui_kit::test]
+fn a_child_workspace_is_a_new_worktree_from_the_parent_branch(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    publish(&h, &[]);
+    // Worktrees go under the real ~/.treeterm/worktrees/<repo name>/: use a unique repo
+    // name and remove what the test creates there.
+    let repo_name = format!("tt-test-{}", uuid::Uuid::new_v4().simple());
+    let repo = h.daemon.root().join(&repo_name);
+    let worktrees_home = dirs::home_dir().unwrap().join(".treeterm/worktrees").join(&repo_name);
+    struct Cleanup(std::path::PathBuf);
+    impl Drop for Cleanup {
+        fn drop(&mut self) {
+            if self.0.exists() && std::fs::remove_dir_all(&self.0).is_err() {
+                eprintln!("could not remove {}", self.0.display());
+            }
+        }
+    }
+    let _cleanup = Cleanup(worktrees_home.clone());
+    std::fs::create_dir_all(&repo).unwrap();
+    let git = |args: &[&str]| {
+        let out = std::process::Command::new("git").args(args).current_dir(&repo).output().unwrap();
+        assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+    git(&["init", "-q", "-b", "main"]);
+    git(&["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init"]);
+
+    let store = open_store(cx, &h, "client-a");
+    wait_until(cx, &store, |s| matches!(s.state(), SessionState::Live));
+    let path = repo.to_string_lossy().into_owned();
+    let root = store.update(cx, |s, cx| s.open_workspace(path, cx));
+    wait_until(cx, &store, |s| loaded(s, &root));
+
+    let child = store
+        .update(cx, |s, cx| s.add_child_workspace(&root, "feature-x".into(), false, Some("try it".into()), cx))
+        .unwrap();
+    wait_until(cx, &store, |s| loaded(s, &child) || matches!(s.entry(&child), Some(WorkspaceEntry::Error { .. })));
+    if let Some(WorkspaceEntry::Error { error, .. }) = store.read_with(cx, |s, _| match s.entry(&child) {
+        Some(WorkspaceEntry::Error { error, name }) => Some(WorkspaceEntry::Error { error: error.clone(), name: name.clone() }),
+        _ => None,
+    }) {
+        panic!("child failed: {error}");
+    }
+    wait_for_disk(cx, || h.daemon.workspaces_dir().join(format!("{child}.json")).exists());
+    let disk = file_on_disk(&h, &child);
+    assert_eq!(disk["parentId"], root.as_str());
+    assert_eq!(disk["isWorktree"], true);
+    assert_eq!(disk["metadata"]["description"], "try it");
+    let worktrees = git(&["worktree", "list"]);
+    assert!(worktrees.lines().count() >= 2, "{worktrees}");
+    assert!(worktrees_home.join("feature-x").exists());
+    // The lock was released after publishing.
+    wait_until(cx, &store, |s| s.version() >= 5);
+    cx.update(|cx| {
+        let rows: Vec<String> = store.read(cx).tree_rows(&HashSet::new(), cx).into_iter().map(|r| r.id).collect();
+        assert_eq!(rows, vec![root.clone(), child.clone()]);
+    });
 }

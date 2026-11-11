@@ -519,6 +519,15 @@ impl WorkspaceStore {
         }
     }
 
+    /// Git reports another branch than the body records (`updateGitInfo`).
+    pub fn set_git_branch(&mut self, branch: &str, cx: &mut Context<Self>) {
+        if self.workspace.file.git_branch.as_deref() == Some(branch) {
+            return;
+        }
+        self.workspace.file.git_branch = Some(branch.to_owned());
+        self.changed(cx);
+    }
+
     pub fn toggle_favourite(&mut self, cx: &mut Context<Self>) {
         if self.workspace.file.metadata.get("isFavourite").map(String::as_str) == Some("true") {
             self.delete_metadata("isFavourite", cx);
