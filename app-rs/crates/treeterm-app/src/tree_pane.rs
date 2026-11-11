@@ -152,6 +152,15 @@ impl Render for TreePane {
                     unread: session
                         .workspace_store(&row.id)
                         .is_some_and(|w| w.read(cx).has_unread_attention()),
+                    pr: session.git_controller(&row.id).and_then(|git| {
+                        let status = git.read(cx).status();
+                        match &status.pull_request {
+                            treeterm_core::git_status::PullRequest::Found(pr) => {
+                                Some((pr.number, treeterm_model::git_controller::pr_signal(status)))
+                            }
+                            treeterm_core::git_status::PullRequest::None => None,
+                        }
+                    }),
                     label: session
                         .entry(&row.id)
                         .map_or(Label::Loading, |entry| Label::of(entry, cx)),
@@ -223,7 +232,7 @@ impl Render for TreePane {
 
 impl TreePane {
     fn render_row(&self, row: RowData, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        let RowData { id, depth, has_children, label, is_worktree, unread, activity } = row;
+        let RowData { id, depth, has_children, label, is_worktree, unread, pr, activity } = row;
         let busy = activity != treeterm_model::workspace_store::ActivityState::Idle;
         let c = colors(cx);
         let (label, label_color): (SharedString, _) = match label {
@@ -269,6 +278,18 @@ impl TreePane {
                         pane.toggle(&toggle_id, cx);
                     })),
             )
+            .when_some(pr, |row, (number, signal)| {
+                use treeterm_model::git_controller::PrSignal;
+                let (mark, color) = match signal {
+                    PrSignal::None => ("", 0x858585),
+                    PrSignal::MergeConflict => ("⚠", 0xff9800),
+                    PrSignal::CiFailure => ("✕", 0xf44747),
+                    PrSignal::CiRunning => ("◌", 0xe2c08d),
+                    PrSignal::ReadyToMerge => ("✓", 0x4caf50),
+                };
+                row.child(div().text_xs().text_color(c.accent).child(format!("#{number}")))
+                    .when(!mark.is_empty(), |row| row.child(div().text_xs().text_color(gpui_kit::rgb(color)).child(mark)))
+            })
             .child(div().flex_1().truncate().text_color(label_color).child(label.clone()))
             // "New activity — open workspace to mark as read".
             .when(unread, |row| row.child(div().text_xs().text_color(c.accent).child("●")))
@@ -341,6 +362,8 @@ struct RowData {
     is_worktree: bool,
     /// Background work finished while the workspace was not shown.
     unread: bool,
+    /// The PR's number and what it needs (`PrIndicators`).
+    pr: Option<(u64, treeterm_model::git_controller::PrSignal)>,
     activity: treeterm_model::workspace_store::ActivityState,
     depth: usize,
     has_children: bool,

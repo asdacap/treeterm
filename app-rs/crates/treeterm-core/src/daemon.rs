@@ -194,6 +194,12 @@ impl DaemonConnection {
         })
     }
 
+    /// The runtime this connection's I/O runs on (for other clients the app builds, e.g.
+    /// GitHub over HTTP).
+    pub fn rt(&self) -> &Rt {
+        &self.rt
+    }
+
     /// Run commands on the daemon's host (`ExecStream`).
     pub fn exec_client(&self) -> crate::exec::ExecClient {
         crate::exec::ExecClient::new(self.rt.clone(), self.main.clone())

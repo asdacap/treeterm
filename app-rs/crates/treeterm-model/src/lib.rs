@@ -9,6 +9,7 @@ pub mod analyzer;
 pub mod app_store;
 pub mod apps;
 pub mod file_browser;
+pub mod git_controller;
 pub mod keybinding_store;
 pub mod review;
 pub mod session_info;

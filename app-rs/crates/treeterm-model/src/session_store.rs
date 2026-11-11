@@ -14,6 +14,7 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::rc::Rc;
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use futures::StreamExt;
@@ -339,6 +340,11 @@ pub struct SessionStore {
     op_runner: Option<Task<()>>,
     /// The workspace this session's window shows, if any.
     viewed: Option<String>,
+    /// Each loaded workspace's git status (`gitController`).
+    git_controllers: HashMap<String, Entity<crate::git_controller::GitController>>,
+    /// The PR lookup client (`None` if it could not be built: no PR info then).
+    github: Option<Arc<dyn treeterm_core::github::GitHubApi>>,
+    github_settings: crate::git_controller::SharedGithubSettings,
     disposed: bool,
     _session_watch: Task<()>,
 }
@@ -351,6 +357,15 @@ impl SessionStore {
         llm: Option<crate::analyzer::LlmService>,
         cx: &mut Context<Self>,
     ) -> Self {
+        let github_settings: crate::git_controller::SharedGithubSettings =
+            Arc::new(RwLock::new(settings.read(cx).settings().github.clone()));
+        let github = match crate::git_controller::github_client(&conn, github_settings.clone()) {
+            Ok(client) => Some(client),
+            Err(error) => {
+                tracing::error!(%error, "no GitHub client: PR status is off");
+                None
+            }
+        };
         let mut events = conn.watch_session(&client_id);
         let session_watch = cx.spawn(async move |this, cx| {
             while let Some(event) = events.next().await {
@@ -394,6 +409,9 @@ impl SessionStore {
             ops: VecDeque::new(),
             op_runner: None,
             viewed: None,
+            git_controllers: HashMap::new(),
+            github,
+            github_settings,
             disposed: false,
             _session_watch: session_watch,
         }
@@ -528,6 +546,7 @@ impl SessionStore {
         for id in dropped_placeholders {
             self.syncs.remove(&id);
             self.entries.shift_remove(&id);
+            self.git_controllers.remove(&id);
             cx.emit(SessionEvent::WorkspaceRemoved(id));
         }
         self.known_refs.retain(|id, _| incoming.contains(id.as_str()));
@@ -569,6 +588,7 @@ impl SessionStore {
         {
             store.update(cx, |store, _| store.dispose());
         }
+        self.git_controllers.remove(id);
         cx.emit(SessionEvent::WorkspaceRemoved(id.to_owned()));
         cx.notify();
     }
@@ -735,6 +755,10 @@ impl SessionStore {
     /// hand both to every workspace, which applies them to its live terminals.
     fn on_settings_changed(&mut self, cx: &mut Context<Self>) {
         let settings = self.settings.read(cx).settings().clone();
+        match self.github_settings.write() {
+            Ok(mut github) => *github = settings.github.clone(),
+            Err(poisoned) => *poisoned.into_inner() = settings.github.clone(),
+        }
         self.registry = Rc::new(AppRegistry::from_settings(&settings));
         let stores: Vec<Entity<WorkspaceStore>> = self.entries.values().filter_map(|e| e.store().cloned()).collect();
         for store in stores {
@@ -757,6 +781,16 @@ impl SessionStore {
             WorkspaceEvent::AttentionRecorded => cx.emit(SessionEvent::AttentionRecorded(owned.clone())),
         });
         let viewed = self.viewed.as_deref() == Some(id.as_str());
+        if let Some(github) = self.github.clone() {
+            let (git, session, owned) = (self.conn.git(), cx.weak_entity(), id.clone());
+            let controller = cx.new(|_| crate::git_controller::GitController::new(owned, session, git, github));
+            cx.observe(&controller, |_, _, cx| cx.notify()).detach();
+            // Selected before it finished loading: refresh now (`setActiveWorkspace` could not).
+            if viewed {
+                controller.update(cx, |c, cx| c.refresh(cx));
+            }
+            self.git_controllers.insert(id.clone(), controller);
+        }
         self.store_events.insert(id, subscription);
         store.update(cx, |w, cx| w.set_viewed(viewed, cx));
         cx.observe(&store, |session, _, cx| {
@@ -767,11 +801,20 @@ impl SessionStore {
         store
     }
 
+    /// A workspace's git status.
+    pub fn git_controller(&self, id: &str) -> Option<&Entity<crate::git_controller::GitController>> {
+        self.git_controllers.get(id)
+    }
+
     /// The window now shows `workspace` of this session (or none of its workspaces):
-    /// a viewed unread workspace is acknowledged.
+    /// a viewed unread workspace is acknowledged, and its git status refreshed
+    /// (`setActiveWorkspace`).
     pub fn set_viewed_workspace(&mut self, workspace: Option<String>, cx: &mut Context<Self>) {
         if self.viewed == workspace {
             return;
+        }
+        if let Some(controller) = workspace.as_deref().and_then(|id| self.git_controllers.get(id)).cloned() {
+            controller.update(cx, |c, cx| c.refresh(cx));
         }
         self.viewed = workspace;
         let stores: Vec<(String, Entity<WorkspaceStore>)> = self
@@ -1349,7 +1392,8 @@ impl SessionStore {
             Some(WorkspaceEntry::Loading { .. } | WorkspaceEntry::Error { .. })
         ) {
             self.entries.shift_remove(id);
-            cx.emit(SessionEvent::WorkspaceRemoved(id.to_owned()));
+            self.git_controllers.remove(id);
+        cx.emit(SessionEvent::WorkspaceRemoved(id.to_owned()));
             cx.notify();
         }
     }

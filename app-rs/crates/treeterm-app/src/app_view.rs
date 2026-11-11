@@ -547,6 +547,64 @@ impl AppView {
     }
 }
 
+/// The header's git status button (`GitStatusButton`), behind count and PR link.
+fn git_status_items(
+    controller: &Entity<treeterm_model::git_controller::GitController>,
+    cx: &mut Context<AppView>,
+) -> Vec<AnyElement> {
+    use treeterm_core::git_status::{ParentConflicts, PullRequest, WorkingTree};
+    let c = colors(cx);
+    let hover = c.bg_hover;
+    let (status, refreshing, failures) = {
+        let git = controller.read(cx);
+        (git.status().clone(), git.is_refreshing(), git.failures().len())
+    };
+    let (label, color): (&str, gpui_kit::Hsla) = if refreshing {
+        ("◌ Checking…", c.text_secondary)
+    } else if status.parent_conflicts == ParentConflicts::Conflicting {
+        ("⚠ Conflicts", gpui_kit::rgb(0xff9800).into())
+    } else if status.working_tree == WorkingTree::Dirty {
+        ("● Uncommitted", gpui_kit::rgb(0xe2c08d).into())
+    } else {
+        ("✓ Clean", gpui_kit::rgb(0x4caf50).into())
+    };
+    let refresh = controller.clone();
+    let mut items = vec![
+        div()
+            .id("git-status")
+            .px_2()
+            .rounded_sm()
+            .text_sm()
+            .text_color(color)
+            .cursor_pointer()
+            .hover(move |d| d.bg(hover))
+            .child(if failures > 0 { format!("{label} ({failures} check{} failed)", if failures > 1 { "s" } else { "" }) } else { label.to_owned() })
+            .on_click(move |_, _, cx| refresh.update(cx, |git, cx| git.refresh(cx)))
+            .into_any_element(),
+    ];
+    if status.behind_count > 0 {
+        items.push(div().text_sm().text_color(c.text_secondary).child(format!("↓ {} behind", status.behind_count)).into_any_element());
+    }
+    if let PullRequest::Found(pr) = &status.pull_request {
+        let url = pr.url.clone();
+        let unresolved = pr.unresolved_count();
+        items.push(
+            div()
+                .id("pr-link")
+                .px_2()
+                .rounded_sm()
+                .text_sm()
+                .text_color(c.accent)
+                .cursor_pointer()
+                .hover(move |d| d.bg(hover))
+                .child(if unresolved > 0 { format!("PR #{} · {unresolved} unresolved", pr.number) } else { format!("PR #{}", pr.number) })
+                .on_click(move |_, _, cx| cx.open_url(&url))
+                .into_any_element(),
+        );
+    }
+    items
+}
+
 /// A session's name in the sidebar; clicking it opens the session pane.
 fn session_name(id: &ConnectionId, name: String, hover: gpui_kit::Hsla, cx: &mut Context<AppView>) -> impl IntoElement + use<> {
     let id = id.clone();
@@ -715,6 +773,9 @@ fn workspace_pane(connected: &mut Connected, window: &mut Window, cx: &mut Conte
         .child(div().text_sm().text_color(secondary).child(path))
         .when_some(file.git_branch.clone(), |d, branch| {
             d.child(div().text_sm().text_color(secondary).child(format!("⎇ {branch}")))
+        })
+        .when_some(connected.session.read(cx).git_controller(&id).cloned(), |d, controller| {
+            d.children(git_status_items(&controller, cx))
         })
         .when_some(operation_error, |d, error| {
             d.child(div().text_sm().text_color(colors(cx).error).child(format!("⚠ {error}")))
