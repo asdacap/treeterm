@@ -27,6 +27,7 @@ pub struct AppView {
 
 enum Body {
     StartingDaemon,
+    Reconnecting { attempt: u32, last_error: SharedString },
     Failed(SharedString),
     Connected(Connected),
 }
@@ -51,6 +52,7 @@ enum ActiveView {
 /// What the app store's state means for this window, read before mutating the view.
 enum Next {
     StartingDaemon,
+    Reconnecting { attempt: u32, last_error: SharedString },
     Failed(SharedString),
     Connected(Entity<SessionStore>),
 }
@@ -72,11 +74,16 @@ impl AppView {
     fn sync(&mut self, store: &Entity<AppStore>, cx: &mut Context<Self>) {
         let next = match store.read(cx).state() {
             AppState::StartingDaemon => Next::StartingDaemon,
+            AppState::Reconnecting { attempt, last_error } => Next::Reconnecting {
+                attempt: *attempt,
+                last_error: last_error.clone().into(),
+            },
             AppState::Failed(reason) => Next::Failed(reason.clone().into()),
             AppState::Connected(session) => Next::Connected(session.clone()),
         };
         self.body = match next {
             Next::StartingDaemon => Body::StartingDaemon,
+            Next::Reconnecting { attempt, last_error } => Body::Reconnecting { attempt, last_error },
             Next::Failed(reason) => Body::Failed(reason),
             Next::Connected(session) => {
                 if let Body::Connected(current) = &self.body
@@ -123,6 +130,20 @@ impl Render for AppView {
                     .text_color(secondary)
                     .child(Spinner::new())
                     .child("Starting TreeTerm daemon…"),
+            ),
+            Body::Reconnecting { attempt, last_error } => centered(
+                v_flex()
+                    .gap_2()
+                    .max_w(px(600.))
+                    .items_center()
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .text_color(secondary)
+                            .child(Spinner::new())
+                            .child(format!("Reconnecting to the TreeTerm daemon (attempt {attempt})…")),
+                    )
+                    .child(div().text_sm().text_color(secondary).child(last_error.clone())),
             ),
             Body::Failed(reason) => centered(
                 v_flex()
@@ -513,6 +534,9 @@ impl AppView {
         use serde_json::json;
         match &self.body {
             Body::StartingDaemon => json!({ "body": "starting" }),
+            Body::Reconnecting { attempt, last_error } => {
+                json!({ "body": "reconnecting", "attempt": attempt, "error": last_error.to_string() })
+            }
             Body::Failed(reason) => json!({ "body": "failed", "reason": reason.to_string() }),
             Body::Connected(connected) => {
                 let session = connected.session.read(cx);

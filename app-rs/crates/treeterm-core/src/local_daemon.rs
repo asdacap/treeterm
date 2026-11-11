@@ -15,6 +15,7 @@ const SOCKET_POLL_INTERVAL: Duration = Duration::from_millis(250);
 /// The socket file appears at bind time; give the gRPC server a moment to start accepting.
 const BIND_SETTLE: Duration = Duration::from_millis(300);
 
+#[derive(Debug, Clone)]
 pub struct LocalDaemonSpec {
     pub socket_path: PathBuf,
     pub binary: PathBuf,

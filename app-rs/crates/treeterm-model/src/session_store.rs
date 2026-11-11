@@ -79,6 +79,8 @@ impl WorkspaceEntry {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionEvent {
     WorkspaceRemoved(String),
+    /// The session watch failed or ended: this store's connection is gone.
+    Failed(String),
 }
 
 impl EventEmitter<SessionEvent> for SessionStore {}
@@ -289,8 +291,13 @@ impl SessionStore {
     // ---- session watch ------------------------------------------------------------------
 
     fn fail(&mut self, reason: &str, cx: &mut Context<Self>) {
+        if self.disposed {
+            return;
+        }
         tracing::error!(reason, "session store failed");
         self.state = SessionState::Failed(reason.to_owned());
+        self.connection = ConnectionStatus::Disconnected;
+        cx.emit(SessionEvent::Failed(reason.to_owned()));
         cx.notify();
     }
 
