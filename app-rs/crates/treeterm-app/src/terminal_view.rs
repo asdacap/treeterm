@@ -74,6 +74,8 @@ pub struct TerminalView {
     /// The button a mouse-reporting program saw go down, so the release can be reported.
     reported_button: Option<mouse::MouseButton>,
     selecting: bool,
+    /// Dragging the scrollbar thumb, grabbed this far below its top.
+    scrollbar_grab: Option<Pixels>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -121,6 +123,7 @@ impl TerminalView {
             scroll_remainder: 0.,
             reported_button: None,
             selecting: false,
+            scrollbar_grab: None,
             _subscriptions: subscriptions,
         }
     }
@@ -241,6 +244,21 @@ impl TerminalView {
 
     fn on_mouse_down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         window.focus(&self.focus, cx);
+        if event.button == MouseButton::Left
+            && let Some(scrollbar) = self.geometry.get().and_then(|g| g.scrollbar)
+            && scrollbar.track.contains(&event.position)
+        {
+            // Grab the thumb where it was hit; a click on the track centres it there.
+            let grab = if scrollbar.thumb.contains(&event.position) {
+                event.position.y - scrollbar.thumb.origin.y
+            } else {
+                scrollbar.thumb.size.height / 2.
+            };
+            self.scrollbar_grab = Some(grab);
+            let ratio = scrollbar.ratio_at(event.position.y, grab);
+            self.model.update(cx, |model, cx| model.scroll_to_ratio(ratio, cx));
+            return;
+        }
         let button = match event.button {
             MouseButton::Left => mouse::MouseButton::Left,
             MouseButton::Middle => mouse::MouseButton::Middle,
@@ -278,6 +296,13 @@ impl TerminalView {
     }
 
     fn on_mouse_move(&mut self, event: &MouseMoveEvent, _window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(grab) = self.scrollbar_grab {
+            if let Some(scrollbar) = self.geometry.get().and_then(|g| g.scrollbar) {
+                let ratio = scrollbar.ratio_at(event.position.y, grab);
+                self.model.update(cx, |model, cx| model.scroll_to_ratio(ratio, cx));
+            }
+            return;
+        }
         let held = event.pressed_button.and_then(|button| match button {
             MouseButton::Left => Some(mouse::MouseButton::Left),
             MouseButton::Middle => Some(mouse::MouseButton::Middle),
@@ -297,6 +322,9 @@ impl TerminalView {
     }
 
     fn on_mouse_up(&mut self, event: &MouseUpEvent, _window: &mut Window, cx: &mut Context<Self>) {
+        if self.scrollbar_grab.take().is_some() {
+            return;
+        }
         if let Some(button) = self.reported_button.take() {
             self.report_mouse(MouseAction::Release(button), event.position, event.modifiers, cx);
             return;

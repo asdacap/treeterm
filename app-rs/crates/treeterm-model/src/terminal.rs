@@ -424,6 +424,17 @@ impl TerminalModel {
         cx.notify();
     }
 
+    /// Jump the viewport to `ratio` of the scrollback (0 = oldest, 1 = newest), as the
+    /// scrollbar does. Leaving the bottom unpins.
+    pub fn scroll_to_ratio(&mut self, ratio: f64, cx: &mut Context<Self>) {
+        if ratio < 1. && self.is_pinned() {
+            self.attachment.gate.set_pinned(false);
+        }
+        view::scroll_to_ratio(&mut *self.attachment.term.lock(), ratio);
+        self.refresh_viewport_state();
+        cx.notify();
+    }
+
     pub fn scroll_to_top(&mut self, cx: &mut Context<Self>) {
         self.attachment.gate.set_pinned(false);
         self.attachment.term.lock().scroll_display(Scroll::Top);

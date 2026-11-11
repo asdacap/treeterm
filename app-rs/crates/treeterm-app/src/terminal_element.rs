@@ -37,6 +37,50 @@ pub struct Geometry {
     pub cell: Size<Pixels>,
     pub cols: usize,
     pub rows: usize,
+    pub scrollbar: Option<Scrollbar>,
+}
+
+/// The scrollback scrollbar: shown whenever there is scrollback.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Scrollbar {
+    pub track: Bounds<Pixels>,
+    pub thumb: Bounds<Pixels>,
+}
+
+impl Scrollbar {
+    pub const WIDTH: Pixels = px(8.);
+    const MIN_THUMB: Pixels = px(20.);
+
+    /// The thumb for a viewport of `rows` lines over `history` lines of scrollback, with
+    /// the view `offset` lines up from the bottom.
+    pub fn new(element: Bounds<Pixels>, rows: usize, history: usize, offset: usize) -> Option<Self> {
+        if history == 0 {
+            return None;
+        }
+        let track = Bounds::new(
+            point(element.origin.x + element.size.width - Self::WIDTH, element.origin.y),
+            size(Self::WIDTH, element.size.height),
+        );
+        let total = (rows + history) as f32;
+        let height = (track.size.height * (rows as f32 / total)).max(Self::MIN_THUMB);
+        let travel = track.size.height - height;
+        // 0 at the oldest line, 1 at the newest.
+        let ratio = 1. - offset as f32 / history as f32;
+        let thumb = Bounds::new(
+            point(track.origin.x, track.origin.y + travel * ratio),
+            size(Self::WIDTH, height),
+        );
+        Some(Self { track, thumb })
+    }
+
+    /// The scroll ratio that puts the thumb's top at `y - grab`.
+    pub fn ratio_at(&self, y: Pixels, grab: Pixels) -> f64 {
+        let travel = self.track.size.height - self.thumb.size.height;
+        if travel <= px(0.) {
+            return 1.;
+        }
+        f64::from(((y - grab - self.track.origin.y) / travel).clamp(0., 1.))
+    }
 }
 
 impl Geometry {
@@ -269,11 +313,13 @@ impl Element for TerminalElement {
         let content = term.renderable_content();
         let cols = term.columns();
         let rows = term.screen_lines();
+        let scrollbar = Scrollbar::new(bounds, rows, term.history_size(), term.grid().display_offset());
         let geometry = Geometry {
             origin: inner.origin,
             cell,
             cols,
             rows,
+            scrollbar,
         };
         self.geometry.set(Some(geometry));
 
@@ -551,6 +597,18 @@ impl Element for TerminalElement {
                 if let Err(error) = line.paint(rect.origin, line_height, TextAlign::Left, None, window, cx) {
                     tracing::warn!(%error, "preedit paint failed");
                 }
+            }
+            if let Some(scrollbar) = frame.geometry.scrollbar {
+                // VS Code / Electron scrollbar thumb: grey at 40%.
+                let thumb: Hsla = gpui_kit::rgba(0x79797966).into();
+                window.paint_quad(gpui_kit::quad(
+                    scrollbar.thumb,
+                    px(4.),
+                    thumb,
+                    px(0.),
+                    gpui_kit::transparent_black(),
+                    gpui_kit::BorderStyle::Solid,
+                ));
             }
             if let Some(strip) = frame.unused_strip {
                 let mut shade = frame.border;
