@@ -29,6 +29,8 @@ impl Render for TrafficBadge {
             .flex_shrink_0()
             .text_size(px(crate::ui::SMALL))
             .font_weight(gpui_kit::FontWeight::NORMAL)
+            // `font-variant-numeric: tabular-nums`: the rate does not jitter as it changes.
+            .font_features(gpui_kit::FontFeatures(std::sync::Arc::new(vec![("tnum".into(), 1)])))
             .whitespace_nowrap()
             .text_color(colors(cx).text_secondary)
             .child(format!("↓ {}", format_rate(rate.bytes_per_sec)))

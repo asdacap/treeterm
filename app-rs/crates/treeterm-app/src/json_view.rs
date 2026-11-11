@@ -1,12 +1,17 @@
 //! `JsonViewer.tsx`: a JSON value as a foldable tree. The root starts open and everything
-//! below it folded; clicking a bracket line flips it.
+//! below it folded; a toggle (or a folded value's "N items") flips it.
 
 use std::collections::HashSet;
 
-use gpui_kit::component::h_flex;
+use gpui_kit::component::v_flex;
 use gpui_kit::prelude::*;
-use gpui_kit::{AnyElement, App, ClickEvent, SharedString, Window, div, px, rgb};
+use gpui_kit::{
+    AnyElement, App, ClickEvent, FontStyle, HighlightStyle, Hsla, SharedString, StyledText, Window, div, px, rgb,
+    rgba,
+};
 use serde_json::Value;
+
+use crate::ui::MONO;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Key {
@@ -15,54 +20,34 @@ pub enum Key {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum Body {
+pub enum Node {
     Null,
     Str(String),
     Num(String),
     Bool(bool),
     /// `{}` or `[]`.
     Empty(&'static str),
-    /// `▸ { 3 items }`; `path` flips it open.
+    /// `▸{3 items}`; `path` flips it open.
     Folded { path: String, brackets: (char, char), count: usize },
-    /// `▾ {`; its children and a [`Body::Close`] follow.
-    Open { path: String, bracket: char },
-    Close(char),
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct Line {
-    pub depth: usize,
-    pub key: Option<Key>,
-    pub body: Body,
-    pub comma: bool,
+    /// `▾{`, its rows, `}`.
+    Open { path: String, brackets: (char, char), children: Vec<(Key, Node)> },
 }
 
 /// `toggled` holds the paths flipped from their default (only the root starts open).
-pub fn flatten(value: &Value, toggled: &HashSet<String>) -> Vec<Line> {
-    let mut lines = Vec::new();
-    push(value, String::new(), 0, None, false, toggled, &mut lines);
-    lines
+pub fn tree(value: &Value, toggled: &HashSet<String>) -> Node {
+    node(value, String::new(), 0, toggled)
 }
 
 fn child_path(parent: &str, key: &str) -> String {
     format!("{parent}/{}", key.replace('~', "~0").replace('/', "~1"))
 }
 
-fn push(
-    value: &Value,
-    path: String,
-    depth: usize,
-    key: Option<Key>,
-    comma: bool,
-    toggled: &HashSet<String>,
-    lines: &mut Vec<Line>,
-) {
-    let line = |body| Line { depth, key: key.clone(), body, comma };
+fn node(value: &Value, path: String, depth: usize, toggled: &HashSet<String>) -> Node {
     let children: Vec<(Key, String, &Value)> = match value {
-        Value::Null => return lines.push(line(Body::Null)),
-        Value::String(text) => return lines.push(line(Body::Str(text.clone()))),
-        Value::Number(number) => return lines.push(line(Body::Num(number.to_string()))),
-        Value::Bool(flag) => return lines.push(line(Body::Bool(*flag))),
+        Value::Null => return Node::Null,
+        Value::String(text) => return Node::Str(text.clone()),
+        Value::Number(number) => return Node::Num(number.to_string()),
+        Value::Bool(flag) => return Node::Bool(*flag),
         Value::Array(items) => items
             .iter()
             .enumerate()
@@ -78,65 +63,166 @@ fn push(
         Value::Null | Value::String(_) | Value::Number(_) | Value::Bool(_) | Value::Object(_) => ('{', '}'),
     };
     if children.is_empty() {
-        return lines.push(line(Body::Empty(if brackets.0 == '[' { "[]" } else { "{}" })));
+        return Node::Empty(if brackets.0 == '[' { "[]" } else { "{}" });
     }
-    let expanded = (depth == 0) != toggled.contains(&path);
-    if !expanded {
-        return lines.push(line(Body::Folded { path, brackets, count: children.len() }));
+    if (depth == 0) == toggled.contains(&path) {
+        return Node::Folded { path, brackets, count: children.len() };
     }
-    lines.push(Line { depth, key: key.clone(), body: Body::Open { path, bracket: brackets.0 }, comma: false });
-    let last = children.len() - 1;
-    for (i, (child_key, child_path, child)) in children.into_iter().enumerate() {
-        push(child, child_path, depth + 1, Some(child_key), i < last, toggled, lines);
-    }
-    lines.push(Line { depth, key: None, body: Body::Close(brackets.1), comma });
+    let children = children
+        .into_iter()
+        .map(|(key, child_path, child)| (key, node(child, child_path, depth + 1, toggled)))
+        .collect();
+    Node::Open { path, brackets, children }
 }
 
-/// The tree's rows; clicking a foldable row calls `on_toggle` with its path.
+const KEY: u32 = 0x9cdcfe;
+const STRING: u32 = 0xce9178;
+const NUMBER: u32 = 0xb5cea8;
+const LITERAL: u32 = 0x569cd6;
+
+/// Colours and the toggle callback, shared by every row.
+struct Palette<F> {
+    punct: Hsla,
+    primary: Hsla,
+    on_toggle: F,
+}
+
+/// `.json-viewer`: monospace 12px, line-height 1.6, padded 8px 12px.
 pub fn render(
-    lines: Vec<Line>,
+    node: Node,
+    secondary: Hsla,
+    primary: Hsla,
     on_toggle: impl Fn(String, &mut Window, &mut App) + Clone + 'static,
-) -> Vec<AnyElement> {
-    const KEY: u32 = 0x9cdcfe;
-    const STRING: u32 = 0xce9178;
-    const NUMBER: u32 = 0xb5cea8;
-    const LITERAL: u32 = 0x569cd6;
-    const PUNCT: u32 = 0x858585;
-    lines
-        .into_iter()
-        .enumerate()
-        .map(|(i, line)| {
-            let mut row = h_flex().id(SharedString::from(format!("json-{i}"))).w_full().items_start().pl(px(16. * line.depth as f32));
-            row = match &line.key {
-                Some(Key::Name(name)) => row.child(div().text_color(rgb(KEY)).child(format!("\"{name}\""))).child(div().text_color(rgb(PUNCT)).child(": ")),
-                Some(Key::Index(index)) => row.child(div().text_color(rgb(PUNCT)).child(format!("{index}: "))),
-                None => row,
-            };
-            let toggle = |row: gpui_kit::Stateful<gpui_kit::Div>, path: &String| {
-                let (path, on_toggle) = (path.clone(), on_toggle.clone());
-                row.cursor_pointer().on_click(move |_: &ClickEvent, window, cx| on_toggle(path.clone(), window, cx))
-            };
-            row = match &line.body {
-                Body::Null => row.child(div().text_color(rgb(LITERAL)).child("null")),
-                Body::Bool(flag) => row.child(div().text_color(rgb(LITERAL)).child(flag.to_string())),
-                Body::Num(number) => row.child(div().text_color(rgb(NUMBER)).child(number.clone())),
-                // The comma rides with a string so it stays next to the text when it wraps.
-                Body::Str(text) => {
-                    let comma = if line.comma { "," } else { "" };
-                    row.child(div().min_w_0().text_color(rgb(STRING)).child(format!("\"{text}\"{comma}")))
-                }
-                Body::Empty(brackets) => row.child(div().text_color(rgb(PUNCT)).child(*brackets)),
-                Body::Folded { path, brackets, count } => {
-                    let noun = if *count == 1 { "item" } else { "items" };
-                    toggle(row, path).child(div().text_color(rgb(PUNCT)).child(format!("▸ {} {count} {noun} {}", brackets.0, brackets.1)))
-                }
-                Body::Open { path, bracket } => toggle(row, path).child(div().text_color(rgb(PUNCT)).child(format!("▾ {bracket}"))),
-                Body::Close(bracket) => row.child(div().text_color(rgb(PUNCT)).child(bracket.to_string())),
-            };
-            let separate_comma = line.comma && !matches!(line.body, Body::Str(_));
-            row.when(separate_comma, |row| row.child(div().text_color(rgb(PUNCT)).child(","))).into_any_element()
-        })
-        .collect()
+) -> AnyElement {
+    let palette = Palette { punct: secondary, primary, on_toggle };
+    let mut counter = 0;
+    let body = value(&palette, None, node, false, &mut counter);
+    div()
+        .px(px(12.))
+        .py(px(8.))
+        .font_family(MONO)
+        .text_size(px(12.))
+        .line_height(px(19.2))
+        .child(body)
+        .into_any_element()
+}
+
+/// One `.json-viewer-row`'s text (`"key": value,`) as inline runs, so a long string wraps
+/// under the key like the DOM's inline spans.
+fn scalar_text(key: Option<&Key>, body: &str, body_color: Hsla, italic: bool, comma: bool, punct: Hsla) -> StyledText {
+    let mut text = String::new();
+    let mut runs: Vec<(std::ops::Range<usize>, HighlightStyle)> = Vec::new();
+    let mut push = |text: &mut String, part: &str, color: Hsla, italic: bool| {
+        let start = text.len();
+        text.push_str(part);
+        let style = HighlightStyle {
+            color: Some(color),
+            font_style: italic.then_some(FontStyle::Italic),
+            ..Default::default()
+        };
+        runs.push((start..text.len(), style));
+    };
+    match key {
+        Some(Key::Name(name)) => push(&mut text, &format!("\"{name}\""), rgb(KEY).into(), false),
+        Some(Key::Index(index)) => push(&mut text, &index.to_string(), punct, false),
+        None => {}
+    }
+    if key.is_some() {
+        push(&mut text, ": ", punct, false);
+    }
+    push(&mut text, body, body_color, italic);
+    if comma {
+        push(&mut text, ",", punct, false);
+    }
+    StyledText::new(text).with_highlights(runs)
+}
+
+/// The key and colon in front of a collection's opening line.
+fn key_prefix(key: Option<&Key>, punct: Hsla) -> Option<AnyElement> {
+    let key = key?;
+    Some(scalar_text(Some(key), "", punct, false, false, punct).into_any_element())
+}
+
+fn value<F: Fn(String, &mut Window, &mut App) + Clone + 'static>(
+    palette: &Palette<F>,
+    key: Option<Key>,
+    node: Node,
+    comma: bool,
+    counter: &mut usize,
+) -> AnyElement {
+    *counter += 1;
+    let id = *counter;
+    let punct = palette.punct;
+    // Rows (not the root) are padded 1px and tint on hover.
+    let row = |content: gpui_kit::Stateful<gpui_kit::Div>| {
+        content.when(key.is_some(), |d| d.py(px(1.)).rounded(px(2.)).hover(|d| d.bg(rgba(0xffffff0a))))
+    };
+    let base = div().id(("json-row", id));
+    let toggle = |path: String, glyph: &'static str, on: &F| {
+        let on = on.clone();
+        div()
+            .id(SharedString::from(format!("json-toggle-{id}")))
+            .pr(px(4.))
+            .text_size(px(10.))
+            .text_color(punct)
+            .cursor_pointer()
+            .hover({
+                let primary = palette.primary;
+                move |d| d.text_color(primary)
+            })
+            .child(glyph)
+            .on_click(move |_: &ClickEvent, window, cx| on(path.clone(), window, cx))
+    };
+    let (body, color, italic) = match node {
+        Node::Null => ("null".to_owned(), rgb(LITERAL).into(), true),
+        Node::Bool(flag) => (flag.to_string(), rgb(LITERAL).into(), false),
+        Node::Num(number) => (number, rgb(NUMBER).into(), false),
+        Node::Str(text) => (format!("\"{text}\""), rgb(STRING).into(), false),
+        Node::Empty(brackets) => (brackets.to_owned(), punct, false),
+        Node::Folded { path, brackets, count } => {
+            let noun = if count == 1 { "item" } else { "items" };
+            let on = palette.on_toggle.clone();
+            let summary_path = path.clone();
+            let primary = palette.primary;
+            let line = div()
+                .flex()
+                .items_center()
+                .flex_wrap()
+                .children(key_prefix(key.as_ref(), punct))
+                .child(toggle(path, "▸", &palette.on_toggle))
+                .child(div().text_color(punct).child(brackets.0.to_string()))
+                .child(
+                    div()
+                        .id(SharedString::from(format!("json-summary-{id}")))
+                        .px(px(4.))
+                        .text_size(px(11.))
+                        .italic()
+                        .text_color(punct)
+                        .cursor_pointer()
+                        .hover(move |d| d.text_color(primary))
+                        .child(format!("{count} {noun}"))
+                        .on_click(move |_: &ClickEvent, window, cx| on(summary_path.clone(), window, cx)),
+                )
+                .child(div().text_color(punct).child(format!("{}{}", brackets.1, if comma { "," } else { "" })));
+            return row(base.child(line)).into_any_element();
+        }
+        Node::Open { path, brackets, children } => {
+            let last = children.len().saturating_sub(1);
+            let mut rows = v_flex().pl(px(16.));
+            for (i, (child_key, child)) in children.into_iter().enumerate() {
+                rows = rows.child(value(palette, Some(child_key), child, i < last, counter));
+            }
+            let opening = div()
+                .flex()
+                .items_center()
+                .children(key_prefix(key.as_ref(), punct))
+                .child(toggle(path, "▾", &palette.on_toggle))
+                .child(div().text_color(punct).child(brackets.0.to_string()));
+            let closing = div().text_color(punct).child(format!("{}{}", brackets.1, if comma { "," } else { "" }));
+            return row(base.child(opening).child(rows).child(closing)).into_any_element();
+        }
+    };
+    row(base.child(scalar_text(key.as_ref(), &body, color, italic, comma, punct))).into_any_element()
 }
 
 #[cfg(test)]
@@ -144,63 +230,66 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn bodies(lines: &[Line]) -> Vec<String> {
-        lines
-            .iter()
-            .map(|line| {
-                let key = match &line.key {
-                    Some(Key::Name(name)) => format!("{name}: "),
-                    Some(Key::Index(i)) => format!("{i}: "),
-                    None => String::new(),
-                };
-                let body = match &line.body {
-                    Body::Null => "null".to_owned(),
-                    Body::Str(text) => format!("\"{text}\""),
-                    Body::Num(number) => number.clone(),
-                    Body::Bool(flag) => flag.to_string(),
-                    Body::Empty(brackets) => (*brackets).to_owned(),
-                    Body::Folded { count, .. } => format!("folded({count})"),
-                    Body::Open { bracket, .. } => bracket.to_string(),
-                    Body::Close(bracket) => bracket.to_string(),
-                };
-                format!("{}{key}{body}{}", "  ".repeat(line.depth), if line.comma { "," } else { "" })
-            })
-            .collect()
+    /// The tree as text: one line per row, folded ones as `folded(n)`.
+    fn lines(node: &Node) -> Vec<String> {
+        fn walk(node: &Node, prefix: String, depth: usize, comma: bool, out: &mut Vec<String>) {
+            let pad = "  ".repeat(depth);
+            let comma = if comma { "," } else { "" };
+            let body = match node {
+                Node::Null => "null".to_owned(),
+                Node::Str(text) => format!("\"{text}\""),
+                Node::Num(number) => number.clone(),
+                Node::Bool(flag) => flag.to_string(),
+                Node::Empty(brackets) => (*brackets).to_owned(),
+                Node::Folded { count, .. } => format!("folded({count})"),
+                Node::Open { brackets, children, .. } => {
+                    out.push(format!("{pad}{prefix}{}", brackets.0));
+                    let last = children.len() - 1;
+                    for (i, (key, child)) in children.iter().enumerate() {
+                        let key = match key {
+                            Key::Name(name) => format!("{name}: "),
+                            Key::Index(i) => format!("{i}: "),
+                        };
+                        walk(child, key, depth + 1, i < last, out);
+                    }
+                    out.push(format!("{pad}{}{comma}", brackets.1));
+                    return;
+                }
+            };
+            out.push(format!("{pad}{prefix}{body}{comma}"));
+        }
+        let mut out = Vec::new();
+        walk(node, String::new(), 0, false, &mut out);
+        out
     }
 
     #[test]
     fn the_root_is_open_and_children_folded() {
         let value = json!({ "a": 1, "b": { "c": true }, "d": [], "e": null });
-        assert_eq!(
-            bodies(&flatten(&value, &HashSet::new())),
-            ["{", "  a: 1,", "  b: folded(1),", "  d: [],", "  e: null", "}"]
-        );
+        assert_eq!(lines(&tree(&value, &HashSet::new())), ["{", "  a: 1,", "  b: folded(1),", "  d: [],", "  e: null", "}"]);
     }
 
     #[test]
     fn toggling_opens_a_child_and_folds_the_root() {
         let value = json!({ "b": { "c": "x", "d": [1, 2] } });
         let open: HashSet<String> = ["/b".to_owned()].into();
-        assert_eq!(
-            bodies(&flatten(&value, &open)),
-            ["{", "  b: {", "    c: \"x\",", "    d: folded(2)", "  }", "}"]
-        );
+        assert_eq!(lines(&tree(&value, &open)), ["{", "  b: {", "    c: \"x\",", "    d: folded(2)", "  }", "}"]);
         let folded: HashSet<String> = [String::new()].into();
-        assert_eq!(bodies(&flatten(&value, &folded)), ["folded(1)"]);
+        assert_eq!(lines(&tree(&value, &folded)), ["folded(1)"]);
     }
 
     #[test]
     fn keys_with_slashes_get_their_own_paths() {
         let value = json!({ "a/b": { "x": 1 }, "a": { "b": { "y": 2 } } });
         let open: HashSet<String> = ["/a~1b".to_owned()].into();
-        let lines = flatten(&value, &open);
-        assert!(bodies(&lines).contains(&"    x: 1".to_owned()));
+        let shown = lines(&tree(&value, &open));
+        assert!(shown.contains(&"    x: 1".to_owned()));
         // Insertion order: "a" is last, so it has no comma.
-        assert!(bodies(&lines).contains(&"  a: folded(1)".to_owned()));
+        assert!(shown.contains(&"  a: folded(1)".to_owned()));
     }
 
     #[test]
     fn a_scalar_root_is_one_line() {
-        assert_eq!(bodies(&flatten(&json!("hi"), &HashSet::new())), ["\"hi\""]);
+        assert_eq!(lines(&tree(&json!("hi"), &HashSet::new())), ["\"hi\""]);
     }
 }

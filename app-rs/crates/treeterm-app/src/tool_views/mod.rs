@@ -7,6 +7,7 @@ mod comments_view;
 mod github_view;
 mod prompt_debugger_view;
 mod ssh_upload_view;
+pub(crate) use ssh_upload_view::SshUploadView;
 mod tty_list_view;
 mod workspace_settings_view;
 
@@ -155,19 +156,4 @@ impl ToolViews {
         self.views.insert(key, (model_id, view));
         element
     }
-}
-
-/// A section heading (`h3`) with an optional count beside it.
-pub(crate) fn heading(title: &'static str, count: Option<String>, secondary: gpui_kit::Hsla) -> gpui_kit::Div {
-    use gpui_kit::component::h_flex;
-    h_flex()
-        .gap_3()
-        .items_center()
-        .child(div().text_base().child(title))
-        .when_some(count, |row, count| row.child(div().text_xs().text_color(secondary).child(count)))
-}
-
-/// A small coloured label (`pillStyle`).
-pub(crate) fn pill(text: impl Into<gpui_kit::SharedString>, background: gpui_kit::Hsla) -> gpui_kit::Div {
-    div().px(gpui_kit::px(6.)).rounded_sm().bg(background).text_color(gpui_kit::white()).text_xs().child(text.into())
 }

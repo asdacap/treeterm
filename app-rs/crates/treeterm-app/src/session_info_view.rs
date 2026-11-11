@@ -1,68 +1,131 @@
-//! The session pane (click a session's name): status, connection logs and port forwards.
-//! Port of `SessionInfoPane.tsx` and `PortForwardDialog.tsx`.
+//! The session pane (click a session's name). Port of `SessionInfoPane.tsx`: Info, SSH (with
+//! its Bootstrap / Tunnel / Daemon / Port Forwards / Monitor / Upload sub-tabs), JSON and
+//! TTYs, plus a Daemon Mismatch tab while the remote daemon is outdated.
 
-use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::checkbox::Checkbox;
-use gpui_kit::component::input::{Input, InputState};
+mod forward_dialog;
+mod monitor;
+mod ttys;
+
+use std::collections::HashSet;
+
+use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::{Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::*;
-use gpui_kit::{AnyElement, Context, Entity, SharedString, Subscription, Window, div, px, rgb};
-use treeterm_core::connection::{ConnectionId, OutputKind, PortForwardStatus};
-use treeterm_core::settings::PortForwardSpec;
+use gpui_kit::{AnyElement, App, Context, Entity, Hsla, ScrollHandle, SharedString, Subscription, Window, div, px, rgb};
+use treeterm_core::connection::{ConnectionId, ConnectionTarget, OutdatedDaemon, OutputKind, PortForwardStatus};
 use treeterm_model::app_store::{AppStore, ConnState};
 use treeterm_model::session_info::SessionInfo;
 
 use crate::theme::colors;
+use crate::ui::{MONO, normal_line, pane_button, pane_subtabs, pane_tab, pane_tabs};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Tab {
     Info,
-    Log(OutputKind),
-    PortForwards,
-    Monitor,
+    Ssh,
     Json,
-    Ttys,
+    Tty,
+    Mismatch,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SshTab {
+    Log(OutputKind),
+    Forwards,
+    Monitor,
+    Upload,
+}
+
+/// The connection as Electron's `ConnectionStatus` names it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Status {
+    Connecting,
+    Connected,
+    Reconnecting,
+    Error,
+    Disconnected,
+}
+
+impl Status {
+    fn of(state: Option<&ConnState>) -> Self {
+        match state {
+            Some(ConnState::Connecting(_)) => Status::Connecting,
+            Some(ConnState::Connected(_)) => Status::Connected,
+            Some(ConnState::Reconnecting { .. }) => Status::Reconnecting,
+            Some(ConnState::Failed { .. }) => Status::Error,
+            None => Status::Disconnected,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Status::Connecting => "connecting",
+            Status::Connected => "connected",
+            Status::Reconnecting => "reconnecting",
+            Status::Error => "error",
+            Status::Disconnected => "disconnected",
+        }
+    }
+
+    /// `getStatusColor`.
+    fn color(self) -> u32 {
+        match self {
+            Status::Connected => 0x4caf50,
+            Status::Connecting | Status::Reconnecting => 0xff9800,
+            Status::Error | Status::Disconnected => 0xf44336,
+        }
+    }
+}
+
+/// `getPfStatusColor`.
+fn forward_color(status: &PortForwardStatus) -> u32 {
+    match status {
+        PortForwardStatus::Active => 0x4caf50,
+        PortForwardStatus::Connecting => 0xff9800,
+        PortForwardStatus::Error(_) => 0xf44336,
+        PortForwardStatus::Stopped => 0x666666,
+    }
+}
+
+const RED: u32 = 0xf44336;
+const ORANGE: u32 = 0xff9800;
+
+/// The JSON tab's keys in the order of Electron's `sessionData`; keys only the native
+/// session has follow.
+fn electron_order(value: serde_json::Value) -> serde_json::Value {
+    let serde_json::Value::Object(mut map) = value else {
+        return value;
+    };
+    let mut ordered = serde_json::Map::new();
+    for key in ["sessionId", "connection", "activeWorkspaceId", "sessionVersion", "workspaces"] {
+        if let Some(field) = map.remove(key) {
+            ordered.insert(key.to_owned(), field);
+        }
+    }
+    ordered.extend(map);
+    serde_json::Value::Object(ordered)
 }
 
 pub struct SessionInfoView {
     app: Entity<AppStore>,
     names: Entity<treeterm_model::session_names::SessionNames>,
     info: Entity<SessionInfo>,
-    tab: Tab,
-    local_port: Entity<InputState>,
-    remote_host: Entity<InputState>,
-    remote_port: Entity<InputState>,
-    save_forward: bool,
-    /// Polls only while the Monitor tab is shown.
-    monitor: Option<(Entity<treeterm_model::system_monitor::SystemMonitor>, Subscription)>,
+    /// The tab the user picked; `None` follows the default (Daemon Mismatch, SSH or Info).
+    selected: Option<Tab>,
+    ssh_tab: SshTab,
+    /// Logs stick to their bottom as lines arrive.
+    log_scroll: ScrollHandle,
+    log_len: (SshTab, usize),
+    forward_dialog: Option<Entity<forward_dialog::ForwardDialog>>,
+    /// Polls only while the Monitor sub-tab is shown.
+    monitor: Option<Entity<monitor::MonitorView>>,
     /// JSON tab: paths flipped from their default fold, and the session it follows while shown.
-    json_toggled: std::collections::HashSet<String>,
+    json_toggled: HashSet<String>,
     json_follow: Option<Subscription>,
-    /// TTYs tab: the session's PTYs with a live viewer (Active Processes, embedded).
-    processes: Option<Entity<crate::active_processes_view::ActiveProcessesView>>,
+    /// TTYs tab: the session's PTYs, grouped by workspace.
+    ttys: Option<Entity<ttys::SessionTtys>>,
+    upload: Option<Entity<crate::tool_views::SshUploadView>>,
     _observe: [Subscription; 3],
-}
-
-/// Status dot colour (`getStatusColor` / `getPfStatusColor`).
-fn forward_color(status: &PortForwardStatus) -> u32 {
-    match status {
-        PortForwardStatus::Active => 0x4caf50,
-        PortForwardStatus::Connecting => 0xff9800,
-        PortForwardStatus::Error(_) => 0xf44336,
-        PortForwardStatus::Stopped => 0x888888,
-    }
-}
-
-fn parse_forward(local: &str, host: &str, remote: &str) -> Option<PortForwardSpec> {
-    let port = |text: &str| text.trim().parse::<u16>().ok().filter(|p| *p > 0);
-    let host = host.trim();
-    (!host.is_empty()).then_some(())?;
-    Some(PortForwardSpec {
-        local_port: port(local)?,
-        remote_host: host.to_owned(),
-        remote_port: port(remote)?,
-        extra: Default::default(),
-    })
 }
 
 impl SessionInfoView {
@@ -70,7 +133,7 @@ impl SessionInfoView {
         app: Entity<AppStore>,
         names: Entity<treeterm_model::session_names::SessionNames>,
         id: ConnectionId,
-        window: &mut Window,
+        _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
         let info = cx.new(|cx| SessionInfo::new(&app, id, cx));
@@ -79,252 +142,214 @@ impl SessionInfoView {
             cx.observe(&app, |_, _, cx| cx.notify()),
             cx.observe(&names, |_, _, cx| cx.notify()),
         ];
-        let remote = app.read(cx).session_slot(info.read(cx).id()).is_some_and(|slot| !slot.is_local());
-        let mut input = |placeholder: &str, value: &str| {
-            let (placeholder, value) = (placeholder.to_owned(), value.to_owned());
-            cx.new(|cx| InputState::new(window, cx).placeholder(placeholder).default_value(value))
-        };
         Self {
-            local_port: input("Local port", ""),
-            remote_host: input("Remote host", "localhost"),
-            remote_port: input("Remote port", ""),
             app,
             names,
             info,
-            tab: if remote { Tab::Log(OutputKind::Bootstrap) } else { Tab::Log(OutputKind::Daemon) },
-            save_forward: true,
+            selected: None,
+            ssh_tab: SshTab::Log(OutputKind::Bootstrap),
+            log_scroll: ScrollHandle::new(),
+            log_len: (SshTab::Log(OutputKind::Bootstrap), 0),
+            forward_dialog: None,
             monitor: None,
-            json_toggled: std::collections::HashSet::new(),
+            json_toggled: HashSet::new(),
             json_follow: None,
-            processes: None,
+            ttys: None,
+            upload: None,
             _observe: observe,
         }
     }
 
-    pub fn connection(&self, cx: &gpui_kit::App) -> ConnectionId {
+    pub fn connection(&self, cx: &App) -> ConnectionId {
         self.info.read(cx).id().clone()
     }
 
-    fn add_forward(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let text = |state: &Entity<InputState>, cx: &gpui_kit::App| state.read(cx).value().to_string();
-        let Some(spec) = parse_forward(&text(&self.local_port, cx), &text(&self.remote_host, cx), &text(&self.remote_port, cx))
-        else {
-            return;
-        };
-        let saved = self.save_forward;
-        self.info.update(cx, |info, cx| info.add_forward(spec, saved, cx));
-        self.local_port.update(cx, |input, cx| input.set_value("", window, cx));
-        self.remote_port.update(cx, |input, cx| input.set_value("", window, cx));
+    /// Connect the ssh host again (`reconnect`): Retry, Refresh daemon, connect anyway.
+    fn reconnect(&self, outdated: OutdatedDaemon, cx: &mut Context<Self>) {
+        let id = self.connection(cx);
+        let target = self.app.read(cx).session_slot(&id).map(|slot| slot.target.clone());
+        match target {
+            Some(ConnectionTarget::Remote(config)) => {
+                let config = (*config).clone();
+                self.app.update(cx, |app, cx| app.connect_remote(config, outdated, cx));
+            }
+            // Electron only reconnects ssh sessions; the local one retries in place.
+            Some(ConnectionTarget::Local) => self.app.read(cx).reconnect(&id),
+            None => {}
+        }
     }
 
-    fn log_view(&self, kind: OutputKind, cx: &mut Context<Self>) -> AnyElement {
-        let c = colors(cx);
-        let lines = self.info.read(cx).log(kind);
-        if lines.is_empty() {
-            let what = match kind {
-                OutputKind::Bootstrap => "No bootstrap output yet…",
-                OutputKind::Tunnel => "No tunnel output yet…",
-                OutputKind::Daemon => "No daemon output yet…",
-            };
-            return div().p_3().text_sm().text_color(c.text_secondary).child(what).into_any_element();
-        }
-        let mut list = v_flex().id("session-log").size_full().overflow_y_scroll().p_2().font_family("Menlo").text_size(px(12.));
-        for line in lines.iter().rev().take(500).rev() {
-            list = list.child(div().child(line.clone()));
-        }
-        list.into_any_element()
-    }
-
-    fn forwards_view(&self, remote: bool, cx: &mut Context<Self>) -> AnyElement {
-        let c = colors(cx);
-        if !remote {
-            return div().p_3().text_sm().text_color(c.text_secondary).child("Port forwards are for SSH sessions.").into_any_element();
-        }
-        let info = self.info.read(cx);
-        let mut list = v_flex().gap_1().p_2();
-        if info.forwards().is_empty() {
-            list = list.child(div().text_sm().text_color(c.text_secondary).child("No port forwards configured."));
-        }
-        for (i, forward) in info.forwards().iter().enumerate() {
-            let spec = &forward.config.spec;
-            let failed = matches!(forward.status, PortForwardStatus::Error(_) | PortForwardStatus::Stopped);
-            let (restart, remove) = (forward.config.id.clone(), forward.config.id.clone());
-            let detail = match &forward.status {
-                PortForwardStatus::Error(error) => format!("(error: {error})"),
-                status => format!("({})", status.as_str()),
-            };
-            list = list.child(
-                h_flex()
-                    .gap_2()
-                    .items_center()
-                    .text_sm()
-                    .child(div().size(px(8.)).rounded_full().bg(rgb(forward_color(&forward.status))))
-                    .child(format!("localhost:{} → {}:{}", spec.local_port, spec.remote_host, spec.remote_port))
-                    .child(div().text_xs().text_color(c.text_secondary).child(detail))
-                    .child(div().flex_1())
-                    .when(failed, |d| {
-                        d.child(Button::new(SharedString::from(format!("pf-restart-{i}"))).xsmall().ghost().label("Restart").on_click(
-                            cx.listener(move |view, _, _, cx| view.info.update(cx, |info, cx| info.restart_forward(&restart, cx))),
-                        ))
-                    })
-                    .child(Button::new(SharedString::from(format!("pf-stop-{i}"))).xsmall().ghost().label("Remove").on_click(
-                        cx.listener(move |view, _, _, cx| view.info.update(cx, |info, cx| info.remove_forward(&remove, cx))),
-                    )),
-            );
-        }
-        let error = info.error().map(str::to_owned);
-        list.child(
-            h_flex()
-                .pt_2()
-                .gap_2()
-                .items_center()
-                .child(div().w(px(100.)).child(Input::new(&self.local_port).small()))
-                .child("→")
-                .child(div().w(px(160.)).child(Input::new(&self.remote_host).small()))
-                .child(div().w(px(100.)).child(Input::new(&self.remote_port).small()))
-                .child(Checkbox::new("pf-save").label("Save").checked(self.save_forward).on_click(cx.listener(
-                    |view, checked: &bool, _, cx| {
-                        view.save_forward = *checked;
-                        cx.notify();
-                    },
-                )))
-                .child(Button::new("pf-add").small().primary().label("Add Port Forward").on_click(
-                    cx.listener(|view, _, window, cx| view.add_forward(window, cx)),
-                )),
-        )
-        .when_some(error, |d, error| d.child(div().text_sm().text_color(c.error).child(error)))
-        .into_any_element()
-    }
-}
-
-/// A row of usage bars for the last samples, newest on the right.
-fn sparkline(samples: Vec<f64>) -> impl IntoElement {
-    let mut row = h_flex().h(px(40.)).items_end().gap(px(1.));
-    for value in samples {
-        row = row.child(
-            div()
-                .w(px(4.))
-                .h(px((value.clamp(1., 100.) * 0.4) as f32))
-                .bg(rgb(treeterm_core::system_monitor::utilization_color(value))),
-        );
-    }
-    row
-}
-
-fn bytes(n: u64) -> String {
-    const GIB: f64 = 1024. * 1024. * 1024.;
-    format!("{:.1} GiB", n as f64 / GIB)
-}
-
-impl SessionInfoView {
-    /// CPU, memory, load, uptime, disks and the busiest processes (`SystemMonitor`).
-    fn monitor_view(&mut self, state: &Option<ConnState>, cx: &mut Context<Self>) -> AnyElement {
-        use treeterm_core::system_monitor::utilization_color;
-        use treeterm_model::system_monitor::{Metrics, SystemMonitor};
-        let c = colors(cx);
-        let (secondary, error, border) = (c.text_secondary, c.error, c.border);
-        let Some(ConnState::Connected(session)) = state else {
-            self.monitor = None;
-            return div().p_3().text_sm().text_color(secondary).child("Not connected").into_any_element();
-        };
-        if self.monitor.is_none() {
-            let exec = session.read(cx).connection().exec_client();
-            let monitor = cx.new(|cx| SystemMonitor::new(exec, cx));
-            let observe = cx.observe(&monitor, |_, _, cx| cx.notify());
-            self.monitor = Some((monitor, observe));
-        }
-        let Some((monitor, _)) = &self.monitor else {
-            return div().into_any_element();
-        };
-        let monitor = monitor.clone();
-        let (metrics, cpu, memory) = {
-            let m = monitor.read(cx);
-            (m.metrics().clone(), m.cpu_history().samples().collect::<Vec<f64>>(), m.memory_history().samples().collect::<Vec<f64>>())
-        };
-        let m = match metrics {
-            Metrics::Loading => return div().p_3().text_sm().text_color(secondary).child("Collecting…").into_any_element(),
-            Metrics::Failed(message) => return div().p_3().text_sm().text_color(error).child(message).into_any_element(),
-            Metrics::Loaded(m) => m,
-        };
-        let stat = move |label: &str, value: String, color: Option<u32>| {
-            v_flex()
-                .gap_1()
-                .child(div().text_xs().text_color(secondary).child(label.to_owned()))
-                .child(div().text_lg().when_some(color, |d, color| d.text_color(rgb(color))).child(value))
-        };
-        let mut disks = v_flex().gap_1();
-        for disk in &m.disks {
-            disks = disks.child(
-                h_flex()
-                    .gap_2()
-                    .text_sm()
-                    .child(div().w(px(200.)).truncate().child(disk.mount_point.clone()))
-                    .child(div().text_color(rgb(utilization_color(disk.usage_percent))).child(format!("{:.0}%", disk.usage_percent)))
-                    .child(div().text_color(secondary).child(format!("{} / {}", bytes(disk.used_bytes), bytes(disk.total_bytes)))),
-            );
-        }
-        let mut processes = v_flex().gap_1();
-        for (i, process) in m.processes.iter().enumerate() {
-            let (kill, pid) = (monitor.clone(), process.pid);
-            processes = processes.child(
-                h_flex()
-                    .gap_2()
-                    .text_sm()
-                    .items_center()
-                    .child(div().w(px(70.)).text_color(secondary).child(process.pid.to_string()))
-                    .child(div().w(px(60.)).child(format!("{:.1}%", process.cpu_percent)))
-                    .child(div().w(px(60.)).text_color(secondary).child(format!("{:.1}%", process.mem_percent)))
-                    .child(div().flex_1().min_w_0().truncate().child(process.command.clone()))
-                    .child(Button::new(SharedString::from(format!("kill-{i}"))).xsmall().ghost().label("Kill").on_click(
-                        move |_, _, cx| kill.update(cx, |m, cx| m.kill(pid, "TERM", cx)),
-                    )),
-            );
-        }
+    /// `.ssh-pane-output`: padded 8px, monospace 12px, line-height 1.5, scrolling.
+    fn output(id: &'static str) -> gpui_kit::Stateful<gpui_kit::Div> {
         v_flex()
-            .id("monitor")
-            .size_full()
+            .id(id)
+            .flex_1()
+            .min_h_0()
             .overflow_y_scroll()
-            .p_3()
-            .gap_4()
-            .child(
-                h_flex()
-                    .gap_6()
-                    .child(stat("CPU", format!("{:.1}% · {} cores", m.cpu.usage_percent, m.cpu.core_count), Some(utilization_color(m.cpu.usage_percent))))
-                    .child(stat(
-                        "Memory",
-                        format!("{:.0}% · {} / {}", m.memory.usage_percent, bytes(m.memory.used_bytes), bytes(m.memory.total_bytes)),
-                        Some(utilization_color(m.memory.usage_percent)),
-                    ))
-                    .child(stat("Load", format!("{:.2} {:.2} {:.2}", m.load_average[0], m.load_average[1], m.load_average[2]), None))
-                    .child(stat("Uptime", m.uptime.clone(), None)),
-            )
-            .child(
-                h_flex()
-                    .gap_6()
-                    .child(v_flex().gap_1().child(div().text_xs().text_color(secondary).child("CPU history")).child(sparkline(cpu)))
-                    .child(v_flex().gap_1().child(div().text_xs().text_color(secondary).child("Memory history")).child(sparkline(memory))),
-            )
-            .child(v_flex().gap_1().child(div().text_xs().text_color(secondary).child("Disks")).child(disks))
-            .child(
-                v_flex()
-                    .gap_1()
-                    .pt_2()
-                    .border_t_1()
-                    .border_color(border)
-                    .child(div().text_xs().text_color(secondary).child("Top processes (PID · CPU · MEM · command)"))
-                    .child(processes),
-            )
-            .into_any_element()
+            .p(px(8.))
+            .font_family(MONO)
+            .text_size(px(12.))
+            .line_height(px(18.))
     }
-}
 
-impl SessionInfoView {
     fn info_view(&self, cx: &mut Context<Self>) -> AnyElement {
-        let mut list = v_flex().p_2().gap_1().font_family("Menlo").text_size(px(12.));
+        let mut list = Self::output("session-info");
         for line in self.info.read(cx).info_lines(cx) {
             list = list.child(div().child(line));
         }
         list.into_any_element()
+    }
+
+    fn log_view(&mut self, kind: OutputKind, cx: &mut Context<Self>) -> AnyElement {
+        let secondary = colors(cx).text_secondary;
+        let lines = self.info.read(cx).log(kind).to_vec();
+        let key = (SshTab::Log(kind), lines.len());
+        if self.log_len != key {
+            self.log_len = key;
+            self.log_scroll.scroll_to_bottom();
+        }
+        let list = Self::output("session-log").track_scroll(&self.log_scroll);
+        if lines.is_empty() {
+            let what = match kind {
+                OutputKind::Bootstrap => "No bootstrap output yet...",
+                OutputKind::Tunnel => "No tunnel output yet...",
+                OutputKind::Daemon => "No daemon output yet...",
+            };
+            return list.child(div().text_color(secondary).child(what)).into_any_element();
+        }
+        list.children(lines.into_iter().map(|line| div().child(line))).into_any_element()
+    }
+
+    /// The port forward list (`.port-forward-list`): status, Log / Hide, Restart / Remove
+    /// or Stop, the error and the expanded ssh output.
+    fn forwards_view(&self, cx: &mut Context<Self>) -> AnyElement {
+        let c = colors(cx);
+        let (secondary, primary, border, bg) = (c.text_secondary, c.text_primary, c.border, c.bg_primary);
+        let info = self.info.read(cx);
+        let list = Self::output("port-forwards");
+        if info.forwards().is_empty() {
+            return list.child(div().text_color(secondary).child("No port forwards configured.")).into_any_element();
+        }
+        let count = info.forwards().len();
+        let mut rows = v_flex();
+        for (i, forward) in info.forwards().iter().enumerate() {
+            let spec = &forward.config.spec;
+            let id = forward.config.id.clone();
+            let log = info.forward_log(&id).map(<[String]>::to_vec);
+            let expanded = log.is_some();
+            let failed = matches!(forward.status, PortForwardStatus::Error(_) | PortForwardStatus::Stopped);
+            let button = |name: &str, label: &'static str, color: Hsla| {
+                pane_button(SharedString::from(format!("pf-{name}-{i}")), label, false, color)
+            };
+            let mut header = h_flex()
+                .gap(px(6.))
+                .p(px(8.))
+                .child(div().size(px(8.)).flex_shrink_0().rounded_full().bg(rgb(forward_color(&forward.status))))
+                .child(
+                    div()
+                        .flex_1()
+                        .text_color(primary)
+                        .child(format!("localhost:{} → {}:{}", spec.local_port, spec.remote_host, spec.remote_port)),
+                )
+                .child(div().text_color(secondary).child(format!("({})", forward.status.as_str())));
+            let toggle = id.clone();
+            header = header.child(
+                button("log", if expanded { "Hide" } else { "Log" }, secondary)
+                    .hover(move |d| d.text_color(primary))
+                    .on_click(cx.listener(move |view, _, _, cx| {
+                        view.info.update(cx, |info, cx| info.toggle_forward_log(&toggle, cx));
+                    })),
+            );
+            if failed {
+                let (restart, remove) = (id.clone(), id.clone());
+                header = header
+                    .child(button("restart", "Restart", rgb(ORANGE).into()).on_click(cx.listener(move |view, _, _, cx| {
+                        view.info.update(cx, |info, cx| info.restart_forward(&restart, cx));
+                    })))
+                    .child(button("remove", "Remove", rgb(RED).into()).on_click(cx.listener(move |view, _, _, cx| {
+                        view.info.update(cx, |info, cx| info.remove_forward(&remove, cx));
+                    })));
+            } else {
+                let stop = id.clone();
+                header = header.child(button("stop", "Stop", rgb(RED).into()).on_click(cx.listener(move |view, _, _, cx| {
+                    view.info.update(cx, |info, cx| info.remove_forward(&stop, cx));
+                })));
+            }
+            let error = match &forward.status {
+                PortForwardStatus::Error(message) => Some(message.to_string()),
+                PortForwardStatus::Active | PortForwardStatus::Connecting | PortForwardStatus::Stopped => None,
+            };
+            let output = log.map(|lines| {
+                let body = if lines.is_empty() {
+                    vec![div().text_color(secondary).child("No output yet...").into_any_element()]
+                } else {
+                    lines.into_iter().map(|line| div().child(line).into_any_element()).collect()
+                };
+                v_flex()
+                    .id(SharedString::from(format!("pf-output-{i}")))
+                    .max_h(px(200.))
+                    .overflow_y_scroll()
+                    .px(px(8.))
+                    .py(px(6.))
+                    .bg(bg)
+                    .border_t_1()
+                    .border_color(border)
+                    .text_size(px(11.))
+                    .line_height(px(16.5))
+                    .children(body)
+            });
+            rows = rows.child(
+                v_flex()
+                    .when(i + 1 < count, |d| d.border_b_1().border_color(border))
+                    .child(header)
+                    .when_some(error, |d, error| {
+                        d.child(
+                            div()
+                                .px(px(8.))
+                                .pb(px(6.))
+                                .text_size(px(11.))
+                                .line_height(px(16.5))
+                                .text_color(rgb(RED))
+                                .child(error),
+                        )
+                    })
+                    .children(output),
+            );
+        }
+        list.child(rows).into_any_element()
+    }
+
+    fn mismatch_view(&self, message: Option<String>, cx: &mut Context<Self>) -> AnyElement {
+        let c = colors(cx);
+        let (primary, secondary) = (c.text_primary, c.text_secondary);
+        let action = |button: gpui_kit::Stateful<gpui_kit::Div>, note: &'static str, color: Hsla| {
+            h_flex()
+                .flex_wrap()
+                .gap(px(10.))
+                .child(button)
+                .child(div().text_size(px(12.)).text_color(color).child(note))
+        };
+        Self::output("session-mismatch")
+            .gap(px(16.))
+            .child(
+                div()
+                    .text_color(primary)
+                    .child(message.unwrap_or_else(|| "The remote daemon binary does not match the local build.".to_owned())),
+            )
+            .child(action(
+                pane_button("mismatch-refresh", "Refresh daemon", false, rgb(ORANGE))
+                    .on_click(cx.listener(|view, _, _, cx| view.reconnect(OutdatedDaemon::Refresh, cx))),
+                "⚠ Drops all running processes on the remote.",
+                rgb(ORANGE).into(),
+            ))
+            .child(action(
+                pane_button("mismatch-accept", "Ignore mismatch & connect anyway", false, secondary)
+                    .hover(move |d| d.text_color(primary))
+                    .on_click(cx.listener(|view, _, _, cx| view.reconnect(OutdatedDaemon::Accept, cx))),
+                "Connects against the outdated remote daemon.",
+                secondary,
+            ))
+            .into_any_element()
     }
 
     fn json_view(&mut self, cx: &mut Context<Self>) -> AnyElement {
@@ -333,10 +358,12 @@ impl SessionInfoView {
         {
             self.json_follow = Some(cx.observe(&session, |_, _, cx| cx.notify()));
         }
-        let value = self.info.read(cx).debug_json(cx);
-        let lines = crate::json_view::flatten(&value, &self.json_toggled);
+        let c = colors(cx);
+        let (secondary, primary) = (c.text_secondary, c.text_primary);
+        let value = electron_order(self.info.read(cx).debug_json(cx));
+        let tree = crate::json_view::tree(&value, &self.json_toggled);
         let view = cx.entity().downgrade();
-        let rows = crate::json_view::render(lines, move |path, _, cx| {
+        let viewer = crate::json_view::render(tree, secondary, primary, move |path, _, cx| {
             match view.update(cx, |view, cx| {
                 if !view.json_toggled.remove(&path) {
                     view.json_toggled.insert(path);
@@ -346,133 +373,273 @@ impl SessionInfoView {
                 Ok(()) | Err(_) => {} // Err: the pane closed
             }
         });
-        v_flex()
-            .id("session-json")
-            .size_full()
-            .overflow_y_scroll()
-            .p_2()
-            .font_family("Menlo")
-            .text_size(px(12.))
-            .children(rows)
-            .into_any_element()
+        Self::output("session-json").child(viewer).into_any_element()
     }
 
     fn ttys_view(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        if self.processes.is_none()
+        if self.ttys.is_none()
             && let Some(session) = self.info.read(cx).session(cx)
         {
             let settings = self.app.read(cx).settings().read(cx).settings().terminal.clone();
-            self.processes =
-                Some(cx.new(|cx| crate::active_processes_view::ActiveProcessesView::new(&session, settings, cx)));
+            self.ttys = Some(cx.new(|cx| ttys::SessionTtys::new(&session, settings, cx)));
         }
-        match &self.processes {
-            Some(view) => div().size_full().p_2().child(view.clone()).into_any_element(),
-            None => div().p_2().text_color(colors(cx).text_secondary).child("Not connected").into_any_element(),
+        match &self.ttys {
+            Some(view) => div().flex_1().min_h_0().child(view.clone()).into_any_element(),
+            None => Self::output("session-ttys")
+                .child(div().text_color(colors(cx).text_secondary).child("Not connected"))
+                .into_any_element(),
         }
+    }
+
+    fn monitor_view(&mut self, state: Option<&ConnState>, cx: &mut Context<Self>) -> AnyElement {
+        let Some(ConnState::Connected(session)) = state else {
+            self.monitor = None;
+            return div().into_any_element();
+        };
+        let monitor = match &self.monitor {
+            Some(monitor) => monitor.clone(),
+            None => {
+                let exec = session.read(cx).connection().exec_client();
+                let monitor = cx.new(|cx| monitor::MonitorView::new(exec, cx));
+                self.monitor = Some(monitor.clone());
+                monitor
+            }
+        };
+        div().flex_1().min_h_0().flex().flex_col().child(monitor).into_any_element()
+    }
+
+    fn upload_view(&mut self, state: Option<&ConnState>, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let Some(ConnState::Connected(session)) = state else {
+            self.upload = None;
+            return div().into_any_element();
+        };
+        let upload = match &self.upload {
+            Some(upload) => upload.clone(),
+            None => {
+                let remote = treeterm_model::web_app::RemoteHost { app: self.app.downgrade(), connection: self.connection(cx) };
+                let model = cx.new(|cx| treeterm_model::tool_tabs::ssh_upload::SshUpload::new(Some(remote), cx));
+                let session = session.clone();
+                let upload = cx.new(|cx| crate::tool_views::SshUploadView::new(model, session, window, cx));
+                self.upload = Some(upload.clone());
+                upload
+            }
+        };
+        div().flex_1().min_h_0().flex().flex_col().child(upload).into_any_element()
+    }
+
+    fn open_forward_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let info = self.info.clone();
+        let dialog = cx.new(|cx| forward_dialog::ForwardDialog::new(info, window, cx));
+        cx.subscribe(&dialog, |view, _, _: &forward_dialog::Closed, cx| {
+            view.forward_dialog = None;
+            cx.notify();
+        })
+        .detach();
+        self.forward_dialog = Some(dialog);
+        cx.notify();
     }
 }
 
 impl Render for SessionInfoView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let c = colors(cx);
-        let (secondary, error, border) = (c.text_secondary, c.error, c.border);
+        let (bg, primary, secondary) = (c.bg_primary, c.text_primary, c.text_secondary);
         let id = self.connection(cx);
-        let (name, state, remote) = match self.app.read(cx).session_slot(&id) {
-            Some(slot) => (self.names.read(cx).name(&slot.target), Some(slot.state.clone()), !slot.is_local()),
+        let (label, state, remote) = match self.app.read(cx).session_slot(&id) {
+            Some(slot) => {
+                let name = self.names.read(cx).name(&slot.target);
+                // `deriveDefaultSessionName` calls the local session "LOCAL".
+                let name = if slot.is_local() && name == treeterm_model::session_names::default_name(&slot.target) {
+                    "LOCAL".to_owned()
+                } else {
+                    name
+                };
+                (name, Some(slot.state.clone()), !slot.is_local())
+            }
             None => ("Disconnected".to_owned(), None, false),
         };
-        let (status, problem) = match &state {
-            Some(ConnState::Connecting(_)) => ("connecting".to_owned(), None),
-            Some(ConnState::Connected(_)) => ("connected".to_owned(), None),
-            Some(ConnState::Reconnecting { attempt, error }) => (format!("reconnecting, attempt {attempt}"), Some(error.clone())),
-            Some(ConnState::Failed { error, .. }) => ("error".to_owned(), Some(error.clone())),
-            None => ("disconnected".to_owned(), None),
+        let status = Status::of(state.as_ref());
+        let connected = status == Status::Connected;
+        let (error, mismatch) = match &state {
+            Some(ConnState::Failed { error, hash_mismatch }) => (Some(error.clone()), *hash_mismatch),
+            Some(ConnState::Connecting(_) | ConnState::Connected(_) | ConnState::Reconnecting { .. }) | None => (None, false),
         };
-        let reconnect_id = id.clone();
+
+        // Header: status dot, name, spinner, status, error and the connection's actions.
         let mut header = h_flex()
-            .px_3()
-            .py_2()
-            .gap_2()
-            .items_center()
+            .flex_shrink_0()
+            .gap(px(8.))
+            .px(px(12.))
+            .py(px(8.))
             .border_b_1()
-            .border_color(border)
-            .child(div().text_lg().child(name))
-            .child(div().text_sm().text_color(secondary).child(if remote { format!("({status})") } else { "(Local)".to_owned() }))
-            .child(div().flex_1());
-        if matches!(state, Some(ConnState::Connected(_))) {
-            header = header.child(Button::new("force-reconnect").small().ghost().label("Reconnect").on_click(cx.listener(
-                move |view, _, _, cx| {
-                    if let Err(error) = view.app.read(cx).manager().force_reconnect(&reconnect_id) {
-                        tracing::error!(%error, "reconnect");
-                    }
-                },
-            )));
-        }
-        let connected = matches!(state, Some(ConnState::Connected(_)));
-        let mut tabs: Vec<(Tab, &str)> = vec![(Tab::Info, "Info")];
-        if remote {
-            tabs.extend([
-                (Tab::Log(OutputKind::Bootstrap), "Bootstrap"),
-                (Tab::Log(OutputKind::Tunnel), "Tunnel"),
-                (Tab::Log(OutputKind::Daemon), "Daemon"),
-                (Tab::PortForwards, "Port Forwards"),
-            ]);
-        } else {
-            tabs.push((Tab::Log(OutputKind::Daemon), "Daemon"));
-        }
-        tabs.push((Tab::Monitor, "Monitor"));
+            .border_color(c.border)
+            .text_size(px(13.)).line_height(normal_line(13.))
+            .when(remote, |d| d.child(div().size(px(8.)).flex_shrink_0().rounded_full().bg(rgb(status.color()))))
+            .child(div().font_weight(gpui_kit::FontWeight::SEMIBOLD).child(label))
+            .when(remote && matches!(status, Status::Connecting | Status::Reconnecting), |d| {
+                d.child(div().ml(px(8.)).child(
+                    Spinner::new().icon(gpui_kit::component::Icon::new(gpui_kit::assets::IconName::LoaderCircle)).with_size(px(14.)).color(primary),
+                ))
+            })
+            .child(div().text_size(px(12.)).line_height(normal_line(12.)).text_color(secondary).child(if remote {
+                format!("({})", status.as_str())
+            } else {
+                "(Local)".to_owned()
+            }))
+            .when_some(error.clone(), |d, error| d.child(div().text_size(px(12.)).line_height(normal_line(12.)).text_color(rgb(RED)).child(error)));
         if connected {
-            tabs.extend([(Tab::Json, "JSON"), (Tab::Ttys, "TTYs")]);
+            let again = id.clone();
+            header = header.child(
+                h_flex().ml_auto().gap(px(8.)).child(
+                    pane_button("session-reconnect", "Reconnect", false, secondary)
+                        .hover(move |d| d.text_color(primary))
+                        .on_click(cx.listener(move |view, _, _, cx| {
+                            if let Err(error) = view.app.read(cx).manager().force_reconnect(&again) {
+                                tracing::error!(%error, "reconnect");
+                            }
+                        })),
+                ),
+            );
+        } else if matches!(status, Status::Error | Status::Disconnected) {
+            let gone = id.clone();
+            header = header.child(
+                h_flex()
+                    .ml_auto()
+                    .gap(px(8.))
+                    .child(
+                        pane_button("session-retry", "Retry", false, secondary)
+                            .hover(move |d| d.text_color(primary))
+                            .on_click(cx.listener(|view, _, _, cx| view.reconnect(OutdatedDaemon::Report, cx))),
+                    )
+                    .child(pane_button("session-remove", "Remove", false, rgb(RED)).on_click(cx.listener(
+                        move |view, _, _, cx| view.app.update(cx, |app, cx| app.disconnect(&gone, cx)),
+                    ))),
+            );
         }
-        let mut tab_bar = h_flex().px_2().py_1().gap_1().border_b_1().border_color(border);
-        for (tab, label) in tabs {
-            let button = Button::new(SharedString::from(format!("info-tab-{label}"))).xsmall().label(label);
-            let button = if self.tab == tab { button.primary() } else { button.ghost() };
-            tab_bar = tab_bar.child(button.on_click(cx.listener(move |view, _, _, cx| {
-                view.tab = tab;
-                cx.notify();
-            })));
+
+        // Tabs: Info + SSH (remote) + JSON/TTYs (local, or remote once connected).
+        let mut tabs: Vec<(Tab, &str)> = Vec::new();
+        if mismatch {
+            tabs.push((Tab::Mismatch, "Daemon Mismatch"));
         }
-        // Pollers and followers live only while their tab is shown.
-        if self.tab != Tab::Monitor {
+        tabs.push((Tab::Info, "Info"));
+        if remote {
+            tabs.push((Tab::Ssh, "SSH"));
+        }
+        if !remote || connected {
+            tabs.extend([(Tab::Json, "JSON"), (Tab::Tty, "TTYs")]);
+        }
+        let default = if mismatch {
+            Tab::Mismatch
+        } else if remote {
+            Tab::Ssh
+        } else {
+            Tab::Info
+        };
+        let active = self.selected.unwrap_or(default);
+        let mut tab_bar = pane_tabs(cx);
+        for (tab, text) in tabs {
+            tab_bar = tab_bar.child(pane_tab(SharedString::from(format!("info-tab-{text}")), text, active == tab, false, cx).on_click(
+                cx.listener(move |view, _, _, cx| {
+                    view.selected = Some(tab);
+                    cx.notify();
+                }),
+            ));
+        }
+
+        // SSH sub-tabs: the logs always, the rest once connected.
+        let ssh = active == Tab::Ssh && remote;
+        let mut ssh_tabs: Vec<(SshTab, &str)> = vec![
+            (SshTab::Log(OutputKind::Bootstrap), "Bootstrap"),
+            (SshTab::Log(OutputKind::Tunnel), "Tunnel"),
+            (SshTab::Log(OutputKind::Daemon), "Daemon"),
+        ];
+        if connected {
+            ssh_tabs.extend([
+                (SshTab::Forwards, "Port Forwards"),
+                (SshTab::Monitor, "Monitor"),
+                (SshTab::Upload, "Upload"),
+            ]);
+        }
+        let subtab_bar = ssh.then(|| {
+            let mut bar = pane_subtabs(cx);
+            for (tab, text) in ssh_tabs {
+                bar = bar.child(
+                    pane_tab(SharedString::from(format!("ssh-tab-{text}")), text, self.ssh_tab == tab, true, cx).on_click(
+                        cx.listener(move |view, _, _, cx| {
+                            view.ssh_tab = tab;
+                            cx.notify();
+                        }),
+                    ),
+                );
+            }
+            if self.ssh_tab == SshTab::Forwards && connected {
+                let accent = colors(cx).accent;
+                bar = bar.child(
+                    pane_button("pf-add", "+ Add Port Forward", true, primary)
+                        .ml_auto()
+                        .border_color(accent)
+                        .on_click(cx.listener(|view, _, window, cx| view.open_forward_dialog(window, cx))),
+                );
+            }
+            bar
+        });
+
+        // Pollers and followers live only while shown.
+        let ssh_tab = ssh.then_some(self.ssh_tab);
+        if ssh_tab != Some(SshTab::Monitor) {
             self.monitor = None;
         }
-        if self.tab != Tab::Json {
+        if ssh_tab != Some(SshTab::Upload) {
+            self.upload = None;
+        }
+        if active != Tab::Json {
             self.json_follow = None;
         }
-        if self.tab != Tab::Ttys {
-            self.processes = None;
+        if active != Tab::Tty {
+            self.ttys = None;
         }
-        let body = match self.tab {
+        if !(ssh && connected) {
+            self.forward_dialog = None;
+        }
+        let body = match active {
+            Tab::Mismatch => self.mismatch_view(error, cx),
             Tab::Info => self.info_view(cx),
-            Tab::Log(kind) => self.log_view(kind, cx),
-            Tab::PortForwards => self.forwards_view(remote, cx),
-            Tab::Monitor => self.monitor_view(&state, cx),
             Tab::Json => self.json_view(cx),
-            Tab::Ttys => self.ttys_view(cx),
+            Tab::Tty => self.ttys_view(cx),
+            Tab::Ssh => match self.ssh_tab {
+                SshTab::Log(kind) => self.log_view(kind, cx),
+                SshTab::Forwards => self.forwards_view(cx),
+                SshTab::Monitor => self.monitor_view(state.as_ref(), cx),
+                SshTab::Upload => self.upload_view(state.as_ref(), window, cx),
+            },
         };
+        let dialog = self.forward_dialog.clone().map(|dialog| {
+            let close = dialog.clone();
+            crate::ui::modal(window, dialog, move |_, cx| close.update(cx, |d, cx| d.close(cx)))
+        });
         v_flex()
             .flex_1()
             .h_full()
             .min_w_0()
-            .pt(px(38.))
+            .bg(bg)
+            .text_color(primary)
             .child(header)
-            .when_some(problem, |d, problem| d.child(div().px_3().py_1().text_sm().text_color(error).child(problem)))
             .child(tab_bar)
-            .child(div().flex_1().min_h_0().child(body))
+            .children(subtab_bar)
+            .child(body)
+            .children(dialog)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::parse_forward;
+    use super::electron_order;
 
     #[test]
-    fn forwards_need_ports_and_a_host() {
-        let spec = parse_forward(" 8080", "localhost ", "3000").unwrap();
-        assert_eq!((spec.local_port, spec.remote_host.as_str(), spec.remote_port), (8080, "localhost", 3000));
-        assert!(parse_forward("", "localhost", "3000").is_none());
-        assert!(parse_forward("8080", "", "3000").is_none());
-        assert!(parse_forward("8080", "localhost", "99999").is_none());
+    fn the_json_tab_lists_keys_in_electrons_order() {
+        let value = serde_json::json!({ "workspaces": {}, "extra": 1, "sessionId": "s", "connection": {} });
+        let keys: Vec<String> = electron_order(value).as_object().unwrap().keys().cloned().collect();
+        assert_eq!(keys, ["sessionId", "connection", "workspaces", "extra"]);
     }
 }

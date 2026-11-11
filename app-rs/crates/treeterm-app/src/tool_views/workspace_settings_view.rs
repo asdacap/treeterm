@@ -1,15 +1,15 @@
 //! The workspace Settings tab (`WorkspaceSettings.tsx`).
 
-use gpui_kit::component::button::Button;
-use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
+use gpui_kit::component::input::{InputEvent, InputState, TextareaState};
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
-use gpui_kit::component::{Sizable as _, h_flex, v_flex};
+use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::*;
-use gpui_kit::{Context, Entity, Subscription, Window, div, px};
+use gpui_kit::{Context, Entity, FontWeight, Subscription, Window, div, px};
 use treeterm_model::tool_tabs::workspace_settings::{default_app_choices, default_app_label};
 use treeterm_model::workspace_store::WorkspaceStore;
 
 use crate::theme::colors;
+use crate::ui::{FieldStyle, MONO, field, normal_line, pane_select_box, pane_text_area};
 
 pub struct WorkspaceSettingsView {
     workspace: Entity<WorkspaceStore>,
@@ -60,9 +60,9 @@ impl WorkspaceSettingsView {
 }
 
 impl Render for WorkspaceSettingsView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let c = colors(cx);
-        let (secondary, border, code_bg) = (c.text_secondary, c.border, c.bg_secondary);
+        let (secondary, primary, border, tertiary) = (c.text_secondary, c.text_primary, c.border, c.bg_tertiary);
         let store = self.workspace.read(cx);
         let choices = default_app_choices(store.registry());
         let current = store.file().settings.default_application_id.clone();
@@ -70,10 +70,30 @@ impl Render for WorkspaceSettingsView {
             Ok(json) => json,
             Err(error) => format!("Cannot show the workspace: {error}"),
         };
-        let label = |text: &'static str| div().text_sm().child(text);
+        // `.settings-input` / `.settings-select`.
+        let style = |height: f32| FieldStyle {
+            bg: tertiary,
+            border,
+            radius: 4.,
+            pad: (8., 12.),
+            size: 13.,
+            mono: false,
+            height,
+        };
+        let group = |label: &'static str| {
+            v_flex().gap(px(6.)).child(
+                div()
+                    .text_size(px(13.))
+                    .line_height(normal_line(13.))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(primary)
+                    .child(label),
+            )
+        };
         let workspace = self.workspace.clone();
-        let picker = Button::new("default-app").small().outline().label(default_app_label(&choices, &current)).dropdown_menu(
-            move |mut menu, _, _| {
+        let picker = pane_select_box("default-app", default_app_label(&choices, &current), style(35.), false, cx)
+            .w_full()
+            .dropdown_menu(move |mut menu, _, _| {
                 for (index, choice) in choices.iter().enumerate() {
                     if index == 1 {
                         menu = menu.separator();
@@ -86,36 +106,46 @@ impl Render for WorkspaceSettingsView {
                     );
                 }
                 menu
-            },
-        );
+            });
         v_flex()
             .id("workspace-settings")
             .size_full()
-            .p_4()
-            .gap_4()
-            .max_w(px(640.))
+            .max_w(px(600.))
+            .p(px(20.))
+            .gap(px(20.))
             .overflow_y_scroll()
-            .child(div().text_lg().child("Workspace Settings"))
-            .child(v_flex().gap_1().child(label("Name")).child(Input::new(&self.name)))
-            .child(v_flex().gap_1().child(label("Description")).child(Textarea::new(&self.description)))
+            .text_color(primary)
             .child(
-                v_flex()
-                    .gap_1()
-                    .child(label("Default Application for Children"))
-                    .child(h_flex().child(picker))
-                    .child(div().text_xs().text_color(secondary).child(
+                div()
+                    .text_size(px(16.))
+                    .line_height(normal_line(16.))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child("Workspace Settings"),
+            )
+            .child(group("Name").child(field(&self.name, style(34.), window, cx)))
+            // A `<textarea>` keeps Chromium's monospace font: `.settings-input` sets none.
+            .child(group("Description").child(pane_text_area(&self.description, FieldStyle { mono: true, ..style(63.) }, window, cx)))
+            .child(
+                group("Default Application for Children").child(picker).child(
+                    div().mt(px(2.)).text_size(px(11.)).line_height(normal_line(11.)).text_color(secondary).child(
                         "The default application to open when creating child workspaces. If not set, inherits from the nearest ancestor that sets one, or uses the global default.",
-                    )),
+                    ),
+                ),
             )
             .child(
                 v_flex()
-                    .gap_1()
+                    .gap(px(6.))
                     .child(
-                        div()
+                        h_flex()
                             .id("workspace-json-toggle")
-                            .text_sm()
+                            .gap(px(6.))
+                            .text_size(px(13.))
+                            .line_height(normal_line(13.))
+                            .text_color(secondary)
                             .cursor_pointer()
-                            .child(format!("{} Raw Workspace JSON", if self.json_open { "▾" } else { "▸" }))
+                            .hover(move |d| d.text_color(primary))
+                            .child(if self.json_open { "▾" } else { "▸" })
+                            .child("Raw Workspace JSON")
                             .on_click(cx.listener(|view, _, _, cx| {
                                 view.json_open = !view.json_open;
                                 cx.notify();
@@ -124,15 +154,20 @@ impl Render for WorkspaceSettingsView {
                     .when(self.json_open, |d| {
                         d.child(
                             div()
-                                .p_2()
-                                .rounded_md()
+                                .id("workspace-json")
+                                .mt(px(8.))
+                                .max_h(px(400.))
+                                .overflow_y_scroll()
+                                .p(px(12.))
+                                .rounded(px(4.))
                                 .border_1()
                                 .border_color(border)
-                                .bg(code_bg)
-                                .font_family("Menlo")
-                                .text_xs()
-                                .whitespace_normal()
-                                .children(json.lines().map(|line| div().child(line.to_owned()))),
+                                .bg(tertiary)
+                                .font_family(MONO)
+                                .text_size(px(12.))
+                                .line_height(normal_line(12.))
+                                .text_color(primary)
+                                .children(json.lines().map(|line| div().whitespace_nowrap().child(line.to_owned()))),
                         )
                     }),
             )

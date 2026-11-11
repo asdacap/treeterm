@@ -1,15 +1,21 @@
 //! The System Prompt Debugger tab (`SystemPromptDebugger.tsx`).
 
-use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
-use gpui_kit::component::{Disableable as _, Sizable as _, h_flex, v_flex};
+use gpui_kit::component::input::{InputEvent, InputState, TextareaState};
+use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
+use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::*;
-use gpui_kit::{Context, Entity, Subscription, Window, div, px, rgb};
+use gpui_kit::{AnyElement, Context, Entity, FontWeight, Subscription, Window, div, px, rgb};
 use treeterm_core::settings::ClassifierProvider;
 use treeterm_model::settings_store::SettingsStore;
 use treeterm_model::tool_tabs::prompt_debugger::{DebugMode, DebugRun, PromptDebugger, REASONING_CHOICES};
 
-use crate::theme::colors;
+use crate::ui::{FieldStyle, MONO, field, normal_line, pane_select_box, pane_text_area, text_button};
+
+/// The inline-styled controls' colours (`#1e1e1e` fields, `#333` borders, `#aaa` labels).
+const FIELD_BG: u32 = 0x1e1e1e;
+const FIELD_BORDER: u32 = 0x333333;
+const FIELD_TEXT: u32 = 0xd4d4d4;
+const LABEL: u32 = 0xaaaaaa;
 
 /// The editable fields of one mode.
 struct ModeInputs {
@@ -78,32 +84,69 @@ impl PromptDebuggerView {
 }
 
 impl Render for PromptDebuggerView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let c = colors(cx);
-        let (secondary, error, border, code_bg) = (c.text_secondary, c.error, c.border, c.bg_secondary);
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let debugger = self.model.read(cx);
         let (mode, run, reasoning, provider) = (debugger.mode(), debugger.run().clone(), debugger.reasoning(), debugger.provider(cx));
         let classifier = provider == ClassifierProvider::Classifier;
         let inputs = self.inputs(mode);
         let (model_input, prompt_input) = (inputs.model.clone(), inputs.prompt.clone());
-        let label = |text: String| div().text_xs().text_color(secondary).child(text);
-
-        let mut modes = h_flex().gap_1().items_center().child(label("Mode".into()));
-        for (index, target) in [DebugMode::Analyzer, DebugMode::Title].into_iter().enumerate() {
-            let button = Button::new(("debugger-mode", index)).xsmall().label(target.label());
-            let button = if target == mode { button.primary() } else { button.ghost() };
-            modes = modes.child(button.on_click(cx.listener(move |view, _, _, cx| {
-                view.model.update(cx, |d, cx| d.set_mode(target, cx));
-            })));
-        }
-        let mut reasonings = h_flex().gap_1().items_center().child(label("Reasoning".into()));
-        for (index, (value, text)) in REASONING_CHOICES.into_iter().enumerate() {
-            let button = Button::new(("debugger-reasoning", index)).xsmall().label(text).disabled(classifier);
-            let button = if value == reasoning { button.primary() } else { button.ghost() };
-            reasonings = reasonings.child(button.on_click(cx.listener(move |view, _, _, cx| {
-                view.model.update(cx, |d, cx| d.set_reasoning(value, cx));
-            })));
-        }
+        let label = |text: String| div().text_size(px(12.)).line_height(normal_line(12.)).text_color(rgb(LABEL)).child(text);
+        let field_style = |height: f32, pad: (f32, f32)| FieldStyle {
+            bg: rgb(FIELD_BG).into(),
+            border: rgb(FIELD_BORDER).into(),
+            radius: 4.,
+            pad,
+            size: 12.,
+            mono: true,
+            height,
+        };
+        // The `<select>`s: 12px, padded 2px 4px, 22px high.
+        let select = |id: &'static str, text: &'static str, width: f32, disabled: bool| {
+            pane_select_box(id, text, FieldStyle { mono: false, ..field_style(22., (2., 4.)) }, disabled, cx)
+                .w(px(width))
+                .text_color(rgb(FIELD_TEXT))
+        };
+        let model = self.model.clone();
+        let mode_picker = select("debugger-mode", mode.label(), 126., false).dropdown_menu(move |mut menu, _, _| {
+            for target in [DebugMode::Analyzer, DebugMode::Title] {
+                let model = model.clone();
+                menu = menu.item(
+                    PopupMenuItem::new(target.label())
+                        .checked(target == mode)
+                        .on_click(move |_, _, cx| model.update(cx, |d, cx| d.set_mode(target, cx))),
+                );
+            }
+            menu
+        });
+        let reasoning_label = REASONING_CHOICES.iter().find(|(value, _)| *value == reasoning).map_or("Off", |(_, text)| text);
+        let model = self.model.clone();
+        let reasoning_picker: AnyElement = if classifier {
+            select("debugger-reasoning", reasoning_label, 73., true).into_any_element()
+        } else {
+            select("debugger-reasoning", reasoning_label, 73., false)
+                .dropdown_menu(move |mut menu, _, _| {
+                    for (value, text) in REASONING_CHOICES {
+                        let model = model.clone();
+                        menu = menu.item(
+                            PopupMenuItem::new(text)
+                                .checked(value == reasoning)
+                                .on_click(move |_, _, cx| model.update(cx, |d, cx| d.set_reasoning(value, cx))),
+                        );
+                    }
+                    menu
+                })
+                .into_any_element()
+        };
+        let labelled = |text: &'static str, control: AnyElement| {
+            h_flex()
+                .flex_shrink_0()
+                .gap(px(4.))
+                .text_size(px(12.))
+                .line_height(normal_line(12.))
+                .text_color(rgb(LABEL))
+                .child(text)
+                .child(control)
+        };
         let running = run == DebugRun::Running;
         let (duration, outcome) = match run {
             DebugRun::Idle | DebugRun::Running => (None, None),
@@ -112,15 +155,22 @@ impl Render for PromptDebuggerView {
         v_flex()
             .id("prompt-debugger")
             .size_full()
-            .p_4()
-            .gap_3()
+            .p(px(16.))
+            .gap(px(12.))
             .overflow_y_scroll()
-            .child(div().text_base().child("System Prompt Debugger"))
+            .child(
+                div()
+                    .text_size(px(18.72))
+                    .line_height(px(22.))
+                    .font_weight(FontWeight::BOLD)
+                    .text_color(rgb(0xcccccc))
+                    .child("System Prompt Debugger"),
+            )
             .child(
                 v_flex()
-                    .gap_1()
-                    .text_xs()
-                    .text_color(secondary)
+                    .text_size(px(12.))
+                    .line_height(normal_line(12.))
+                    .text_color(rgb(LABEL))
                     .child(format!("Provider: {}", if classifier { "Classifier" } else { "Chat Completions" }))
                     .when(classifier, |d| {
                         d.child(
@@ -130,57 +180,83 @@ impl Render for PromptDebuggerView {
             )
             .child(
                 h_flex()
-                    .gap_3()
-                    .items_end()
-                    .child(v_flex().flex_1().gap_1().child(label("Model".into())).child(Input::new(&model_input).small()))
-                    .child(modes)
-                    .child(reasonings),
-            )
-            .child(
-                h_flex()
-                    .gap_2()
-                    .items_center()
-                    .child(label(format!("System Prompt ({})", mode.label())))
-                    .child(Button::new("debugger-update").xsmall().outline().label("Update").on_click(cx.listener(
-                        |view, _, _, cx| {
-                            let settings = view.settings.clone();
-                            view.model.update(cx, |d, cx| d.save_prompt(&settings, cx));
-                        },
-                    ))),
-            )
-            .child(Textarea::new(&prompt_input).h(px(160.)))
-            .child(label("Buffer (paste from debug console)".into()))
-            .child(Textarea::new(&self.buffer).h(px(160.)))
-            .child(
-                h_flex()
-                    .gap_3()
-                    .items_center()
+                    .gap(px(12.))
                     .child(
-                        Button::new("debugger-test")
-                            .small()
-                            .primary()
-                            .disabled(running)
-                            .label(if running { "Testing..." } else { "Test" })
-                            .on_click(cx.listener(|view, _, _, cx| view.model.update(cx, |d, cx| d.test(cx)))),
+                        v_flex()
+                            .flex_1()
+                            .min_w_0()
+                            // The label sits on the 16px body font's line.
+                            .child(div().h(px(19.)).flex().items_end().pb(px(1.)).child(label("Model".into())))
+                            .child(field(&model_input, field_style(24., (4., 8.)), window, cx).text_color(rgb(FIELD_TEXT))),
+                    )
+                    .child(labelled("Mode", mode_picker.into_any_element()))
+                    .child(labelled("Reasoning", reasoning_picker)),
+            )
+            .child(
+                h_flex()
+                    .gap(px(8.))
+                    .child(label(format!("System Prompt ({})", mode.label())))
+                    .child(
+                        text_button("debugger-update", "Update", 11., (2., 8.), rgb(0xcccccc), rgb(0x333333), rgb(0x555555), 4.)
+                            .on_click(cx.listener(|view, _, _, cx| {
+                                let settings = view.settings.clone();
+                                view.model.update(cx, |d, cx| d.save_prompt(&settings, cx));
+                            })),
+                    ),
+            )
+            .child(pane_text_area(&prompt_input, field_style(120., (8., 8.)), window, cx).text_color(rgb(FIELD_TEXT)))
+            .child(label("Buffer (paste from debug console)".into()))
+            .child(pane_text_area(&self.buffer, field_style(120., (8., 8.)), window, cx).text_color(rgb(FIELD_TEXT)))
+            .child(
+                h_flex()
+                    .gap(px(12.))
+                    .child(
+                        div()
+                            .id("debugger-test")
+                            .px(px(16.))
+                            .py(px(6.))
+                            .rounded(px(4.))
+                            .bg(rgb(if running { 0x333333 } else { 0x2472c8 }))
+                            .text_size(px(13.))
+                            .line_height(normal_line(13.))
+                            .text_color(gpui_kit::white())
+                            .child(if running { "Testing..." } else { "Test" })
+                            .when(!running, |d| {
+                                d.cursor_pointer().on_click(cx.listener(|view, _, _, cx| view.model.update(cx, |d, cx| d.test(cx))))
+                            }),
                     )
                     .when_some(duration, |d, duration| {
-                        d.child(div().text_xs().text_color(secondary).child(format!("{}ms", duration.as_millis())))
+                        d.child(
+                            div()
+                                .text_size(px(12.))
+                                .line_height(normal_line(12.))
+                                .text_color(rgb(0x888888))
+                                .child(format!("{}ms", duration.as_millis())),
+                        )
                     }),
             )
             .when_some(outcome, |d, outcome| match outcome {
                 Ok(result) => d.child(
                     div()
-                        .p_2()
-                        .rounded_md()
+                        .p(px(8.))
+                        .rounded(px(4.))
                         .border_1()
-                        .border_color(border)
-                        .bg(code_bg)
-                        .font_family("Menlo")
-                        .text_xs()
+                        .border_color(rgb(FIELD_BORDER))
+                        .bg(rgb(FIELD_BG))
+                        .font_family(MONO)
+                        .text_size(px(12.))
+                        .line_height(normal_line(12.))
                         .text_color(rgb(0x23d18b))
                         .child(result),
                 ),
-                Err(message) => d.child(div().font_family("Menlo").text_xs().text_color(error).child(message)),
+                Err(message) => d.child(
+                    div()
+                        .font_family(MONO)
+                        .text_size(px(12.))
+                        .line_height(normal_line(12.))
+                        .text_color(rgb(0xf14c4c))
+                        .child(message),
+                ),
             })
     }
 }

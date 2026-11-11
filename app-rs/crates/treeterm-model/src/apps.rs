@@ -216,6 +216,98 @@ pub fn is_allowed_webview_url(url: &str) -> bool {
     matches!(host.to_ascii_lowercase().as_str(), "localhost" | "127.0.0.1")
 }
 
+/// An http(s) URL split as the browser tab's address bar needs it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PageUrl {
+    scheme: String,
+    host: String,
+    port: Option<u16>,
+    /// Path, query and fragment; at least `/`.
+    rest: String,
+}
+
+impl PageUrl {
+    fn parse(url: &str) -> Option<Self> {
+        let (scheme, after) = url.split_once("://")?;
+        let scheme = scheme.to_ascii_lowercase();
+        if scheme != "http" && scheme != "https" {
+            return None;
+        }
+        let end = after.find(['/', '?', '#']).unwrap_or(after.len());
+        let (authority, rest) = after.split_at(end);
+        let host_port = authority.rsplit('@').next().unwrap_or_default();
+        let (host, port) = match host_port.rsplit_once(':') {
+            Some((host, "")) => (host, None),
+            Some((host, port)) => (host, Some(port.parse::<u16>().ok()?)),
+            None => (host_port, None),
+        };
+        if host.is_empty() {
+            return None;
+        }
+        let rest = if rest.starts_with('/') { rest.to_owned() } else { format!("/{rest}") };
+        let default = if scheme == "https" { 443 } else { 80 };
+        let port = port.filter(|p| *p != default);
+        Some(Self { scheme, host: host.to_ascii_lowercase(), port, rest })
+    }
+
+    /// `targetPort`: the explicit port or the scheme's default.
+    fn target_port(&self) -> u16 {
+        self.port.unwrap_or(if self.scheme == "https" { 443 } else { 80 })
+    }
+
+    fn origin(&self) -> String {
+        match self.port {
+            Some(port) => format!("{}://{}:{port}", self.scheme, self.host),
+            None => format!("{}://{}", self.scheme, self.host),
+        }
+    }
+}
+
+/// What was typed into a browser tab's address bar, resolved against the page it shows
+/// (`resolveAddress`): a path, query or fragment stays on the page's origin; a full address
+/// must be http(s) on localhost / 127.0.0.1 with the page's scheme and port. The error is
+/// the message the bar shows.
+pub fn resolve_address(input: &str, page_url: &str) -> Result<String, String> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Err("Enter a URL or path".to_owned());
+    }
+    let page = PageUrl::parse(page_url).ok_or_else(|| format!("Invalid page URL: {page_url}"))?;
+    let typed = if trimmed.starts_with(['/', '?', '#']) {
+        let path_end = page.rest.find(['?', '#']).unwrap_or(page.rest.len());
+        let query_end = page.rest.find('#').unwrap_or(page.rest.len());
+        let base = match trimmed.chars().next() {
+            Some('/') => "",
+            Some('?') => &page.rest[..path_end],
+            Some(_) | None => &page.rest[..query_end],
+        };
+        PageUrl { rest: format!("{base}{trimmed}"), ..page.clone() }
+    } else {
+        let has_scheme = trimmed.split_once("://").is_some_and(|(scheme, _)| {
+            let mut chars = scheme.chars();
+            chars.next().is_some_and(|c| c.is_ascii_alphabetic())
+                && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '.' | '-'))
+        });
+        let absolute = if has_scheme { trimmed.to_owned() } else { format!("http://{trimmed}") };
+        match PageUrl::parse(&absolute) {
+            Some(url) if is_allowed_webview_url(&absolute) => url,
+            Some(_) | None => return Err(format!("URL must be http(s)://localhost or 127.0.0.1: {absolute}")),
+        }
+    };
+    if typed.scheme != page.scheme || typed.target_port() != page.target_port() {
+        return Err(format!("Only pages on {} can be opened in this tab", page.origin()));
+    }
+    let rest = typed.rest.clone();
+    Ok(format!("{}{rest}", PageUrl { host: page.host.clone(), ..typed }.origin()))
+}
+
+/// The path, query and fragment of `url` when it is on `home`'s origin: what a browser tab
+/// remembers as its page (`rememberPage`).
+pub fn page_path(home: &str, url: &str) -> Option<String> {
+    let (home, page) = (PageUrl::parse(home)?, PageUrl::parse(url)?);
+    (home.origin() == page.origin()).then_some(page.rest)
+}
+
 pub struct AppRegistry {
     apps: Vec<AppDef>,
 }
@@ -402,6 +494,33 @@ impl AppRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn addresses_resolve_against_the_page_like_electron() {
+        let page = "http://localhost:8765/docs/a.html?x=1#top";
+        assert_eq!(resolve_address("/b", page).as_deref(), Ok("http://localhost:8765/b"));
+        assert_eq!(resolve_address("?y=2", page).as_deref(), Ok("http://localhost:8765/docs/a.html?y=2"));
+        assert_eq!(resolve_address("#end", page).as_deref(), Ok("http://localhost:8765/docs/a.html?x=1#end"));
+        assert_eq!(resolve_address(" localhost:8765 ", page).as_deref(), Ok("http://localhost:8765/"));
+        // The page's host is kept, so the forward's cookies and storage stay.
+        assert_eq!(resolve_address("http://127.0.0.1:8765/c", page).as_deref(), Ok("http://localhost:8765/c"));
+        assert_eq!(resolve_address("  ", page), Err("Enter a URL or path".to_owned()));
+        assert_eq!(
+            resolve_address("example.com", page),
+            Err("URL must be http(s)://localhost or 127.0.0.1: http://example.com".to_owned())
+        );
+        assert_eq!(
+            resolve_address("localhost:9000/x", page),
+            Err("Only pages on http://localhost:8765 can be opened in this tab".to_owned())
+        );
+        assert_eq!(resolve_address("http://localhost/", "http://localhost:80/").as_deref(), Ok("http://localhost/"));
+    }
+
+    #[test]
+    fn pages_are_remembered_only_on_the_home_origin() {
+        assert_eq!(page_path("http://localhost:8765", "http://localhost:8765/a?b#c").as_deref(), Some("/a?b#c"));
+        assert_eq!(page_path("http://localhost:8765/x", "http://localhost:9000/a"), None);
+    }
 
     #[test]
     fn terminal_tabs_start_without_a_pty_and_with_a_fresh_handle() {

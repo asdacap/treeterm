@@ -24,7 +24,43 @@ pub struct SessionInfo {
     logs: HashMap<OutputKind, Vec<String>>,
     forwards: Vec<PortForwardInfo>,
     error: Option<String>,
+    /// Forwards whose output is shown, with what it printed and the task following it.
+    forward_logs: HashMap<PortForwardId, (Vec<String>, Option<Task<()>>)>,
     _tasks: Vec<Task<()>>,
+}
+
+/// Why the "Add Port Forward" dialog refuses its fields (`PortForwardDialog`'s messages).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ForwardFieldError {
+    LocalPort,
+    RemoteHost,
+    RemotePort,
+}
+
+impl ForwardFieldError {
+    pub fn message(self) -> &'static str {
+        match self {
+            ForwardFieldError::LocalPort => "Local port must be a number between 1 and 65535",
+            ForwardFieldError::RemoteHost => "Remote host is required",
+            ForwardFieldError::RemotePort => "Remote port must be a number between 1 and 65535",
+        }
+    }
+}
+
+/// The dialog's fields as a forward, checked in Electron's order. Ports read like
+/// `parseInt`: leading digits, the rest ignored.
+pub fn parse_forward_fields(local: &str, host: &str, remote: &str) -> Result<PortForwardSpec, ForwardFieldError> {
+    let port = |text: &str| -> Option<u16> {
+        let digits: String = text.trim().chars().take_while(char::is_ascii_digit).collect();
+        digits.parse::<u32>().ok().filter(|p| (1..=65535).contains(p)).and_then(|p| u16::try_from(p).ok())
+    };
+    let local_port = port(local).ok_or(ForwardFieldError::LocalPort)?;
+    let host = host.trim();
+    if host.is_empty() {
+        return Err(ForwardFieldError::RemoteHost);
+    }
+    let remote_port = port(remote).ok_or(ForwardFieldError::RemotePort)?;
+    Ok(PortForwardSpec { local_port, remote_host: host.to_owned(), remote_port, extra: Default::default() })
 }
 
 impl SessionInfo {
@@ -62,6 +98,7 @@ impl SessionInfo {
             logs,
             forwards: Vec::new(),
             error: None,
+            forward_logs: HashMap::new(),
             _tasks: tasks,
         }
     }
@@ -207,6 +244,47 @@ impl SessionInfo {
         self.refresh_forwards(cx);
     }
 
+    /// Show or hide a forward's ssh output ("Log" / "Hide"): shown ones follow new lines.
+    pub fn toggle_forward_log(&mut self, forward: &PortForwardId, cx: &mut Context<Self>) {
+        if self.forward_logs.remove(forward).is_some() {
+            cx.notify();
+            return;
+        }
+        let Some(app) = self.app.upgrade() else {
+            return;
+        };
+        let watch = app.read(cx).manager().watch_port_forward_output(forward);
+        let (lines, task) = match watch {
+            Ok(watch) => {
+                let (id, mut updates) = (forward.clone(), watch.updates);
+                let task = cx.spawn(async move |this, cx| {
+                    while let Some(line) = updates.next().await {
+                        let pushed = this.update(cx, |info, cx| {
+                            if let Some((log, _)) = info.forward_logs.get_mut(&id) {
+                                log.push(line);
+                                let excess = log.len().saturating_sub(MAX_LINES);
+                                log.drain(..excess);
+                                cx.notify();
+                            }
+                        });
+                        if pushed.is_err() {
+                            return;
+                        }
+                    }
+                });
+                (watch.initial, Some(task))
+            }
+            Err(error) => (vec![format!("Failed to watch output: {error}")], None),
+        };
+        self.forward_logs.insert(forward.clone(), (lines, task));
+        cx.notify();
+    }
+
+    /// The forward's output while shown ([`Self::toggle_forward_log`]).
+    pub fn forward_log(&self, forward: &PortForwardId) -> Option<&[String]> {
+        self.forward_logs.get(forward).map(|(lines, _)| lines.as_slice())
+    }
+
     /// A failed or stopped forward again, as a new forward with the same spec.
     pub fn restart_forward(&mut self, forward: &PortForwardId, cx: &mut Context<Self>) {
         let Some(old) = self.forwards.iter().find(|f| &f.config.id == forward).cloned() else {
@@ -216,5 +294,22 @@ impl SessionInfo {
             app.read(cx).manager().remove_port_forward(forward);
         }
         self.add_forward(old.config.spec, old.config.persistence == Persistence::Saved, cx);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ForwardFieldError, parse_forward_fields};
+
+    #[test]
+    fn forward_fields_are_checked_in_order_like_parse_int() {
+        let spec = parse_forward_fields(" 8080", " localhost ", "3000").unwrap();
+        assert_eq!((spec.local_port, spec.remote_host.as_str(), spec.remote_port), (8080, "localhost", 3000));
+        assert_eq!(parse_forward_fields("80x", "h", "9px").map(|s| (s.local_port, s.remote_port)), Ok((80, 9)));
+        assert_eq!(parse_forward_fields("", "", ""), Err(ForwardFieldError::LocalPort));
+        assert_eq!(parse_forward_fields("0", "h", "1"), Err(ForwardFieldError::LocalPort));
+        assert_eq!(parse_forward_fields("8080", "  ", ""), Err(ForwardFieldError::RemoteHost));
+        assert_eq!(parse_forward_fields("8080", "h", "65536"), Err(ForwardFieldError::RemotePort));
+        assert_eq!(parse_forward_fields("8080", "h", "-1"), Err(ForwardFieldError::RemotePort));
     }
 }

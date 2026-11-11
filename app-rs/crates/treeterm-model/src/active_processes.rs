@@ -106,6 +106,35 @@ impl ActiveProcesses {
         let Some((id, _)) = self.selected.take() else {
             return;
         };
+        self.kill_then_refresh(id, cx);
+    }
+
+    /// Kill any PTY (the session pane's per-row Kill), closing its viewer if it is shown,
+    /// then re-list.
+    pub fn kill(&mut self, id: &str, cx: &mut Context<Self>) {
+        if self.selected.as_ref().is_some_and(|(shown, _)| shown == id) {
+            self.selected = None;
+        }
+        self.list = ProcessList::Loading;
+        self.kill_then_refresh(id.to_owned(), cx);
+    }
+
+    /// Close the viewer; the PTY keeps running.
+    pub fn deselect(&mut self, cx: &mut Context<Self>) {
+        if self.selected.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    /// List again from scratch: "Loading…" until the daemon answers (`SessionTtyList`'s
+    /// Refresh).
+    pub fn reload(&mut self, cx: &mut Context<Self>) {
+        self.list = ProcessList::Loading;
+        cx.notify();
+        self.refresh(cx);
+    }
+
+    fn kill_then_refresh(&mut self, id: String, cx: &mut Context<Self>) {
         let kill = self.conn.kill_pty(&id);
         self._stop = Some(cx.spawn(async move |this, cx| {
             let failed = match kill.await {
@@ -136,6 +165,35 @@ pub fn display_name(cwd: &str, workspaces: &[(String, String)]) -> String {
     }
 }
 
+/// The PTYs of one workspace in the session pane's TTY list (`SessionTtyList`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct PtyGroup {
+    /// The workspace's name, or "Unknown".
+    pub label: String,
+    pub sessions: Vec<PtySessionInfo>,
+}
+
+/// PTYs grouped by the workspace whose path is their cwd, workspaces in first-seen order,
+/// unmatched PTYs last under "Unknown" (`groupByWorkspace`). `workspaces` are `(path, name)`.
+pub fn group_by_workspace(sessions: &[PtySessionInfo], workspaces: &[(String, String)]) -> Vec<PtyGroup> {
+    let mut groups: Vec<(Option<&str>, PtyGroup)> = Vec::new();
+    for session in sessions {
+        // As Electron's path map: a later workspace with the same path wins.
+        let workspace = workspaces.iter().rev().find(|(path, _)| *path == session.cwd);
+        let key = workspace.map(|(path, _)| path.as_str());
+        match groups.iter_mut().find(|(k, _)| *k == key) {
+            Some((_, group)) => group.sessions.push(session.clone()),
+            None => {
+                let label = workspace.map_or_else(|| "Unknown".to_owned(), |(_, name)| name.clone());
+                groups.push((key, PtyGroup { label, sessions: vec![session.clone()] }));
+            }
+        }
+    }
+    // Stable: workspace groups keep their order, Unknown goes last.
+    groups.sort_by_key(|(key, _)| key.is_none());
+    groups.into_iter().map(|(_, group)| group).collect()
+}
+
 /// Compact "Ns/Nm/Nh/Nd ago" (`formatRelativeTime`); times in milliseconds.
 pub fn relative_time(timestamp_ms: i64, now_ms: i64) -> String {
     let seconds = (now_ms - timestamp_ms).max(0) / 1000;
@@ -163,6 +221,23 @@ mod tests {
         assert_eq!(display_name("/repo/app", &workspaces), "App");
         assert_eq!(display_name("/home/me/src/", &workspaces), "/home/me/src/");
         assert_eq!(display_name("/home/me/src", &workspaces), "src");
+    }
+
+    fn pty(id: &str, cwd: &str) -> PtySessionInfo {
+        PtySessionInfo { id: id.to_owned(), cwd: cwd.to_owned(), ..Default::default() }
+    }
+
+    #[test]
+    fn ptys_group_by_workspace_with_unknown_last() {
+        let workspaces = vec![("/a".to_owned(), "A".to_owned()), ("/b".to_owned(), "B".to_owned())];
+        let sessions = [pty("1", "/tmp"), pty("2", "/b"), pty("3", "/a"), pty("4", "/b"), pty("5", "/x")];
+        let groups = group_by_workspace(&sessions, &workspaces);
+        let shape: Vec<(&str, Vec<&str>)> = groups
+            .iter()
+            .map(|g| (g.label.as_str(), g.sessions.iter().map(|s| s.id.as_str()).collect()))
+            .collect();
+        assert_eq!(shape, [("B", vec!["2", "4"]), ("A", vec!["3"]), ("Unknown", vec!["1", "5"])]);
+        assert!(group_by_workspace(&[], &workspaces).is_empty());
     }
 
     #[test]

@@ -22,6 +22,7 @@ pub struct SystemMonitor {
     metrics: Metrics,
     cpu: UsageHistory,
     memory: UsageHistory,
+    updated_at: Option<std::time::SystemTime>,
     _poll: Task<()>,
     _kill: Option<Task<()>>,
 }
@@ -39,9 +40,34 @@ fn request(command: &str, args: Vec<String>) -> ExecRequest {
 impl SystemMonitor {
     /// Starts polling; stops when dropped.
     pub fn new(exec: ExecClient, cx: &mut Context<Self>) -> Self {
+        let poll = Self::poll(exec.clone(), cx);
+        Self {
+            exec,
+            metrics: Metrics::Loading,
+            cpu: UsageHistory::default(),
+            memory: UsageHistory::default(),
+            updated_at: None,
+            _poll: poll,
+            _kill: None,
+        }
+    }
+
+    /// Back to "Collecting…" and poll again from now (Electron's Retry / refresh button).
+    pub fn refresh(&mut self, cx: &mut Context<Self>) {
+        self.metrics = Metrics::Loading;
+        self._poll = Self::poll(self.exec.clone(), cx);
+        cx.notify();
+    }
+
+    /// When the shown metrics were collected.
+    pub fn updated_at(&self) -> Option<std::time::SystemTime> {
+        self.updated_at
+    }
+
+    fn poll(exec: ExecClient, cx: &mut Context<Self>) -> Task<()> {
         let executor = cx.background_executor().clone();
-        let poller = exec.clone();
-        let poll = cx.spawn(async move |this, cx| {
+        let poller = exec;
+        cx.spawn(async move |this, cx| {
             loop {
                 let result = poller
                     .run(request("sh", vec!["-c".to_owned(), MONITOR_SCRIPT.to_owned()]))
@@ -56,19 +82,12 @@ impl SystemMonitor {
                 }
                 executor.timer(POLL_INTERVAL).await;
             }
-        });
-        Self {
-            exec,
-            metrics: Metrics::Loading,
-            cpu: UsageHistory::default(),
-            memory: UsageHistory::default(),
-            _poll: poll,
-            _kill: None,
-        }
+        })
     }
 
     fn record(&mut self, metrics: Metrics, cx: &mut Context<Self>) {
         if let Metrics::Loaded(m) = &metrics {
+            self.updated_at = Some(std::time::SystemTime::now());
             self.cpu.push(m.cpu.usage_percent);
             self.memory.push(m.memory.usage_percent);
         }
@@ -95,6 +114,22 @@ impl SystemMonitor {
             Ok(output) if output.exit_code == 0 => {}
             Ok(output) => tracing::warn!(pid, stderr = %String::from_utf8_lossy(&output.stderr), "kill failed"),
             Err(error) => tracing::warn!(pid, %error, "kill failed"),
+        }));
+    }
+
+    /// The process list's Stop / Kill: signal `pid`, then collect again once it is done
+    /// (`sendSignal` → `onRefresh`).
+    pub fn signal(&mut self, pid: u32, signal: &str, cx: &mut Context<Self>) {
+        let run = self.exec.run(request("kill", vec![format!("-{signal}"), pid.to_string()]));
+        self._kill = Some(cx.spawn(async move |this, cx| {
+            match run.await {
+                Ok(output) if output.exit_code == 0 => {}
+                Ok(output) => tracing::warn!(pid, stderr = %String::from_utf8_lossy(&output.stderr), "kill failed"),
+                Err(error) => tracing::warn!(pid, %error, "kill failed"),
+            }
+            match this.update(cx, |monitor, cx| monitor.refresh(cx)) {
+                Ok(()) | Err(_) => {} // Err: the monitor closed
+            }
         }));
     }
 }

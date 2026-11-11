@@ -507,3 +507,339 @@ pub fn scrollbar_thumb(handle: &gpui_kit::ScrollHandle, viewport: f32, content: 
         .rounded(px(5.))
         .bg(colors(cx).border)
 }
+
+// --- panes ---
+
+/// Chromium's `font-family: monospace` on macOS.
+pub const MONO: &str = "Menlo";
+
+/// Chromium's `line-height: normal` for a font size (system font and Menlo alike): 14px at
+/// 12px, 15px at 13px, 13px at 11px.
+pub fn normal_line(size: f32) -> gpui_kit::Pixels {
+    px((size * 1.2).floor())
+}
+
+/// `.ssh-pane-tab`: secondary text that turns primary on hover, over a 2px bottom rule in the
+/// accent colour when `active`. `sub` is the `.ssh-pane-subtabs` size (11px, 6px 12px)
+/// instead of 12px, 8px 16px.
+pub fn pane_tab(
+    id: impl Into<ElementId>,
+    label: impl Into<gpui_kit::SharedString>,
+    active: bool,
+    sub: bool,
+    cx: &App,
+) -> Stateful<Div> {
+    let c = colors(cx);
+    let primary = c.text_primary;
+    pane_button(id, label, sub, if active { primary } else { c.text_secondary })
+        .when(active, |d| d.border_color(c.accent))
+        .hover(move |d| d.text_color(primary))
+}
+
+/// A `.ssh-pane-tab` used as a button, coloured by an inline `style={{ color }}` (Retry,
+/// Remove, Restart…) that wins over its hover colour.
+pub fn pane_button(
+    id: impl Into<ElementId>,
+    label: impl Into<gpui_kit::SharedString>,
+    sub: bool,
+    color: impl Into<Hsla>,
+) -> Stateful<Div> {
+    let label: gpui_kit::SharedString = label.into();
+    // Chromium's `line-height: normal` for the system font: 14px at 12px, 13px at 11px.
+    let (size, line, x, y) = if sub { (SMALL, 13., 12., 6.) } else { (12., 14., 16., 8.) };
+    div()
+        .id(id)
+        .flex()
+        .flex_shrink_0()
+        .items_center()
+        .px(px(x))
+        .pt(px(y))
+        .pb(px(y))
+        .border_b_2()
+        .border_color(gpui_kit::transparent_black())
+        .text_size(px(size))
+        .line_height(px(line))
+        .whitespace_nowrap()
+        .text_color(color.into())
+        .cursor_pointer()
+        .child(label)
+}
+
+/// `.ssh-pane-tabs`: a row of [`pane_tab`]s over a 1px rule.
+pub fn pane_tabs(cx: &App) -> Div {
+    div().flex().flex_shrink_0().border_b_1().border_color(colors(cx).border)
+}
+
+/// `.ssh-pane-subtabs`: [`pane_tabs`] inset 4px (SSH sub-tabs; a Web App's or remote
+/// Browser's Browser / Shell / Port Forward).
+pub fn pane_subtabs(cx: &App) -> Div {
+    pane_tabs(cx).pl(px(4.))
+}
+
+/// How a CSS `<input>` / `<textarea>` / `<select>` is drawn.
+#[derive(Clone, Copy)]
+pub struct FieldStyle {
+    pub bg: Hsla,
+    pub border: Hsla,
+    pub radius: f32,
+    /// `padding: y x`.
+    pub pad: (f32, f32),
+    pub size: f32,
+    pub mono: bool,
+    /// The border-box height.
+    pub height: f32,
+}
+
+/// A text field drawn as its CSS: background, 1px border that turns accent while focused,
+/// radius, padding and font. The layout around it sets its width.
+pub fn field(
+    state: &gpui_kit::Entity<gpui_kit::component::input::InputState>,
+    style: FieldStyle,
+    window: &Window,
+    cx: &App,
+) -> gpui_kit::component::input::Input {
+    let focused = gpui_kit::Focusable::focus_handle(state.read(cx), cx).is_focused(window);
+    let input = gpui_kit::component::input::Input::new(state).appearance(false);
+    Styled::h(input, px(style.height))
+        .w_full()
+        .px(px(style.pad.1))
+        .py(px(0.))
+        .bg(style.bg)
+        .border_1()
+        .border_color(if focused { colors(cx).accent } else { style.border })
+        .rounded(px(style.radius))
+        .text_size(px(style.size))
+        .line_height(normal_line(style.size))
+        .when(style.mono, |d| d.font_family(MONO))
+}
+
+/// [`field`] for a multi-line `<textarea>` `style.height` high.
+pub fn pane_text_area(
+    state: &gpui_kit::Entity<gpui_kit::component::input::TextareaState>,
+    style: FieldStyle,
+    window: &Window,
+    cx: &App,
+) -> gpui_kit::component::input::Textarea {
+    let focused = gpui_kit::Focusable::focus_handle(state.read(cx), cx).is_focused(window);
+    gpui_kit::component::input::Textarea::new(state)
+        .appearance(false)
+        // XSmall: the editor pads itself 4px left and right, nothing above or below.
+        .xsmall()
+        .h(px(style.height))
+        .w_full()
+        .px(px(style.pad.1 - 4.))
+        .py(px(style.pad.0))
+        .bg(style.bg)
+        .border_1()
+        .border_color(if focused { colors(cx).accent } else { style.border })
+        .rounded(px(style.radius))
+        .text_size(px(style.size))
+        .line_height(normal_line(style.size))
+        .when(style.mono, |d| d.font_family(MONO))
+}
+
+/// A `<select>` drawn as its CSS (background, border, padding) with Chromium's chevron;
+/// a [`Trigger`] for the dropdown menu of its options.
+pub fn pane_select_box(
+    id: impl Into<ElementId>,
+    label: impl Into<gpui_kit::SharedString>,
+    style: FieldStyle,
+    disabled: bool,
+    cx: &App,
+) -> Trigger {
+    let label: gpui_kit::SharedString = label.into();
+    let fg = colors(cx).text_primary;
+    Trigger::new(
+        div()
+            .id(id)
+            .h(px(style.height))
+            .flex()
+            .flex_shrink_0()
+            .items_center()
+            .gap(px(4.))
+            // Chromium insets a menulist's text 4px more than its padding.
+            .pl(px(style.pad.1 + 4.))
+            // Chromium draws the arrow 5px from the right edge, over the padding.
+            .pr(px(5.))
+            .bg(style.bg)
+            .border_1()
+            .border_color(style.border)
+            .rounded(px(style.radius))
+            .text_size(px(style.size))
+            .text_color(fg)
+            .when(disabled, |d| d.opacity(0.5))
+            .when(!disabled, |d| d.cursor_pointer())
+            .child(div().flex_1().whitespace_nowrap().child(label))
+            .child(icon(IconName::ChevronDown, style.size, fg)),
+    )
+}
+
+/// An unstyled `<select>` as Chromium draws it (Arial 13.33px, black on white, grey
+/// border), `width` wide (Chromium fits its widest option); a [`Trigger`] for its options.
+pub fn native_select(
+    id: impl Into<ElementId>,
+    label: impl Into<gpui_kit::SharedString>,
+    width: f32,
+    disabled: bool,
+) -> Trigger {
+    let label: gpui_kit::SharedString = label.into();
+    Trigger::new(
+        div()
+            .id(id)
+            .w(px(width))
+            .h(px(19.))
+            .flex()
+            .flex_shrink_0()
+            .items_center()
+            .pl(px(4.))
+            .pr(px(4.))
+            .bg(gpui_kit::white())
+            .border_1()
+            .border_color(rgb(0x767676))
+            .rounded(px(2.))
+            .font_family("Arial")
+            .text_size(px(13.333))
+            .line_height(px(15.))
+            .text_color(gpui_kit::black())
+            .when(disabled, |d| d.opacity(0.5))
+            .when(!disabled, |d| d.cursor_pointer())
+            .child(div().flex_1().whitespace_nowrap().child(label))
+            .child(icon(IconName::ChevronDown, 12., gpui_kit::black())),
+    )
+}
+
+/// `.dialog-btn`'s variants.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum DialogButton {
+    /// No variant: Chromium's default button face.
+    Plain,
+    /// `.cancel` / `.secondary`.
+    Secondary,
+    /// `.create` / `.primary`.
+    Primary,
+}
+
+/// `.dialog-btn`: 13px text, 8px 16px padding, rounded 4px, borderless; 50% when disabled.
+pub fn pane_dialog_button(
+    id: impl Into<ElementId>,
+    label: impl Into<gpui_kit::SharedString>,
+    kind: DialogButton,
+    disabled: bool,
+    cx: &App,
+) -> Stateful<Div> {
+    let label: gpui_kit::SharedString = label.into();
+    let c = colors(cx);
+    let (bg, fg, hover): (Hsla, Hsla, Hsla) = match kind {
+        DialogButton::Plain => (rgb(0xefefef).into(), rgb(0x000000).into(), rgb(0xe5e5e5).into()),
+        DialogButton::Secondary => (c.bg_tertiary, c.text_primary, c.bg_hover),
+        DialogButton::Primary => (c.accent, gpui_kit::white(), rgb(0x006cbf).into()),
+    };
+    div()
+        .id(id)
+        .flex_shrink_0()
+        .px(px(16.))
+        .py(px(8.))
+        .rounded(px(4.))
+        .bg(bg)
+        .text_size(px(BODY))
+        .line_height(normal_line(BODY))
+        .text_color(fg)
+        .whitespace_nowrap()
+        .when(disabled, |d| d.opacity(0.5))
+        .when(!disabled, |d| d.cursor_pointer().hover(move |d| d.bg(hover)))
+        .child(label)
+}
+
+/// A bordered text button as Electron's ad-hoc CSS draws them (`.tty-list-refresh-btn`,
+/// `.comments-push-btn`, …): font size, `padding: y x`, colours, radius. Callers add the
+/// hover style (one per element).
+#[allow(clippy::too_many_arguments)]
+pub fn text_button(
+    id: impl Into<ElementId>,
+    label: impl Into<gpui_kit::SharedString>,
+    size: f32,
+    pad: (f32, f32),
+    fg: impl Into<Hsla>,
+    bg: impl Into<Hsla>,
+    border: impl Into<Hsla>,
+    radius: f32,
+) -> Stateful<Div> {
+    let label: gpui_kit::SharedString = label.into();
+    div()
+        .id(id)
+        .flex()
+        .flex_shrink_0()
+        .items_center()
+        .justify_center()
+        .px(px(pad.1))
+        .py(px(pad.0))
+        .border_1()
+        .border_color(border.into())
+        .rounded(px(radius))
+        .bg(bg.into())
+        .text_size(px(size))
+        .line_height(normal_line(size))
+        .text_color(fg.into())
+        .whitespace_nowrap()
+        .cursor_pointer()
+        .child(label)
+}
+
+/// `.dialog-close`: an 18px "✕" / "×", secondary until hovered.
+pub fn dialog_close(id: impl Into<ElementId>, glyph: &'static str, cx: &App) -> Stateful<Div> {
+    let c = colors(cx);
+    let (hover, primary) = (c.bg_hover, c.text_primary);
+    div()
+        .id(id)
+        .flex_shrink_0()
+        .px(px(8.))
+        .py(px(4.))
+        .rounded(px(4.))
+        .text_size(px(18.))
+        .text_color(c.text_secondary)
+        .cursor_pointer()
+        .hover(move |d| d.bg(hover).text_color(primary))
+        .child(glyph)
+}
+
+/// `.dialog-overlay`: a window-wide 60% black backdrop with `content` centred; a click on
+/// the backdrop calls `on_dismiss`. `content` should `.occlude()` so clicks inside it stay
+/// there.
+pub fn modal(
+    window: &Window,
+    content: impl IntoElement,
+    on_dismiss: impl Fn(&mut Window, &mut App) + 'static,
+) -> gpui_kit::AnyElement {
+    let size = window.viewport_size();
+    gpui_kit::deferred(
+        gpui_kit::anchored()
+            .position(gpui_kit::point(px(0.), px(0.)))
+            .position_mode(gpui_kit::AnchoredPositionMode::Window)
+            .child(
+                div()
+                    .id("dialog-overlay")
+                    .w(size.width)
+                    .h(size.height)
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .bg(gpui_kit::rgba(0x00000099))
+                    .occlude()
+                    .on_mouse_down(gpui_kit::MouseButton::Left, move |_, window, cx| on_dismiss(window, cx))
+                    .child(content),
+            ),
+    )
+    .with_priority(1)
+    .into_any_element()
+}
+
+/// The shadow of Electron's dialogs (`box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4)`).
+pub fn dialog_shadow() -> Vec<gpui_kit::BoxShadow> {
+    vec![gpui_kit::BoxShadow {
+        color: gpui_kit::rgba(0x00000066).into(),
+        offset: gpui_kit::point(px(0.), px(8.)),
+        blur_radius: px(32.),
+        spread_radius: px(0.),
+        inset: false,
+    }]
+}

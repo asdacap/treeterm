@@ -1,15 +1,15 @@
 //! The GitHub tab (`GitHubBrowser.tsx`): the PR the session's git controller loaded.
 
-use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::assets::IconName;
 use gpui_kit::component::spinner::Spinner;
-use gpui_kit::component::{Disableable as _, Sizable as _, h_flex, v_flex};
+use gpui_kit::component::{Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::*;
-use gpui_kit::{AnyElement, Context, Entity, Hsla, SharedString, Subscription, Window, div, px, rgb};
+use gpui_kit::{AnyElement, Context, Entity, FontWeight, Hsla, SharedString, Subscription, Window, div, px, rgb, rgba};
 use treeterm_model::git_controller::GitController;
 use treeterm_model::tool_tabs::github::{Mark, PrPanel, check_mark, panel, review_label, review_mark, state_label, thread_location};
 
-use super::heading;
 use crate::theme::colors;
+use crate::ui::{MONO, action_button, icon, normal_line};
 
 pub struct GitHubView {
     /// `None`: the session has no GitHub client.
@@ -17,17 +17,23 @@ pub struct GitHubView {
     _observe: Option<Subscription>,
 }
 
-/// A mark's glyph and colour (`github-icon-*`).
-fn mark(mark: Mark) -> (&'static str, Hsla) {
-    match mark {
-        Mark::Approved => ("✓", rgb(0x4caf50).into()),
-        Mark::Rejected => ("✗", rgb(0xf44336).into()),
-        Mark::Commented => ("💬", rgb(0x2196f3).into()),
-        Mark::Pending => ("◷", rgb(0xff9800).into()),
-        Mark::Dismissed => ("!", rgb(0x9e9e9e).into()),
-        Mark::Running => ("◌", rgb(0xff9800).into()),
-        Mark::Unknown => ("!", rgb(0xff9800).into()),
-    }
+/// A mark's icon in its `.github-icon-*` colour; a running check spins.
+fn mark(mark: Mark, secondary: Hsla) -> AnyElement {
+    let (name, color): (IconName, Hsla) = match mark {
+        Mark::Approved => (IconName::CircleCheck, rgb(0x238636).into()),
+        Mark::Rejected => (IconName::CircleX, rgb(0xb62324).into()),
+        Mark::Commented => (IconName::MessageSquare, rgb(0xd29922).into()),
+        Mark::Pending => (IconName::Clock, secondary),
+        Mark::Dismissed | Mark::Unknown => (IconName::CircleAlert, secondary),
+        Mark::Running => {
+            return Spinner::new()
+                .icon(gpui_kit::component::Icon::new(IconName::LoaderCircle))
+                .with_size(px(14.))
+                .color(secondary)
+                .into_any_element();
+        }
+    };
+    icon(name, 14., color).flex_shrink_0().into_any_element()
 }
 
 impl GitHubView {
@@ -36,28 +42,54 @@ impl GitHubView {
         Self { controller, _observe: observe }
     }
 
-    fn refresh_button(&self, refreshing: bool, label: bool) -> Button {
+    /// `.workspace-action-btn` with the refresh icon (a spinner while refreshing), and the
+    /// "Refresh" label in the empty state.
+    fn refresh_button(&self, refreshing: bool, label: bool, cx: &mut Context<Self>) -> AnyElement {
         let controller = self.controller.clone();
-        let button = Button::new("github-refresh").small().ghost().disabled(refreshing);
-        let button = match (refreshing, label) {
-            (true, _) => button.child(Spinner::new()),
-            (false, true) => button.label("⟳ Refresh"),
-            (false, false) => button.label("⟳"),
+        let primary = colors(cx).text_primary;
+        let glyph = if refreshing {
+            Spinner::new()
+                .icon(gpui_kit::component::Icon::new(IconName::LoaderCircle))
+                .with_size(px(14.))
+                .color(primary)
+                .into_any_element()
+        } else {
+            icon(IconName::RefreshCw, 14., primary).into_any_element()
         };
-        button.on_click(move |_, _, cx| {
-            if let Some(controller) = &controller {
-                controller.update(cx, |c, cx| c.refresh(cx));
-            }
-        })
+        action_button("github-refresh", cx)
+            .when(refreshing, |d| d.opacity(0.5))
+            .child(glyph)
+            .when(label, |d| d.child(div().ml(px(4.)).child("Refresh")))
+            .when(!refreshing, |d| {
+                d.on_click(move |_, _, cx| {
+                    if let Some(controller) = &controller {
+                        controller.update(cx, |c, cx| c.refresh(cx));
+                    }
+                })
+            })
+            .into_any_element()
     }
+}
+
+/// `.github-section`: a bordered box with its 13px title.
+fn section(title: String, border: Hsla) -> gpui_kit::Div {
+    v_flex().p(px(12.)).rounded(px(6.)).border_1().border_color(border).child(
+        div()
+            .mb(px(8.))
+            .text_size(px(13.))
+            .line_height(normal_line(13.))
+            .font_weight(FontWeight::SEMIBOLD)
+            .child(title),
+    )
 }
 
 impl Render for GitHubView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let c = colors(cx);
-        let (secondary, border, card, accent) = (c.text_secondary, c.border, c.bg_secondary, c.accent);
+        let (secondary, primary, border, hover_bg) = (c.text_secondary, c.text_primary, c.border, c.bg_secondary);
+        let root = v_flex().id("github-pr").size_full().overflow_y_scroll().p(px(16.)).text_color(primary);
         let Some(controller) = &self.controller else {
-            return centered(div().text_color(secondary).child("GitHub is not available in this session"));
+            return root.child(empty(div().child("GitHub is not available in this session"), secondary));
         };
         let (status, refreshing) = {
             let git = controller.read(cx);
@@ -65,135 +97,149 @@ impl Render for GitHubView {
         };
         let (pr, details) = match panel(&status.pull_request) {
             PrPanel::NoPr => {
-                return centered(
+                return root.child(empty(
                     v_flex()
-                        .gap_2()
+                        .gap(px(12.))
                         .items_center()
-                        .child(div().text_color(secondary).child("No open pull request found for this branch."))
-                        .child(self.refresh_button(refreshing, true)),
-                );
+                        .child(div().child("No open pull request found for this branch."))
+                        .child(self.refresh_button(refreshing, true, cx)),
+                    secondary,
+                ));
             }
             PrPanel::Found { pr, details } => (pr.clone(), details.cloned().map_err(str::to_owned)),
         };
         let url = pr.url.clone();
-        let header = v_flex()
-            .gap_2()
-            .pb_3()
-            .border_b_1()
-            .border_color(border)
-            .child(
-                h_flex()
-                    .gap_2()
-                    .items_center()
-                    .child(div().flex_1().text_lg().child(format!("#{} {}", pr.number, pr.title)))
-                    .child(self.refresh_button(refreshing, false))
-                    .child(
-                        Button::new("github-open")
-                            .small()
-                            .ghost()
-                            .label("↗ Open on GitHub")
+        let mut header = v_flex().mb(px(16.)).child(
+            h_flex()
+                .justify_between()
+                .gap(px(8.))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .truncate()
+                        .text_size(px(16.))
+                        .line_height(normal_line(16.))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child(format!("#{} {}", pr.number, pr.title)),
+                )
+                .child(
+                    h_flex().flex_shrink_0().gap(px(4.)).child(self.refresh_button(refreshing, false, cx)).child(
+                        action_button("github-open", cx)
+                            .child(icon(IconName::ExternalLink, 14., primary))
+                            .tooltip(|window, cx| gpui_kit::component::tooltip::Tooltip::new("Open on GitHub").build(window, cx))
                             .on_click(move |_, _, cx| cx.open_url(&url)),
                     ),
-            );
-        let mut sections = v_flex().gap_4().pt_3();
+                ),
+        );
         let details = match details {
             Ok(details) => details,
             Err(reason) => {
-                return v_flex()
-                    .id("github-pr")
-                    .size_full()
-                    .p_4()
-                    .overflow_y_scroll()
-                    .child(header)
-                    .child(div().pt_3().text_sm().text_color(secondary).child(format!("Reviews and checks are unavailable: {reason}")))
-                    .into_any_element();
+                return root.child(header).child(
+                    div()
+                        .text_size(px(12.))
+                        .text_color(secondary)
+                        .child(format!("Reviews and checks are unavailable: {reason}")),
+                );
             }
         };
-        let header = header.child(h_flex().child(
-            div()
-                .px_2()
-                .rounded_md()
-                .bg(match details.state {
-                    treeterm_core::github::PrState::Open => rgb(0x238636),
-                    treeterm_core::github::PrState::Merged => rgb(0x8957e5),
-                    treeterm_core::github::PrState::Closed | treeterm_core::github::PrState::Other(_) => rgb(0xda3633),
-                })
-                .text_sm()
-                .text_color(gpui_kit::white())
-                .child(state_label(&details.state)),
-        ));
+        let (badge_fg, badge_bg) = match details.state {
+            treeterm_core::github::PrState::Open => (0x238636, 0x23863626),
+            treeterm_core::github::PrState::Merged => (0x8250df, 0x8250df26),
+            treeterm_core::github::PrState::Closed | treeterm_core::github::PrState::Other(_) => (0xb62324, 0xb6232426),
+        };
+        header = header.child(
+            h_flex().mt(px(6.)).child(
+                div()
+                    .px(px(8.))
+                    .py(px(2.))
+                    .rounded(px(12.))
+                    .bg(rgba(badge_bg))
+                    .text_size(px(11.))
+                    .line_height(normal_line(11.))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(rgb(badge_fg))
+                    .child(state_label(&details.state)),
+            ),
+        );
+        let mut sections = v_flex().gap(px(16.));
+        let item = || h_flex().gap(px(6.)).text_size(px(12.)).line_height(normal_line(12.));
         if !details.reviews.is_empty() {
-            let mut list = v_flex().gap_1();
+            let mut list = v_flex().gap(px(6.));
             for review in &details.reviews {
-                let (glyph, color) = mark(review_mark(&review.state));
                 list = list.child(
-                    h_flex()
-                        .gap_2()
-                        .text_sm()
-                        .child(div().text_color(color).child(glyph))
-                        .child(div().child(review.author.clone()))
+                    item()
+                        .child(mark(review_mark(&review.state), secondary))
+                        .child(div().font_weight(FontWeight::MEDIUM).child(review.author.clone()))
                         .child(div().text_color(secondary).child(review_label(&review.state))),
                 );
             }
-            sections = sections.child(v_flex().gap_2().child(heading("Reviews", None, secondary)).child(list));
+            sections = sections.child(section("Reviews".into(), border).child(list));
         }
         if !details.check_runs.is_empty() {
-            let mut list = v_flex().gap_1();
+            let mut list = v_flex().gap(px(6.));
             for check in &details.check_runs {
-                let (glyph, color) = mark(check_mark(check));
                 list = list.child(
-                    h_flex().gap_2().text_sm().child(div().text_color(color).child(glyph)).child(check.name.clone()),
+                    item()
+                        .child(mark(check_mark(check), secondary))
+                        .child(div().min_w_0().truncate().child(check.name.clone())),
                 );
             }
-            sections = sections.child(v_flex().gap_2().child(heading("Checks", None, secondary)).child(list));
+            sections = sections.child(section("Checks".into(), border).child(list));
         }
         let threads = &details.unresolved_threads;
         let threads_section = if threads.is_empty() {
-            v_flex()
-                .gap_2()
-                .child(heading("Unresolved Comments", None, secondary))
-                .child(div().text_sm().text_color(secondary).child("No unresolved comments"))
+            section("Unresolved Comments".into(), border)
+                .child(div().text_size(px(12.)).text_color(secondary).child("No unresolved comments"))
         } else {
-            let mut list = v_flex().gap_2();
+            let mut list = v_flex().gap(px(6.));
             for (index, thread) in threads.iter().enumerate() {
                 let url = pr.url.clone();
                 list = list.child(
                     v_flex()
                         .id(SharedString::from(format!("github-thread-{index}")))
-                        .p_2()
-                        .gap_1()
-                        .rounded_md()
+                        .p(px(8.))
+                        .rounded(px(4.))
                         .border_1()
                         .border_color(border)
-                        .bg(card)
                         .cursor_pointer()
+                        .hover(move |d| d.bg(hover_bg))
                         .child(
                             h_flex()
-                                .gap_2()
-                                .text_xs()
-                                .child(div().flex_1().truncate().text_color(accent).child(thread_location(thread)))
-                                .child(div().text_color(secondary).child(thread.author.clone())),
+                                .justify_between()
+                                .mb(px(4.))
+                                .text_size(px(11.))
+                                .line_height(normal_line(11.))
+                                .text_color(secondary)
+                                .child(div().font_family(MONO).child(thread_location(thread)))
+                                .child(div().child(thread.author.clone())),
                         )
-                        .child(div().text_sm().child(thread.body.clone()))
+                        .child(
+                            div()
+                                .max_h(px(60.))
+                                .overflow_hidden()
+                                .text_size(px(12.))
+                                .line_height(px(16.8))
+                                .child(thread.body.clone()),
+                        )
                         .on_click(move |_, _, cx| cx.open_url(&url)),
                 );
             }
-            v_flex()
-                .gap_2()
-                .child(heading("Unresolved Comments", Some(format!("({})", threads.len())), secondary))
-                .child(list)
+            section(format!("Unresolved Comments ({})", threads.len()), border).child(list)
         };
-        v_flex()
-            .id("github-pr")
-            .size_full()
-            .p_4()
-            .overflow_y_scroll()
-            .child(header)
-            .child(sections.child(threads_section))
-            .into_any_element()
+        root.child(header).child(sections.child(threads_section))
     }
 }
 
-fn centered(child: impl IntoElement) -> AnyElement {
-    div().size_full().flex().items_center().justify_center().p(px(16.)).child(child).into_any_element()
+/// `.github-browser-empty`: centred, secondary, 16px.
+fn empty(child: impl IntoElement, secondary: Hsla) -> AnyElement {
+    v_flex()
+        .size_full()
+        .items_center()
+        .justify_center()
+        .text_size(px(16.))
+        .line_height(px(19.))
+        .text_color(secondary)
+        .child(child)
+        .into_any_element()
 }
