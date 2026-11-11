@@ -16,6 +16,14 @@ cargo build -p treeterm-app            # add --features automation for the contr
 For an isolated sandbox (separate HOME, socket, daemon) and the automation socket, see
 `AGENTS.md`.
 
+End-to-end tests launch the real binary in such a sandbox (daemon lifecycle, terminal output
+across restarts). They open a window, so they only run when asked:
+
+```sh
+(cd daemon-rs && cargo build -p treeterm-daemon)
+cd app-rs && cargo test -p treeterm-app --features automation --test e2e -- --ignored --test-threads=1
+```
+
 ## Packaging
 
 `app-rs/xtask` packages the app with plain `cargo`/`std::process` (no packaging crates, nothing
