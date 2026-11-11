@@ -340,6 +340,8 @@ pub struct SessionStore {
     op_runner: Option<Task<()>>,
     /// The workspace this session's window shows, if any.
     viewed: Option<String>,
+    /// The merge running or last finished, with git's output (`mergeOutput`).
+    merge_output: Option<MergeOutput>,
     /// For a session on an ssh host: where its web apps' ports are forwarded from.
     remote: Option<crate::web_app::RemoteHost>,
     /// Recently used worktrees on the daemon's host (`~/.treeterm/worktrees.json`). Set by
@@ -414,6 +416,7 @@ impl SessionStore {
             ops: VecDeque::new(),
             op_runner: None,
             viewed: None,
+            merge_output: None,
             remote: None,
             registry_api: None,
             git_controllers: HashMap::new(),
@@ -1968,10 +1971,48 @@ impl SessionStore {
     /// uncommitted changes. Before a merge that removes the child, its uncommitted work is
     /// committed as WIP; after it the child is marked merged and removed with its worktree
     /// and branch. Failures show on the child.
+    /// The merge running or last finished, if not dismissed.
+    pub fn merge_output(&self) -> Option<&MergeOutput> {
+        self.merge_output.as_ref()
+    }
+
+    pub fn dismiss_merge_output(&mut self, cx: &mut Context<Self>) {
+        if self.merge_output.as_ref().is_some_and(|o| o.state != MergeState::Running) {
+            self.merge_output = None;
+            cx.notify();
+        }
+    }
+
     pub fn merge_workspace(&mut self, id: &str, squash: bool, after: AfterMerge, cx: &mut Context<Self>) {
         let Some(store) = self.workspace_store(id).cloned() else {
             return;
         };
+        let branch = store.read(cx).file().git_branch.clone().unwrap_or_default();
+        self.merge_output = Some(MergeOutput {
+            title: format!(
+                "{} {branch}{}",
+                if squash { "Squash merge" } else { "Merge" },
+                if after == AfterMerge::Remove { " and remove worktree" } else { "" }
+            ),
+            lines: Vec::new(),
+            state: MergeState::Running,
+        });
+        cx.notify();
+        let (lines_tx, mut lines_rx) = futures::channel::mpsc::unbounded::<String>();
+        cx.spawn(async move |this, cx| {
+            while let Some(line) = lines_rx.next().await {
+                let done = this.update(cx, |session, cx| {
+                    if let Some(output) = &mut session.merge_output {
+                        output.lines.push(line);
+                        cx.notify();
+                    }
+                });
+                if done.is_err() {
+                    return;
+                }
+            }
+        })
+        .detach();
         let id = id.to_owned();
         let lock = self.acquire_lock(cx);
         let git = self.conn.git();
@@ -1979,7 +2020,7 @@ impl SessionStore {
             let locked = lock.await.unwrap_or_else(|_| Err("session store dropped".to_owned()));
             let result = match locked {
                 Ok(()) => {
-                    let merged = merge_locked(&this, &id, squash, after, &git, cx).await;
+                    let merged = merge_locked(&this, &id, squash, after, &git, &lines_tx, cx).await;
                     let result = match (merged, after) {
                         (Ok(()), AfterMerge::Remove) => {
                             match this.update(cx, |_, cx| store.update(cx, |w, cx| w.set_status(WorkspaceStatus::Merged, cx))) {
@@ -2002,10 +2043,21 @@ impl SessionStore {
                 }
                 Err(error) => Err(error),
             };
-            if let Err(error) = result {
-                match this.update(cx, |session, cx| session.set_operation_error(&id, &store, error, cx)) {
-                    Ok(()) | Err(_) => {}
+            drop(lines_tx);
+            let state = match &result {
+                Ok(()) => MergeState::Succeeded,
+                Err(error) => MergeState::Failed(error.clone()),
+            };
+            match this.update(cx, |session, cx| {
+                if let Some(output) = &mut session.merge_output {
+                    output.state = state;
                 }
+                if let Err(error) = result {
+                    session.set_operation_error(&id, &store, error, cx);
+                }
+                cx.notify();
+            }) {
+                Ok(()) | Err(_) => {}
             }
         })
         .detach();
@@ -2246,9 +2298,15 @@ async fn merge_locked(
     squash: bool,
     after: AfterMerge,
     git: &treeterm_core::git::GitApi,
+    lines: &futures::channel::mpsc::UnboundedSender<String>,
     cx: &mut gpui_kit::AsyncApp,
 ) -> Result<(), String> {
     use treeterm_core::git::{MergeMode, Progress};
+    let report = |text: &str| {
+        if lines.unbounded_send(text.to_owned()).is_err() {
+            tracing::debug!("merge output dropped: session gone");
+        }
+    };
     let (child_path, child_name, child_branch, parent_path) = this
         .update(cx, |session, cx| -> Result<_, String> {
             let child = session.workspace_store(id).ok_or("Workspace not found")?.read(cx).workspace();
@@ -2274,14 +2332,29 @@ async fn merge_locked(
         git.stage_all(&child_path)
             .await
             .map_err(|e| format!("Failed to stage changes: {e}"))?;
-        git.commit_all(&child_path, &format!("WIP: Auto-commit before merge from {child_name}"), Progress::Silent)
+        git.commit_all(&child_path, &format!("WIP: Auto-commit before merge from {child_name}"), Progress::Report(&report))
             .await
             .map_err(|e| format!("Failed to commit changes: {e}"))?;
     }
     let mode = if squash { MergeMode::Squash } else { MergeMode::Merge };
-    git.merge(&parent_path, &child_branch, mode, Progress::Silent)
+    git.merge(&parent_path, &child_branch, mode, Progress::Report(&report))
         .await
         .map_err(|e| format!("Merge failed: {e}"))
+}
+
+/// A merge's progress for the output panel.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MergeOutput {
+    pub title: String,
+    pub lines: Vec<String>,
+    pub state: MergeState,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MergeState {
+    Running,
+    Succeeded,
+    Failed(String),
 }
 
 fn remember_hash(sync: &mut WorkspaceSync, sha: String) {

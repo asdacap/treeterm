@@ -447,6 +447,14 @@ fn merging_a_child_brings_its_commits_into_the_parent_and_removes_it(cx: &mut Te
     assert!(git_in(&repo, &["log", "--oneline"]).contains("WIP: Auto-commit before merge from feat-merge"));
     wait_for_disk(cx, || !child_dir.exists());
     assert!(!git_in(&repo, &["branch", "--list", "feat-merge"]).contains("feat-merge"));
+    // The output panel's record says how it ended.
+    wait_until(cx, &store, |s| {
+        s.merge_output().is_some_and(|o| o.state == treeterm_model::session_store::MergeState::Succeeded)
+    });
+    let title = store.read_with(cx, |s, _| s.merge_output().map(|o| o.title.clone()));
+    assert_eq!(title.as_deref(), Some("Merge feat-merge and remove worktree"));
+    store.update(cx, |s, cx| s.dismiss_merge_output(cx));
+    assert!(store.read_with(cx, |s, _| s.merge_output().is_none()));
 }
 
 /// A temp git repo with one commit, plus cleanup of what tests create for it under the
