@@ -263,12 +263,16 @@ impl Render for SettingsView {
         };
         let error = colors(cx).error;
         v_flex()
+            .w_full()
             .gap_2()
             .child(
-                h_flex().h(px(520.)).items_start().child(self.sidebar(cx)).child(
+                h_flex().w_full().h(px(520.)).items_start().child(self.sidebar(cx)).child(
                     div()
                         .id("settings-panel")
                         .flex_1()
+                        // Without a zero minimum, wide inputs and long help lines size the
+                        // panel past the dialog's edge.
+                        .min_w_0()
                         .h_full()
                         .overflow_y_scroll()
                         .pl_4()
