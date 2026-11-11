@@ -86,6 +86,8 @@ pub enum TabContent {
     Files(Entity<crate::file_browser::FileBrowser>),
     Editor(Entity<crate::text_editor::TextEditor>),
     Review(Entity<crate::review::ReviewModel>),
+    /// A web page; the view owns the native webview.
+    Browser { url: String },
     /// The tab's PTY is being created.
     StartingTerminal,
     Failed(String),
@@ -108,6 +110,7 @@ enum TabRef {
         model: Entity<crate::review::ReviewModel>,
         _events: Subscription,
     },
+    Browser { url: String },
 }
 
 enum TerminalTab {
@@ -196,6 +199,7 @@ impl WorkspaceStore {
             Some(TabRef::Files { model, .. }) => TabContent::Files(model.clone()),
             Some(TabRef::Editor { model, .. }) => TabContent::Editor(model.clone()),
             Some(TabRef::Review { model, .. }) => TabContent::Review(model.clone()),
+            Some(TabRef::Browser { url }) => TabContent::Browser { url: url.clone() },
             None => TabContent::NotPorted(tab.application_id.clone()),
         })
     }
@@ -301,7 +305,8 @@ impl WorkspaceStore {
             TabRef::Terminal(TerminalTab::Creating { .. } | TerminalTab::Failed(_))
             | TabRef::Files { .. }
             | TabRef::Editor { .. }
-            | TabRef::Review { .. } => None,
+            | TabRef::Review { .. }
+            | TabRef::Browser { .. } => None,
         })
     }
 
@@ -336,6 +341,11 @@ impl WorkspaceStore {
                     store.merge_tab_state(&owned_tab, next.clone(), cx);
                 });
                 self.tabs.insert(tab_id.to_owned(), TabRef::Files { model, _events: events });
+            }
+            AppKind::Browser { url } => {
+                let path = tab.state.get("path").and_then(Value::as_str).unwrap_or_default();
+                let full = format!("{}{}", url.trim_end_matches('/'), if path.is_empty() || path.starts_with('/') { path.to_owned() } else { format!("/{path}") });
+                self.tabs.insert(tab_id.to_owned(), TabRef::Browser { url: full });
             }
             AppKind::Review => {
                 let base = match (tab.state.get("baseBranchOverride").and_then(Value::as_str), &self.parent_branch) {
@@ -615,7 +625,8 @@ impl WorkspaceStore {
                 TabRef::Terminal(TerminalTab::Failed(_))
                 | TabRef::Files { .. }
                 | TabRef::Editor { .. }
-                | TabRef::Review { .. },
+                | TabRef::Review { .. }
+                | TabRef::Browser { .. },
             )
             | None => {}
         }
@@ -776,7 +787,8 @@ impl WorkspaceStore {
                 TabRef::Terminal(TerminalTab::Creating { .. } | TerminalTab::Failed(_))
                 | TabRef::Files { .. }
                 | TabRef::Editor { .. }
-                | TabRef::Review { .. } => {}
+                | TabRef::Review { .. }
+                | TabRef::Browser { .. } => {}
             }
         }
     }

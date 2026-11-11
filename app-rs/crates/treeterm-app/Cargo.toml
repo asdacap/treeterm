@@ -14,6 +14,9 @@ path = "src/main.rs"
 treeterm-core.workspace = true
 treeterm-model.workspace = true
 treeterm-term.workspace = true
+gpui-webview = "=0.9.1"
+# The wry fork gpui-webview builds on (same version, so builders are interchangeable).
+wry = { package = "lb-wry", version = "=0.53.3" }
 gpui-kit = { workspace = true, features = ["component", "assets", "tree-sitter-languages"] }
 tokio.workspace = true
 tracing.workspace = true

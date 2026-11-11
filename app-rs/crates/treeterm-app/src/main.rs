@@ -4,6 +4,7 @@ mod app_view;
 mod child_dialog;
 #[cfg(feature = "automation")]
 mod automation;
+mod browser_view;
 mod daemon_binary;
 mod file_browser_view;
 mod keybinding_overlay;

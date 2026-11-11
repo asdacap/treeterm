@@ -46,6 +46,8 @@ struct Connected {
     editor_views: HashMap<EntityId, Entity<crate::text_editor_view::TextEditorView>>,
     /// Views of Review tabs, by model.
     review_views: HashMap<EntityId, Entity<crate::review_view::ReviewView>>,
+    /// Browser views by (workspace, tab): they own native webviews, hidden when not shown.
+    browser_views: HashMap<(String, String), Entity<crate::browser_view::BrowserView>>,
     /// Focus the shown terminal on the next render (after a workspace or tab switch).
     focus_pending: bool,
     _selection: Subscription,
@@ -129,6 +131,7 @@ impl AppView {
             file_views: HashMap::new(),
             editor_views: HashMap::new(),
             review_views: HashMap::new(),
+            browser_views: HashMap::new(),
             focus_pending: false,
             _selection: selection,
         }
@@ -496,6 +499,14 @@ fn workspace_pane(connected: &mut Connected, window: &mut Window, cx: &mut Conte
                     .clone();
                 div().size_full().child(view).into_any_element()
             }
+            Some(TabContent::Browser { url }) => {
+                let view = connected
+                    .browser_views
+                    .entry((id.clone(), tab_id.clone()))
+                    .or_insert_with(|| cx.new(|_| crate::browser_view::BrowserView::new(url)))
+                    .clone();
+                div().size_full().child(view).into_any_element()
+            }
             Some(TabContent::StartingTerminal) => {
                 centered(div().text_color(secondary).child("Starting terminal…"))
             }
@@ -508,6 +519,19 @@ fn workspace_pane(connected: &mut Connected, window: &mut Window, cx: &mut Conte
             None => centered(div().text_color(secondary).child("No tabs")),
         },
     };
+
+    // Native webviews draw above GPUI: show only the active tab's, and none under a dialog.
+    let dialog_open = {
+        use gpui_kit::component::WindowExt as _;
+        window.has_active_dialog(cx)
+    };
+    let shown_key = active.clone().map(|tab| (id.clone(), tab));
+    let views: Vec<((String, String), Entity<crate::browser_view::BrowserView>)> =
+        connected.browser_views.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+    for (key, view) in views {
+        let shown = !dialog_open && shown_key.as_ref() == Some(&key);
+        view.update(cx, |v, cx| v.set_shown(shown, cx));
+    }
 
     v_flex()
         .flex_1()

@@ -28,6 +28,8 @@ pub enum AppKind {
     Editor,
     /// What a worktree changed (`review`).
     Review,
+    /// A local web page (`browser-<instance>`); only localhost URLs.
+    Browser { url: String },
 }
 
 impl AppKind {
@@ -35,7 +37,7 @@ impl AppKind {
     pub fn is_terminal(&self) -> bool {
         match self {
             AppKind::Terminal { .. } | AppKind::AiHarness { .. } | AppKind::CustomRunner { .. } => true,
-            AppKind::Files | AppKind::Editor | AppKind::Review => false,
+            AppKind::Files | AppKind::Editor | AppKind::Review | AppKind::Browser { .. } => false,
         }
     }
 }
@@ -66,6 +68,7 @@ impl AppDef {
             }),
             AppKind::Files => json!({ "selectedPath": null, "expandedDirs": [] }),
             AppKind::Review => json!({ "viewMode": "committed" }),
+            AppKind::Browser { .. } => json!({ "localPort": { "status": "unassigned" }, "path": "" }),
             AppKind::Editor => json!({
                 "status": "ready", "filePath": "", "originalContent": "", "currentContent": "",
                 "language": "plaintext", "isDirty": false, "viewMode": "editor"
@@ -95,7 +98,7 @@ impl AppDef {
             AppKind::CustomRunner { command_template } => {
                 Some(command_template.replace("{{workspace_path}}", workspace_path))
             }
-            AppKind::Files | AppKind::Editor | AppKind::Review => None,
+            AppKind::Files | AppKind::Editor | AppKind::Review | AppKind::Browser { .. } => None,
         }
     }
 
@@ -107,9 +110,27 @@ impl AppDef {
             | AppKind::CustomRunner { .. }
             | AppKind::Files
             | AppKind::Editor
-            | AppKind::Review => None,
+            | AppKind::Review
+            | AppKind::Browser { .. } => None,
         }
     }
+}
+
+/// Whether a page may load: http(s) on localhost or 127.0.0.1 only (`isAllowedWebviewUrl`).
+pub fn is_allowed_webview_url(url: &str) -> bool {
+    let Some((scheme, rest)) = url.split_once("://") else {
+        return false;
+    };
+    if scheme != "http" && scheme != "https" {
+        return false;
+    }
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    let host_port = authority.rsplit('@').next().unwrap_or_default();
+    let host = match host_port.strip_prefix('[') {
+        Some(_) => return false, // IPv6 literals are not on the list
+        None => host_port.split(':').next().unwrap_or_default(),
+    };
+    matches!(host.to_ascii_lowercase().as_str(), "localhost" | "127.0.0.1")
 }
 
 pub struct AppRegistry {
@@ -206,6 +227,19 @@ impl AppRegistry {
                 is_default: instance.is_default,
             });
         }
+        for instance in &settings.browser.instances {
+            apps.push(AppDef {
+                id: format!("browser-{}", instance.id),
+                name: instance.name.clone(),
+                icon: instance.icon.clone(),
+                kind: AppKind::Browser {
+                    url: instance.url.clone(),
+                },
+                can_close: true,
+                show_in_new_tab_menu: true,
+                is_default: instance.is_default,
+            });
+        }
         Self { apps }
     }
 
@@ -282,6 +316,17 @@ mod tests {
             "customrunner-build"
         );
         assert_eq!(registry.default_for_workspace([], "aiharness-claude").unwrap().id, "aiharness-claude");
+    }
+
+    #[test]
+    fn only_local_http_pages_are_allowed() {
+        assert!(is_allowed_webview_url("http://localhost:3000/app"));
+        assert!(is_allowed_webview_url("https://127.0.0.1/"));
+        assert!(!is_allowed_webview_url("https://example.com"));
+        assert!(!is_allowed_webview_url("http://localhost.evil.com"));
+        assert!(!is_allowed_webview_url("http://user@evil.com"));
+        assert!(!is_allowed_webview_url("file:///etc/passwd"));
+        assert!(!is_allowed_webview_url("javascript:alert(1)"));
     }
 
     #[test]
