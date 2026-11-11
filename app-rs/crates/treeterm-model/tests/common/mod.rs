@@ -4,7 +4,7 @@
 
 use std::time::Duration;
 
-use gpui_kit::{Entity, TestAppContext};
+use gpui_kit::{App, Entity, TestAppContext};
 use treeterm_core::daemon::DaemonConnection;
 use treeterm_core::rt::Rt;
 use treeterm_testkit::TestDaemon;
@@ -56,9 +56,18 @@ pub fn wait_until<T: 'static>(
     entity: &Entity<T>,
     done: impl Fn(&T) -> bool,
 ) {
+    wait_until_app(cx, entity, |e, _| done(e));
+}
+
+/// [`wait_until`] for conditions that read other entities.
+pub fn wait_until_app<T: 'static>(
+    cx: &mut TestAppContext,
+    entity: &Entity<T>,
+    done: impl Fn(&T, &App) -> bool,
+) {
     for _ in 0..1000 {
         cx.run_until_parked();
-        if entity.read_with(cx, |e, _| done(e)) {
+        if entity.read_with(cx, |e, cx| done(e, cx)) {
             return;
         }
         std::thread::sleep(Duration::from_millis(10));

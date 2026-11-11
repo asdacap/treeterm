@@ -5,5 +5,7 @@
 //! I/O goes through `treeterm_core` and arrives via [`treeterm_core::rt`].
 
 pub mod app_store;
+pub mod apps;
 pub mod session_store;
 pub mod terminal;
+pub mod workspace_store;

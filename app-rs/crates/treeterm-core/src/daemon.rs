@@ -30,7 +30,7 @@ pub enum ApiError {
 pub const UNARY_DEADLINE: Duration = Duration::from_secs(30);
 
 /// Run a unary call with [`UNARY_DEADLINE`].
-async fn unary<T>(
+pub(crate) async fn unary<T>(
     call: impl Future<Output = Result<tonic::Response<T>, tonic::Status>>,
 ) -> Result<T, ApiError> {
     match tokio::time::timeout(UNARY_DEADLINE, call).await {
@@ -52,9 +52,9 @@ impl From<tonic::Status> for ApiError {
 /// (`daemon-rs/.../connection_id.rs`), so lock-sensitive calls get a connection of their own.
 #[derive(Clone)]
 pub struct DaemonConnection {
-    rt: Rt,
+    pub(crate) rt: Rt,
     socket_path: PathBuf,
-    main: DaemonClient,
+    pub(crate) main: DaemonClient,
     session: DaemonClient,
 }
 

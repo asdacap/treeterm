@@ -5,6 +5,7 @@
 //!
 //! - `state` — what the window shows (workspaces, selection, terminal screens)
 //! - `select <workspace-id>` / `tab <workspace-id> <tab-id>`
+//! - `newtab <workspace-id>` / `closetab <workspace-id> <tab-id>`
 //! - `type <text>` — type text as keystrokes; `key <keystroke>` — e.g. `enter`, `ctrl-c`
 //! - `screenshot <path.png>` — render the last frame offscreen (no screen-capture permission)
 
@@ -99,6 +100,15 @@ fn handle(line: &str, window: AnyWindowHandle, view: &Entity<AppView>, cx: &mut 
                     };
                     window.dispatch_keystroke(keystroke, cx);
                 }
+                Ok(json!({ "ok": true }))
+            }
+            "newtab" => {
+                let tab = view.update(cx, |view, cx| view.automation_new_tab(rest, cx));
+                Ok(json!({ "ok": tab.is_some(), "tab": tab }))
+            }
+            "closetab" => {
+                let (workspace, tab) = rest.split_once(' ').ok_or("usage: closetab <workspace> <tab>")?;
+                view.update(cx, |view, cx| view.automation_close_tab(workspace, tab, cx));
                 Ok(json!({ "ok": true }))
             }
             "focus" => {

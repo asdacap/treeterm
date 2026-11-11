@@ -20,6 +20,8 @@ thiserror.workspace = true
 libc.workspace = true
 tracing.workspace = true
 dirs = "6"
+sha2.workspace = true
+hex.workspace = true
 indexmap = { version = "2", features = ["serde"] }
 uuid = { version = "1", features = ["v4"] }
 

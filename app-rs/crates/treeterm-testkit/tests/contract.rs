@@ -83,3 +83,30 @@ async fn ensure_running_clears_stale_state_before_spawning() {
     assert!(!spec.pid_file.exists());
     assert!(!spec.socket_path.exists());
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn body_writes_are_compare_and_swap() {
+    use treeterm_core::wire::stable_json::sha256_hex;
+    use treeterm_core::workspace_io::{BodyWrite, Expected};
+    let daemon = TestDaemon::start();
+    let conn = DaemonConnection::open(&rt(), daemon.socket_path()).await.unwrap().unwrap();
+    let dir = daemon.workspaces_dir().to_string_lossy().into_owned();
+
+    let first = conn.write_body(&dir, "w.json", "one".into(), Expected::Absent).await.unwrap().unwrap();
+    assert_eq!(first, BodyWrite::Written);
+    let again = conn.write_body(&dir, "w.json", "two".into(), Expected::Absent).await.unwrap().unwrap();
+    assert_eq!(again, BodyWrite::Conflict);
+    let stale = conn
+        .write_body(&dir, "w.json", "two".into(), Expected::Sha(sha256_hex("zzz")))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(stale, BodyWrite::Conflict);
+    let next = conn
+        .write_body(&dir, "w.json", "two".into(), Expected::Sha(sha256_hex("one")))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(next, BodyWrite::Written);
+    assert_eq!(std::fs::read_to_string(daemon.workspaces_dir().join("w.json")).unwrap(), "two");
+}

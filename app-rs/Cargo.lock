@@ -7653,11 +7653,13 @@ version = "0.1.0"
 dependencies = [
  "dirs 6.0.0",
  "futures",
+ "hex",
  "hyper-util",
  "indexmap",
  "libc",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
@@ -7698,6 +7700,8 @@ version = "0.1.0"
 dependencies = [
  "futures",
  "gpui-kit",
+ "indexmap",
+ "serde",
  "serde_json",
  "tokio",
  "tracing",

@@ -13,6 +13,8 @@ treeterm-proto.workspace = true
 gpui-kit.workspace = true
 futures.workspace = true
 serde_json.workspace = true
+serde.workspace = true
+indexmap = "2"
 tracing.workspace = true
 uuid = { version = "1", features = ["v4"] }
 

@@ -13,3 +13,4 @@ pub mod settings;
 pub mod transport;
 pub mod tree;
 pub mod wire;
+pub mod workspace_io;

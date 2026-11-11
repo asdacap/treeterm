@@ -4,9 +4,10 @@ use std::collections::HashMap;
 
 use gpui_kit::component::{h_flex, spinner::Spinner, v_flex};
 use gpui_kit::prelude::*;
-use gpui_kit::{AnyElement, Context, Entity, EntityId, SharedString, Subscription, Window, div, px};
+use gpui_kit::{AnyElement, App, Context, Entity, EntityId, SharedString, Subscription, Window, div, px};
 use treeterm_model::app_store::{AppState, AppStore};
-use treeterm_model::session_store::{SessionStore, TabTerminal, WorkspaceEntry};
+use treeterm_model::session_store::{SessionStore, WorkspaceEntry};
+use treeterm_model::workspace_store::TabContent;
 
 use crate::terminal_view::TerminalView;
 use crate::theme::colors;
@@ -30,9 +31,6 @@ struct Connected {
     session: Entity<SessionStore>,
     tree: Entity<TreePane>,
     active: ActiveView,
-    /// The tab shown per workspace, until this window picks one it is the file's active tab.
-    /// Window-local for now: writing `activeTabId` back comes with the workspace store.
-    selected_tabs: HashMap<String, String>,
     /// Views of terminal models, by model, so focus and IME state survive re-renders.
     terminal_views: HashMap<EntityId, Entity<TerminalView>>,
     /// Focus the shown terminal on the next render (after a workspace or tab switch).
@@ -98,7 +96,6 @@ impl AppView {
             session,
             tree,
             active: ActiveView::Nothing,
-            selected_tabs: HashMap::new(),
             terminal_views: HashMap::new(),
             focus_pending: false,
             _selection: selection,
@@ -145,64 +142,112 @@ fn centered(child: impl IntoElement) -> AnyElement {
         .into_any_element()
 }
 
-/// The active workspace: header, tab strip and the selected tab. Terminal tabs are live;
+/// The active workspace: header, tab strip and the active tab. Terminal tabs are live;
 /// other application kinds arrive in later milestones.
 fn workspace_pane(connected: &mut Connected, window: &mut Window, cx: &mut Context<AppView>) -> AnyElement {
     let c = colors(cx);
-    let (secondary, error, border, active_bg, hover) =
-        (c.text_secondary, c.error, c.border, c.bg_primary, c.bg_hover);
+    let (secondary, error, border, active_bg, hover, primary) =
+        (c.text_secondary, c.error, c.border, c.bg_primary, c.bg_hover, c.text_primary);
     let tab_bar_bg = c.bg_secondary;
+    prune_terminal_views(connected, cx);
     let ActiveView::Workspace(id) = &connected.active else {
         return centered(div().text_color(secondary).child("Select a workspace"));
     };
     let id = id.clone();
-    let session = connected.session.read(cx);
-    // The selection can outlive its ref when another window removes the workspace.
-    let Some(r) = session.refs().iter().find(|r| r.id == id) else {
-        return centered(div().text_color(secondary).child("Workspace was removed"));
-    };
-    let path = r.path.clone();
-    let file = match session.workspace(&id) {
-        WorkspaceEntry::Loading => return centered(div().text_color(secondary).child("Loading…")),
-        WorkspaceEntry::Error(reason) => {
+    let workspace = match connected.session.read(cx).entry(&id) {
+        // The selection can outlive its workspace when another window removes it.
+        None => return centered(div().text_color(secondary).child("Workspace was removed")),
+        Some(WorkspaceEntry::Loading { message, .. }) => {
+            return centered(div().text_color(secondary).child(message.clone()));
+        }
+        Some(WorkspaceEntry::Error { error: reason, .. }) => {
             return centered(div().text_color(error).child(reason.clone()));
         }
-        WorkspaceEntry::Loaded(file) => file.clone(),
+        Some(WorkspaceEntry::Loaded(store) | WorkspaceEntry::OperationError { store, .. }) => store.clone(),
     };
-
-    let selected = connected
-        .selected_tabs
-        .get(&id)
-        .filter(|tab| file.app_states.contains_key(*tab))
-        .cloned()
-        .or_else(|| file.active_tab_id.clone().filter(|tab| file.app_states.contains_key(tab)))
-        .or_else(|| file.app_states.keys().next().cloned());
+    let operation_error = match connected.session.read(cx).entry(&id) {
+        Some(WorkspaceEntry::OperationError { error, .. }) => Some(error.clone()),
+        Some(_) | None => None,
+    };
+    let (path, file) = {
+        let ws = workspace.read(cx).workspace();
+        (ws.path.clone(), ws.file.clone())
+    };
+    let active = file.active_tab_id.clone().filter(|tab| file.app_states.contains_key(tab));
 
     let mut tabs = h_flex().h(px(32.)).bg(tab_bar_bg).border_b_1().border_color(border);
+    let registry = connected.session.read(cx).registry().clone();
     for (tab_id, tab) in &file.app_states {
-        let is_selected = selected.as_deref() == Some(tab_id.as_str());
-        let ws = id.clone();
-        let tab_key = tab_id.clone();
+        let is_active = active.as_deref() == Some(tab_id.as_str());
+        // Tabs of applications the native app lacks (or that cannot close) keep no close button.
+        let closable = registry.get(&tab.application_id).is_some_and(|app| app.can_close);
+        let select = (workspace.clone(), tab_id.clone());
+        let close = (workspace.clone(), tab_id.clone());
         tabs = tabs.child(
-            div()
+            h_flex()
                 .id(SharedString::from(format!("tab-{tab_id}")))
                 .h_full()
-                .px_3()
-                .flex()
+                .pl_3()
+                .pr_1()
+                .gap_1()
                 .items_center()
                 .text_sm()
                 .border_r_1()
                 .border_color(border)
-                .when(is_selected, |d| d.bg(active_bg))
-                .when(!is_selected, |d| d.text_color(secondary).hover(move |s| s.bg(hover)))
+                .when(is_active, |d| d.bg(active_bg).text_color(primary))
+                .when(!is_active, |d| d.text_color(secondary).hover(move |s| s.bg(hover)))
                 .cursor_pointer()
                 .child(tab.title.clone())
+                .when(!closable, |d| d.pr_2())
+                .when(closable, |d| d.child(
+                    div()
+                        .id(SharedString::from(format!("tab-close-{tab_id}")))
+                        .px_1()
+                        .rounded_sm()
+                        .text_color(secondary)
+                        .hover(move |s| s.bg(hover).text_color(primary))
+                        .child("×")
+                        .on_click(cx.listener(move |_, _, _, cx| {
+                            cx.stop_propagation();
+                            let (workspace, tab) = &close;
+                            workspace.update(cx, |w, cx| w.remove_tab(tab, cx));
+                        })),
+                ))
                 .on_click(cx.listener(move |view, _, _, cx| {
+                    let (workspace, tab) = &select;
+                    workspace.update(cx, |w, cx| w.set_active_tab(tab, cx));
                     if let Body::Connected(connected) = &mut view.body {
-                        connected.selected_tabs.insert(ws.clone(), tab_key.clone());
                         connected.focus_pending = true;
-                        cx.notify();
                     }
+                    cx.notify();
+                })),
+        );
+    }
+    let default_app = connected
+        .session
+        .read(cx)
+        .registry()
+        .default_app()
+        .map(|app| app.id.clone());
+    if let Some(app_id) = default_app {
+        let target = workspace.clone();
+        tabs = tabs.child(
+            div()
+                .id("new-tab")
+                .h_full()
+                .px_3()
+                .flex()
+                .items_center()
+                .text_color(secondary)
+                .hover(move |s| s.bg(hover).text_color(primary))
+                .cursor_pointer()
+                .child("+")
+                .on_click(cx.listener(move |view, _, _, cx| {
+                    target.update(cx, |w, cx| w.add_tab(&app_id, cx));
+                    if let Body::Connected(connected) = &mut view.body {
+                        connected.focus_pending = true;
+                    }
+                    cx.notify();
                 })),
         );
     }
@@ -218,50 +263,38 @@ fn workspace_pane(connected: &mut Connected, window: &mut Window, cx: &mut Conte
         .child(div().text_sm().text_color(secondary).child(path))
         .when_some(file.git_branch.clone(), |d, branch| {
             d.child(div().text_sm().text_color(secondary).child(format!("⎇ {branch}")))
+        })
+        .when_some(operation_error, |d, error| {
+            d.child(div().text_sm().text_color(colors(cx).error).child(format!("⚠ {error}")))
         });
 
-    let content: AnyElement = match &selected {
+    let content: AnyElement = match &active {
         None => centered(div().text_color(secondary).child("No tabs")),
-        Some(tab_id) => {
-            let terminal = connected
-                .session
-                .update(cx, |session, cx| session.terminal(&id, tab_id, cx));
-            match terminal {
-                TabTerminal::Live(model) => {
-                    let view = connected
-                        .terminal_views
-                        .entry(model.entity_id())
-                        .or_insert_with(|| cx.new(|cx| TerminalView::new(model.clone(), window, cx)))
-                        .clone();
-                    if std::mem::take(&mut connected.focus_pending) {
-                        let focus = view.read(cx).focus_handle().clone();
-                        window.focus(&focus, cx);
-                    }
-                    div().size_full().child(view).into_any_element()
+        Some(tab_id) => match workspace.read(cx).tab_content(tab_id) {
+            Some(TabContent::Terminal(model)) => {
+                let view = connected
+                    .terminal_views
+                    .entry(model.entity_id())
+                    .or_insert_with(|| cx.new(|cx| TerminalView::new(model.clone(), window, cx)))
+                    .clone();
+                if std::mem::take(&mut connected.focus_pending) {
+                    let focus = view.read(cx).focus_handle().clone();
+                    window.focus(&focus, cx);
                 }
-                TabTerminal::NoPty => {
-                    centered(div().text_color(error).child("No PTY available for this terminal"))
-                }
-                TabTerminal::NotATerminal => {
-                    let app = file.app_states.get(tab_id).map(|t| t.application_id.clone()).unwrap_or_default();
-                    centered(
-                        div()
-                            .text_color(secondary)
-                            .child(format!("“{app}” tabs are not available in the native app yet")),
-                    )
-                }
+                div().size_full().child(view).into_any_element()
             }
-        }
+            Some(TabContent::StartingTerminal) => {
+                centered(div().text_color(secondary).child("Starting terminal…"))
+            }
+            Some(TabContent::Failed(message)) => centered(div().text_color(error).child(message)),
+            Some(TabContent::NotPorted(app)) => centered(
+                div()
+                    .text_color(secondary)
+                    .child(format!("“{app}” tabs are not available in the native app yet")),
+            ),
+            None => centered(div().text_color(secondary).child("No tabs")),
+        },
     };
-    // Views whose model is gone (tab closed) are dropped with it.
-    let live: Vec<EntityId> = connected.terminal_views.keys().copied().collect();
-    for entity_id in live {
-        let alive = connected.terminal_views[&entity_id].read(cx).model().entity_id() == entity_id
-            && connected.session.read(cx).has_terminal(entity_id);
-        if !alive {
-            connected.terminal_views.remove(&entity_id);
-        }
-    }
 
     v_flex()
         .flex_1()
@@ -271,6 +304,18 @@ fn workspace_pane(connected: &mut Connected, window: &mut Window, cx: &mut Conte
         .child(tabs)
         .child(div().flex_1().min_h_0().child(content))
         .into_any_element()
+}
+
+/// Drop views whose terminal is gone (tab closed, workspace removed): a view holds its
+/// model, and a model kept alive here would stay attached to its PTY.
+fn prune_terminal_views(connected: &mut Connected, cx: &App) {
+    let session = connected.session.read(cx);
+    let live: std::collections::HashSet<EntityId> = session
+        .workspace_ids()
+        .filter_map(|id| session.workspace_store(id))
+        .flat_map(|store| store.read(cx).terminals().map(|t| t.entity_id()).collect::<Vec<_>>())
+        .collect();
+    connected.terminal_views.retain(|model_id, _| live.contains(model_id));
 }
 
 #[cfg(feature = "automation")]
@@ -284,20 +329,25 @@ impl AppView {
             Body::Connected(connected) => {
                 let session = connected.session.read(cx);
                 let workspaces: Vec<_> = session
-                    .refs()
-                    .iter()
-                    .map(|r| {
-                        let entry = match session.workspace(&r.id) {
-                            WorkspaceEntry::Loading => json!("loading"),
-                            WorkspaceEntry::Error(reason) => json!({ "error": reason }),
-                            WorkspaceEntry::Loaded(file) => json!({
-                                "name": file.display_name(),
-                                "tabs": file.app_states.iter().map(|(id, t)| json!({
-                                    "id": id, "app": t.application_id, "title": t.title
-                                })).collect::<Vec<_>>(),
-                            }),
+                    .workspace_ids()
+                    .map(|id| {
+                        let entry = match session.entry(id) {
+                            Some(WorkspaceEntry::Loading { message, .. }) => json!({ "loading": message }),
+                            Some(WorkspaceEntry::Error { error, .. }) => json!({ "error": error }),
+                            Some(WorkspaceEntry::Loaded(store) | WorkspaceEntry::OperationError { store, .. }) => {
+                                let ws = store.read(cx).workspace();
+                                json!({
+                                    "name": ws.file.display_name(),
+                                    "path": ws.path,
+                                    "activeTabId": ws.file.active_tab_id,
+                                    "tabs": ws.file.app_states.iter().map(|(id, t)| json!({
+                                        "id": id, "app": t.application_id, "title": t.title, "state": t.state
+                                    })).collect::<Vec<_>>(),
+                                })
+                            }
+                            None => serde_json::Value::Null,
                         };
-                        json!({ "id": r.id, "path": r.path, "entry": entry })
+                        json!({ "id": id, "entry": entry })
                     })
                     .collect();
                 let active = match &connected.active {
@@ -324,9 +374,9 @@ impl AppView {
                     .collect();
                 json!({
                     "body": "connected",
+                    "version": session.version(),
                     "workspaces": workspaces,
                     "active": active,
-                    "selectedTabs": connected.selected_tabs,
                     "terminals": terminals,
                 })
             }
@@ -342,9 +392,29 @@ impl AppView {
 
     pub fn automation_select_tab(&mut self, workspace: &str, tab: &str, cx: &mut Context<Self>) {
         if let Body::Connected(connected) = &mut self.body {
-            connected.selected_tabs.insert(workspace.to_owned(), tab.to_owned());
+            if let Some(store) = connected.session.read(cx).workspace_store(workspace).cloned() {
+                store.update(cx, |w, cx| w.set_active_tab(tab, cx));
+            }
             connected.focus_pending = true;
             cx.notify();
+        }
+    }
+
+    pub fn automation_new_tab(&mut self, workspace: &str, cx: &mut Context<Self>) -> Option<String> {
+        let Body::Connected(connected) = &mut self.body else {
+            return None;
+        };
+        let store = connected.session.read(cx).workspace_store(workspace).cloned()?;
+        let app = connected.session.read(cx).registry().default_app()?.id.clone();
+        connected.focus_pending = true;
+        store.update(cx, |w, cx| w.add_tab(&app, cx))
+    }
+
+    pub fn automation_close_tab(&mut self, workspace: &str, tab: &str, cx: &mut Context<Self>) {
+        if let Body::Connected(connected) = &self.body
+            && let Some(store) = connected.session.read(cx).workspace_store(workspace).cloned()
+        {
+            store.update(cx, |w, cx| w.remove_tab(tab, cx));
         }
     }
 }

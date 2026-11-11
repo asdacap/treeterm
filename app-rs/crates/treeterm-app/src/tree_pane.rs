@@ -59,11 +59,13 @@ impl Render for TreePane {
         let rows: Result<Vec<RowData>, AnyElement> = match session.state() {
             SessionState::Waiting => Err(status_line("Loading session…", text_secondary)),
             SessionState::Failed(reason) => Err(status_line(reason.clone(), error)),
-            SessionState::Live(_) => Ok(session
-                .tree_rows(&self.collapsed)
+            SessionState::Live => Ok(session
+                .tree_rows(&self.collapsed, cx)
                 .into_iter()
                 .map(|row| RowData {
-                    label: Label::of(session.workspace(&row.id)),
+                    label: session
+                        .entry(&row.id)
+                        .map_or(Label::Loading, |entry| Label::of(entry, cx)),
                     id: row.id,
                     depth: row.depth,
                     has_children: row.has_children,
@@ -161,11 +163,13 @@ enum Label {
 }
 
 impl Label {
-    fn of(entry: &WorkspaceEntry) -> Self {
+    fn of(entry: &WorkspaceEntry, cx: &gpui_kit::App) -> Self {
         match entry {
-            WorkspaceEntry::Loaded(file) => Label::Name(file.display_name().to_owned().into()),
-            WorkspaceEntry::Loading => Label::Loading,
-            WorkspaceEntry::Error(reason) => Label::Error(reason.clone().into()),
+            WorkspaceEntry::Loaded(store) | WorkspaceEntry::OperationError { store, .. } => {
+                Label::Name(store.read(cx).file().display_name().to_owned().into())
+            }
+            WorkspaceEntry::Loading { .. } => Label::Loading,
+            WorkspaceEntry::Error { error, .. } => Label::Error(error.clone().into()),
         }
     }
 }

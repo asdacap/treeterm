@@ -101,6 +101,15 @@ pub fn parse_workspace_file(content: &[u8]) -> Result<WorkspaceFile, WorkspaceFi
     Ok(stored.body)
 }
 
+/// The bytes to write for `body`: the stored envelope with `parent_hash` chained in, keys
+/// sorted. `parent_hash` is the sha of the body this write supersedes (`""` for the first).
+pub fn stored_json(body: &WorkspaceFile, parent_hash: &str) -> Result<String, serde_json::Error> {
+    super::stable_json::to_string(&StoredWorkspaceFile {
+        parent_hash: parent_hash.to_owned(),
+        body: body.clone(),
+    })
+}
+
 /// Where a workspace sits in the tree. `parentId` is optional on the wire only.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Parent<'a> {
@@ -128,6 +137,23 @@ impl WorkspaceFile {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stored_json_round_trips_and_omits_absent_optionals() {
+        let body = parse_workspace_file(STORED.as_bytes()).unwrap();
+        let mut minimal = body.clone();
+        minimal.parent_id = None;
+        minimal.git_branch = None;
+        minimal.active_tab_id = None;
+        let json = stored_json(&minimal, "abc").unwrap();
+        assert!(!json.contains("null"), "{json}");
+        assert!(json.starts_with(r#"{"activeTabId"#) || json.starts_with(r#"{"appStates"#));
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(value["parentHash"], "abc");
+        assert_eq!(parse_workspace_file(json.as_bytes()).unwrap(), minimal);
+        // Deterministic: the same body always serializes the same way.
+        assert_eq!(json, stored_json(&minimal, "abc").unwrap());
+    }
 
     const STORED: &str = r#"{
         "appStates": {"tab-1": {"applicationId": "terminal", "title": "Terminal", "state": {"ptyId": "pty-1", "custom": [1, 2]}}},
