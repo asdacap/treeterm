@@ -52,6 +52,8 @@ struct Connected {
     review_views: HashMap<EntityId, Entity<crate::review_view::ReviewView>>,
     /// Browser views by (workspace, tab): they own native webviews, hidden when not shown.
     browser_views: HashMap<(String, String), Entity<crate::browser_view::BrowserView>>,
+    /// Web App tabs showing their shell instead of their page, by (workspace, tab).
+    web_app_shell: std::collections::HashSet<(String, String)>,
     /// Focus the shown terminal on the next render (after a workspace or tab switch).
     focus_pending: bool,
     _selection: Subscription,
@@ -195,6 +197,7 @@ impl AppView {
             editor_views: HashMap::new(),
             review_views: HashMap::new(),
             browser_views: HashMap::new(),
+            web_app_shell: std::collections::HashSet::new(),
             focus_pending: false,
             _selection: selection,
         }
@@ -907,6 +910,9 @@ fn workspace_pane(connected: &mut Connected, window: &mut Window, cx: &mut Conte
                     .clone();
                 div().size_full().child(view).into_any_element()
             }
+            Some(TabContent::WebApp { app, terminal }) => {
+                web_app_tab(connected, &workspace, &id, tab_id, &app, terminal, window, cx)
+            }
             Some(TabContent::StartingTerminal) => {
                 centered(div().text_color(secondary).child("Starting terminal…"))
             }
@@ -925,7 +931,11 @@ fn workspace_pane(connected: &mut Connected, window: &mut Window, cx: &mut Conte
         use gpui_kit::component::WindowExt as _;
         window.has_active_dialog(cx)
     };
-    let shown_key = active.clone().map(|tab| (id.clone(), tab));
+    // A Web App tab shows its page only on its Browser sub-tab.
+    let shown_key = active
+        .clone()
+        .map(|tab| (id.clone(), tab))
+        .filter(|key| !connected.web_app_shell.contains(key));
     let views: Vec<((String, String), Entity<crate::browser_view::BrowserView>)> =
         connected.browser_views.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
     for (key, view) in views {
@@ -954,6 +964,101 @@ fn workspace_pane(connected: &mut Connected, window: &mut Window, cx: &mut Conte
         .child(tabs)
         .child(div().flex_1().min_h_0().child(content))
         .into_any_element()
+}
+
+/// A Web App tab (`WebAppPane`): Browser and Shell sub-tabs over its page and its server's
+/// terminal.
+#[allow(clippy::too_many_arguments)]
+fn web_app_tab(
+    connected: &mut Connected,
+    workspace: &Entity<treeterm_model::workspace_store::WorkspaceStore>,
+    workspace_id: &str,
+    tab_id: &str,
+    app: &Entity<treeterm_model::web_app::WebAppModel>,
+    terminal: Option<Entity<treeterm_model::terminal::TerminalModel>>,
+    window: &mut Window,
+    cx: &mut Context<AppView>,
+) -> AnyElement {
+    use gpui_kit::component::Sizable as _;
+    use gpui_kit::component::button::{Button, ButtonVariants as _};
+    use treeterm_model::web_app::WebAppPhase;
+    let c = colors(cx);
+    let (secondary, error, border) = (c.text_secondary, c.error, c.border);
+    let key = (workspace_id.to_owned(), tab_id.to_owned());
+    let shell = connected.web_app_shell.contains(&key);
+    let mut bar = h_flex().px_2().py_1().gap_1().border_b_1().border_color(border);
+    for (label, wants_shell) in [("Browser", false), ("Shell", true)] {
+        let button = Button::new(SharedString::from(format!("webapp-{label}-{tab_id}"))).xsmall().label(label);
+        let button = if shell == wants_shell { button.primary() } else { button.ghost() };
+        let key = key.clone();
+        bar = bar.child(button.on_click(cx.listener(move |view, _, _, cx| {
+            if let Some(connected) = view.current_mut() {
+                if wants_shell {
+                    connected.web_app_shell.insert(key.clone());
+                    connected.focus_pending = true;
+                } else {
+                    connected.web_app_shell.remove(&key);
+                }
+            }
+            cx.notify();
+        })));
+    }
+    let body = if shell {
+        match terminal {
+            Some(model) => {
+                let view = connected
+                    .terminal_views
+                    .entry(model.entity_id())
+                    .or_insert_with(|| cx.new(|cx| TerminalView::new(model.clone(), window, cx)))
+                    .clone();
+                if std::mem::take(&mut connected.focus_pending) {
+                    let focus = view.read(cx).focus_handle().clone();
+                    window.focus(&focus, cx);
+                }
+                v_flex()
+                    .size_full()
+                    .child(div().flex_1().min_h_0().child(view))
+                    .child(terminal_status_bar(workspace, tab_id, cx))
+                    .into_any_element()
+            }
+            None => centered(div().text_color(secondary).child("The server starts once a port is found…")),
+        }
+    } else {
+        match app.read(cx).phase().clone() {
+            WebAppPhase::Ready { url } => {
+                let stale = connected.browser_views.get(&key).is_some_and(|view| view.read(cx).url() != url);
+                if stale {
+                    connected.browser_views.remove(&key);
+                }
+                let view = connected
+                    .browser_views
+                    .entry(key)
+                    .or_insert_with(|| cx.new(|_| crate::browser_view::BrowserView::new(url)))
+                    .clone();
+                div().size_full().child(view).into_any_element()
+            }
+            WebAppPhase::AllocatingPort => centered(div().text_color(secondary).child("Finding a free port…")),
+            WebAppPhase::WaitingForServer { port } => {
+                centered(div().text_color(secondary).child(format!("Waiting for the server on port {port}…")))
+            }
+            WebAppPhase::Forwarding { port } => {
+                centered(div().text_color(secondary).child(format!("Forwarding port {port} from the remote host…")))
+            }
+            WebAppPhase::Error(message) => {
+                let retry = app.clone();
+                centered(
+                    v_flex()
+                        .gap_2()
+                        .items_center()
+                        .child(div().text_color(error).child(message))
+                        .child(Button::new("webapp-retry").small().label("Retry").on_click(move |_, _, cx| {
+                            retry.update(cx, |app, cx| app.retry(cx));
+                        })),
+                )
+            }
+        }
+    };
+    v_flex().size_full().child(bar).child(div().flex_1().min_h_0().child(body)).into_any_element()
 }
 
 /// The bar under a terminal: activity badge, idle-detector and width-limit switches.

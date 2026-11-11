@@ -85,16 +85,21 @@ Done (tested against a real in-process daemon unless noted):
   names), activity states with transitions, unread attention markers with the ding.
 - **Files / editor (M6):** file tree, highlighted viewer, images, PDF (webview), editor tab.
 - **Review (M7):** committed / uncommitted / commits views, stage/unstage/commit.
-- **Web (M8):** Browser tabs in a native webview (localhost guard).
+- **Web (M8):** Browser tabs in a native webview (localhost guard); Web App tabs (free port
+  probed on the daemon's host, dev server with `$PORT`, page once it answers, ephemeral SSH
+  port forward on remote sessions — remote path tested only through the model, not a host).
+- **Tree and CLI:** favourites, title/branch refresh, unread markers, git status and PR
+  badges; `treeterm [dir]`, `treeterm ssh user@host[:port]`, `treeterm shutdown-daemon`.
+- **Packaging (M9):** `cargo run -p xtask -- dist` (macOS `.app` + zip verified; Linux
+  tarball and the Nix package untested).
 
 Not yet:
 
-- Git status polling and badges, PR indicators, GitHub app, review comments, viewed files,
-  search panel, go-to-definition (core logic ported; UI pending).
+- GitHub app tab, review comments, viewed files, search panel, go-to-definition (core
+  logic ported; UI in progress).
 - Analyzer history / prompt debugger, chat, prompt buttons (commit, rebase, review comments).
-- Tree drag/drop, favourites, abandon, worktree registry, auto-open worktrees.
-- Web apps (dev server with `$PORT`), 3D model viewer; CLI (`treeterm [dir]`, `treeterm ssh`).
-- Packaging (M9), parity sweep and cut-over (M10). Linux build verification (CI job added).
+- Tree drag/drop, worktree registry, auto-open worktrees; 3D model viewer.
+- Parity sweep and cut-over (M10). Linux build verification (CI jobs added, not yet run).
 
 ## Known differences from Electron (deliberate)
 

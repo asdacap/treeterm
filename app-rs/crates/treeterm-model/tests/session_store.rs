@@ -785,3 +785,47 @@ fn finished_work_in_an_unviewed_workspace_is_marked_unread_until_viewed(cx: &mut
             .is_some_and(|a| a["revision"] == a["acknowledgedRevision"])
     });
 }
+
+#[gpui_kit::test]
+fn a_web_app_gets_a_free_port_starts_its_server_and_is_ready(cx: &mut TestAppContext) {
+    use treeterm_model::web_app::WebAppPhase;
+    cx.executor().allow_parking();
+    let h = harness();
+    std::fs::write(h.daemon.workspaces_dir().join("a.json"), body("a", None)).unwrap();
+    publish(&h, &["a"]);
+    let settings = treeterm_core::settings::from_value(serde_json::json!({
+        "webApp": { "instances": [{
+            "id": "py", "name": "Py", "icon": "P", "command": "python3 -m http.server $PORT --bind 127.0.0.1",
+            "isDefault": false, "keepOnExit": false
+        }]}
+    }))
+    .unwrap();
+    let conn = h.conn.clone();
+    let settings_store = cx.new(|_| SettingsStore::in_memory(settings));
+    let store = cx.new(|cx| SessionStore::new(conn, "client-a".into(), settings_store, None, cx));
+    wait_until(cx, &store, |s| loaded(s, "a"));
+    let workspace = store.read_with(cx, |s, _| ws(s, "a"));
+    let tab = workspace.update(cx, |w, cx| w.add_tab("webapp-py", cx)).unwrap();
+    let Some(TabContent::WebApp { app, .. }) = workspace.read_with(cx, |w, _| w.tab_content(&tab)) else {
+        panic!("not a web app tab");
+    };
+    // Real time: curl probes run on the daemon, the poll interval on the executor clock.
+    let mut phase = WebAppPhase::AllocatingPort;
+    for _ in 0..600 {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        cx.executor().advance_clock(std::time::Duration::from_millis(500));
+        cx.run_until_parked();
+        phase = app.read_with(cx, |a, _| a.phase().clone());
+        if matches!(phase, WebAppPhase::Ready { .. } | WebAppPhase::Error(_)) {
+            break;
+        }
+    }
+    let port = app.read_with(cx, |a, _| a.port()).expect("a port was assigned");
+    assert_eq!(phase, WebAppPhase::Ready { url: format!("http://localhost:{port}/") });
+    assert!((20000..45000).contains(&port));
+    wait_for_disk(cx, || file_on_disk(&h, "a")["appStates"][&tab]["state"]["port"]["port"] == port);
+    assert!(matches!(
+        workspace.read_with(cx, |w, _| w.tab_content(&tab)),
+        Some(TabContent::WebApp { terminal: Some(_), .. })
+    ));
+}

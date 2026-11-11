@@ -340,6 +340,8 @@ pub struct SessionStore {
     op_runner: Option<Task<()>>,
     /// The workspace this session's window shows, if any.
     viewed: Option<String>,
+    /// For a session on an ssh host: where its web apps' ports are forwarded from.
+    remote: Option<crate::web_app::RemoteHost>,
     /// Each loaded workspace's git status (`gitController`).
     git_controllers: HashMap<String, Entity<crate::git_controller::GitController>>,
     /// The PR lookup client (`None` if it could not be built: no PR info then).
@@ -409,6 +411,7 @@ impl SessionStore {
             ops: VecDeque::new(),
             op_runner: None,
             viewed: None,
+            remote: None,
             git_controllers: HashMap::new(),
             github,
             github_settings,
@@ -774,7 +777,8 @@ impl SessionStore {
         let registry = self.registry.clone();
         let settings = self.settings.read(cx).settings().clone();
         let llm = self.llm.clone();
-        let store = cx.new(|cx| WorkspaceStore::new(workspace, conn, registry, settings, llm, cx));
+        let remote = self.remote.clone();
+        let store = cx.new(|cx| WorkspaceStore::new(workspace, conn, registry, settings, llm, remote, cx));
         let owned = id.clone();
         let subscription = cx.subscribe(&store, move |session, _, event: &WorkspaceEvent, cx| match event {
             WorkspaceEvent::Changed => session.enqueue_content_sync(&owned, cx),
@@ -807,6 +811,11 @@ impl SessionStore {
             .iter()
             .find(|(_, ref_path)| ref_path.as_str() == path)
             .map(|(id, _)| id.clone())
+    }
+
+    /// This session is on an ssh host (set once, before its workspaces load).
+    pub fn set_remote_host(&mut self, remote: crate::web_app::RemoteHost) {
+        self.remote = Some(remote);
     }
 
     /// A workspace's git status.

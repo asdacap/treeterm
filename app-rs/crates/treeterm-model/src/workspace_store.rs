@@ -95,6 +95,11 @@ pub enum TabContent {
     Failed(String),
     /// An application the native app does not have yet.
     NotPorted(String),
+    /// A dev server and its page; `terminal` once its PTY is attached.
+    WebApp {
+        app: Entity<crate::web_app::WebAppModel>,
+        terminal: Option<Entity<TerminalModel>>,
+    },
 }
 
 /// Runtime state of one tab; never persisted.
@@ -150,6 +155,10 @@ pub struct WorkspaceStore {
     attention_tracker: AttentionTracker,
     /// The window shows this workspace.
     viewed: bool,
+    /// Web App tabs' servers and pages (their PTYs are ordinary terminal tabs).
+    web_apps: HashMap<String, (Entity<crate::web_app::WebAppModel>, Subscription)>,
+    /// The ssh host this workspace lives on (web apps forward their port from it).
+    remote: Option<crate::web_app::RemoteHost>,
     /// Runs AI-harness analyzers; `None` leaves them off (tests, no LLM client).
     llm: Option<LlmService>,
     _git_refresh: Option<Task<()>>,
@@ -182,6 +191,7 @@ impl WorkspaceStore {
         registry: Rc<AppRegistry>,
         settings: Rc<Settings>,
         llm: Option<LlmService>,
+        remote: Option<crate::web_app::RemoteHost>,
         cx: &mut Context<Self>,
     ) -> Self {
         let mut store = Self {
@@ -196,6 +206,8 @@ impl WorkspaceStore {
             attention: AttentionSyncState::default(),
             attention_tracker: AttentionTracker::default(),
             viewed: false,
+            web_apps: HashMap::new(),
+            remote,
             llm,
             _git_refresh: None,
         };
@@ -217,6 +229,13 @@ impl WorkspaceStore {
     /// What the tab shows; `None` for a tab id the body does not have.
     pub fn tab_content(&self, tab_id: &str) -> Option<TabContent> {
         let tab = self.workspace.file.app_states.get(tab_id)?;
+        if let Some((app, _)) = self.web_apps.get(tab_id) {
+            let terminal = match self.tabs.get(tab_id) {
+                Some(TabRef::Terminal(TerminalTab::Attached { model, .. })) => Some(model.clone()),
+                Some(_) | None => None,
+            };
+            return Some(TabContent::WebApp { app: app.clone(), terminal });
+        }
         Some(match self.tabs.get(tab_id) {
             Some(TabRef::Terminal(TerminalTab::Attached { model, .. })) => TabContent::Terminal(model.clone()),
             Some(TabRef::Terminal(TerminalTab::Creating { .. })) => TabContent::StartingTerminal,
@@ -517,7 +536,7 @@ impl WorkspaceStore {
 
     /// Create the runtime side of a tab (`initTab` → `onWorkspaceLoad`).
     fn init_tab(&mut self, tab_id: &str, cx: &mut Context<Self>) {
-        if self.tabs.contains_key(tab_id) {
+        if self.tabs.contains_key(tab_id) || self.web_apps.contains_key(tab_id) {
             return;
         }
         let Some(tab) = self.workspace.file.app_states.get(tab_id) else {
@@ -528,6 +547,40 @@ impl WorkspaceStore {
         };
         let startup_command = app.startup_command(&self.workspace.path);
         match &app.kind {
+            AppKind::WebApp { command, .. } => {
+                let assigned = |key: &str| {
+                    let port = tab.state.get(key)?;
+                    (port.get("status").and_then(Value::as_str) == Some("assigned"))
+                        .then(|| port.get("port").and_then(Value::as_u64))
+                        .flatten()
+                        .and_then(|p| u16::try_from(p).ok())
+                };
+                let (port, local_port) = (assigned("port"), assigned("localPort"));
+                let pty = tab.state.get("ptyId").and_then(Value::as_str).map(str::to_owned);
+                let handle = match tab.state.get("ptyHandle") {
+                    Some(Value::String(handle)) => handle.clone(),
+                    Some(_) | None => uuid::Uuid::new_v4().to_string(),
+                };
+                let (exec, owned, remote, command) =
+                    (self.conn.exec_client(), tab_id.to_owned(), self.remote.clone(), command.clone());
+                let model = cx.new(|cx| crate::web_app::WebAppModel::new(exec, owned, port, local_port, remote, cx));
+                let owned_tab = tab_id.to_owned();
+                let events = cx.subscribe(&model, move |store, _, event: &crate::web_app::WebAppEvent, cx| {
+                    store.on_web_app_event(&owned_tab, *event, cx);
+                });
+                self.web_apps.insert(tab_id.to_owned(), (model, events));
+                // The server runs in a terminal once its port is known.
+                let terminal = match (pty, port) {
+                    (Some(pty_id), _) => Some(self.attach_terminal(tab_id, pty_id, cx)),
+                    (None, Some(port)) => {
+                        Some(self.create_pty(tab_id, handle, Some(crate::web_app::resolve_command(&command, port)), cx))
+                    }
+                    (None, None) => None,
+                };
+                if let Some(terminal) = terminal {
+                    self.tabs.insert(tab_id.to_owned(), TabRef::Terminal(terminal));
+                }
+            }
             AppKind::Files => {
                 let fs = self.conn.fs_client();
                 let root = self.workspace.path.clone();
@@ -764,8 +817,47 @@ impl WorkspaceStore {
 
     /// Release a tab's runtime state without touching the body (`disposeTabResources`).
     /// Detaches its terminal; never kills the PTY.
+    /// A web app picked its port (start its server) or its local forward port.
+    fn on_web_app_event(&mut self, tab_id: &str, event: crate::web_app::WebAppEvent, cx: &mut Context<Self>) {
+        use crate::web_app::WebAppEvent;
+        let (key, port) = match event {
+            WebAppEvent::PortAssigned(port) => ("port", port),
+            WebAppEvent::LocalPortAssigned(port) => ("localPort", port),
+        };
+        self.update_tab_state(
+            tab_id,
+            |state| {
+                if let Value::Object(state) = state {
+                    state.insert(key.into(), serde_json::json!({ "status": "assigned", "port": port }));
+                }
+            },
+            cx,
+        );
+        let WebAppEvent::PortAssigned(port) = event else {
+            return;
+        };
+        if self.tabs.contains_key(tab_id) {
+            return;
+        }
+        let Some(tab) = self.workspace.file.app_states.get(tab_id) else {
+            return;
+        };
+        let command = match self.registry.get(&tab.application_id).map(|app| &app.kind) {
+            Some(AppKind::WebApp { command, .. }) => command.clone(),
+            Some(_) | None => return,
+        };
+        let handle = match tab.state.get("ptyHandle") {
+            Some(Value::String(handle)) => handle.clone(),
+            Some(_) | None => uuid::Uuid::new_v4().to_string(),
+        };
+        let terminal = self.create_pty(tab_id, handle, Some(crate::web_app::resolve_command(&command, port)), cx);
+        self.tabs.insert(tab_id.to_owned(), TabRef::Terminal(terminal));
+        cx.notify();
+    }
+
     fn dispose_tab(&mut self, tab_id: &str) {
         self.tabs.remove(tab_id);
+        self.web_apps.remove(tab_id);
         self.activity.remove_tab_state(tab_id);
         self.activity_version += 1;
     }
@@ -869,6 +961,9 @@ impl WorkspaceStore {
         };
         if !app.can_close {
             return;
+        }
+        if let Some((app, _)) = self.web_apps.get(tab_id) {
+            app.update(cx, |app, cx| app.close(cx));
         }
         match self.tabs.get(tab_id) {
             Some(TabRef::Terminal(TerminalTab::Attached { model, .. })) => {
@@ -1054,6 +1149,10 @@ impl WorkspaceStore {
 
     /// The workspace is being removed: kill every tab's daemon resources (`ref.close()`).
     pub fn close_all_tabs(&mut self, cx: &mut Context<Self>) {
+        let apps: Vec<Entity<crate::web_app::WebAppModel>> = self.web_apps.values().map(|(app, _)| app.clone()).collect();
+        for app in apps {
+            app.update(cx, |app, cx| app.close(cx));
+        }
         for tab in self.tabs.values() {
             match tab {
                 TabRef::Terminal(TerminalTab::Attached { model, .. }) => {

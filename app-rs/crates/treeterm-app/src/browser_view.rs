@@ -44,6 +44,10 @@ impl BrowserView {
         }
     }
 
+    pub fn url(&self) -> &str {
+        &self.url
+    }
+
     /// Show or hide the native view (tab switched away, dialog open).
     pub fn set_shown(&mut self, shown: bool, cx: &mut Context<Self>) {
         if self.shown == shown {

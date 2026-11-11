@@ -224,6 +224,7 @@ impl AppStore {
             cx.notify();
             return;
         }
+        let remote_target = matches!(target, ConnectionTarget::Remote(_));
         self.insert_slot(id.clone(), target);
         let Some(slot) = self.sessions.get_mut(&id) else {
             return;
@@ -237,7 +238,15 @@ impl AppStore {
             ConnectionStatus::Connected { daemon } => {
                 tracing::info!(%id, "connected");
                 let (client_id, settings, llm) = (self.client_id.clone(), self.settings.clone(), self.llm.clone());
-                let session = cx.new(|cx| SessionStore::new(daemon, client_id, settings, llm, cx));
+                let remote = remote_target
+                    .then(|| crate::web_app::RemoteHost { app: cx.weak_entity(), connection: id.clone() });
+                let session = cx.new(|cx| {
+                    let mut session = SessionStore::new(daemon, client_id, settings, llm, cx);
+                    if let Some(remote) = remote {
+                        session.set_remote_host(remote);
+                    }
+                    session
+                });
                 cx.observe(&session, |_, _, cx| cx.notify()).detach();
                 let owned = id.clone();
                 let events = cx.subscribe(&session, move |store, session, event: &SessionEvent, cx| match event {

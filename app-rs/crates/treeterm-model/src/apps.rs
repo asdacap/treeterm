@@ -11,8 +11,7 @@ use treeterm_core::settings::Settings;
 pub enum AppKind {
     /// A shell (or a startup command) in a daemon PTY.
     Terminal { startup_command: Option<String> },
-    /// An AI coding agent running in a PTY. The LLM analyzer and prompt buttons are not
-    /// ported yet; the terminal is.
+    /// An AI coding agent running in a PTY, read by the LLM analyzer.
     AiHarness {
         command: String,
         background: String,
@@ -30,13 +29,18 @@ pub enum AppKind {
     Review,
     /// A local web page (`browser-<instance>`); only localhost URLs.
     Browser { url: String },
+    /// A dev server run in a terminal with `$PORT` set, and its page (`webapp-<instance>`).
+    WebApp { command: String, keep_on_exit: bool },
 }
 
 impl AppKind {
     /// Whether tabs of this application run in a PTY.
     pub fn is_terminal(&self) -> bool {
         match self {
-            AppKind::Terminal { .. } | AppKind::AiHarness { .. } | AppKind::CustomRunner { .. } => true,
+            AppKind::Terminal { .. }
+            | AppKind::AiHarness { .. }
+            | AppKind::CustomRunner { .. }
+            | AppKind::WebApp { .. } => true,
             AppKind::Files | AppKind::Editor | AppKind::Review | AppKind::Browser { .. } => false,
         }
     }
@@ -65,6 +69,16 @@ impl AppDef {
                 "keepOnExit": false,
                 "idleDetectorDisabled": false,
                 "widthLimitDisabled": false,
+            }),
+            AppKind::WebApp { keep_on_exit, .. } => json!({
+                "ptyId": null,
+                "ptyHandle": handle,
+                "keepOnExit": keep_on_exit,
+                "idleDetectorDisabled": false,
+                "widthLimitDisabled": false,
+                "port": { "status": "unassigned" },
+                "localPort": { "status": "unassigned" },
+                "path": "",
             }),
             AppKind::Files => json!({ "selectedPath": null, "expandedDirs": [] }),
             AppKind::Review => json!({ "viewMode": "committed" }),
@@ -98,6 +112,8 @@ impl AppDef {
             AppKind::CustomRunner { command_template } => {
                 Some(command_template.replace("{{workspace_path}}", workspace_path))
             }
+            // Needs its port first: see `web_app::resolve_command`.
+            AppKind::WebApp { .. } => None,
             AppKind::Files | AppKind::Editor | AppKind::Review | AppKind::Browser { .. } => None,
         }
     }
@@ -111,7 +127,8 @@ impl AppDef {
             | AppKind::Files
             | AppKind::Editor
             | AppKind::Review
-            | AppKind::Browser { .. } => None,
+            | AppKind::Browser { .. }
+            | AppKind::WebApp { .. } => None,
         }
     }
 }
@@ -221,6 +238,20 @@ impl AppRegistry {
                 icon: instance.icon.clone(),
                 kind: AppKind::CustomRunner {
                     command_template: instance.command_template.clone(),
+                },
+                can_close: true,
+                show_in_new_tab_menu: true,
+                is_default: instance.is_default,
+            });
+        }
+        for instance in &settings.web_app.instances {
+            apps.push(AppDef {
+                id: format!("webapp-{}", instance.id),
+                name: instance.name.clone(),
+                icon: instance.icon.clone(),
+                kind: AppKind::WebApp {
+                    command: instance.command.clone(),
+                    keep_on_exit: instance.keep_on_exit,
                 },
                 can_close: true,
                 show_in_new_tab_menu: true,
