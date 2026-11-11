@@ -22,7 +22,7 @@ use gpui_kit::{App, AppContext as _, Context, Entity, EventEmitter, Subscription
 use indexmap::IndexMap;
 use serde::Serialize;
 use treeterm_core::daemon::{ApiError, DaemonConnection};
-use treeterm_core::settings::Settings;
+use crate::settings_store::{SettingsEvent, SettingsStore};
 use treeterm_core::tree::{self, TreeNode, TreeRow};
 use treeterm_core::wire::stable_json::{self, sha256_hex};
 use treeterm_core::wire::workspace_file::{WorkspaceFile, parse_workspace_file, stored_json};
@@ -185,8 +185,9 @@ fn name_from_path(path: &str) -> String {
 pub struct SessionStore {
     conn: DaemonConnection,
     client_id: String,
-    settings: Rc<Settings>,
+    settings: Entity<SettingsStore>,
     registry: Rc<AppRegistry>,
+    _settings_events: Subscription,
     state: SessionState,
     connection: ConnectionStatus,
     version: u64,
@@ -214,7 +215,7 @@ impl SessionStore {
     pub fn new(
         conn: DaemonConnection,
         client_id: String,
-        settings: Rc<Settings>,
+        settings: Entity<SettingsStore>,
         cx: &mut Context<Self>,
     ) -> Self {
         let mut events = conn.watch_session(&client_id);
@@ -233,12 +234,16 @@ impl SessionStore {
                 Ok(()) | Err(_) => {} // Err: store dropped, nothing to report to
             }
         });
-        let registry = Rc::new(AppRegistry::from_settings(&settings));
+        let registry = Rc::new(AppRegistry::from_settings(settings.read(cx).settings()));
+        let settings_events = cx.subscribe(&settings, |session, _, event: &SettingsEvent, cx| match event {
+            SettingsEvent::Changed => session.on_settings_changed(cx),
+        });
         Self {
             conn,
             client_id,
             settings,
             registry,
+            _settings_events: settings_events,
             state: SessionState::Waiting,
             connection: ConnectionStatus::Connected,
             version: 0,
@@ -579,11 +584,24 @@ impl SessionStore {
         cx.notify();
     }
 
+    /// Settings changed (here or in another app): rebuild the application registry and
+    /// hand both to every workspace, which applies them to its live terminals.
+    fn on_settings_changed(&mut self, cx: &mut Context<Self>) {
+        let settings = self.settings.read(cx).settings().clone();
+        self.registry = Rc::new(AppRegistry::from_settings(&settings));
+        let stores: Vec<Entity<WorkspaceStore>> = self.entries.values().filter_map(|e| e.store().cloned()).collect();
+        for store in stores {
+            let (registry, settings) = (self.registry.clone(), settings.clone());
+            store.update(cx, |w, cx| w.apply_settings(registry, settings, cx));
+        }
+        cx.notify();
+    }
+
     fn new_workspace_store(&mut self, workspace: Workspace, cx: &mut Context<Self>) -> Entity<WorkspaceStore> {
         let id = workspace.id.clone();
         let conn = self.conn.clone();
         let registry = self.registry.clone();
-        let settings = self.settings.clone();
+        let settings = self.settings.read(cx).settings().clone();
         let store = cx.new(|cx| WorkspaceStore::new(workspace, conn, registry, settings, cx));
         let owned = id.clone();
         let subscription = cx.subscribe(&store, move |session, _, event: &WorkspaceEvent, cx| match event {

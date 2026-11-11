@@ -5,6 +5,7 @@ use std::collections::HashSet;
 use gpui_kit::{AppContext as _, Entity, TestAppContext};
 use treeterm_core::wire::workspace_file::{WorkspaceFile, WorkspaceStatus, WorktreeSettings};
 use treeterm_model::session_store::{SessionState, SessionStore, WorkspaceEntry};
+use treeterm_model::settings_store::SettingsStore;
 use treeterm_model::workspace_store::{TabContent, Workspace, WorkspaceStore};
 use treeterm_proto::treeterm::WorkspaceRef;
 
@@ -36,7 +37,8 @@ fn publish(h: &Harness, ids: &[&str]) {
 fn open_store(cx: &mut TestAppContext, h: &Harness, client: &str) -> Entity<SessionStore> {
     let conn = h.conn.clone();
     let client = client.to_owned();
-    cx.new(|cx| SessionStore::new(conn, client, Default::default(), cx))
+    let settings = cx.new(|_| SettingsStore::in_memory(Default::default()));
+    cx.new(|cx| SessionStore::new(conn, client, settings, cx))
 }
 
 fn loaded(s: &SessionStore, id: &str) -> bool {
@@ -265,4 +267,26 @@ fn removing_a_workspace_takes_its_children_and_files_with_it(cx: &mut TestAppCon
     assert!(h.daemon.workspaces_dir().join("other.json").exists());
     // The lock was released.
     store.read_with(cx, |s, _| assert!(s.version() >= 3));
+}
+
+#[gpui_kit::test]
+fn settings_changes_reach_live_terminals(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    std::fs::write(h.daemon.workspaces_dir().join("a.json"), body("a", None)).unwrap();
+    publish(&h, &["a"]);
+    let settings = cx.new(|_| SettingsStore::in_memory(Default::default()));
+    let conn = h.conn.clone();
+    let store = cx.new(|cx| SessionStore::new(conn, "client-a".into(), settings.clone(), cx));
+    wait_until(cx, &store, |s| loaded(s, "a"));
+    let workspace = store.read_with(cx, |s, _| ws(s, "a"));
+    let tab = workspace.update(cx, |w, cx| w.add_tab("terminal", cx)).unwrap();
+    wait_until_app(cx, &workspace, |w, _| matches!(w.tab_content(&tab), Some(TabContent::Terminal(_))));
+
+    settings.update(cx, |s, cx| s.update(|settings| settings.terminal.font_size = 17.0, cx));
+    cx.run_until_parked();
+    let Some(TabContent::Terminal(terminal)) = workspace.read_with(cx, |w, _| w.tab_content(&tab)) else {
+        unreachable!()
+    };
+    terminal.read_with(cx, |t, _| assert_eq!(t.options().settings.font_size, 17.0));
 }

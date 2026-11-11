@@ -22,6 +22,13 @@ impl KeybindingStore {
         }
     }
 
+    /// New prefix key, timeout or action keys (settings changed).
+    pub fn set_settings(&mut self, settings: KeybindingSettings, cx: &mut Context<Self>) {
+        self.machine.set_settings(settings);
+        self.reschedule(cx);
+        cx.notify();
+    }
+
     pub fn machine(&self) -> &Keybindings {
         &self.machine
     }

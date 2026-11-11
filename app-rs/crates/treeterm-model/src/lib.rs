@@ -8,5 +8,6 @@ pub mod app_store;
 pub mod apps;
 pub mod keybinding_store;
 pub mod session_store;
+pub mod settings_store;
 pub mod terminal;
 pub mod workspace_store;

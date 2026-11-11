@@ -7703,6 +7703,7 @@ dependencies = [
  "indexmap",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
  "tracing",
  "treeterm-core",

@@ -7,16 +7,15 @@
 //! running again with exponential backoff (1 s · 2ⁿ, capped at 30 s, unbounded) and a fresh
 //! session store is built on a new connection generation.
 
-use std::rc::Rc;
 use std::time::Duration;
 
 use gpui_kit::{AppContext as _, Context, Entity, Subscription, Task};
 use treeterm_core::daemon::DaemonConnection;
 use treeterm_core::local_daemon::{LocalDaemonSpec, ensure_running};
 use treeterm_core::rt::Rt;
-use treeterm_core::settings::Settings;
 
 use crate::session_store::{SessionEvent, SessionStore};
+use crate::settings_store::SettingsStore;
 
 const RECONNECT_BASE: Duration = Duration::from_secs(1);
 const RECONNECT_MAX: Duration = Duration::from_secs(30);
@@ -34,7 +33,7 @@ pub struct AppStore {
     rt: Rt,
     spec: LocalDaemonSpec,
     state: AppState,
-    settings: Rc<Settings>,
+    settings: Entity<SettingsStore>,
     /// Identifies this process to the daemon (`sender_id`, `listener_id`), so it can skip
     /// echoes of its own session updates. One per process: windows share stores.
     client_id: String,
@@ -52,12 +51,12 @@ pub fn reconnect_delay(attempt: u32) -> Duration {
 }
 
 impl AppStore {
-    pub fn new(rt: Rt, spec: LocalDaemonSpec, settings: Settings, cx: &mut Context<Self>) -> Self {
+    pub fn new(rt: Rt, spec: LocalDaemonSpec, settings: Entity<SettingsStore>, cx: &mut Context<Self>) -> Self {
         let mut store = Self {
             rt,
             spec,
             state: AppState::StartingDaemon,
-            settings: Rc::new(settings),
+            settings,
             client_id: uuid::Uuid::new_v4().to_string(),
             _connect: None,
             _session_events: None,

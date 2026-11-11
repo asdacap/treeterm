@@ -570,6 +570,25 @@ impl WorkspaceStore {
         cx.notify();
     }
 
+    /// New settings: the registry decides which tabs are native and how new ones start;
+    /// live terminals take the emulator and font settings.
+    pub fn apply_settings(&mut self, registry: Rc<AppRegistry>, settings: Rc<Settings>, cx: &mut Context<Self>) {
+        self.registry = registry;
+        self.settings = settings;
+        for tab in self.tabs.values() {
+            if let TabRef::Terminal(TerminalTab::Attached { model, .. }) = tab {
+                let terminal = self.settings.terminal.clone();
+                model.update(cx, |model, cx| model.apply_settings(terminal, cx));
+            }
+        }
+        // Tabs of applications that just appeared (a new AI harness instance) start now.
+        let tab_ids: Vec<String> = self.workspace.file.app_states.keys().cloned().collect();
+        for tab_id in tab_ids {
+            self.init_tab(&tab_id, cx);
+        }
+        cx.notify();
+    }
+
     /// The workspace is being removed: kill every tab's daemon resources (`ref.close()`).
     pub fn close_all_tabs(&mut self, cx: &mut Context<Self>) {
         for tab in self.tabs.values() {

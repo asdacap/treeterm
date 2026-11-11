@@ -17,6 +17,7 @@ use gpui_kit::{
 };
 use treeterm_core::keybinding::{KeyOutcome, KeyPress, KeybindingSettings, Modifiers, Os};
 use treeterm_model::keybinding_store::KeybindingStore;
+use treeterm_model::settings_store::{SettingsEvent, SettingsStore};
 use treeterm_core::local_daemon::LocalDaemonSpec;
 use treeterm_core::paths::{self, process_env};
 use treeterm_core::rt::Rt;
@@ -34,14 +35,10 @@ fn automation_enabled() -> bool {
     std::env::var_os("TREETERM_AUTOMATION_SOCKET").is_some()
 }
 
-/// Prefix-mode settings from `settings.json`. A value that does not parse falls back to the
-/// defaults, loudly.
-fn keybinding_settings() -> KeybindingSettings {
-    let raw = paths::user_data_dir()
-        .ok()
-        .and_then(|dir| std::fs::read(treeterm_core::settings::settings_path(&dir)).ok())
-        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
-        .unwrap_or(serde_json::Value::Null);
+/// Prefix-mode settings from the loaded settings. A value that does not parse falls back
+/// to the defaults, loudly.
+fn keybinding_settings(settings: &treeterm_core::settings::Settings) -> KeybindingSettings {
+    let raw = serde_json::to_value(settings).unwrap_or(serde_json::Value::Null);
     match KeybindingSettings::from_settings_json(&raw, Os::host()) {
         Ok(settings) => settings,
         Err(error) => {
@@ -111,16 +108,6 @@ fn main() {
         .build()
         .expect("start the I/O runtime");
     let rt = Rt::new(tokio.handle().clone());
-    let settings = match paths::user_data_dir().map_err(|e| e.to_string()).and_then(|dir| {
-        treeterm_core::settings::load(&dir).map_err(|e| e.to_string())
-    }) {
-        Ok(settings) => settings,
-        Err(error) => {
-            // Same fallback as Electron, but said out loud.
-            tracing::error!(%error, "settings unreadable; using defaults");
-            treeterm_core::settings::Settings::default()
-        }
-    };
 
     #[cfg(feature = "automation")]
     let rt_for_automation = rt.clone();
@@ -128,7 +115,8 @@ fn main() {
         gpui_kit::init(cx);
         theme::install(cx);
         terminal_view::bind_keys(cx);
-        let store = cx.new(|cx| AppStore::new(rt, spec, settings, cx));
+        let settings = cx.new(|cx| SettingsStore::new(paths::user_data_dir().ok(), cx));
+        let store = cx.new(|cx| AppStore::new(rt, spec, settings.clone(), cx));
         menus::install(store.clone(), cx);
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
@@ -144,7 +132,18 @@ fn main() {
             }),
             ..WindowOptions::default()
         };
-        let keybindings = cx.new(|_| KeybindingStore::new(keybinding_settings()));
+        let initial_keys = keybinding_settings(settings.read(cx).settings());
+        let keybindings = cx.new(|_| KeybindingStore::new(initial_keys));
+        cx.subscribe(&settings, {
+            let keybindings = keybindings.clone();
+            move |settings, event: &SettingsEvent, cx| match event {
+                SettingsEvent::Changed => {
+                    let next = keybinding_settings(settings.read(cx).settings());
+                    keybindings.update(cx, |kb, cx| kb.set_settings(next, cx));
+                }
+            }
+        })
+        .detach();
         let (window, view) = gpui_kit::open_window(options, cx, {
             let keybindings = keybindings.clone();
             |_, cx| cx.new(|cx| AppView::new(store, keybindings, cx))
