@@ -358,8 +358,12 @@ impl WorkspaceStore {
                 let model = cx.new(|cx| crate::review::ReviewModel::new(exec, git, path, base, &state, cx));
                 let owned_tab = tab_id.to_owned();
                 let events = cx.subscribe(&model, move |store, _, event: &crate::review::ReviewEvent, cx| {
-                    let crate::review::ReviewEvent::StateChanged(next) = event;
-                    store.merge_tab_state(&owned_tab, next.clone(), cx);
+                    match event {
+                        crate::review::ReviewEvent::StateChanged(next) => {
+                            store.merge_tab_state(&owned_tab, next.clone(), cx);
+                        }
+                        crate::review::ReviewEvent::Committed => {}
+                    }
                 });
                 self.tabs.insert(tab_id.to_owned(), TabRef::Review { model, _events: events });
             }

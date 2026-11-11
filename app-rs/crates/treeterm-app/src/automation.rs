@@ -132,6 +132,35 @@ fn handle(line: &str, window: AnyWindowHandle, view: &Entity<AppView>, cx: &mut 
                 window.activate_window();
                 Ok(json!({ "ok": true }))
             }
+            "click" => {
+                // `click <x> <y>` in window points (screenshot pixels / scale factor).
+                let mut coords = rest.split_whitespace().map(str::parse::<f32>);
+                let (Some(Ok(x)), Some(Ok(y))) = (coords.next(), coords.next()) else {
+                    return Err("usage: click <x> <y>".to_owned());
+                };
+                let position = gpui_kit::point(gpui_kit::px(x), gpui_kit::px(y));
+                let modifiers = gpui_kit::Modifiers::default();
+                window.dispatch_event(
+                    gpui_kit::PlatformInput::MouseMove(gpui_kit::MouseMoveEvent { position, pressed_button: None, modifiers }),
+                    cx,
+                );
+                let button = gpui_kit::MouseButton::Left;
+                window.dispatch_event(
+                    gpui_kit::PlatformInput::MouseDown(gpui_kit::MouseDownEvent {
+                        button,
+                        position,
+                        modifiers,
+                        click_count: 1,
+                        first_mouse: false,
+                    }),
+                    cx,
+                );
+                window.dispatch_event(
+                    gpui_kit::PlatformInput::MouseUp(gpui_kit::MouseUpEvent { button, position, modifiers, click_count: 1 }),
+                    cx,
+                );
+                Ok(json!({ "ok": true }))
+            }
             "key" => {
                 let keystroke = Keystroke::parse_with_os(rest, cx.platform_info().os)
                     .map_err(|e| e.to_string())?;

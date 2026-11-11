@@ -590,3 +590,50 @@ fn an_editor_tab_loads_edits_and_saves_a_file(cx: &mut TestAppContext) {
     });
     assert_eq!(file_on_disk(&h, "a")["appStates"][&tab]["title"], "notes.txt");
 }
+
+#[gpui_kit::test]
+fn the_review_tab_stages_and_commits_uncommitted_changes(cx: &mut TestAppContext) {
+    use treeterm_core::git::Staging;
+    use treeterm_model::review::{ReviewContent, StageTarget};
+    cx.executor().allow_parking();
+    let h = harness();
+    publish(&h, &[]);
+    let repo = TempRepo::new(&h);
+    std::fs::write(repo.path.join("new.txt"), "fresh\n").unwrap();
+    let store = open_store(cx, &h, "client-a");
+    let root = open_repo_workspace(cx, &store, &repo);
+    let workspace = store.read_with(cx, |s, _| ws(s, &root));
+
+    let tab = workspace
+        .update(cx, |w, cx| w.add_tab_with("review", serde_json::json!({ "viewMode": "uncommitted" }), cx))
+        .unwrap();
+    let Some(TabContent::Review(review)) = workspace.read_with(cx, |w, _| w.tab_content(&tab)) else {
+        panic!("not a review tab");
+    };
+    let staged_files = |content: &ReviewContent, side: Staging| match content {
+        ReviewContent::Uncommitted(u) => {
+            u.changes.files.iter().filter(|f| f.entry.staged == side).map(|f| f.entry.path.clone()).collect()
+        }
+        _ => Vec::new(),
+    };
+    wait_until(cx, &review, |r| staged_files(r.content(), Staging::Unstaged) == vec!["new.txt".to_owned()]);
+    let ReviewContent::Uncommitted(uncommitted) = review.read_with(cx, |r, _| r.content().clone()) else {
+        unreachable!()
+    };
+    assert!(uncommitted.patch.contains("+fresh"), "{}", uncommitted.patch);
+
+    review.update(cx, |r, cx| r.stage(StageTarget::File("new.txt".into()), cx));
+    wait_until(cx, &review, |r| staged_files(r.content(), Staging::Staged) == vec!["new.txt".to_owned()]);
+
+    review.update(cx, |r, cx| r.commit("   ", cx));
+    assert_eq!(
+        review.read_with(cx, |r, _| r.commit_op().clone()),
+        treeterm_model::review::GitOp::Failed("Commit message is required".into())
+    );
+    review.update(cx, |r, cx| r.commit("add new file", cx));
+    wait_until(cx, &review, |r| match r.content() {
+        ReviewContent::Uncommitted(u) => u.changes.files.is_empty(),
+        _ => false,
+    });
+    assert!(repo.git(&["log", "--oneline"]).contains("add new file"));
+}
