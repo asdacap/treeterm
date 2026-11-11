@@ -180,6 +180,13 @@ impl PtyManager {
             let mut envp: Vec<*const libc::c_char> = envp_owned.iter().map(|e| e.as_ptr()).collect();
             envp.push(std::ptr::null());
             let argv = [c_shell.as_ptr(), c_arg.as_ptr(), std::ptr::null()];
+            // Every descriptor above stderr is closed in the child before exec (computed
+            // here: the child may only make async-signal-safe calls). Without this each shell
+            // inherits the masters of every PTY created before it, so no shell ever sees its
+            // terminal close when the daemon exits, and orphaned shells keep PTYs allocated
+            // until the system runs out.
+            let open_max = libc::sysconf(libc::_SC_OPEN_MAX);
+            let max_fd: libc::c_int = if open_max <= 0 || open_max > 65_536 { 65_536 } else { open_max as libc::c_int };
             let mut master: libc::c_int = 0;
             let mut ws = libc::winsize {
                 ws_row: rows,
@@ -200,16 +207,22 @@ impl PtyManager {
                 // Child: async-signal-safe calls only. A missing directory leaves the shell
                 // in the daemon's (as before).
                 libc::chdir(c_cwd.as_ptr());
+                for fd in 3..max_fd {
+                    libc::close(fd);
+                }
                 libc::execve(c_shell.as_ptr(), argv.as_ptr(), envp.as_ptr());
                 libc::_exit(1);
             }
             (master, pid)
         };
 
-        // Set master fd to non-blocking
+        // Non-blocking, and close-on-exec so processes the daemon runs later (exec
+        // requests) don't hold this PTY open either.
         unsafe {
             let flags = libc::fcntl(master_fd, libc::F_GETFL);
             libc::fcntl(master_fd, libc::F_SETFL, flags | libc::O_NONBLOCK);
+            let fd_flags = libc::fcntl(master_fd, libc::F_GETFD);
+            libc::fcntl(master_fd, libc::F_SETFD, fd_flags | libc::FD_CLOEXEC);
         }
 
         // Register the non-blocking fd with tokio's I/O driver once. Both the
@@ -873,6 +886,36 @@ mod tests {
         assert_eq!(sessions[0].rows, 24);
 
         mgr.kill(&id).await;
+    }
+
+    /// Descriptors of `pid` that are PTY masters (`/dev/ptmx`).
+    fn ptmx_fds(pid: libc::pid_t) -> usize {
+        if cfg!(target_os = "linux") {
+            std::fs::read_dir(format!("/proc/{pid}/fd"))
+                .map(|dir| {
+                    dir.filter_map(|e| e.ok())
+                        .filter(|e| std::fs::read_link(e.path()).is_ok_and(|t| t.to_string_lossy().contains("ptmx")))
+                        .count()
+                })
+                .unwrap_or(0)
+        } else {
+            let out = std::process::Command::new("lsof").args(["-n", "-P", "-p", &pid.to_string()]).output().unwrap();
+            String::from_utf8_lossy(&out.stdout).lines().filter(|l| l.contains("/dev/ptmx")).count()
+        }
+    }
+
+    #[tokio::test]
+    async fn a_shell_holds_no_other_pty_open() {
+        let mgr = PtyManager::new();
+        let first = mgr.create_pty("/tmp".into(), HashMap::new(), 80, 24, None, None).await.unwrap();
+        let second = mgr.create_pty("/tmp".into(), HashMap::new(), 80, 24, None, None).await.unwrap();
+        let session = mgr.sessions.read().await.get(&second).unwrap().clone();
+        let pid = session.lock().await.child_pid;
+        // Past exec: the shell is running.
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        assert_eq!(ptmx_fds(pid), 0, "the second shell inherited a PTY master");
+        mgr.kill(&first).await;
+        mgr.kill(&second).await;
     }
 
     #[tokio::test]
