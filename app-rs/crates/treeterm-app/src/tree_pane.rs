@@ -378,18 +378,16 @@ impl TreePane {
                 let (child_session, child_parent, child_label, pane) =
                     (session.clone(), id.clone(), label.clone(), pane.clone());
                 let menu = menu.item(PopupMenuItem::new("New child workspace…").on_click(move |_, window, cx| {
-                    let pane = pane.clone();
-                    let on_created: crate::child_dialog::OnCreated = std::rc::Rc::new(move |id, _, cx| {
-                        pane.update(cx, |pane, cx| pane.select(id, cx));
+                    let (pane, session, parent, label) =
+                        (pane.clone(), child_session.clone(), child_parent.clone(), child_label.clone());
+                    let behind = behind_upstream(&session, &parent, cx);
+                    upstream_guard(behind, label.clone(), window, cx, move |window, cx| {
+                        let pane = pane.clone();
+                        let on_created: crate::child_dialog::OnCreated = std::rc::Rc::new(move |id, _, cx| {
+                            pane.update(cx, |pane, cx| pane.select(id, cx));
+                        });
+                        crate::child_dialog::open(session.clone(), parent.clone(), label.clone(), on_created, window, cx);
                     });
-                    crate::child_dialog::open(
-                        child_session.clone(),
-                        child_parent.clone(),
-                        child_label.clone(),
-                        on_created,
-                        window,
-                        cx,
-                    );
                 }))
                 .separator();
                 let store = session.read(cx).workspace_store(&id).cloned();
@@ -428,11 +426,15 @@ impl TreePane {
                     menu
                 };
                 let menu = {
-                    let (session, id) = (session.clone(), id.clone());
-                    menu.item(PopupMenuItem::new("Quick fork").on_click(move |_, _, cx| {
-                        if let Err(error) = session.update(cx, |s, cx| s.quick_fork(&id, cx)) {
-                            tracing::error!(%error, "quick fork");
-                        }
+                    let (session, id, label) = (session.clone(), id.clone(), label.clone());
+                    menu.item(PopupMenuItem::new("Quick fork").on_click(move |_, window, cx| {
+                        let (session, id) = (session.clone(), id.clone());
+                        let behind = behind_upstream(&session, &id, cx);
+                        upstream_guard(behind, label.clone(), window, cx, move |_, cx| {
+                            if let Err(error) = session.update(cx, |s, cx| s.quick_fork(&id, cx)) {
+                                tracing::error!(%error, "quick fork");
+                            }
+                        });
                     }))
                     .separator()
                 };
@@ -553,6 +555,44 @@ fn confirm_merge(
             .show_cancel(true)
             .on_ok(move |_, _, cx| {
                 session.update(cx, |s, cx| s.merge_workspace(&id, squash, after, cx));
+                true
+            })
+    });
+}
+
+/// Commits `id`'s branch is behind its upstream (from its git status; 0 if unknown).
+fn behind_upstream(session: &Entity<SessionStore>, id: &str, cx: &gpui_kit::App) -> u64 {
+    session.read(cx).git_controller(id).map_or(0, |git| git.read(cx).status().behind_count)
+}
+
+/// `UpstreamWarningDialog`: forking a branch that is behind upstream asks first.
+fn upstream_guard(
+    behind: u64,
+    name: SharedString,
+    window: &mut gpui_kit::Window,
+    cx: &mut gpui_kit::App,
+    proceed: impl Fn(&mut gpui_kit::Window, &mut gpui_kit::App) + 'static,
+) {
+    if behind == 0 {
+        proceed(window, cx);
+        return;
+    }
+    let proceed = std::rc::Rc::new(proceed);
+    window.open_alert_dialog(cx, move |alert, _, _| {
+        let proceed = proceed.clone();
+        alert
+            .title("Upstream Updates Available")
+            .description(format!(
+                "{name} is {behind} commit{} behind upstream. Forking now means the new worktree will be based on an \
+                 outdated branch. Consider pulling the latest changes before forking to avoid merge conflicts.",
+                if behind > 1 { "s" } else { "" }
+            ))
+            .show_cancel(true)
+            .ok_text("Fork Anyway")
+            .on_ok(move |_, window, cx| {
+                // After this dialog closes, so a second dialog can open.
+                let proceed = proceed.clone();
+                window.defer(cx, move |window, cx| proceed(window, cx));
                 true
             })
     });
