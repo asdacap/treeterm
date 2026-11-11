@@ -36,6 +36,7 @@ pub mod system_monitor;
 pub mod traffic;
 pub mod transport;
 pub mod tree;
+pub mod ui_state;
 pub mod wire;
 pub mod workspace_io;
 pub mod worktree_hierarchy;

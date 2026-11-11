@@ -176,7 +176,7 @@ fn handle(line: &str, window: AnyWindowHandle, view: &Entity<AppView>, cx: &mut 
                 );
                 Ok(json!({ "ok": true }))
             }
-            "click" | "rclick" => {
+            "click" | "rclick" | "dblclick" => {
                 // `click <x> <y>` in window points (screenshot pixels / scale factor);
                 // `rclick` uses the right button (context menus).
                 let mut coords = rest.split_whitespace().map(str::parse::<f32>);
@@ -190,20 +190,24 @@ fn handle(line: &str, window: AnyWindowHandle, view: &Entity<AppView>, cx: &mut 
                     cx,
                 );
                 let button = if command == "rclick" { gpui_kit::MouseButton::Right } else { gpui_kit::MouseButton::Left };
-                window.dispatch_event(
-                    gpui_kit::PlatformInput::MouseDown(gpui_kit::MouseDownEvent {
-                        button,
-                        position,
-                        modifiers,
-                        click_count: 1,
-                        first_mouse: false,
-                    }),
-                    cx,
-                );
-                window.dispatch_event(
-                    gpui_kit::PlatformInput::MouseUp(gpui_kit::MouseUpEvent { button, position, modifiers, click_count: 1 }),
-                    cx,
-                );
+                // `dblclick`: a first click, then a second with the platform's count of 2.
+                let counts: &[usize] = if command == "dblclick" { &[1, 2] } else { &[1] };
+                for &click_count in counts {
+                    window.dispatch_event(
+                        gpui_kit::PlatformInput::MouseDown(gpui_kit::MouseDownEvent {
+                            button,
+                            position,
+                            modifiers,
+                            click_count,
+                            first_mouse: false,
+                        }),
+                        cx,
+                    );
+                    window.dispatch_event(
+                        gpui_kit::PlatformInput::MouseUp(gpui_kit::MouseUpEvent { button, position, modifiers, click_count }),
+                        cx,
+                    );
+                }
                 Ok(json!({ "ok": true }))
             }
             "key" => {

@@ -13,6 +13,7 @@ pub mod git_controller;
 pub mod keybinding_store;
 pub mod review;
 pub mod session_info;
+pub mod session_names;
 mod review_metadata;
 pub mod run_actions;
 pub mod session_store;

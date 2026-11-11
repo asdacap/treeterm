@@ -20,6 +20,8 @@ use crate::tree_pane::{TreePane, WorkspaceSelected};
 pub struct AppView {
     keybindings: Entity<KeybindingStore>,
     settings: Entity<treeterm_model::settings_store::SettingsStore>,
+    /// Custom session names (renamed in the sidebar).
+    names: Entity<treeterm_model::session_names::SessionNames>,
     /// Holds keyboard focus when nothing inside does, so window-level shortcuts dispatch.
     focus: gpui_kit::FocusHandle,
     /// Owned, not just observed: an observation does not keep the store alive, and dropping
@@ -77,10 +79,12 @@ impl AppView {
         store: Entity<AppStore>,
         keybindings: Entity<KeybindingStore>,
         settings: Entity<treeterm_model::settings_store::SettingsStore>,
+        names: Entity<treeterm_model::session_names::SessionNames>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
         cx.observe(&store, |view, store, cx| view.sync(&store, cx)).detach();
+        cx.observe(&names, |_, _, cx| cx.notify()).detach();
         // The attention ding (`playDing`): the system bell, when sound is on.
         cx.subscribe_in(&store, window, |view, _, event: &treeterm_model::app_store::AppEvent, window, cx| match event {
             treeterm_model::app_store::AppEvent::Attention { .. } => {
@@ -95,6 +99,7 @@ impl AppView {
         let mut view = Self {
             keybindings,
             settings,
+            names,
             focus: cx.focus_handle(),
             store: store.clone(),
             sessions: IndexMap::new(),
@@ -111,18 +116,18 @@ impl AppView {
     /// Follow the store: a view per connected session (rebuilt for each new connection
     /// generation), none for the others.
     fn sync(&mut self, store: &Entity<AppStore>, cx: &mut Context<Self>) {
-        let wanted: Vec<(ConnectionId, Entity<SessionStore>, SharedString, bool)> = store
+        let wanted: Vec<(ConnectionId, Entity<SessionStore>, treeterm_core::connection::ConnectionTarget, bool)> = store
             .read(cx)
             .sessions()
             .filter_map(|slot| match &slot.state {
-                ConnState::Connected(session) => Some((slot.id.clone(), session.clone(), slot.name().into(), !slot.is_local())),
+                ConnState::Connected(session) => Some((slot.id.clone(), session.clone(), slot.target.clone(), !slot.is_local())),
                 ConnState::Connecting(_) | ConnState::Reconnecting { .. } | ConnState::Failed { .. } => None,
             })
             .collect();
         self.sessions.retain(|id, connected| wanted.iter().any(|(w, session, ..)| w == id && *session == connected.session));
-        for (id, session, name, remote) in wanted {
+        for (id, session, target, remote) in wanted {
             if !self.sessions.contains_key(&id) {
-                let connected = self.connect(id.clone(), session, name, remote, cx);
+                let connected = self.connect(id.clone(), session, target, remote, cx);
                 self.sessions.insert(id, connected);
             }
         }
@@ -173,13 +178,13 @@ impl AppView {
         &mut self,
         id: ConnectionId,
         session: Entity<SessionStore>,
-        name: SharedString,
+        target: treeterm_core::connection::ConnectionTarget,
         remote: bool,
         cx: &mut Context<Self>,
     ) -> Connected {
         cx.observe(&session, |_, _, cx| cx.notify()).detach();
-        let keybindings = self.keybindings.clone();
-        let tree = cx.new(|cx| TreePane::new(session.clone(), keybindings, name, remote, cx));
+        let (keybindings, names) = (self.keybindings.clone(), self.names.clone());
+        let tree = cx.new(|cx| TreePane::new(session.clone(), keybindings, names, target, remote, cx));
         let info_id = id.clone();
         cx.subscribe(&tree, move |view, _, _: &crate::tree_pane::SessionInfoRequested, cx| {
             view.info_pending = Some(info_id.clone());
@@ -312,11 +317,12 @@ impl AppView {
         }
         let c = colors(cx);
         let (bg, secondary, error, hover, border) = (c.bg_secondary, c.text_secondary, c.error, c.bg_hover, c.border);
+        let names = self.names.read(cx);
         let slots: Vec<(ConnectionId, String, ConnState, bool)> = self
             .store
             .read(cx)
             .sessions()
-            .map(|slot| (slot.id.clone(), slot.name(), slot.state.clone(), slot.is_local()))
+            .map(|slot| (slot.id.clone(), names.name(&slot.target), slot.state.clone(), slot.is_local()))
             .collect();
         let mut list = v_flex().w_full();
         for (id, name, state, local) in slots {
@@ -503,8 +509,8 @@ impl AppView {
             for connected in self.sessions.values() {
                 connected.session.update(cx, |s, cx| s.set_viewed_workspace(None, cx));
             }
-            let app = self.store.clone();
-            self.info = Some(cx.new(|cx| crate::session_info_view::SessionInfoView::new(app, id, window, cx)));
+            let (app, names) = (self.store.clone(), self.names.clone());
+            self.info = Some(cx.new(|cx| crate::session_info_view::SessionInfoView::new(app, names, id, window, cx)));
         }
         if let Some(info) = &self.info {
             let id = info.read(cx).connection(cx);
@@ -1594,7 +1600,7 @@ impl AppView {
                     ConnState::Reconnecting { attempt, error } => format!("reconnecting ({attempt}): {error}"),
                     ConnState::Failed { error, .. } => format!("failed: {error}"),
                 };
-                json!({ "id": slot.id.as_str(), "name": slot.name(), "state": state })
+                json!({ "id": slot.id.as_str(), "name": self.names.read(cx).name(&slot.target), "state": state })
             })
             .collect();
         match self.current() {

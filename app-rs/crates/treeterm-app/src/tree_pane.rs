@@ -3,7 +3,8 @@
 use std::collections::HashSet;
 
 use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
-use gpui_kit::component::{WindowExt as _, h_flex, v_flex};
+use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::{Sizable as _, WindowExt as _, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{AnyElement, ClickEvent, Context, Entity, EventEmitter, SharedString, Window, div, px};
 use treeterm_model::workspace_store::ActivityStyle as _;
@@ -19,8 +20,11 @@ pub struct WorkspaceSelected(pub String);
 pub struct TreePane {
     session: Entity<SessionStore>,
     keybindings: Entity<KeybindingStore>,
-    /// The connection's name ("Local", or the ssh label).
-    title: SharedString,
+    /// The session's name: custom, else "Local" or the ssh label.
+    names: Entity<treeterm_model::session_names::SessionNames>,
+    target: treeterm_core::connection::ConnectionTarget,
+    /// Renaming the session in place (double-click its name); saved on Enter or blur.
+    renaming: Option<(Entity<InputState>, gpui_kit::Subscription)>,
     /// A remote session: "+" browses the remote filesystem instead of a local folder picker.
     remote: bool,
     /// The whole session's rows are hidden.
@@ -77,25 +81,48 @@ impl TreePane {
     pub fn new(
         session: Entity<SessionStore>,
         keybindings: Entity<KeybindingStore>,
-        title: SharedString,
+        names: Entity<treeterm_model::session_names::SessionNames>,
+        target: treeterm_core::connection::ConnectionTarget,
         remote: bool,
         cx: &mut Context<Self>,
     ) -> Self {
         cx.observe(&session, |_, _, cx| cx.notify()).detach();
         cx.observe(&keybindings, |_, _, cx| cx.notify()).detach();
+        cx.observe(&names, |_, _, cx| cx.notify()).detach();
         let meter = session.read(cx).traffic().clone();
         let traffic = cx.new(|cx| crate::traffic_badge::TrafficBadge::new(meter, "connection-traffic", cx));
         Self {
             traffic,
             session,
             keybindings,
-            title,
+            names,
+            target,
+            renaming: None,
             remote,
             folded: false,
             drop_hint: None,
             collapsed: HashSet::new(),
             selected: Selection::Nothing,
         }
+    }
+
+    /// Edit the session's name in place (`SessionPanel` double-click).
+    fn start_rename(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let current = self.names.read(cx).name(&self.target);
+        let input = cx.new(|cx| InputState::new(window, cx).default_value(current));
+        input.update(cx, |input, cx| input.focus(window, cx));
+        let subscription = cx.subscribe(&input, |pane, input, event: &InputEvent, cx| match event {
+            InputEvent::PressEnter { .. } | InputEvent::Blur => {
+                let text = input.read(cx).value().to_string();
+                pane.renaming = None;
+                let target = pane.target.clone();
+                pane.names.update(cx, |names, cx| names.rename(&target, &text, cx));
+                cx.notify();
+            }
+            InputEvent::Change | InputEvent::Focus => {}
+        });
+        self.renaming = Some((input, subscription));
+        cx.notify();
     }
 
     fn toggle(&mut self, id: &str, cx: &mut Context<Self>) {
@@ -244,7 +271,32 @@ impl Render for TreePane {
                                 cx.notify();
                             })),
                     )
-                    .child(div().flex_1().truncate().child(self.title.clone()))
+                    .child(match &self.renaming {
+                        Some((input, _)) => div()
+                            .id("session-rename")
+                            .flex_1()
+                            .on_click(|_: &ClickEvent, _, cx| cx.stop_propagation())
+                            .on_key_down(cx.listener(|pane, event: &gpui_kit::KeyDownEvent, _, cx| {
+                                if event.keystroke.key == "escape" {
+                                    pane.renaming = None; // dropping the subscription discards the edit
+                                    cx.notify();
+                                }
+                            }))
+                            .child(Input::new(input).xsmall())
+                            .into_any_element(),
+                        None => div()
+                            .id("session-title")
+                            .flex_1()
+                            .truncate()
+                            .child(self.names.read(cx).name(&self.target))
+                            .on_click(cx.listener(|pane, event: &ClickEvent, window, cx| {
+                                if event.click_count() == 2 {
+                                    cx.stop_propagation();
+                                    pane.start_rename(window, cx);
+                                }
+                            }))
+                            .into_any_element(),
+                    })
                     .child(self.traffic.clone())
                     .when(self.session.read(cx).is_locked(), |d| {
                         d.child(

@@ -26,6 +26,7 @@ enum Tab {
 
 pub struct SessionInfoView {
     app: Entity<AppStore>,
+    names: Entity<treeterm_model::session_names::SessionNames>,
     info: Entity<SessionInfo>,
     tab: Tab,
     local_port: Entity<InputState>,
@@ -39,7 +40,7 @@ pub struct SessionInfoView {
     json_follow: Option<Subscription>,
     /// TTYs tab: the session's PTYs with a live viewer (Active Processes, embedded).
     processes: Option<Entity<crate::active_processes_view::ActiveProcessesView>>,
-    _observe: [Subscription; 2],
+    _observe: [Subscription; 3],
 }
 
 /// Status dot colour (`getStatusColor` / `getPfStatusColor`).
@@ -65,9 +66,19 @@ fn parse_forward(local: &str, host: &str, remote: &str) -> Option<PortForwardSpe
 }
 
 impl SessionInfoView {
-    pub fn new(app: Entity<AppStore>, id: ConnectionId, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        app: Entity<AppStore>,
+        names: Entity<treeterm_model::session_names::SessionNames>,
+        id: ConnectionId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let info = cx.new(|cx| SessionInfo::new(&app, id, cx));
-        let observe = [cx.observe(&info, |_, _, cx| cx.notify()), cx.observe(&app, |_, _, cx| cx.notify())];
+        let observe = [
+            cx.observe(&info, |_, _, cx| cx.notify()),
+            cx.observe(&app, |_, _, cx| cx.notify()),
+            cx.observe(&names, |_, _, cx| cx.notify()),
+        ];
         let remote = app.read(cx).session_slot(info.read(cx).id()).is_some_and(|slot| !slot.is_local());
         let mut input = |placeholder: &str, value: &str| {
             let (placeholder, value) = (placeholder.to_owned(), value.to_owned());
@@ -78,6 +89,7 @@ impl SessionInfoView {
             remote_host: input("Remote host", "localhost"),
             remote_port: input("Remote port", ""),
             app,
+            names,
             info,
             tab: if remote { Tab::Log(OutputKind::Bootstrap) } else { Tab::Log(OutputKind::Daemon) },
             save_forward: true,
@@ -366,7 +378,7 @@ impl Render for SessionInfoView {
         let (secondary, error, border) = (c.text_secondary, c.error, c.border);
         let id = self.connection(cx);
         let (name, state, remote) = match self.app.read(cx).session_slot(&id) {
-            Some(slot) => (slot.name(), Some(slot.state.clone()), !slot.is_local()),
+            Some(slot) => (self.names.read(cx).name(&slot.target), Some(slot.state.clone()), !slot.is_local()),
             None => ("Disconnected".to_owned(), None, false),
         };
         let (status, problem) = match &state {
