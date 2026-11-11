@@ -448,3 +448,114 @@ fn merging_a_child_brings_its_commits_into_the_parent_and_removes_it(cx: &mut Te
     wait_for_disk(cx, || !child_dir.exists());
     assert!(!git_in(&repo, &["branch", "--list", "feat-merge"]).contains("feat-merge"));
 }
+
+/// A temp git repo with one commit, plus cleanup of what tests create for it under the
+/// real `~/.treeterm/worktrees/<repo name>/`.
+struct TempRepo {
+    path: std::path::PathBuf,
+    worktrees_home: std::path::PathBuf,
+}
+
+impl TempRepo {
+    fn new(h: &Harness) -> Self {
+        let name = format!("tt-test-{}", uuid::Uuid::new_v4().simple());
+        let path = h.daemon.root().join(&name);
+        std::fs::create_dir_all(&path).unwrap();
+        let repo = Self {
+            worktrees_home: dirs::home_dir().unwrap().join(".treeterm/worktrees").join(&name),
+            path,
+        };
+        repo.git(&["init", "-q", "-b", "main"]);
+        repo.git(&["config", "user.email", "t@t"]);
+        repo.git(&["config", "user.name", "t"]);
+        repo.git(&["commit", "-q", "--allow-empty", "-m", "init"]);
+        repo
+    }
+
+    fn git(&self, args: &[&str]) -> String {
+        let out = std::process::Command::new("git").args(args).current_dir(&self.path).output().unwrap();
+        assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    }
+}
+
+impl Drop for TempRepo {
+    fn drop(&mut self) {
+        if self.worktrees_home.exists() && std::fs::remove_dir_all(&self.worktrees_home).is_err() {
+            eprintln!("could not remove {}", self.worktrees_home.display());
+        }
+    }
+}
+
+fn open_repo_workspace(cx: &mut TestAppContext, store: &Entity<SessionStore>, repo: &TempRepo) -> String {
+    wait_until(cx, store, |s| matches!(s.state(), SessionState::Live));
+    let path = repo.path.to_string_lossy().into_owned();
+    let id = store.update(cx, |s, cx| s.open_workspace(path, cx));
+    wait_until(cx, store, |s| loaded(s, &id));
+    id
+}
+
+fn wait_child(cx: &mut TestAppContext, store: &Entity<SessionStore>, id: &str) {
+    wait_until(cx, store, |s| loaded(s, id) || matches!(s.entry(id), Some(WorkspaceEntry::Error { .. })));
+    let error = store.read_with(cx, |s, _| match s.entry(id) {
+        Some(WorkspaceEntry::Error { error, .. }) => Some(error.clone()),
+        _ => None,
+    });
+    if let Some(error) = error {
+        panic!("child failed: {error}");
+    }
+}
+
+#[gpui_kit::test]
+fn a_child_can_check_out_an_existing_branch(cx: &mut TestAppContext) {
+    use treeterm_model::session_store::{ChildOptions, ChildSource};
+    cx.executor().allow_parking();
+    let h = harness();
+    publish(&h, &[]);
+    let repo = TempRepo::new(&h);
+    repo.git(&["branch", "team/feature-y"]);
+    let store = open_store(cx, &h, "client-a");
+    let root = open_repo_workspace(cx, &store, &repo);
+
+    let child = store
+        .update(cx, |s, cx| {
+            s.create_child(
+                &root,
+                ChildSource::ExistingBranch { branch: "team/feature-y".into() },
+                ChildOptions::default(),
+                cx,
+            )
+        })
+        .unwrap();
+    wait_child(cx, &store, &child);
+    wait_for_disk(cx, || h.daemon.workspaces_dir().join(format!("{child}.json")).exists());
+    let disk = file_on_disk(&h, &child);
+    assert_eq!(disk["name"], "feature-y");
+    assert_eq!(disk["gitBranch"], "team/feature-y");
+    assert_eq!(disk["metadata"]["branchIsUserDefined"], "true");
+}
+
+#[gpui_kit::test]
+fn an_existing_worktree_can_be_adopted_once(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    publish(&h, &[]);
+    let repo = TempRepo::new(&h);
+    let outside = h.daemon.root().join("outside-wt");
+    repo.git(&["worktree", "add", "-q", "-b", "side", outside.to_str().unwrap()]);
+    let store = open_store(cx, &h, "client-a");
+    let root = open_repo_workspace(cx, &store, &repo);
+
+    let worktree = treeterm_core::git::WorktreeInfo {
+        path: outside.to_string_lossy().into_owned(),
+        branch: "side".into(),
+    };
+    let child = store
+        .update(cx, |s, cx| s.adopt_existing_worktree(&root, worktree.clone(), None, cx))
+        .unwrap();
+    wait_child(cx, &store, &child);
+    let again = store.update(cx, |s, cx| s.adopt_existing_worktree(&root, worktree, None, cx));
+    assert_eq!(again.unwrap_err(), "This worktree is already open");
+    wait_for_disk(cx, || h.daemon.workspaces_dir().join(format!("{child}.json")).exists());
+    assert_eq!(file_on_disk(&h, &child)["gitBranch"], "side");
+}

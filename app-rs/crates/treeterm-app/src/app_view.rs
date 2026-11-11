@@ -648,6 +648,13 @@ impl AppView {
         store.update(cx, |w, cx| w.add_tab(&app, cx))
     }
 
+    pub fn automation_session(&self) -> Option<Entity<SessionStore>> {
+        match &self.body {
+            Body::Connected(connected) => Some(connected.session.clone()),
+            Body::StartingDaemon | Body::Reconnecting { .. } | Body::Failed(_) => None,
+        }
+    }
+
     pub fn automation_open_workspace(&mut self, path: String, cx: &mut Context<Self>) -> Option<String> {
         let Body::Connected(connected) = &self.body else {
             return None;

@@ -116,6 +116,12 @@ fn handle(line: &str, window: AnyWindowHandle, view: &Entity<AppView>, cx: &mut 
                 let id = view.update(cx, |view, cx| view.automation_open_workspace(rest.to_owned(), cx));
                 Ok(json!({ "ok": id.is_some(), "id": id }))
             }
+            "childdialog" => {
+                let session = view.read(cx).automation_session().ok_or("not connected")?;
+                let on_created: crate::child_dialog::OnCreated = std::rc::Rc::new(|_, _, _| {});
+                crate::child_dialog::open(session, rest.to_owned(), "parent".into(), on_created, window, cx);
+                Ok(json!({ "ok": true }))
+            }
             "focus" => {
                 // Re-run focus sync: focus the shown terminal again.
                 window.activate_window();

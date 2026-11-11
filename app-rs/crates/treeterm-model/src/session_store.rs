@@ -87,6 +87,69 @@ pub enum RemoveMode {
     KeepWorktreeAndBranch,
 }
 
+/// Where a new child worktree's branch comes from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChildSource {
+    /// A new branch named `name`, from the parent's current branch.
+    NewBranch { name: String },
+    /// A local branch that has no worktree yet.
+    ExistingBranch { branch: String },
+    /// A remote-tracking branch such as `origin/feature`.
+    RemoteBranch { remote_branch: String },
+    /// A pull request's head branch (fetched first); its title becomes the display name.
+    PullRequest { head_ref: String, title: String },
+}
+
+impl ChildSource {
+    /// The worktree (and workspace) name: the last path segment of the branch.
+    pub fn worktree_name(&self) -> String {
+        let last = |branch: &str| branch.rsplit('/').find(|s| !s.is_empty()).unwrap_or(branch).to_owned();
+        match self {
+            ChildSource::NewBranch { name } => name.clone(),
+            ChildSource::ExistingBranch { branch } => last(branch),
+            ChildSource::RemoteBranch { remote_branch } => last(remote_branch),
+            ChildSource::PullRequest { head_ref, .. } => last(head_ref),
+        }
+    }
+
+    fn message(&self) -> &'static str {
+        match self {
+            ChildSource::NewBranch { .. } => "Creating worktree...",
+            ChildSource::ExistingBranch { .. } => "Creating worktree from branch...",
+            ChildSource::RemoteBranch { .. } => "Creating worktree from remote...",
+            ChildSource::PullRequest { .. } => "Creating worktree from pull request...",
+        }
+    }
+
+    /// Metadata the child starts with (`createChildWithLoading`).
+    fn metadata(&self, description: Option<String>) -> std::collections::BTreeMap<String, String> {
+        let mut metadata = std::collections::BTreeMap::new();
+        match self {
+            ChildSource::NewBranch { .. } => {}
+            ChildSource::ExistingBranch { .. } | ChildSource::RemoteBranch { .. } => {
+                metadata.insert("branchIsUserDefined".to_owned(), "true".to_owned());
+            }
+            ChildSource::PullRequest { title, .. } => {
+                metadata.insert("branchIsUserDefined".to_owned(), "true".to_owned());
+                // The PR body is not used: it can be very long.
+                if !title.is_empty() {
+                    metadata.insert("displayName".to_owned(), title.clone());
+                }
+            }
+        }
+        if let Some(description) = description.filter(|d| !d.is_empty()) {
+            metadata.insert("description".to_owned(), description);
+        }
+        metadata
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ChildOptions {
+    pub detached: bool,
+    pub description: Option<String>,
+}
+
 /// What happens to a child after its branch is merged into the parent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AfterMerge {
@@ -1263,15 +1326,32 @@ impl SessionStore {
     }
 
     /// Create a git worktree under `parent_id` and add it as a child workspace
-    /// (`addChildWorkspace` → `createChildWithLoading`). The new worktree branches from the
-    /// parent's current branch. Returns the child's id at once; it shows as Loading with the
-    /// git output until done, or as an Error.
+    /// (`addChildWorkspace` → `createChildWithLoading`), branching from the parent's
+    /// current branch. Returns the child's id at once; it shows as Loading with the git output
+    /// until done, or as an Error.
     pub fn add_child_workspace(
         &mut self,
         parent_id: &str,
         name: String,
         detached: bool,
         description: Option<String>,
+        cx: &mut Context<Self>,
+    ) -> Result<String, String> {
+        self.create_child(
+            parent_id,
+            ChildSource::NewBranch { name },
+            ChildOptions { detached, description },
+            cx,
+        )
+    }
+
+    /// Create a child workspace from `source` (`addChildWorkspace`,
+    /// `createWorktreeFromBranch`, `createWorktreeFromRemote`, `createWorktreeFromPr`).
+    pub fn create_child(
+        &mut self,
+        parent_id: &str,
+        source: ChildSource,
+        options: ChildOptions,
         cx: &mut Context<Self>,
     ) -> Result<String, String> {
         let parent = self
@@ -1285,12 +1365,13 @@ impl SessionStore {
                 (true, None) | (false, _) => return Err("Parent workspace is not a git repository".to_owned()),
             }
         };
+        let name = source.worktree_name();
         let id = new_workspace_id();
         self.entries.insert(
             id.clone(),
             WorkspaceEntry::Loading {
                 name: name.clone(),
-                message: "Creating worktree...".to_owned(),
+                message: source.message().to_owned(),
                 output: Vec::new(),
             },
         );
@@ -1306,16 +1387,24 @@ impl SessionStore {
                 }
                 return;
             }
-            // The parent may have switched branches since it was last read.
-            if let treeterm_core::git::GitInfo::Repo { branch, .. } = git.get_info(&parent_path).await {
-                match this.update(cx, |_, cx| parent.update(cx, |p, cx| p.set_git_branch(&branch, cx))) {
-                    Ok(()) | Err(_) => {}
+            // Before the git operation (`preOperation`).
+            match &source {
+                ChildSource::NewBranch { .. } => {
+                    // The parent may have switched branches since it was last read.
+                    if let treeterm_core::git::GitInfo::Repo { branch, .. } = git.get_info(&parent_path).await {
+                        match this.update(cx, |_, cx| parent.update(cx, |p, cx| p.set_git_branch(&branch, cx))) {
+                            Ok(()) | Err(_) => {}
+                        }
+                    }
                 }
+                // The PR head must exist as a remote-tracking ref locally.
+                ChildSource::PullRequest { .. } => {
+                    if let Err(error) = git.fetch(&root_path).await {
+                        tracing::warn!(%error, "fetch before PR worktree failed; trying anyway");
+                    }
+                }
+                ChildSource::ExistingBranch { .. } | ChildSource::RemoteBranch { .. } => {}
             }
-            let base = match this.update(cx, |_, cx| parent.read(cx).file().git_branch.clone()) {
-                Ok(Some(branch)) => treeterm_core::git::WorktreeBase::Ref(branch),
-                Ok(None) | Err(_) => treeterm_core::git::WorktreeBase::Head,
-            };
             // Git's output goes to the Loading row as it arrives.
             let (lines_tx, mut lines_rx) = futures::channel::mpsc::unbounded::<String>();
             let report = move |line: &str| {
@@ -1326,21 +1415,42 @@ impl SessionStore {
                 this.update(cx, |_, cx| {
                     cx.spawn(async move |this, cx| {
                         while let Some(line) = lines_rx.next().await {
-                            match this.update(cx, |s, cx| s.append_output(&child_id, line, cx)) {
-                                Ok(()) => {}
-                                Err(_) => return,
+                            if this.update(cx, |s, cx| s.append_output(&child_id, line, cx)).is_err() {
+                                return;
                             }
                         }
                     })
                 })
             };
-            let created = git
-                .create_worktree(&root_path, &name, base, treeterm_core::git::Progress::Report(&report))
-                .await;
+            let progress = treeterm_core::git::Progress::Report(&report);
+            let created = match &source {
+                ChildSource::NewBranch { name } => {
+                    let base = match this.update(cx, |_, cx| parent.read(cx).file().git_branch.clone()) {
+                        Ok(Some(branch)) => treeterm_core::git::WorktreeBase::Ref(branch),
+                        Ok(None) | Err(_) => treeterm_core::git::WorktreeBase::Head,
+                    };
+                    git.create_worktree(&root_path, name, base, progress).await
+                }
+                ChildSource::ExistingBranch { branch } => {
+                    git.create_worktree_from_branch(&root_path, branch, &source.worktree_name(), progress).await
+                }
+                ChildSource::RemoteBranch { remote_branch } => {
+                    git.create_worktree_from_remote(&root_path, remote_branch, &source.worktree_name(), progress)
+                        .await
+                }
+                ChildSource::PullRequest { head_ref, .. } => {
+                    let remote_branch = format!("origin/{head_ref}");
+                    git.create_worktree_from_remote(&root_path, &remote_branch, &source.worktree_name(), progress)
+                        .await
+                }
+            };
             drop(report);
             drop(drain);
             let published = this.update(cx, |s, cx| match created {
-                Ok(info) => Some(s.finish_child(&child_id, &parent, name.clone(), info, detached, description, cx)),
+                Ok(info) => {
+                    let metadata = source.metadata(options.description.clone());
+                    Some(s.finish_child(&child_id, &parent, name.clone(), info, options.detached, metadata, cx))
+                }
                 Err(error) => {
                     s.fail_child(&child_id, &name, error.to_string(), cx);
                     None
@@ -1351,12 +1461,66 @@ impl SessionStore {
             {
                 tracing::debug!("child publish dropped with the store");
             }
-            let Ok(unlock) = this.update(cx, |s, cx| s.release_lock(cx)) else {
+            release(&this, cx).await;
+        })
+        .detach();
+        Ok(id)
+    }
+
+    /// Add an existing worktree of the parent's repository as a child workspace
+    /// (`adoptExistingWorktree`). No git operation; refused if it is already open.
+    pub fn adopt_existing_worktree(
+        &mut self,
+        parent_id: &str,
+        worktree: treeterm_core::git::WorktreeInfo,
+        description: Option<String>,
+        cx: &mut Context<Self>,
+    ) -> Result<String, String> {
+        let parent = self
+            .workspace_store(parent_id)
+            .ok_or("Parent workspace not found")?
+            .clone();
+        let already_open = self
+            .entries
+            .values()
+            .filter_map(WorkspaceEntry::store)
+            .any(|store| store.read(cx).workspace().path == worktree.path);
+        if already_open {
+            return Err("This worktree is already open".to_owned());
+        }
+        let name = name_from_path(&worktree.path);
+        let id = new_workspace_id();
+        self.entries.insert(
+            id.clone(),
+            WorkspaceEntry::Loading {
+                name: name.clone(),
+                message: "Opening worktree...".to_owned(),
+                output: Vec::new(),
+            },
+        );
+        cx.notify();
+        let lock = self.acquire_lock(cx);
+        let child_id = id.clone();
+        cx.spawn(async move |this, cx| {
+            let locked = lock.await.unwrap_or_else(|_| Err("session store dropped".to_owned()));
+            if let Err(error) = locked {
+                match this.update(cx, |s, cx| s.fail_child(&child_id, &name, error, cx)) {
+                    Ok(()) | Err(_) => {}
+                }
                 return;
-            };
-            if unlock.await.is_err() {
-                tracing::debug!("unlock dropped with the store");
             }
+            let mut metadata = std::collections::BTreeMap::new();
+            metadata.insert("branchIsUserDefined".to_owned(), "true".to_owned());
+            if let Some(description) = description.filter(|d| !d.is_empty()) {
+                metadata.insert("description".to_owned(), description);
+            }
+            let published = this.update(cx, |s, cx| s.finish_child(&child_id, &parent, name, worktree, false, metadata, cx));
+            if let Ok(Some(published)) = published
+                && published.await.is_err()
+            {
+                tracing::debug!("child publish dropped with the store");
+            }
+            release(&this, cx).await;
         })
         .detach();
         Ok(id)
@@ -1384,7 +1548,7 @@ impl SessionStore {
         name: String,
         info: treeterm_core::git::WorktreeInfo,
         detached: bool,
-        description: Option<String>,
+        extra_metadata: std::collections::BTreeMap<String, String>,
         cx: &mut Context<Self>,
     ) -> Option<oneshot::Receiver<()>> {
         use treeterm_core::wire::workspace_file::{AppState, WorkspaceStatus};
@@ -1415,11 +1579,8 @@ impl SessionStore {
             );
             active_tab_id = Some(tab_id);
         }
-        let mut metadata = std::collections::BTreeMap::new();
+        let mut metadata = extra_metadata;
         metadata.insert("sortOrder".to_owned(), self.next_sort_order(Some(&parent_id), cx));
-        if let Some(description) = description.filter(|d| !d.is_empty()) {
-            metadata.insert("description".to_owned(), description);
-        }
         let now = now_millis();
         let file = WorkspaceFile {
             name,
