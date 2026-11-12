@@ -142,6 +142,10 @@ are not ours). Its changes are marked `TreeTerm patch` (`grep -rn "TreeTerm patc
 - `src/diff/mod.rs`: a Unified row has one line-number gutter, numbering the line it shows
   (the new number for unchanged and added lines, the old one for removed lines), as Pierre's
   unified diff in Electron's Review tab does; the Kit draws an old and a new gutter.
+- `src/diff/sticky.rs` (new), `src/diff/mod.rs`, `src/diff/state.rs`:
+  `Diff::render_sticky_header` pins the header of the file at the top of the viewport while
+  its rows scroll under it, and the next file's header pushes it out, as Electron's
+  `.file-diff-header` (`position: sticky; top: 0`) does; the Kit's headers scroll away.
 
 When `gpui-kit` is upgraded, copy the new `gpui-component` over this directory and re-apply
 the marked changes (or drop the patch if the Kit gained the option).

@@ -567,6 +567,10 @@ impl DiffState {
     pub(crate) fn rows(&self) -> &Rc<Vec<DisplayRow>> {
         &self.rows
     }
+    // TreeTerm patch: for the sticky file header.
+    pub(crate) fn header_rows(&self) -> &[usize] {
+        &self.header_rows
+    }
     pub(crate) fn list(&self) -> &ListState {
         &self.list
     }

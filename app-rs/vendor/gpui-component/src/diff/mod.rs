@@ -10,6 +10,8 @@ mod parser_tests;
 mod presentation;
 mod selection;
 mod state;
+// TreeTerm patch: sticky file headers.
+mod sticky;
 
 pub use conflict::{DiffConflict, DiffConflictResolution};
 pub use decoration::{DiffDecoration, DiffGutterMarker};
@@ -240,6 +242,8 @@ pub struct Diff {
     on_add_annotation: Option<RangeHandler>,
     on_line_click: Option<ClickHandler>,
     on_line_hover: Option<HoverHandler>,
+    // TreeTerm patch: see `render_sticky_header`.
+    sticky_header: Option<FileRenderer>,
 }
 
 fn file_renderer<F, E>(render: F) -> FileRenderer
@@ -272,6 +276,7 @@ impl Diff {
             on_add_annotation: None,
             on_line_click: None,
             on_line_hover: None,
+            sticky_header: None,
         }
     }
     /// Shows the original and modified line-number lanes. Default is true.
@@ -413,6 +418,19 @@ impl Diff {
         E: IntoElement,
     {
         self.header.suffix = Some(file_renderer(render));
+        self
+    }
+    /// TreeTerm patch: pins the header of the file at the top of the viewport, as a CSS
+    /// `position: sticky; top: 0` header inside its file's section would be: once the
+    /// file's header row starts to scroll out of view, `render`'s header for that file is
+    /// drawn over the rows at the top, and the next file's header pushes it up and out.
+    /// It takes clicks and hovers from the rows beneath it, not the wheel.
+    pub fn render_sticky_header<F, E>(mut self, render: F) -> Self
+    where
+        F: Fn(&DiffFile, &mut Window, &mut App) -> E + 'static,
+        E: IntoElement,
+    {
+        self.sticky_header = Some(file_renderer(render));
         self
     }
     /// Compatibility alias for [`Self::render_annotation`].
@@ -598,6 +616,14 @@ fn render_diff(
     });
     let rows = state.rows().clone();
     let scrollbar = state.list().clone();
+    // TreeTerm patch: over the rows, under the scrollbars.
+    let sticky_header = props.sticky_header.map(|render| sticky::StickyHeader {
+        list: scrollbar.clone(),
+        rows: rows.clone(),
+        header_rows: state.header_rows().to_vec(),
+        files: state.files().to_vec(),
+        render,
+    });
     let horizontal = state.horizontal_scroll().clone();
     let has_rows = !rows.is_empty();
     let label = match state.files() {
@@ -638,6 +664,7 @@ fn render_diff(
             state.selection().clone(),
             state.geometry().clone(),
         ))
+        .children(sticky_header)
         .when(has_rows && !soft_wrap, |this| {
             this.child(
                 ScrollableMask::new(Axis::Horizontal, &horizontal).id("diff-horizontal-wheel"),
