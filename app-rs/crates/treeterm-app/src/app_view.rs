@@ -1707,6 +1707,8 @@ fn workspace_pane(
         let is_active = active.as_deref() == Some(tab_id.as_str());
         let app = registry.get(&tab.application_id);
         // Tabs of applications the native app lacks (or that cannot close) keep no close button.
+        // Every other tab has one, active or not, shown while the tab is hovered (flex-layout's
+        // `.flexlayout__tab_button_trailing` at `opacity: 0` until `:hover`).
         let closable = app.is_some_and(|app| app.can_close);
         let app_icon = app.map(|app| app.icon.clone()).unwrap_or_default();
         let select = (workspace.clone(), tab_id.clone());
@@ -1731,7 +1733,7 @@ fn workspace_pane(
                 .child(div().flex_shrink_0().mr(px(6.)).child(app_icon))
                 .child(div().whitespace_nowrap().child(tab.title.clone()))
                 .child(div().ml(px(4.)).flex_shrink_0().child(crate::ui::activity_glyph(activity, 10., text)))
-                .when(closable && is_active, |d| {
+                .when(closable, |d| {
                     d.child(
                         div()
                             .id(SharedString::from(format!("tab-close-{tab_id}")))
