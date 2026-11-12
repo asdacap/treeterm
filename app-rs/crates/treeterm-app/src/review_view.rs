@@ -15,16 +15,16 @@ use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::component::{WindowExt as _, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    AnyElement, App, ClickEvent, Focusable as _, Context, Entity, FontWeight, MouseButton, MouseMoveEvent, ScrollHandle, SharedString,
+    AnyElement, App, ClickEvent, Focusable as _, Context, Entity, EntityId, FontWeight, MouseButton, MouseMoveEvent, ScrollHandle, SharedString,
     Subscription, Window, deferred, div, px, rgb, rgba,
 };
 use treeterm_core::git::{GitLogCommit, Staging};
 use treeterm_model::review::{
-    ConflictCheck, GitOp, Loaded, Notice, ReviewBase, ReviewContent, ReviewEvent, ReviewHeader, ReviewMode,
-    ReviewModel, StageTarget,
+    ConflictCheck, FavouriteSelection, GitOp, Loaded, Notice, ReviewBase, ReviewContent, ReviewEvent, ReviewHeader,
+    ReviewMode, ReviewModel, StageTarget,
 };
 use treeterm_model::session_store::AfterMerge;
-use treeterm_model::workspace_store::{MergeOutput, MergeState};
+use treeterm_model::workspace_store::{MergeOutput, MergeState, WorkspaceStore};
 
 use crate::theme::colors;
 use parts::{ERROR_RED, MONO, action_button, branch_pill, plain_icon, spinner, toolbar_button, totals};
@@ -35,6 +35,9 @@ const MONO_12_ADVANCE: f32 = 7.224;
 
 pub struct ReviewView {
     model: Entity<ReviewModel>,
+    workspace: Entity<WorkspaceStore>,
+    /// The selected favourite's viewer, and the model it shows.
+    favourite_view: Option<(EntityId, Entity<crate::file_browser_view::FileBrowserView>)>,
     /// The stacked diff of what is shown, rebuilt when the patch or the filter changes.
     diff: Option<DiffCache>,
     /// `isSplitView` (Electron starts split).
@@ -77,7 +80,7 @@ pub struct ReviewView {
 }
 
 impl ReviewView {
-    pub fn new(model: Entity<ReviewModel>, cx: &mut Context<Self>) -> Self {
+    pub fn new(model: Entity<ReviewModel>, workspace: Entity<WorkspaceStore>, cx: &mut Context<Self>) -> Self {
         let observe = cx.observe(&model, |_, _, cx| cx.notify());
         let events = cx.subscribe(&model, |view, _, event: &ReviewEvent, cx| match event {
             ReviewEvent::Committed => {
@@ -92,6 +95,8 @@ impl ReviewView {
         });
         Self {
             model,
+            workspace,
+            favourite_view: None,
             diff: None,
             split: true,
             hide_unchanged: true,
@@ -927,7 +932,10 @@ impl ReviewView {
 
     /// A click in the file list (or a jump): the diff scrolls to the file, expanded.
     fn select_file(&mut self, path: &str, cx: &mut Context<Self>) {
-        self.model.update(cx, |m, cx| m.focus_file(path, cx));
+        self.model.update(cx, |m, cx| {
+            m.show_diff(cx);
+            m.focus_file(path, cx);
+        });
         if let Some(diff) = &self.diff {
             let path = path.to_owned();
             diff.state.update(cx, |s, cx| s.scroll_to_file(&path, cx));
@@ -953,6 +961,34 @@ impl ReviewView {
     /// left of the diff area; 20px padding, the body's 16px text, secondary colour.
     fn empty(text: &'static str, color: gpui_kit::Hsla) -> AnyElement {
         div().flex_shrink_0().p(px(20.)).text_size(px(16.)).text_color(color).child(text).into_any_element()
+    }
+
+    /// Show the selected favourite's PDF / model webview only while this tab is shown.
+    pub fn set_shown(&mut self, shown: bool, cx: &mut Context<Self>) {
+        let selected = self.model.read(cx).favourite_selection().relative_path().is_some();
+        if let Some((_, view)) = &self.favourite_view {
+            view.update(cx, |v, cx| v.set_shown(shown && selected, cx));
+        }
+    }
+
+    /// `renderRightPane`: the selected favourite's file viewer in the diff's place.
+    fn favourite_pane(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let FavouriteSelection::Selected { viewer, .. } = self.model.read(cx).favourite_selection().clone() else {
+            self.favourite_view = None;
+            return None;
+        };
+        let view = match &self.favourite_view {
+            Some((shown, view)) if *shown == viewer.entity_id() => view.clone(),
+            Some(_) | None => {
+                let workspace = self.workspace.clone();
+                let id = viewer.entity_id();
+                let view = cx.new(|cx| crate::file_browser_view::FileBrowserView::embedded(viewer, workspace, cx));
+                self.favourite_view = Some((id, view.clone()));
+                view
+            }
+        };
+        // `.review-favourite-viewer`.
+        Some(div().flex().flex_1().min_w_0().h_full().child(view).into_any_element())
     }
 
     /// `.diff-content`: the file list, the divider and the diff.
@@ -1103,10 +1139,10 @@ impl ReviewView {
         let tree = files::tree(self, "committed", &shown, &viewed, None, false, cx);
         let favourites = files::favourites(self, &listed, cx);
         let list = v_flex().child(search).children(favourites).when(has_changes, |d| d.child(tree)).into_any_element();
-        let right = if has_changes {
-            self.stacked(&committed.patch, &shown, &viewed, true, window, cx)
-        } else {
-            Self::empty("No committed changes to show", secondary)
+        let right = match self.favourite_pane(cx) {
+            Some(pane) => pane,
+            None if has_changes => self.stacked(&committed.patch, &shown, &viewed, true, window, cx),
+            None => Self::empty("No committed changes to show", secondary),
         };
         column.child(self.content_row(list, right, cx)).into_any_element()
     }
@@ -1173,10 +1209,10 @@ impl ReviewView {
             list = list.child(files::section_title(title, cx)).child(files::tree(self, title, &shown, &viewed, Some(busy), true, cx));
             shown_all.extend(shown);
         }
-        let right = if has_changes {
-            self.stacked(&uncommitted.patch, &shown_all, &viewed, true, window, cx)
-        } else {
-            Self::empty("No uncommitted changes", secondary)
+        let right = match self.favourite_pane(cx) {
+            Some(pane) => pane,
+            None if has_changes => self.stacked(&uncommitted.patch, &shown_all, &viewed, true, window, cx),
+            None => Self::empty("No uncommitted changes", secondary),
         };
         column = column.child(self.content_row(list.into_any_element(), right, cx));
         if uncommitted.has_staged() {
@@ -1349,9 +1385,10 @@ impl ReviewView {
                 Loaded::Ready(_) => files::tree(self, "commit", &shown, &viewed, None, false, cx),
             };
             let list = v_flex().child(search).children(files::favourites(self, &listed, cx)).child(tree).into_any_element();
-            let right = match body {
-                Some(patch) => self.stacked(&patch, &shown, &viewed, false, window, cx),
-                None => div().into_any_element(),
+            let right = match (self.favourite_pane(cx), body) {
+                (Some(pane), _) => pane,
+                (None, Some(patch)) => self.stacked(&patch, &shown, &viewed, false, window, cx),
+                (None, None) => div().into_any_element(),
             };
             column = column.child(self.content_row(list, right, cx));
         }

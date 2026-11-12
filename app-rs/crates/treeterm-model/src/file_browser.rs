@@ -265,6 +265,16 @@ pub fn is_favourite_path(path: &str, favourites: &[String]) -> bool {
     })
 }
 
+/// Where the browser is shown, which decides where a repo search hit opens.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Host {
+    /// The Files tab: the hit opens here.
+    FilesTab,
+    /// A viewer inside another tab (Review's favourites): the hit opens in a new Files tab
+    /// (`openInFileBrowser`).
+    Embedded,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum FileBrowserEvent {
     /// Selection or expansion changed: persist it in the tab state.
@@ -278,6 +288,7 @@ pub struct FileBrowser {
     exec: Arc<dyn ExecApi>,
     /// `HEAD` and `git blame`, for review comments.
     git: GitApi,
+    host: Host,
     root: String,
     listings: HashMap<String, Listing>,
     expanded: Vec<String>,
@@ -417,6 +428,7 @@ impl FileBrowser {
             fs,
             exec,
             git,
+            host: Host::FilesTab,
             root: root.clone(),
             listings: HashMap::new(),
             expanded: expanded.clone(),
@@ -454,6 +466,16 @@ impl FileBrowser {
             }
         }
         browser
+    }
+
+    /// Shown inside another tab ([`Host::Embedded`]).
+    pub fn embedded(mut self) -> Self {
+        self.host = Host::Embedded;
+        self
+    }
+
+    pub fn host(&self) -> Host {
+        self.host
     }
 
     pub fn download_state(&self) -> &DownloadState {
@@ -1002,13 +1024,28 @@ impl FileBrowser {
         self.select_match(next, cx);
     }
 
-    /// Open a repo hit, selecting the match.
+    /// Open a repo hit, selecting the match; an embedded viewer opens it in a new Files tab
+    /// at its line instead.
     pub fn open_repo_hit(&mut self, hit: &RepoHit, cx: &mut Context<Self>) {
         let len = match &self.search {
             SearchPanel::Open(search) => search.query.len(),
             SearchPanel::Closed => 0,
         };
-        self.open_location(&hit.file_path, hit.line_number as usize, hit.column as usize, len, cx);
+        match self.host {
+            Host::FilesTab => self.open_location(&hit.file_path, hit.line_number as usize, hit.column as usize, len, cx),
+            Host::Embedded => {
+                let Some(workspace) = self.workspace.upgrade() else {
+                    return;
+                };
+                let state = json!({
+                    "selectedPath": search::to_workspace_absolute(&self.root, &hit.file_path),
+                    "scrollToLine": hit.line_number,
+                });
+                if workspace.update(cx, |w, cx| w.add_tab_with("filesystem", state, cx)).is_none() {
+                    tracing::error!("the file browser is not registered");
+                }
+            }
+        }
     }
 
     // ---- file name search ---------------------------------------------------------------

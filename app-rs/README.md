@@ -97,6 +97,7 @@ Done (tested against a real in-process daemon unless noted):
   (click a line number; commented lines marked in the glyph margin); editor tab.
 - **Review (M7):** committed / uncommitted / commits views, stage/unstage/commit, inline
   comments (Electron's metadata format), viewed files, image diffs (before / after),
+  favourites outside the diff shown in the Files viewer (with its comments) in the diff's place,
   prompting the AI harness; live merge
   output; git status (uncommitted / conflicts / behind, Pull) and PR indicators.
 - **Web (M8):** Browser tabs in a native webview (localhost guard); Web App tabs (free port
@@ -162,9 +163,8 @@ The chrome was matched to Electron's computed styles, measured side by side on o
 - With the sidebar collapsed the header keeps clear of the macOS window buttons (Electron's
   title runs under them).
 - Not ported: Cmd+F in Review, the merge output inside the Review tab (it shows over the
-  workspace), Review's favourite viewer (a favourite outside the diff opens in an Editor
-  tab, which takes no comments), Markdown rendering of `.md` pages in the browser, and the
-  remote Browser tab's Port Forward sub-tab.
+  workspace), Markdown rendering of `.md` pages in the browser, and the remote Browser tab's
+  Port Forward sub-tab.
 
 ## Known differences from Electron (deliberate)
 

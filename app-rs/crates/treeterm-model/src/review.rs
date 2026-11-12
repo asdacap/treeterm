@@ -25,6 +25,9 @@ use treeterm_core::review::{
     ViewedFilesStore, build_prompt_for_comments, generate_review_prompt,
 };
 
+use treeterm_core::files::FavouriteFile;
+
+use crate::file_browser::FileBrowser;
 use crate::review_metadata::{Blame, Later, Now};
 use crate::session_store::{AfterMerge, RemoveMode};
 use crate::workspace_store::WorkspaceStore;
@@ -146,6 +149,24 @@ pub struct CommentDraft {
     pub line_number: u32,
 }
 
+/// `FavouriteSelection`: a favourite outside the diff, shown in a file viewer (the Files
+/// tab's, with its review comments) in place of the diff.
+#[derive(Clone)]
+pub enum FavouriteSelection {
+    None,
+    Selected { file: FavouriteFile, viewer: Entity<FileBrowser> },
+}
+
+impl FavouriteSelection {
+    /// The selected favourite's workspace-relative path.
+    pub fn relative_path(&self) -> Option<&str> {
+        match self {
+            FavouriteSelection::None => None,
+            FavouriteSelection::Selected { file, .. } => Some(&file.relative_path),
+        }
+    }
+}
+
 /// A failure the tab shows until dismissed (a metadata write, a prompt).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Notice {
@@ -244,6 +265,7 @@ pub struct ReviewModel {
     /// resolved from.
     favourites: crate::file_browser::Favourites,
     favourite_paths: Vec<String>,
+    favourite: FavouriteSelection,
     _favourites: Option<Task<()>>,
     /// Both sides of each image file shown.
     images: HashMap<String, ImageSides>,
@@ -343,6 +365,8 @@ impl ReviewModel {
         let observe = cx.observe(workspace, |model: &mut Self, workspace, cx| {
             let paths = workspace.read(cx).favourite_paths().to_vec();
             if paths != model.favourite_paths {
+                // Other favourites: the pane goes back to the diff.
+                model.favourite = FavouriteSelection::None;
                 model.load_favourites(cx);
             }
             cx.notify();
@@ -365,6 +389,7 @@ impl ReviewModel {
             image_diff: None,
             favourites: crate::file_browser::Favourites::Empty,
             favourite_paths: Vec::new(),
+            favourite: FavouriteSelection::None,
             _favourites: None,
             images: HashMap::new(),
             _images: Vec::new(),
@@ -798,6 +823,10 @@ impl ReviewModel {
     /// "Refresh changes": reload everything, keeping what is shown until the new content
     /// arrives (`handleRefresh`).
     pub fn refresh(&mut self, cx: &mut Context<Self>) {
+        if let FavouriteSelection::Selected { file, viewer } = &self.favourite {
+            let path = file.path.clone();
+            viewer.update(cx, |viewer, cx| viewer.open(&path, false, cx));
+        }
         self.reload_quietly(cx);
     }
 
@@ -916,19 +945,35 @@ impl ReviewModel {
         self.git_request(&all)
     }
 
-    /// Open a file in an editor tab of the workspace (a favourite the diff does not show).
-    pub fn open_file(&mut self, path: &str, cx: &mut Context<Self>) {
-        if let Some(workspace) = self.workspace.upgrade()
-            && workspace.update(cx, |w, cx| w.open_in_editor(path, cx)).is_none()
-        {
-            self.notice = Notice::Error("The editor application is not registered".to_owned());
-            cx.notify();
-        }
-    }
-
     /// The workspace's favourite files, shown above the changed files.
     pub fn favourites(&self) -> &crate::file_browser::Favourites {
         &self.favourites
+    }
+
+    pub fn favourite_selection(&self) -> &FavouriteSelection {
+        &self.favourite
+    }
+
+    /// Show a favourite that is not in the diff in a file viewer, in the diff's place (one in
+    /// the diff is scrolled to instead: [`Self::show_diff`]).
+    pub fn select_favourite(&mut self, file: FavouriteFile, cx: &mut Context<Self>) {
+        if self.favourite.relative_path() == Some(file.relative_path.as_str()) {
+            return;
+        }
+        let Some(workspace) = self.workspace.upgrade() else {
+            return;
+        };
+        let viewer = workspace.update(cx, |w, cx| w.file_viewer(&file.path, cx));
+        self.favourite = FavouriteSelection::Selected { file, viewer };
+        cx.notify();
+    }
+
+    /// Selecting anything in the diff gives the pane back to it.
+    pub fn show_diff(&mut self, cx: &mut Context<Self>) {
+        if matches!(self.favourite, FavouriteSelection::Selected { .. }) {
+            self.favourite = FavouriteSelection::None;
+            cx.notify();
+        }
     }
 
     /// Resolve the favourite paths to files (a favourite directory names every file under
@@ -963,6 +1008,13 @@ impl ReviewModel {
                 Err(error) => crate::file_browser::Favourites::Failed(error.to_string()),
             };
             match this.update(cx, |model, cx| {
+                // Never select one here; only drop a selection whose file no longer resolves.
+                if let (crate::file_browser::Favourites::Ready(files), Some(selected)) =
+                    (&favourites, model.favourite.relative_path())
+                    && !files.iter().any(|file| file.relative_path == selected)
+                {
+                    model.favourite = FavouriteSelection::None;
+                }
                 model.favourites = favourites;
                 cx.notify();
             }) {

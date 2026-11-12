@@ -39,13 +39,16 @@ pub fn section_title(title: &'static str, cx: &App) -> AnyElement {
 
 /// `FavouriteFileSection`: the workspace's favourite files above the changed ones, each
 /// marked "changed" when the diff shows it. A changed one scrolls the diff to it; another
-/// opens in an editor tab (Electron shows it in place of the diff). Hidden without any.
+/// is shown in a file viewer in place of the diff (and stays selected). Hidden without any.
 pub fn favourites(view: &ReviewView, changed: &[ListedFile], cx: &mut Context<ReviewView>) -> Option<AnyElement> {
     use treeterm_model::file_browser::Favourites;
     let c = colors(cx);
-    let (secondary, primary, hover, border) = (c.text_secondary, c.text_primary, c.bg_hover, c.border);
+    let (secondary, primary, hover, border, active_bg) = (c.text_secondary, c.text_primary, c.bg_hover, c.border, c.bg_active);
     let star = gpui_kit::rgb(0xe3b341);
-    let favourites = view.model.read(cx).favourites().clone();
+    let (favourites, selected) = {
+        let model = view.model.read(cx);
+        (model.favourites().clone(), model.favourite_selection().relative_path().map(str::to_owned))
+    };
     let body: Vec<AnyElement> = match favourites {
         Favourites::Empty => return None,
         Favourites::Ready(files) if files.is_empty() => return None,
@@ -71,7 +74,8 @@ pub fn favourites(view: &ReviewView, changed: &[ListedFile], cx: &mut Context<Re
             .map(|file| {
                 let in_diff = changed.iter().any(|f| f.path == file.relative_path);
                 let name = treeterm_core::files::favourite_file_name(&file).to_owned();
-                let (relative, absolute) = (file.relative_path.clone(), file.path.clone());
+                let is_selected = selected.as_deref() == Some(file.relative_path.as_str());
+                let relative = file.relative_path.clone();
                 div()
                     .id(SharedString::from(format!("favourite-{}", file.relative_path)))
                     .flex()
@@ -85,7 +89,8 @@ pub fn favourites(view: &ReviewView, changed: &[ListedFile], cx: &mut Context<Re
                     .border_b_1()
                     .border_color(border)
                     .cursor_pointer()
-                    .hover(move |d| d.bg(hover))
+                    .when(is_selected, |d| d.bg(active_bg))
+                    .when(!is_selected, |d| d.hover(move |d| d.bg(hover)))
                     .child(crate::ui::icon(IconName::StarFill, 12., star))
                     .child(div().flex_1().min_w_0().truncate().child(name))
                     .when(in_diff, |d| {
@@ -95,7 +100,8 @@ pub fn favourites(view: &ReviewView, changed: &[ListedFile], cx: &mut Context<Re
                         if in_diff {
                             view.select_file(&relative, cx);
                         } else {
-                            view.model.update(cx, |m, cx| m.open_file(&absolute, cx));
+                            let file = file.clone();
+                            view.model.update(cx, |m, cx| m.select_favourite(file, cx));
                         }
                     }))
                     .into_any_element()

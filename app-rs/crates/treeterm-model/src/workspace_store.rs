@@ -715,15 +715,8 @@ impl WorkspaceStore {
                 }
             }
             AppKind::Files => {
-                let fs = self.conn.fs_client();
-                let exec: std::sync::Arc<dyn treeterm_core::exec::ExecApi> = std::sync::Arc::new(self.conn.exec_client());
-                let root = self.workspace.path.clone();
-                let state = tab.state.clone();
-                let (workspace, favourites) = (cx.entity(), self.workspace.file.favourite_paths.clone());
-                let (git, in_repo) = (self.conn.git(), self.workspace.file.is_git_repo);
-                let model = cx.new(|cx| {
-                    crate::file_browser::FileBrowser::new(fs, exec, git, in_repo, root, &state, &workspace, favourites, cx)
-                });
+                let (state, workspace) = (tab.state.clone(), cx.entity());
+                let model = cx.new(|cx| self.file_browser(&workspace, &state, cx));
                 let owned_tab = tab_id.to_owned();
                 let events = cx.subscribe(&model, move |store, _, event: &crate::file_browser::FileBrowserEvent, cx| {
                     let crate::file_browser::FileBrowserEvent::StateChanged(next) = event;
@@ -1139,6 +1132,35 @@ impl WorkspaceStore {
             },
             cx,
         );
+    }
+
+    /// The Files tab's model on this workspace (`workspace`), from a `FilesystemState`.
+    fn file_browser(
+        &self,
+        workspace: &Entity<Self>,
+        state: &Value,
+        cx: &mut Context<crate::file_browser::FileBrowser>,
+    ) -> crate::file_browser::FileBrowser {
+        let exec: std::sync::Arc<dyn treeterm_core::exec::ExecApi> = std::sync::Arc::new(self.conn.exec_client());
+        crate::file_browser::FileBrowser::new(
+            self.conn.fs_client(),
+            exec,
+            self.conn.git(),
+            self.workspace.file.is_git_repo,
+            self.workspace.path.clone(),
+            state,
+            workspace,
+            self.workspace.file.favourite_paths.clone(),
+            cx,
+        )
+    }
+
+    /// A file viewer on `path` inside another tab (Review's favourites): the Files tab's
+    /// model, its state kept nowhere.
+    pub fn file_viewer(&self, path: &str, cx: &mut Context<Self>) -> Entity<crate::file_browser::FileBrowser> {
+        let state = serde_json::json!({ "selectedPath": path, "expandedDirs": [] });
+        let workspace = cx.entity();
+        cx.new(|cx| self.file_browser(&workspace, &state, cx).embedded())
     }
 
     /// Add a tab with `overrides` merged over the application's initial state

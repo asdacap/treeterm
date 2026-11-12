@@ -199,6 +199,16 @@ const FAVOURITE: u32 = 0xe3b341;
 /// Menlo, as Monaco and `.search-panel-hit` set it.
 const MONO: &str = "Menlo";
 
+/// What the view lays out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Layout {
+    /// The Files tab: the tree beside the viewer.
+    Browser,
+    /// The viewer alone, inside another tab (Review's favourites: `FileViewer` without
+    /// `FilesystemBrowser`).
+    Viewer,
+}
+
 /// Dragging the divider between the tree and the viewer.
 #[derive(Clone)]
 struct TreeResize;
@@ -211,6 +221,7 @@ impl Render for TreeResize {
 
 pub struct FileBrowserView {
     model: Entity<FileBrowser>,
+    layout: Layout,
     /// The PDF or 3D model shown, and the webview showing it.
     page: Option<(String, Entity<crate::browser_view::AssetPageView>)>,
     /// The markdown file showing its preview (`viewMode`); a file opens on its source.
@@ -335,6 +346,7 @@ impl FileBrowserView {
         let comments = cx.observe(&workspace, |_, _, cx| cx.notify());
         Self {
             model,
+            layout: Layout::Browser,
             page: None,
             markdown_preview: None,
             preview_scroll: gpui_kit::ScrollHandle::new(),
@@ -360,6 +372,15 @@ impl FileBrowserView {
             _observe: observe,
             _workspace: comments,
         }
+    }
+
+    /// The viewer alone, for a file shown inside another tab.
+    pub fn embedded(
+        model: Entity<FileBrowser>,
+        workspace: Entity<treeterm_model::workspace_store::WorkspaceStore>,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        Self { layout: Layout::Viewer, ..Self::new(model, workspace, cx) }
     }
 
     /// Show the PDF / model webview only while this tab is shown, such a file is the current
@@ -1634,7 +1655,9 @@ impl Render for FileBrowserView {
         if self.resizing && !cx.has_active_drag() {
             self.resizing = false;
         }
-        let tree: Vec<AnyElement> = if self.tree_collapsed {
+        let tree: Vec<AnyElement> = if self.layout == Layout::Viewer {
+            Vec::new()
+        } else if self.tree_collapsed {
             vec![
                 div()
                     .id("show-file-tree")

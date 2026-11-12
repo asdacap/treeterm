@@ -4,10 +4,10 @@
 use gpui_kit::{AppContext as _, Entity, TestAppContext};
 use treeterm_core::review::{CommitAnchor, Freshness, LineAnchor, Resolution, Side};
 use treeterm_model::file_browser::{
-    Anchor, DefinitionLookup, Favourites, FileBrowser, FileView, LineDraft, NAME_SEARCH_DEBOUNCE, NameResults,
+    Anchor, DefinitionLookup, Favourites, FileBrowser, FileView, Host, LineDraft, NAME_SEARCH_DEBOUNCE, NameResults,
     REPO_SEARCH_DEBOUNCE, RepoResults, SearchPanel, SearchRow, Star,
 };
-use treeterm_model::review::{Direction, GitOp, Head, Notice, ReviewContent, ReviewModel};
+use treeterm_model::review::{Direction, FavouriteSelection, GitOp, Head, Notice, ReviewContent, ReviewModel};
 use treeterm_model::session_store::{SessionState, SessionStore, WorkspaceEntry};
 use treeterm_model::settings_store::SettingsStore;
 use treeterm_model::workspace_store::{TabContent, WorkspaceStore};
@@ -630,6 +630,71 @@ fn review_comments_are_added_addressed_prompted_and_deleted(cx: &mut TestAppCont
     review.update(cx, |r, cx| r.delete_comment(&comment.id, cx));
     assert!(review.read_with(cx, |r, cx| r.comments(cx).unwrap()).is_empty());
     assert_eq!(metadata(cx, &workspace, "reviewComments"), Some(serde_json::json!([])));
+}
+
+#[gpui_kit::test]
+fn a_review_favourite_outside_the_diff_shows_in_a_viewer_that_takes_comments(cx: &mut TestAppContext) {
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let repo = TempRepo::new(&h);
+    repo.write("notes.md", "one\ntwo\n");
+    repo.write("a.txt", "a\n");
+    repo.commit_all("base");
+    repo.write("a.txt", "A\n");
+    let store = open_store(cx, &h);
+    let workspace = open_repo_workspace(cx, &h, &store, &repo);
+    workspace.update(cx, |w, cx| {
+        w.add_favourite_path("notes.md", cx);
+        w.add_favourite_path("a.txt", cx);
+    });
+    let review = open_review(cx, &workspace);
+    wait_review(cx, &review, "favourites", |r, _| matches!(r.favourites(), Favourites::Ready(files) if files.len() == 2));
+    let Favourites::Ready(files) = review.read_with(cx, |r, _| r.favourites().clone()) else { unreachable!() };
+    let notes = files.iter().find(|f| f.relative_path == "notes.md").unwrap().clone();
+
+    // Nothing is selected until asked; then the file shows in an embedded viewer.
+    assert!(review.read_with(cx, |r, _| r.favourite_selection().relative_path().is_none()));
+    review.update(cx, |r, cx| r.select_favourite(notes.clone(), cx));
+    let FavouriteSelection::Selected { viewer, .. } = review.read_with(cx, |r, _| r.favourite_selection().clone()) else {
+        panic!("not selected");
+    };
+    assert_eq!(viewer.read_with(cx, |b, _| b.host()), Host::Embedded);
+    wait_until(cx, &viewer, |b| matches!(b.view(), FileView::Text { path, .. } if *path == notes.path));
+    // Selecting it again keeps the viewer.
+    review.update(cx, |r, cx| r.select_favourite(notes.clone(), cx));
+    let same = matches!(review.read_with(cx, |r, _| r.favourite_selection().clone()), FavouriteSelection::Selected { viewer: v, .. } if v == viewer);
+    assert!(same);
+
+    // A comment on it is saved with its relative path, as Electron's Review writes it.
+    wait_files(cx, &viewer, "HEAD read", |b, _| matches!(b.anchor(), Anchor::Head(_)));
+    viewer.update(cx, |b, cx| b.start_comment(2, cx));
+    viewer.update(cx, |b, cx| b.submit_comment("second line", cx));
+    wait_files(cx, &viewer, "comment saved", |b, _| b.comment_draft().is_none());
+    let comments = review.read_with(cx, |r, cx| r.comments(cx).unwrap());
+    assert_eq!(comments.len(), 1);
+    assert_eq!((comments[0].file_path.as_str(), comments[0].line_number, comments[0].side), ("notes.md", 2, Side::Modified));
+
+    // A repo search hit opens a Files tab at its line; the viewer keeps its file.
+    let hit = treeterm_core::search::RepoHit { file_path: "a.txt".into(), line_number: 1, column: 1, preview: "A".into() };
+    viewer.update(cx, |b, cx| b.open_repo_hit(&hit, cx));
+    let files_tab = workspace.read_with(cx, |w, _| {
+        w.file().app_states.values().find(|tab| tab.application_id == "filesystem").map(|tab| tab.state.clone())
+    });
+    let files_tab = files_tab.expect("a Files tab");
+    assert_eq!(files_tab["selectedPath"], serde_json::json!(format!("{}/a.txt", repo.root())));
+    assert_eq!(files_tab["scrollToLine"], serde_json::json!(1));
+    assert!(viewer.read_with(cx, |b, _| matches!(b.view(), FileView::Text { path, .. } if *path == notes.path)));
+
+    // Selecting anything in the diff gives the pane back to it.
+    review.update(cx, |r, cx| r.show_diff(cx));
+    assert!(review.read_with(cx, |r, _| r.favourite_selection().relative_path().is_none()));
+
+    // When the favourites change, the selection goes.
+    review.update(cx, |r, cx| r.select_favourite(notes.clone(), cx));
+    assert_eq!(review.read_with(cx, |r, _| r.favourite_selection().relative_path().map(str::to_owned)), Some("notes.md".to_owned()));
+    workspace.update(cx, |w, cx| w.remove_favourite_path("a.txt", cx));
+    wait_review(cx, &review, "selection dropped", |r, _| r.favourite_selection().relative_path().is_none());
 }
 
 /// A Review tab with `state` (e.g. a base override) on the repo's workspace, and its tab id.

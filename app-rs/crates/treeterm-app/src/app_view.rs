@@ -627,6 +627,15 @@ impl Render for AppView {
         for view in hidden_files {
             view.update(cx, |v, cx| v.set_shown(false, cx));
         }
+        let hidden_reviews: Vec<Entity<crate::review_view::ReviewView>> = self
+            .sessions
+            .iter()
+            .filter(|(id, _)| on_screen.as_ref() != Some(*id))
+            .flat_map(|(_, connected)| connected.review_views.values().cloned().collect::<Vec<_>>())
+            .collect();
+        for view in hidden_reviews {
+            view.update(cx, |v, cx| v.set_shown(false, cx));
+        }
         let pane = match (info, self.current_mut()) {
             (Some(info), _) => info.into_any_element(),
             (None, current) => match current {
@@ -1868,7 +1877,7 @@ fn workspace_pane(
                 let view = connected
                     .review_views
                     .entry(model.entity_id())
-                    .or_insert_with(|| cx.new(|cx| crate::review_view::ReviewView::new(model.clone(), cx)))
+                    .or_insert_with(|| cx.new(|cx| crate::review_view::ReviewView::new(model.clone(), workspace.clone(), cx)))
                     .clone();
                 div().size_full().child(view).into_any_element()
             }
@@ -1941,6 +1950,20 @@ fn workspace_pane(
         connected.file_views.iter().map(|(k, v)| (*k, v.clone())).collect();
     for (model_id, view) in file_views {
         let shown = !dialog_open && shown_files == Some(model_id);
+        view.update(cx, |v, cx| v.set_shown(shown, cx));
+    }
+    // Review shows a favourite's file (a PDF or model in a webview) in place of the diff.
+    let shown_review = match &active {
+        Some(tab) => match workspace.read(cx).tab_content(tab) {
+            Some(TabContent::Review(model)) => Some(model.entity_id()),
+            Some(_) | None => None,
+        },
+        None => None,
+    };
+    let review_views: Vec<(EntityId, Entity<crate::review_view::ReviewView>)> =
+        connected.review_views.iter().map(|(k, v)| (*k, v.clone())).collect();
+    for (model_id, view) in review_views {
+        let shown = !dialog_open && shown_review == Some(model_id);
         view.update(cx, |v, cx| v.set_shown(shown, cx));
     }
 
