@@ -93,9 +93,22 @@ fn style(cx: &App) -> TextViewStyle {
         .with_dark(true)
 }
 
+/// Where a link click goes instead of the system browser.
+pub(crate) type LinkHandler = std::sync::Arc<dyn Fn(&str, &mut gpui_kit::Window, &mut App) + Send + Sync>;
+
 /// The preview of `text`, scrolling in its own box (with Electron's classic scrollbar).
-pub(crate) fn preview(id: SharedString, text: String, scroll: &ScrollHandle, cx: &App) -> AnyElement {
+/// Links open in the system browser unless `on_link` takes them.
+pub(crate) fn preview(id: SharedString, text: String, scroll: &ScrollHandle, on_link: Option<LinkHandler>, cx: &App) -> AnyElement {
     let c = colors(cx);
+    let view = TextView::markdown(id, text)
+        .style(style(cx))
+        // react-markdown neither highlights code blocks nor labels their language.
+        .code_block_highlighter(|_| Vec::new())
+        .code_block_actions(|_, _, _| div());
+    let view = match on_link {
+        Some(on_link) => view.on_link_click(move |href, _, window, cx| on_link(href.as_ref(), window, cx)),
+        None => view,
+    };
     let content = div()
         .w_full()
         .px(px(PADDING))
@@ -103,12 +116,6 @@ pub(crate) fn preview(id: SharedString, text: String, scroll: &ScrollHandle, cx:
         .text_color(c.text_primary)
         .text_size(px(BODY))
         .line_height(relative(1.6))
-        .child(
-            TextView::markdown(id, text)
-                .style(style(cx))
-                // react-markdown neither highlights code blocks nor labels their language.
-                .code_block_highlighter(|_| Vec::new())
-                .code_block_actions(|_, _, _| div()),
-        );
+        .child(view);
     div().size_full().bg(c.bg_primary).child(crate::ui::scroll_area("markdown-preview", scroll, content, cx)).into_any_element()
 }

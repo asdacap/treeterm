@@ -9266,6 +9266,7 @@ dependencies = [
  "treeterm-proto",
  "treeterm-term",
  "treeterm-testkit",
+ "url",
  "uuid",
 ]
 

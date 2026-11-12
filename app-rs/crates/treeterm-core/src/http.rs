@@ -154,6 +154,41 @@ impl HttpClient for ReqwestHttp {
     }
 }
 
+/// A page a browser tab fetched itself: one its webview cannot display (WebKit has no
+/// view for `text/markdown`, which Chromium shows as text).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FetchedPage {
+    pub status: u16,
+    /// The media type without parameters, lowercase; empty when the server sent none.
+    pub content_type: String,
+    pub body: Vec<u8>,
+}
+
+/// GET `url` on whatever runtime polls this (it needs a Tokio reactor).
+pub async fn fetch_page(url: &str) -> Result<FetchedPage, HttpError> {
+    let tls = tls_config().map_err(|error| HttpError(error.to_string()))?;
+    let client = reqwest::Client::builder()
+        .user_agent(USER_AGENT)
+        .tls_backend_preconfigured(tls)
+        .build()
+        .map_err(|error| HttpError(error.to_string()))?;
+    let response = client.get(url).send().await.map_err(|error| HttpError(error.to_string()))?;
+    let status = response.status().as_u16();
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .map(media_type)
+        .unwrap_or_default();
+    let body = response.bytes().await.map_err(|error| HttpError(error.to_string()))?;
+    Ok(FetchedPage { status, content_type, body: body.to_vec() })
+}
+
+/// `text/Markdown; charset=utf-8` → `text/markdown`.
+pub fn media_type(content_type: &str) -> String {
+    content_type.split(';').next().unwrap_or_default().trim().to_ascii_lowercase()
+}
+
 /// Percent-encode a query value (everything but RFC 3986 unreserved characters).
 pub fn encode_query_value(value: &str) -> String {
     let mut encoded = String::with_capacity(value.len());
@@ -171,6 +206,13 @@ pub fn encode_query_value(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn media_types_drop_their_parameters() {
+        assert_eq!(media_type("text/Markdown; charset=utf-8"), "text/markdown");
+        assert_eq!(media_type(" text/plain "), "text/plain");
+        assert_eq!(media_type(""), "");
+    }
 
     #[test]
     fn query_values_are_percent_encoded() {

@@ -5,6 +5,14 @@
 //! Without GPUI Fast composition the native view is drawn above GPUI content in its bounds,
 //! so the owner hides it whenever its tab is not shown or a dialog is open
 //! ([`BrowserView::set_shown`]).
+//!
+//! A page that is markdown source (`isMarkdownPage`) is rendered in its place, probed once
+//! each load finishes; the webview stays hidden under it until a page that is not markdown
+//! loads. Links in the rendered page load in the tab on its origin, elsewhere in the system
+//! browser. WebKit cannot display `text/markdown` (Chromium shows it as text), so a page
+//! the webview cannot display is reloaded through the tab's own URL scheme, which fetches
+//! it and serves markdown as text ([`proxied_url`]); anything else opens in the system
+//! browser.
 
 use std::time::Duration;
 
@@ -16,7 +24,10 @@ use gpui_kit::{
     px, relative, rgb,
 };
 use gpui_webview::WebView;
-use treeterm_model::apps::{is_allowed_webview_url, page_path, resolve_address};
+use treeterm_model::apps::{
+    MarkdownLink, PAGE_PROBE_SCRIPT, PageContent, is_allowed_webview_url, is_markdown_page, markdown_link, page_content,
+    page_path, proxied_url, resolve_address, unproxied_url,
+};
 use treeterm_model::workspace_store::WorkspaceStore;
 
 use crate::theme::colors;
@@ -32,6 +43,10 @@ enum Page {
 enum PageEvent {
     Started(String),
     Finished(String),
+    /// [`PAGE_PROBE_SCRIPT`]'s result.
+    Probed(String),
+    /// A page the webview cannot display (it wanted to download it).
+    Undisplayable(String),
 }
 
 /// A back / forward the toolbar asked for: the next load moves along the history instead
@@ -63,6 +78,13 @@ pub struct BrowserView {
     draft: Draft,
     /// Where the page last shown is remembered (the tab's `path`), when set.
     memory: Option<(WeakEntity<WorkspaceStore>, String)>,
+    /// The page as last probed; the previous one stays until the next load is probed.
+    content: PageContent,
+    markdown_scroll: gpui_kit::ScrollHandle,
+    /// Where probe results go (the webview's callback runs off the main thread).
+    probes: Option<tokio::sync::mpsc::UnboundedSender<PageEvent>>,
+    /// This tab's URL scheme for pages the webview cannot display ([`proxied_url`]).
+    proxy: String,
     _events: Option<Task<()>>,
     _address: Vec<Subscription>,
 }
@@ -90,6 +112,14 @@ impl BrowserView {
             address: None,
             draft: Draft::Idle,
             memory: None,
+            content: PageContent::Web,
+            markdown_scroll: gpui_kit::ScrollHandle::new(),
+            probes: None,
+            proxy: {
+                // One scheme per tab: WebKitGTK registers schemes per web context.
+                static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+                format!("treeterm-page{}", NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
+            },
             _events: None,
             _address: Vec::new(),
         }
@@ -113,8 +143,40 @@ impl BrowserView {
             return;
         }
         self.shown = shown;
+        self.sync_visibility(cx);
+    }
+
+    /// The native view shows while the tab does, unless rendered markdown covers it.
+    fn sync_visibility(&mut self, cx: &mut Context<Self>) {
+        let visible = self.shown && self.content == PageContent::Web;
         if let Page::Live(webview) = &self.page {
-            webview.update(cx, |w, _| if shown { w.show() } else { w.hide() });
+            webview.update(cx, |w, _| if visible { w.show() } else { w.hide() });
+        }
+    }
+
+    /// Ask the page what it is ([`PAGE_PROBE_SCRIPT`]).
+    fn probe(&mut self, cx: &mut Context<Self>) {
+        let Some(probes) = self.probes.clone() else {
+            return;
+        };
+        self.webview(cx, |w| {
+            let sent = w.raw().evaluate_script_with_callback(PAGE_PROBE_SCRIPT, move |result| {
+                if probes.send(PageEvent::Probed(result)).is_err() {
+                    tracing::debug!("browser tab closed while its page was probed");
+                }
+            });
+            if let Err(error) = sent {
+                tracing::error!(%error, "browser page probe");
+            }
+        });
+    }
+
+    /// A link clicked in rendered markdown.
+    fn follow_markdown_link(&mut self, href: &str, cx: &mut Context<Self>) {
+        match markdown_link(href, &self.current) {
+            Ok(MarkdownLink::InTab(url)) => self.load(url, cx),
+            Ok(MarkdownLink::External(url)) => open_externally(&url),
+            Err(error) => tracing::error!(%error, "markdown link"),
         }
     }
 
@@ -124,15 +186,28 @@ impl BrowserView {
             return;
         }
         let (events, mut updates) = tokio::sync::mpsc::unbounded_channel();
+        self.probes = Some(events.clone());
+        let undisplayable = events.clone();
+        let (proxy, guard_proxy) = (self.proxy.clone(), self.proxy.clone());
         let builder = wry::WebViewBuilder::new()
             .with_url(self.current.clone())
             // In-page navigation stays on localhost; anything else goes to the system browser.
-            .with_navigation_handler(|url| {
-                let allowed = is_allowed_webview_url(&url) || url == "about:blank";
+            .with_navigation_handler(move |url| {
+                let allowed = is_allowed_webview_url(&url) || url == "about:blank" || unproxied_url(&guard_proxy, &url).is_some();
                 if !allowed {
                     open_externally(&url);
                 }
                 allowed
+            })
+            .with_download_started_handler(move |url, _| {
+                if undisplayable.send(PageEvent::Undisplayable(url)).is_err() {
+                    tracing::debug!("browser tab closed while a page downloaded");
+                }
+                false
+            })
+            .with_asynchronous_custom_protocol(self.proxy.clone(), move |_, request, responder| {
+                let page = unproxied_url(&proxy, &request.uri().to_string());
+                std::thread::spawn(move || responder.respond(proxy_response(page)));
             })
             .with_new_window_req_handler(|url, _| {
                 open_externally(&url);
@@ -164,6 +239,13 @@ impl BrowserView {
 
     /// Follow the page: history, loading state, the address shown and the remembered page.
     fn on_page(&mut self, event: PageEvent, cx: &mut Context<Self>) {
+        // A proxied page is shown (and remembered) as the page it stands for.
+        let shown = |url: String| unproxied_url(&self.proxy, &url).unwrap_or(url);
+        let event = match event {
+            PageEvent::Started(url) => PageEvent::Started(shown(url)),
+            PageEvent::Finished(url) => PageEvent::Finished(shown(url)),
+            other @ (PageEvent::Probed(_) | PageEvent::Undisplayable(_)) => other,
+        };
         match event {
             PageEvent::Started(url) => {
                 self.loading = true;
@@ -186,6 +268,26 @@ impl BrowserView {
             PageEvent::Finished(url) => {
                 self.loading = false;
                 self.current = url;
+                self.probe(cx);
+            }
+            PageEvent::Undisplayable(url) => {
+                match proxied_url(&self.proxy, &url) {
+                    Some(proxied) if is_allowed_webview_url(&url) => self.load(proxied, cx),
+                    Some(_) | None => tracing::error!(%url, "the browser tab cannot show this page"),
+                }
+                return;
+            }
+            PageEvent::Probed(result) => {
+                self.content = match page_content(&result, &self.proxy) {
+                    Ok(content) => content,
+                    Err(error) => {
+                        tracing::error!(%error, "browser page probe");
+                        PageContent::Web
+                    }
+                };
+                self.sync_visibility(cx);
+                cx.notify();
+                return;
             }
         }
         if let Some((workspace, tab)) = &self.memory
@@ -283,6 +385,37 @@ impl BrowserView {
     }
 }
 
+/// What the tab's proxy scheme serves for `page` (the URL it stands for): markdown as
+/// text; for anything else a note, and the page opens in the system browser. Runs on its
+/// own thread (the fetch blocks it).
+fn proxy_response(page: Option<String>) -> wry::http::Response<std::borrow::Cow<'static, [u8]>> {
+    let text = |status: u16, body: String| {
+        wry::http::Response::builder()
+            .status(status)
+            .header("Content-Type", "text/plain; charset=utf-8")
+            .body(std::borrow::Cow::Owned(body.into_bytes()))
+            .unwrap_or_else(|_| wry::http::Response::new(std::borrow::Cow::Borrowed(&[][..])))
+    };
+    let Some(page) = page.filter(|page| is_allowed_webview_url(page)) else {
+        return text(404, "Only localhost pages can be shown".to_owned());
+    };
+    let fetched = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| error.to_string())
+        .and_then(|rt| rt.block_on(treeterm_core::http::fetch_page(&page)).map_err(|error| error.to_string()));
+    match fetched {
+        Ok(fetched) if is_markdown_page(&fetched.content_type, &page) => {
+            text(fetched.status, String::from_utf8_lossy(&fetched.body).into_owned())
+        }
+        Ok(fetched) => {
+            open_externally(&page);
+            text(200, format!("`{page}` ({}) cannot be shown here; it was opened in the system browser.", fetched.content_type))
+        }
+        Err(error) => text(502, format!("Cannot load `{page}`: {error}")),
+    }
+}
+
 /// `.webapp-toolbar button`: a 14px glyph, 2px 8px padding, transparent until hovered;
 /// 35% when disabled.
 fn toolbar_button(id: &'static str, glyph: &'static str, title: &'static str, enabled: bool, cx: &gpui_kit::App) -> gpui_kit::Stateful<gpui_kit::Div> {
@@ -327,7 +460,23 @@ impl Render for BrowserView {
         let body: AnyElement = match &self.page {
             Page::NotBuilt => div().into_any_element(),
             Page::Failed(message) => div().p_4().text_color(error).child(message.clone()).into_any_element(),
-            Page::Live(webview) => div().size_full().bg(gpui_kit::white()).child(webview.clone()).into_any_element(),
+            Page::Live(webview) => match &self.content {
+                PageContent::Web => div().size_full().bg(gpui_kit::white()).child(webview.clone()).into_any_element(),
+                // `.webapp-markdown`: the webview keeps its place (hidden) under the page.
+                PageContent::Markdown(text) => {
+                    let this = cx.weak_entity();
+                    let preview = crate::file_browser_view::markdown_preview_linked(
+                        SharedString::from(format!("page-markdown-{}", self.current)),
+                        text.clone(),
+                        &self.markdown_scroll,
+                        move |href, _, cx| match this.update(cx, |view, cx| view.follow_markdown_link(href, cx)) {
+                            Ok(()) | Err(_) => {} // Err: the tab closed
+                        },
+                        cx,
+                    );
+                    div().relative().size_full().child(webview.clone()).child(div().absolute().inset_0().child(preview)).into_any_element()
+                }
+            },
         };
         let (can_back, can_forward, loading) = (!self.back.is_empty(), !self.forward.is_empty(), self.loading);
         let tip: SharedString = invalid.clone().unwrap_or_else(|| address.read(cx).value().to_string()).into();

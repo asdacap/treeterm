@@ -308,6 +308,87 @@ pub fn page_path(home: &str, url: &str) -> Option<String> {
     (home.origin() == page.origin()).then_some(page.rest)
 }
 
+/// What a browser tab shows once a page has loaded (`PageContent`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PageContent {
+    /// The page itself.
+    Web,
+    /// Markdown source, rendered over the page.
+    Markdown(String),
+}
+
+/// Run in the page once it has loaded: what it is (`PROBE_SCRIPT`). Text pages are shown
+/// inline, so `innerText` is the source. Stringified, so every webview hands back the same
+/// JSON (a string holding the object).
+pub const PAGE_PROBE_SCRIPT: &str =
+    r#"JSON.stringify({ contentType: document.contentType, url: location.href, text: document.body ? document.body.innerText : "" })"#;
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PageProbe {
+    content_type: String,
+    url: String,
+    text: String,
+}
+
+/// `isMarkdownPage`: markdown source to render rather than show as text. Servers often send
+/// `.md` files as `text/plain`; HTML is never markdown.
+pub fn is_markdown_page(content_type: &str, url: &str) -> bool {
+    if matches!(content_type, "text/markdown" | "text/x-markdown") {
+        return true;
+    }
+    let path = url::Url::parse(url).map(|url| url.path().to_ascii_lowercase()).unwrap_or_default();
+    content_type == "text/plain" && (path.ends_with(".md") || path.ends_with(".markdown"))
+}
+
+/// What [`PAGE_PROBE_SCRIPT`] returned (the webview's JSON of its result). Pages loaded
+/// through the tab's `proxy` scheme are markdown ([`proxied_url`]).
+pub fn page_content(probe: &str, proxy: &str) -> Result<PageContent, String> {
+    let json: String = serde_json::from_str(probe).map_err(|e| format!("page probe: {e}: {probe}"))?;
+    let probe: PageProbe = serde_json::from_str(&json).map_err(|e| format!("page probe: {e}: {json}"))?;
+    let proxied = unproxied_url(proxy, &probe.url).is_some();
+    Ok(if proxied || is_markdown_page(&probe.content_type, &probe.url) {
+        PageContent::Markdown(probe.text)
+    } else {
+        PageContent::Web
+    })
+}
+
+/// A page the webview cannot display (WebKit has no view for `text/markdown`), reloaded
+/// through the tab's own `proxy` scheme, which fetches it and serves markdown as text:
+/// `http://localhost:8765/a.md` → `<proxy>://http.localhost:8765/a.md`.
+pub fn proxied_url(proxy: &str, url: &str) -> Option<String> {
+    let (scheme, rest) = url.split_once("://")?;
+    matches!(scheme, "http" | "https").then(|| format!("{proxy}://{scheme}.{rest}"))
+}
+
+/// The page a [`proxied_url`] stands for; `None` for any other URL.
+pub fn unproxied_url(proxy: &str, url: &str) -> Option<String> {
+    let rest = url.strip_prefix(proxy)?.strip_prefix("://")?;
+    let (scheme, rest) = rest.split_once('.')?;
+    matches!(scheme, "http" | "https").then(|| format!("{scheme}://{rest}"))
+}
+
+/// Where a link in a rendered markdown page goes (`onMarkdownClick`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MarkdownLink {
+    /// On the page's origin: load it in the tab.
+    InTab(String),
+    /// Anywhere else: the system browser.
+    External(String),
+}
+
+/// `href` resolved against the page it is on.
+pub fn markdown_link(href: &str, page_url: &str) -> Result<MarkdownLink, String> {
+    let page = url::Url::parse(page_url).map_err(|e| format!("Invalid page URL {page_url}: {e}"))?;
+    let target = page.join(href).map_err(|e| format!("Invalid link {href}: {e}"))?;
+    Ok(if target.origin() == page.origin() {
+        MarkdownLink::InTab(target.into())
+    } else {
+        MarkdownLink::External(target.into())
+    })
+}
+
 pub struct AppRegistry {
     apps: Vec<AppDef>,
 }
@@ -494,6 +575,57 @@ impl AppRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn markdown_pages_are_markdown_types_or_plain_text_named_md() {
+        assert!(is_markdown_page("text/markdown", "http://localhost:3000/x"));
+        assert!(is_markdown_page("text/x-markdown", "http://localhost:3000/x"));
+        assert!(is_markdown_page("text/plain", "http://localhost:3000/docs/README.md"));
+        assert!(is_markdown_page("text/plain", "http://localhost:3000/a.MARKDOWN?raw=1"));
+        assert!(!is_markdown_page("text/html", "http://localhost:3000/README.md"));
+        assert!(!is_markdown_page("text/plain", "http://localhost:3000/notes.txt"));
+    }
+
+    #[test]
+    fn the_page_probe_says_what_the_page_is() {
+        let probe = |content_type: &str, url: &str| {
+            let object = serde_json::json!({ "contentType": content_type, "url": url, "text": "# Hi" }).to_string();
+            serde_json::to_string(&object).unwrap()
+        };
+        let content = |probe: String| page_content(&probe, "tt-page1");
+        assert_eq!(content(probe("text/plain", "http://localhost:1/a.md")), Ok(PageContent::Markdown("# Hi".into())));
+        assert_eq!(content(probe("text/html", "http://localhost:1/a.md")), Ok(PageContent::Web));
+        // Whatever the proxy serves is markdown, whatever the path.
+        assert_eq!(content(probe("text/plain", "tt-page1://http.localhost:1/api/readme")), Ok(PageContent::Markdown("# Hi".into())));
+        assert!(content("{}".into()).is_err());
+        assert!(content("\"{}\"".into()).is_err());
+    }
+
+    #[test]
+    fn undisplayable_pages_round_trip_through_the_proxy_scheme() {
+        let proxied = proxied_url("tt-page1", "http://localhost:8765/docs/a.md?x=1#y").unwrap();
+        assert_eq!(proxied, "tt-page1://http.localhost:8765/docs/a.md?x=1#y");
+        assert_eq!(unproxied_url("tt-page1", &proxied).as_deref(), Some("http://localhost:8765/docs/a.md?x=1#y"));
+        assert_eq!(
+            unproxied_url("tt-page1", &proxied_url("tt-page1", "https://127.0.0.1/a.md").unwrap()).as_deref(),
+            Some("https://127.0.0.1/a.md")
+        );
+        assert_eq!(proxied_url("tt-page1", "file:///etc/passwd"), None);
+        assert_eq!(unproxied_url("tt-page1", "http://localhost:8765/a.md"), None);
+        assert_eq!(unproxied_url("tt-page1", "tt-page12://http.localhost/a.md"), None);
+        assert_eq!(unproxied_url("tt-page1", "tt-page1://ftp.localhost/a.md"), None);
+    }
+
+    #[test]
+    fn markdown_links_stay_on_the_page_origin_or_go_outside() {
+        let page = "http://localhost:3000/docs/guide.md";
+        assert_eq!(markdown_link("intro.md", page), Ok(MarkdownLink::InTab("http://localhost:3000/docs/intro.md".into())));
+        assert_eq!(markdown_link("../README.md#top", page), Ok(MarkdownLink::InTab("http://localhost:3000/README.md#top".into())));
+        assert_eq!(markdown_link("/x", page), Ok(MarkdownLink::InTab("http://localhost:3000/x".into())));
+        assert_eq!(markdown_link("http://localhost:4000/", page), Ok(MarkdownLink::External("http://localhost:4000/".into())));
+        assert_eq!(markdown_link("https://example.com/a", page), Ok(MarkdownLink::External("https://example.com/a".into())));
+        assert!(markdown_link("x", "not a url").is_err());
+    }
 
     #[test]
     fn addresses_resolve_against_the_page_like_electron() {

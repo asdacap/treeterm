@@ -1489,7 +1489,19 @@ impl FileBrowserView {
 
 /// `MarkdownPreview`: GitHub-flavoured markdown in 20px of padding.
 pub(crate) fn markdown_preview(id: SharedString, text: String, scroll: &gpui_kit::ScrollHandle, cx: &App) -> AnyElement {
-    markdown::preview(id, text, scroll, cx)
+    markdown::preview(id, text, scroll, None, cx)
+}
+
+/// [`markdown_preview`] whose links go to `on_link` (with the `href` as written).
+pub(crate) fn markdown_preview_linked(
+    id: SharedString,
+    text: String,
+    scroll: &gpui_kit::ScrollHandle,
+    on_link: impl Fn(&str, &mut Window, &mut App) + Send + Sync + 'static,
+    cx: &App,
+) -> AnyElement {
+    let on_link: markdown::LinkHandler = std::sync::Arc::new(on_link);
+    markdown::preview(id, text, scroll, Some(on_link), cx)
 }
 
 impl Render for FileBrowserView {
