@@ -103,9 +103,10 @@ Done (tested against a real in-process daemon unless noted):
   harness; live merge
   output; git status (uncommitted / conflicts / behind, Pull) and PR indicators.
 - **Web (M8):** Browser tabs in a native webview (localhost guard); Web App tabs (free port
-  probed on the daemon's host, dev server with `$PORT`, page once it answers, ephemeral SSH
-  port forward on remote sessions — remote path tested only through the model, not a host).
-  Markdown pages (`text/markdown`, or `.md` sent as `text/plain`) are rendered in the
+  probed on the daemon's host, dev server with `$PORT`, page once it answers); on remote
+  sessions both reach their page through an ephemeral SSH port forward owned by the tab, with
+  a Port Forward sub-tab (status, Restart, ssh output) — remote path not yet run against a
+  host. Markdown pages (`text/markdown`, or `.md` sent as `text/plain`) are rendered in the
   page's place; WebKit cannot display `text/markdown`, so such a page is reloaded through
   the tab's own URL scheme, which fetches it and serves it as text.
 - **Workspace pane:** header with git status, PR link, Pull, ▶ Run (npm/make/just/Taskfile/
@@ -170,7 +171,6 @@ The chrome was matched to Electron's computed styles, measured side by side on o
 - Review's find: GPUI Kit's diff does not report the word under the pointer or the file at
   the top of the scroll, so the right-click menu needs a selection (double-click a word) and
   "In this file" is the file last under the pointer (else the one last selected).
-- Not ported: the remote Browser tab's Port Forward sub-tab.
 
 ## Known differences from Electron (deliberate)
 

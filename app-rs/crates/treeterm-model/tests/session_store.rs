@@ -949,6 +949,38 @@ fn a_web_app_gets_a_free_port_starts_its_server_and_is_ready(cx: &mut TestAppCon
 }
 
 #[gpui_kit::test]
+fn a_local_browser_tab_opens_its_remembered_page_directly(cx: &mut TestAppContext) {
+    use treeterm_model::browser_page::BrowserPhase;
+    use treeterm_model::workspace_store::PageHost;
+    cx.executor().allow_parking();
+    let h = harness();
+    std::fs::write(h.daemon.workspaces_dir().join("a.json"), body("a", None)).unwrap();
+    publish(&h, &["a"]);
+    let settings = treeterm_core::settings::from_value(serde_json::json!({
+        "browser": { "instances": [{ "id": "docs", "name": "Docs", "icon": "B", "url": "http://localhost:3000/", "isDefault": false }] }
+    }))
+    .unwrap();
+    let conn = h.conn.clone();
+    let settings_store = cx.new(|_| SettingsStore::in_memory(settings));
+    let store = cx.new(|cx| SessionStore::new(conn, "client-a".into(), settings_store, None, cx));
+    wait_until(cx, &store, |s| loaded(s, "a"));
+    let workspace = store.read_with(cx, |s, _| ws(s, "a"));
+    let tab = workspace.update(cx, |w, cx| w.add_tab_with("browser-docs", serde_json::json!({ "path": "/guide?x=1" }), cx)).unwrap();
+    let Some(TabContent::Browser { page, forward }) = workspace.read_with(cx, |w, _| w.tab_content(&tab)) else {
+        panic!("not a browser tab");
+    };
+    // No forward on this machine: the page is ready at once, on the page the tab remembers.
+    assert!(matches!(forward, PageHost::Local));
+    let ready = BrowserPhase::Ready { url: "http://localhost:3000/guide?x=1".into(), home: "http://localhost:3000/".into() };
+    assert_eq!(page.read_with(cx, |p, _| p.phase().clone()), ready);
+    page.update(cx, |p, cx| p.restart_forward(cx));
+    page.update(cx, |p, cx| p.retry(cx));
+    assert_eq!(page.read_with(cx, |p, _| p.phase().clone()), ready);
+    workspace.update(cx, |w, cx| w.remove_tab(&tab, cx));
+    assert!(workspace.read_with(cx, |w, _| w.tab_content(&tab)).is_none());
+}
+
+#[gpui_kit::test]
 fn auto_open_adopts_worktrees_under_their_detected_parents(cx: &mut TestAppContext) {
     use treeterm_model::session_store::AutoOpenItem;
     cx.executor().allow_parking();

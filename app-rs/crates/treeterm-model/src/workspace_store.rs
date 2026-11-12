@@ -139,9 +139,12 @@ pub enum TabContent {
     Files(Entity<crate::file_browser::FileBrowser>),
     Editor(Entity<crate::text_editor::TextEditor>),
     Review(Entity<crate::review::ReviewModel>),
-    /// A web page; the view owns the native webview. `url` opens the page remembered in the
-    /// tab's state; `home` is the instance's start page.
-    Browser { url: String, home: String },
+    /// A localhost page (through the tab's forward on an ssh session); the view owns the
+    /// native webview.
+    Browser {
+        page: Entity<crate::browser_page::BrowserPageModel>,
+        forward: PageHost,
+    },
     /// The tab's PTY is being created.
     StartingTerminal,
     Failed(String),
@@ -151,6 +154,7 @@ pub enum TabContent {
     WebApp {
         app: Entity<crate::web_app::WebAppModel>,
         terminal: Option<Entity<TerminalModel>>,
+        forward: PageHost,
     },
     /// The branch's pull request, from the session's git controller of this workspace.
     GitHub,
@@ -162,6 +166,22 @@ pub enum TabContent {
     Chat(Entity<crate::tool_tabs::chat::ChatModel>),
     PromptDebugger(Entity<crate::tool_tabs::prompt_debugger::PromptDebugger>),
     SshUpload(Entity<crate::tool_tabs::ssh_upload::SshUpload>),
+}
+
+/// Where a Web App's or Browser tab's page is served from.
+#[derive(Clone)]
+pub enum PageHost {
+    /// This machine: the page is opened directly.
+    Local,
+    /// The ssh host: through the tab's own port forward (its Port Forward sub-tab).
+    Remote(Entity<crate::forward_monitor::ForwardMonitor>),
+}
+
+/// A Web App tab's runtime state.
+struct WebAppTab {
+    model: Entity<crate::web_app::WebAppModel>,
+    forward: PageHost,
+    _events: Subscription,
 }
 
 /// Runtime state of one tab; never persisted.
@@ -179,7 +199,11 @@ enum TabRef {
         model: Entity<crate::review::ReviewModel>,
         _events: Subscription,
     },
-    Browser { url: String, home: String },
+    Browser {
+        page: Entity<crate::browser_page::BrowserPageModel>,
+        forward: PageHost,
+        _events: Subscription,
+    },
     Tool(crate::tool_tabs::ToolTab),
 }
 
@@ -219,7 +243,7 @@ pub struct WorkspaceStore {
     /// The window shows this workspace.
     viewed: bool,
     /// Web App tabs' servers and pages (their PTYs are ordinary terminal tabs).
-    web_apps: HashMap<String, (Entity<crate::web_app::WebAppModel>, Subscription)>,
+    web_apps: HashMap<String, WebAppTab>,
     /// The ssh host this workspace lives on (web apps forward their port from it).
     remote: Option<crate::web_app::RemoteHost>,
     /// Runs AI-harness analyzers; `None` leaves them off (tests, no LLM client).
@@ -308,12 +332,12 @@ impl WorkspaceStore {
     /// What the tab shows; `None` for a tab id the body does not have.
     pub fn tab_content(&self, tab_id: &str) -> Option<TabContent> {
         let tab = self.workspace.file.app_states.get(tab_id)?;
-        if let Some((app, _)) = self.web_apps.get(tab_id) {
+        if let Some(web_app) = self.web_apps.get(tab_id) {
             let terminal = match self.tabs.get(tab_id) {
                 Some(TabRef::Terminal(TerminalTab::Attached { model, .. })) => Some(model.clone()),
                 Some(_) | None => None,
             };
-            return Some(TabContent::WebApp { app: app.clone(), terminal });
+            return Some(TabContent::WebApp { app: web_app.model.clone(), terminal, forward: web_app.forward.clone() });
         }
         Some(match self.tabs.get(tab_id) {
             Some(TabRef::Terminal(TerminalTab::Attached { model, .. })) => TabContent::Terminal(model.clone()),
@@ -322,7 +346,7 @@ impl WorkspaceStore {
             Some(TabRef::Files { model, .. }) => TabContent::Files(model.clone()),
             Some(TabRef::Editor { model, .. }) => TabContent::Editor(model.clone()),
             Some(TabRef::Review { model, .. }) => TabContent::Review(model.clone()),
-            Some(TabRef::Browser { url, home }) => TabContent::Browser { url: url.clone(), home: home.clone() },
+            Some(TabRef::Browser { page, forward, .. }) => TabContent::Browser { page: page.clone(), forward: forward.clone() },
             Some(TabRef::Tool(tool)) => tool.content(),
             None => TabContent::NotPorted(tab.application_id.clone()),
         })
@@ -701,7 +725,8 @@ impl WorkspaceStore {
                 let events = cx.subscribe(&model, move |store, _, event: &crate::web_app::WebAppEvent, cx| {
                     store.on_web_app_event(&owned_tab, *event, cx);
                 });
-                self.web_apps.insert(tab_id.to_owned(), (model, events));
+                let forward = self.page_host(tab_id, &model, cx);
+                self.web_apps.insert(tab_id.to_owned(), WebAppTab { model, forward, _events: events });
                 // The server runs in a terminal once its port is known.
                 let terminal = match (pty, port) {
                     (Some(pty_id), _) => Some(self.attach_terminal(tab_id, pty_id, cx)),
@@ -725,9 +750,21 @@ impl WorkspaceStore {
                 self.tabs.insert(tab_id.to_owned(), TabRef::Files { model, _events: events });
             }
             AppKind::Browser { url } => {
-                let path = tab.state.get("path").and_then(Value::as_str).unwrap_or_default();
-                let full = format!("{}{}", url.trim_end_matches('/'), if path.is_empty() || path.starts_with('/') { path.to_owned() } else { format!("/{path}") });
-                self.tabs.insert(tab_id.to_owned(), TabRef::Browser { url: full, home: url.clone() });
+                let path = tab.state.get("path").and_then(Value::as_str).unwrap_or_default().to_owned();
+                let local_port = tab
+                    .state
+                    .get("localPort")
+                    .filter(|port| port.get("status").and_then(Value::as_str) == Some("assigned"))
+                    .and_then(|port| port.get("port").and_then(Value::as_u64))
+                    .and_then(|port| u16::try_from(port).ok());
+                let (home, owned, remote) = (url.clone(), tab_id.to_owned(), self.remote.clone());
+                let page = cx.new(|cx| crate::browser_page::BrowserPageModel::new(home, path, owned, local_port, remote, cx));
+                let owned_tab = tab_id.to_owned();
+                let events = cx.subscribe(&page, move |store, _, event: &crate::web_app::WebAppEvent, cx| {
+                    store.on_web_app_event(&owned_tab, *event, cx);
+                });
+                let forward = self.page_host(tab_id, &page, cx);
+                self.tabs.insert(tab_id.to_owned(), TabRef::Browser { page, forward, _events: events });
             }
             AppKind::Review => {
                 let base = match (tab.state.get("baseBranchOverride").and_then(Value::as_str), &self.parent_branch) {
@@ -1030,6 +1067,17 @@ impl WorkspaceStore {
 
     /// Release a tab's runtime state without touching the body (`disposeTabResources`).
     /// Detaches its terminal; never kills the PTY.
+    /// On an ssh session, the monitor of the forward `page` owns (the Port Forward sub-tab).
+    fn page_host<T: 'static>(&self, tab_id: &str, page: &Entity<T>, cx: &mut Context<Self>) -> PageHost {
+        match &self.remote {
+            None => PageHost::Local,
+            Some(remote) => {
+                let (app, id) = (remote.app.clone(), crate::web_app::forward_id_for_tab(tab_id));
+                PageHost::Remote(cx.new(|cx| crate::forward_monitor::ForwardMonitor::new(app, id, page, cx)))
+            }
+        }
+    }
+
     /// A web app picked its port (start its server) or its local forward port.
     fn on_web_app_event(&mut self, tab_id: &str, event: crate::web_app::WebAppEvent, cx: &mut Context<Self>) {
         use crate::web_app::WebAppEvent;
@@ -1311,8 +1359,8 @@ impl WorkspaceStore {
         if !app.can_close {
             return;
         }
-        if let Some((app, _)) = self.web_apps.get(tab_id) {
-            app.update(cx, |app, cx| app.close(cx));
+        if let Some(web_app) = self.web_apps.get(tab_id) {
+            web_app.model.update(cx, |app, cx| app.close(cx));
         }
         match self.tabs.get(tab_id) {
             Some(TabRef::Terminal(TerminalTab::Attached { model, .. })) => {
@@ -1322,12 +1370,12 @@ impl WorkspaceStore {
                 // Its creation finds the tab gone and kills the PTY (`on_pty_created`).
                 tracing::debug!(%handle, "tab closed while its PTY was starting");
             }
+            Some(TabRef::Browser { page, .. }) => page.update(cx, |page, cx| page.close(cx)),
             Some(
                 TabRef::Terminal(TerminalTab::Failed(_))
                 | TabRef::Files { .. }
                 | TabRef::Editor { .. }
                 | TabRef::Review { .. }
-                | TabRef::Browser { .. }
                 | TabRef::Tool(_),
             )
             | None => {}
@@ -1600,7 +1648,7 @@ impl WorkspaceStore {
 
     /// The workspace is being removed: kill every tab's daemon resources (`ref.close()`).
     pub fn close_all_tabs(&mut self, cx: &mut Context<Self>) {
-        let apps: Vec<Entity<crate::web_app::WebAppModel>> = self.web_apps.values().map(|(app, _)| app.clone()).collect();
+        let apps: Vec<Entity<crate::web_app::WebAppModel>> = self.web_apps.values().map(|app| app.model.clone()).collect();
         for app in apps {
             app.update(cx, |app, cx| app.close(cx));
         }
@@ -1609,12 +1657,12 @@ impl WorkspaceStore {
                 TabRef::Terminal(TerminalTab::Attached { model, .. }) => {
                     model.update(cx, |model, cx| model.kill(cx));
                 }
+                TabRef::Browser { page, .. } => page.update(cx, |page, cx| page.close(cx)),
                 // A PTY still starting is killed by its creation finding the tab gone.
                 TabRef::Terminal(TerminalTab::Creating { .. } | TerminalTab::Failed(_))
                 | TabRef::Files { .. }
                 | TabRef::Editor { .. }
                 | TabRef::Review { .. }
-                | TabRef::Browser { .. }
                 | TabRef::Tool(_) => {}
             }
         }

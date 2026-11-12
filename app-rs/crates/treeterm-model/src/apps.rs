@@ -301,6 +301,27 @@ pub fn resolve_address(input: &str, page_url: &str) -> Result<String, String> {
     Ok(format!("{}{rest}", PageUrl { host: page.host.clone(), ..typed }.origin()))
 }
 
+/// The page a browser tab opens: its start page with the path it remembers (`pageUrl`).
+pub fn page_url(home: &str, path: &str) -> String {
+    let separator = if path.is_empty() || path.starts_with('/') { "" } else { "/" };
+    format!("{}{separator}{path}", home.trim_end_matches('/'))
+}
+
+/// `targetPort`: the port a localhost page is served on (the scheme's default without one).
+pub fn target_port(url: &str) -> Result<u16, String> {
+    PageUrl::parse(url)
+        .filter(|_| is_allowed_webview_url(url))
+        .map(|page| page.target_port())
+        .ok_or_else(|| format!("URL must be http(s)://localhost or 127.0.0.1: {url}"))
+}
+
+/// `forwardedUrl`: the same path and query, through the local end of an ssh forward.
+pub fn forwarded_url(url: &str, local_port: u16) -> Result<String, String> {
+    let page = PageUrl::parse(url).ok_or_else(|| format!("Invalid page URL: {url}"))?;
+    let local = PageUrl { host: "localhost".to_owned(), port: Some(local_port), ..page };
+    Ok(format!("{}{}", local.origin(), local.rest))
+}
+
 /// The path, query and fragment of `url` when it is on `home`'s origin: what a browser tab
 /// remembers as its page (`rememberPage`).
 pub fn page_path(home: &str, url: &str) -> Option<String> {
@@ -599,6 +620,19 @@ mod tests {
         assert_eq!(content(probe("text/plain", "tt-page1://http.localhost:1/api/readme")), Ok(PageContent::Markdown("# Hi".into())));
         assert!(content("{}".into()).is_err());
         assert!(content("\"{}\"".into()).is_err());
+    }
+
+    #[test]
+    fn browser_pages_join_their_path_and_move_to_the_forward() {
+        assert_eq!(page_url("http://localhost:3000", "/docs?x=1"), "http://localhost:3000/docs?x=1");
+        assert_eq!(page_url("http://localhost:3000/", "docs"), "http://localhost:3000/docs");
+        assert_eq!(page_url("http://localhost:3000/", ""), "http://localhost:3000");
+        assert_eq!(target_port("http://localhost:3000/a"), Ok(3000));
+        assert_eq!(target_port("http://127.0.0.1/"), Ok(80));
+        assert_eq!(target_port("https://localhost"), Ok(443));
+        assert!(target_port("http://example.com:3000/").is_err());
+        assert_eq!(forwarded_url("http://127.0.0.1:3000/a/b?q#h", 24567), Ok("http://localhost:24567/a/b?q#h".to_owned()));
+        assert_eq!(forwarded_url("http://localhost", 24567), Ok("http://localhost:24567/".to_owned()));
     }
 
     #[test]

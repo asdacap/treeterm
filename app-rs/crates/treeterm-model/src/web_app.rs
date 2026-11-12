@@ -133,9 +133,20 @@ impl WebAppModel {
         self.start(cx);
     }
 
+    /// "Restart" on the Port Forward sub-tab: a new forward, then the page again.
+    pub fn restart_forward(&mut self, cx: &mut Context<Self>) {
+        self.remove_forward(cx);
+        self.start(cx);
+        cx.notify();
+    }
+
     /// The tab closed: drop its forward.
     pub fn close(&mut self, cx: &mut Context<Self>) {
         self._run = None;
+        self.remove_forward(cx);
+    }
+
+    fn remove_forward(&self, cx: &mut Context<Self>) {
         if let Some(remote) = &self.remote
             && let Some(app) = remote.app.upgrade()
         {
@@ -237,7 +248,7 @@ async fn settled_forward(
 
 /// An active forward from a local port to `localhost:<remote_port>` on the ssh host,
 /// reusing a live one (`ensureForward`). Returns the local port.
-async fn ensure_forward(
+pub(crate) async fn ensure_forward(
     remote: &RemoteHost,
     tab_id: &str,
     remote_port: u16,

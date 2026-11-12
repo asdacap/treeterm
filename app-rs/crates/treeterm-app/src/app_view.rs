@@ -4,14 +4,14 @@ use std::collections::HashMap;
 
 use gpui_kit::component::{h_flex, spinner::Spinner, v_flex};
 use gpui_kit::prelude::*;
-use gpui_kit::{AnyElement, App, Context, Entity, EntityId, SharedString, Subscription, Window, div, px};
+use gpui_kit::{AnyElement, App, Context, Entity, EntityId, SharedString, Subscription, WeakEntity, Window, div, px};
 use treeterm_core::keybinding::{Action, PrefixAction};
 use indexmap::IndexMap;
 use treeterm_core::connection::ConnectionId;
 use treeterm_model::app_store::{AppStore, ConnState};
 use treeterm_model::keybinding_store::KeybindingStore;
 use treeterm_model::session_store::{SessionStore, WorkspaceEntry};
-use treeterm_model::workspace_store::{ActivityStyle as _, TabContent};
+use treeterm_model::workspace_store::{ActivityStyle as _, PageHost, TabContent, WorkspaceStore};
 
 use crate::terminal_view::TerminalView;
 use crate::theme::colors;
@@ -74,8 +74,8 @@ struct Connected {
     run_actions: HashMap<String, Entity<treeterm_model::run_actions::RunActions>>,
     /// Each shown workspace's download badge, by workspace id.
     traffic_badges: HashMap<String, Entity<crate::traffic_badge::TrafficBadge>>,
-    /// Web App tabs showing their shell instead of their page, by (workspace, tab).
-    web_app_shell: std::collections::HashSet<(String, String)>,
+    /// Web App and Browser tabs not on their Browser sub-tab, by (workspace, tab).
+    page_subtabs: HashMap<(String, String), PageSubTab>,
     /// Views of tool tabs (GitHub, Comments, Chat, …).
     tool_views: crate::tool_views::ToolViews,
     /// The header's in-place name or description editor.
@@ -247,7 +247,7 @@ impl AppView {
             editor_views: HashMap::new(),
             review_views: HashMap::new(),
             browser_views: HashMap::new(),
-            web_app_shell: std::collections::HashSet::new(),
+            page_subtabs: HashMap::new(),
             run_actions: HashMap::new(),
             traffic_badges: HashMap::new(),
             header_edit: None,
@@ -1885,20 +1885,9 @@ fn workspace_pane(
                 }
                 div().size_full().child(view).into_any_element()
             }
-            Some(TabContent::Browser { url, home }) => {
-                // Page memory: the tab reopens on the page it last showed (`path`).
-                let memory = (workspace.downgrade(), tab_id.clone());
-                let view = connected
-                    .browser_views
-                    .entry((id.clone(), tab_id.clone()))
-                    .or_insert_with(|| {
-                        cx.new(|_| crate::browser_view::BrowserView::new(url).remember_pages_in(memory.0, memory.1, home))
-                    })
-                    .clone();
-                div().size_full().child(view).into_any_element()
-            }
-            Some(TabContent::WebApp { app, terminal }) => {
-                web_app_tab(connected, &workspace, &id, tab_id, &app, terminal, window, cx)
+            Some(TabContent::Browser { page, forward }) => browser_tab(connected, &workspace, &id, tab_id, &page, forward, cx),
+            Some(TabContent::WebApp { app, terminal, forward }) => {
+                web_app_tab(connected, &workspace, &id, tab_id, &app, terminal, forward, window, cx)
             }
             Some(
                 tool @ (TabContent::GitHub
@@ -1932,11 +1921,11 @@ fn workspace_pane(
         use gpui_kit::component::WindowExt as _;
         window.has_active_dialog(cx)
     };
-    // A Web App tab shows its page only on its Browser sub-tab.
+    // A Web App or Browser tab shows its page only on its Browser sub-tab.
     let shown_key = active
         .clone()
         .map(|tab| (id.clone(), tab))
-        .filter(|key| !connected.web_app_shell.contains(key));
+        .filter(|key| connected.page_subtabs.get(key).is_none_or(|sub| *sub == PageSubTab::Browser));
     let views: Vec<((String, String), Entity<crate::browser_view::BrowserView>)> =
         connected.browser_views.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
     for (key, view) in views {
@@ -1984,6 +1973,261 @@ fn workspace_pane(
 /// A Web App tab (`WebAppPane`): Browser and Shell sub-tabs over its page and its server's
 /// terminal.
 #[allow(clippy::too_many_arguments)]
+/// A Web App's or Browser tab's sub-tab (`WebAppSubTab` / `BrowserSubTab`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PageSubTab {
+    Browser,
+    Shell,
+    PortForward,
+}
+
+impl PageSubTab {
+    fn label(self) -> &'static str {
+        match self {
+            PageSubTab::Browser => "Browser",
+            PageSubTab::Shell => "Shell",
+            PageSubTab::PortForward => "Port Forward",
+        }
+    }
+}
+
+/// `.ssh-pane-subtabs`: 11px tabs with a 2px accent underline on the active one.
+fn page_subtab_bar(key: &(String, String), tabs: &[PageSubTab], active: PageSubTab, cx: &mut Context<AppView>) -> AnyElement {
+    let c = colors(cx);
+    let (secondary, border, primary, accent) = (c.text_secondary, c.border, c.text_primary, c.accent);
+    let mut bar = h_flex().pl(px(4.)).border_b_1().border_color(border);
+    for &tab in tabs {
+        let key = key.clone();
+        let is_active = tab == active;
+        bar = bar.child(
+            div()
+                .id(SharedString::from(format!("page-{}-{}", tab.label(), key.1)))
+                .px(px(12.))
+                .py(px(6.))
+                .text_size(px(11.))
+                .border_b(px(2.))
+                .border_color(if is_active { accent } else { gpui_kit::transparent_black() })
+                .text_color(if is_active { primary } else { secondary })
+                .cursor_pointer()
+                .hover(move |d| d.text_color(primary))
+                .child(tab.label())
+                .on_click(cx.listener(move |view, _, _, cx| show_page_subtab(view, &key, tab, cx))),
+        );
+    }
+    bar.into_any_element()
+}
+
+fn show_page_subtab(view: &mut AppView, key: &(String, String), tab: PageSubTab, cx: &mut Context<AppView>) {
+    if let Some(connected) = view.current_mut() {
+        connected.page_subtabs.insert(key.clone(), tab);
+        if tab == PageSubTab::Shell {
+            connected.focus_pending = true;
+        }
+    }
+    cx.notify();
+}
+
+/// A link under a page's waiting message or error ("View shell", "View port forward").
+fn page_link(key: &(String, String), tab: PageSubTab, label: &'static str, cx: &mut Context<AppView>) -> gpui_kit::Stateful<gpui_kit::Div> {
+    let key = key.clone();
+    div()
+        .id(SharedString::from(format!("page-link-{label}-{}", key.1)))
+        .text_size(px(12.))
+        .text_color(colors(cx).accent)
+        .cursor_pointer()
+        .child(label)
+        .on_click(cx.listener(move |view, _, _, cx| show_page_subtab(view, &key, tab, cx)))
+}
+
+/// `.webapp-waiting`: a 20px spinner over a 13px message, and the links.
+fn page_waiting(message: String, links: Vec<gpui_kit::Stateful<gpui_kit::Div>>, cx: &App) -> AnyElement {
+    let c = colors(cx);
+    v_flex()
+        .size_full()
+        .items_center()
+        .justify_center()
+        .gap(px(12.))
+        .text_size(px(13.))
+        .text_color(c.text_secondary)
+        .child(
+            Spinner::new()
+                .icon(gpui_kit::component::Icon::new(IconName::LoaderCircle))
+                .with_size(px(20.))
+                .color(c.accent),
+        )
+        .child(message)
+        .children(links)
+        .into_any_element()
+}
+
+/// A page that failed: the message, Retry and the links.
+fn page_error(message: String, retry: impl Fn(&mut App) + 'static, links: Vec<gpui_kit::Stateful<gpui_kit::Div>>, cx: &App) -> AnyElement {
+    v_flex()
+        .size_full()
+        .items_center()
+        .justify_center()
+        .gap(px(12.))
+        .text_size(px(13.))
+        .child(div().px(px(8.)).text_color(gpui_kit::rgb(0xf44336)).child(message))
+        .child(
+            div()
+                .id("webapp-retry")
+                .text_size(px(12.))
+                .text_color(colors(cx).accent)
+                .cursor_pointer()
+                .child("Retry")
+                .on_click(move |_, _, cx| retry(cx)),
+        )
+        .children(links)
+        .into_any_element()
+}
+
+/// The page's view once it is ready: made when the page's URL changes (a new forward).
+fn page_view(connected: &mut Connected, key: (String, String), url: String, memory: Option<(WeakEntity<WorkspaceStore>, String)>, home: String, cx: &mut Context<AppView>) -> AnyElement {
+    let stale = connected.browser_views.get(&key).is_some_and(|view| view.read(cx).url() != home);
+    if stale {
+        connected.browser_views.remove(&key);
+    }
+    let view = connected
+        .browser_views
+        .entry(key)
+        .or_insert_with(|| {
+            cx.new(|_| {
+                let view = crate::browser_view::BrowserView::new(url);
+                match memory {
+                    Some((workspace, tab)) => view.remember_pages_in(workspace, tab, home),
+                    None => view,
+                }
+            })
+        })
+        .clone();
+    div().size_full().child(view).into_any_element()
+}
+
+/// `PortForwardView`: the tab's forward (`localhost:L → host:R (status)`, Restart once it
+/// failed or stopped, its error) over its ssh output.
+fn port_forward_pane(monitor: &Entity<treeterm_model::forward_monitor::ForwardMonitor>, restart: impl Fn(&mut App) + 'static, cx: &App) -> AnyElement {
+    use treeterm_core::connection::PortForwardStatus;
+    use treeterm_model::forward_monitor::ForwardState;
+    let c = colors(cx);
+    let (secondary, border) = (c.text_secondary, c.border);
+    match monitor.read(cx).state().clone() {
+        ForwardState::Missing => v_flex()
+            .size_full()
+            .items_center()
+            .justify_center()
+            .text_size(px(13.))
+            .text_color(secondary)
+            .child("No port forward yet. It starts once the server is ready.")
+            .into_any_element(),
+        ForwardState::Live { info, log } => {
+            let spec = &info.config.spec;
+            let can_restart = matches!(info.status, PortForwardStatus::Error(_) | PortForwardStatus::Stopped);
+            let error = match &info.status {
+                PortForwardStatus::Error(error) => Some(error.to_string()),
+                PortForwardStatus::Connecting | PortForwardStatus::Active | PortForwardStatus::Stopped => None,
+            };
+            let toolbar = h_flex()
+                .flex_shrink_0()
+                .gap(px(8.))
+                .px(px(8.))
+                .py(px(4.))
+                .border_b_1()
+                .border_color(border)
+                .bg(c.bg_secondary)
+                .text_size(px(12.))
+                .child(
+                    div().flex_1().min_w_0().truncate().font_family(crate::ui::MONO).child(format!(
+                        "localhost:{} → {}:{} ({})",
+                        spec.local_port,
+                        spec.remote_host,
+                        spec.remote_port,
+                        info.status.as_str()
+                    )),
+                )
+                .when(can_restart, |d| {
+                    d.child(
+                        div()
+                            .id("forward-restart")
+                            .px(px(8.))
+                            .py(px(2.))
+                            .rounded(px(4.))
+                            .border_1()
+                            .border_color(border)
+                            .cursor_pointer()
+                            .hover(|d| d.bg(colors(cx).bg_hover))
+                            .child("Restart")
+                            .on_click(move |_, _, cx| restart(cx)),
+                    )
+                });
+            // `.ssh-pane-output`.
+            let output = div()
+                .id("forward-output")
+                .flex_1()
+                .min_h_0()
+                .overflow_y_scroll()
+                .p(px(8.))
+                .font_family(crate::ui::MONO)
+                .text_size(px(12.))
+                .text_color(secondary)
+                .children(log.into_iter().map(|line| div().child(line)));
+            v_flex()
+                .size_full()
+                .child(toolbar)
+                .when_some(error, |d, error| {
+                    d.child(div().px(px(8.)).py(px(4.)).text_size(px(12.)).text_color(gpui_kit::rgb(0xf44336)).child(error))
+                })
+                .child(output)
+                .into_any_element()
+        }
+    }
+}
+
+/// A Browser tab (`BrowserPane`): its page, and on an ssh session a Port Forward sub-tab.
+fn browser_tab(
+    connected: &mut Connected,
+    workspace: &Entity<WorkspaceStore>,
+    workspace_id: &str,
+    tab_id: &str,
+    page: &Entity<treeterm_model::browser_page::BrowserPageModel>,
+    forward: PageHost,
+    cx: &mut Context<AppView>,
+) -> AnyElement {
+    use treeterm_model::browser_page::BrowserPhase;
+    let key = (workspace_id.to_owned(), tab_id.to_owned());
+    let sub = connected.page_subtabs.get(&key).copied().unwrap_or(PageSubTab::Browser);
+    let links = |cx: &mut Context<AppView>| match &forward {
+        PageHost::Local => Vec::new(),
+        PageHost::Remote(_) => vec![page_link(&key, PageSubTab::PortForward, "View port forward", cx)],
+    };
+    let browser = match page.read(cx).phase().clone() {
+        // Page memory: the tab reopens on the page it last showed (`path`).
+        BrowserPhase::Ready { url, home } => {
+            page_view(connected, key.clone(), url, Some((workspace.downgrade(), tab_id.to_owned())), home, cx)
+        }
+        BrowserPhase::Forwarding { port } => page_waiting(format!("Starting port forward for port {port}…"), links(cx), cx),
+        BrowserPhase::Error(message) => {
+            let retry = page.clone();
+            page_error(message, move |cx| retry.update(cx, |page, cx| page.retry(cx)), links(cx), cx)
+        }
+    };
+    let monitor = match forward {
+        // Local sessions open the page directly: nothing else to show.
+        PageHost::Local => return browser,
+        PageHost::Remote(monitor) => monitor,
+    };
+    let bar = page_subtab_bar(&key, &[PageSubTab::Browser, PageSubTab::PortForward], sub, cx);
+    let body = match sub {
+        PageSubTab::PortForward => {
+            let restart = page.clone();
+            port_forward_pane(&monitor, move |cx| restart.update(cx, |page, cx| page.restart_forward(cx)), cx)
+        }
+        PageSubTab::Browser | PageSubTab::Shell => browser,
+    };
+    v_flex().size_full().child(bar).child(div().flex_1().min_h_0().child(body)).into_any_element()
+}
+
+#[allow(clippy::too_many_arguments)]
 fn web_app_tab(
     connected: &mut Connected,
     workspace: &Entity<treeterm_model::workspace_store::WorkspaceStore>,
@@ -1991,81 +2235,26 @@ fn web_app_tab(
     tab_id: &str,
     app: &Entity<treeterm_model::web_app::WebAppModel>,
     terminal: Option<Entity<treeterm_model::terminal::TerminalModel>>,
+    forward: PageHost,
     window: &mut Window,
     cx: &mut Context<AppView>,
 ) -> AnyElement {
     use treeterm_model::web_app::WebAppPhase;
     let c = colors(cx);
-    let (secondary, border) = (c.text_secondary, c.border);
+    let secondary = c.text_secondary;
     let key = (workspace_id.to_owned(), tab_id.to_owned());
-    let shell = connected.web_app_shell.contains(&key);
-    // `.ssh-pane-subtabs`: 11px tabs with a 2px accent underline on the active one.
-    let (primary, accent) = (c.text_primary, c.accent);
-    let mut bar = h_flex().pl(px(4.)).border_b_1().border_color(border);
-    for (label, wants_shell) in [("Browser", false), ("Shell", true)] {
-        let active = shell == wants_shell;
-        let key = key.clone();
-        bar = bar.child(
-            div()
-                .id(SharedString::from(format!("webapp-{label}-{tab_id}")))
-                .px(px(12.))
-                .py(px(6.))
-                .text_size(px(11.))
-                .border_b(px(2.))
-                .border_color(if active { accent } else { gpui_kit::transparent_black() })
-                .text_color(if active { primary } else { secondary })
-                .cursor_pointer()
-                .hover(move |d| d.text_color(primary))
-                .child(label)
-                .on_click(cx.listener(move |view, _, _, cx| {
-                    if let Some(connected) = view.current_mut() {
-                        if wants_shell {
-                            connected.web_app_shell.insert(key.clone());
-                            connected.focus_pending = true;
-                        } else {
-                            connected.web_app_shell.remove(&key);
-                        }
-                    }
-                    cx.notify();
-                })),
-        );
-    }
-    // `.webapp-waiting`: a 20px spinner over a 13px message, and the "View shell" link.
-    let view_shell = {
-        let key = key.clone();
-        div()
-            .id(SharedString::from(format!("webapp-view-shell-{tab_id}")))
-            .text_size(px(12.))
-            .text_color(accent)
-            .cursor_pointer()
-            .child("View shell")
-            .on_click(cx.listener(move |view, _, _, cx| {
-                if let Some(connected) = view.current_mut() {
-                    connected.web_app_shell.insert(key.clone());
-                    connected.focus_pending = true;
-                }
-                cx.notify();
-            }))
+    let sub = connected.page_subtabs.get(&key).copied().unwrap_or(PageSubTab::Browser);
+    let tabs: &[PageSubTab] = match &forward {
+        PageHost::Local => &[PageSubTab::Browser, PageSubTab::Shell],
+        PageHost::Remote(_) => &[PageSubTab::Browser, PageSubTab::Shell, PageSubTab::PortForward],
     };
-    let waiting = |message: String, link: gpui_kit::Stateful<gpui_kit::Div>| {
-        v_flex()
-            .size_full()
-            .items_center()
-            .justify_center()
-            .gap(px(12.))
-            .text_size(px(13.))
-            .text_color(secondary)
-            .child(
-                Spinner::new()
-                    .icon(gpui_kit::component::Icon::new(IconName::LoaderCircle))
-                    .with_size(px(20.))
-                    .color(accent),
-            )
-            .child(message)
-            .child(link)
-            .into_any_element()
-    };
-    let body = if shell {
+    let bar = page_subtab_bar(&key, tabs, sub, cx);
+    let view_shell = |cx: &mut Context<AppView>| vec![page_link(&key, PageSubTab::Shell, "View shell", cx)];
+    let waiting = |message: String, links: Vec<gpui_kit::Stateful<gpui_kit::Div>>, cx: &mut Context<AppView>| page_waiting(message, links, cx);
+    let body = if let (PageSubTab::PortForward, PageHost::Remote(monitor)) = (sub, &forward) {
+        let restart = app.clone();
+        port_forward_pane(monitor, move |cx| restart.update(cx, |app, cx| app.restart_forward(cx)), cx)
+    } else if sub == PageSubTab::Shell {
         match terminal {
             Some(model) => {
                 let view = connected
@@ -2087,41 +2276,13 @@ fn web_app_tab(
         }
     } else {
         match app.read(cx).phase().clone() {
-            WebAppPhase::Ready { url } => {
-                let stale = connected.browser_views.get(&key).is_some_and(|view| view.read(cx).url() != url);
-                if stale {
-                    connected.browser_views.remove(&key);
-                }
-                let view = connected
-                    .browser_views
-                    .entry(key)
-                    .or_insert_with(|| cx.new(|_| crate::browser_view::BrowserView::new(url)))
-                    .clone();
-                div().size_full().child(view).into_any_element()
-            }
-            WebAppPhase::AllocatingPort => waiting("Finding a free port…".to_owned(), view_shell),
-            WebAppPhase::WaitingForServer { port } => waiting(format!("Waiting for server on port {port}…"), view_shell),
-            WebAppPhase::Forwarding { port } => waiting(format!("Starting port forward for port {port}…"), view_shell),
+            WebAppPhase::Ready { url } => page_view(connected, key.clone(), url.clone(), None, url, cx),
+            WebAppPhase::AllocatingPort => waiting("Finding a free port…".to_owned(), view_shell(cx), cx),
+            WebAppPhase::WaitingForServer { port } => waiting(format!("Waiting for server on port {port}…"), view_shell(cx), cx),
+            WebAppPhase::Forwarding { port } => waiting(format!("Starting port forward for port {port}…"), view_shell(cx), cx),
             WebAppPhase::Error(message) => {
                 let retry = app.clone();
-                v_flex()
-                    .size_full()
-                    .items_center()
-                    .justify_center()
-                    .gap(px(12.))
-                    .text_size(px(13.))
-                    .child(div().px(px(8.)).text_color(gpui_kit::rgb(0xf44336)).child(message))
-                    .child(
-                        div()
-                            .id("webapp-retry")
-                            .text_size(px(12.))
-                            .text_color(accent)
-                            .cursor_pointer()
-                            .child("Retry")
-                            .on_click(move |_, _, cx| retry.update(cx, |app, cx| app.retry(cx))),
-                    )
-                    .child(view_shell)
-                    .into_any_element()
+                page_error(message, move |cx| retry.update(cx, |app, cx| app.retry(cx)), view_shell(cx), cx)
             }
         }
     };
