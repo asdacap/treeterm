@@ -87,3 +87,21 @@ fn dragged_sessions_keep_their_place_and_the_rest_follow(cx: &mut TestAppContext
     names.update(cx, |n, cx| n.reorder(&shown, &local, &b, Side::Before, cx));
     assert_eq!(names.read_with(cx, |n, _| names_of(n, with_c.clone())), ["me@c", "Local", "me@b", "me@a"]);
 }
+
+#[gpui_kit::test]
+fn recent_directories_are_kept_per_target_newest_first_up_to_ten(cx: &mut TestAppContext) {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("ui-state.json");
+    let names = cx.new(|_| SessionNames::new(Some(path.clone())));
+    let local = ConnectionTarget::Local;
+    assert!(names.read_with(cx, |n, _| n.recent_directories(&local).is_empty()));
+
+    for index in 0..12 {
+        names.update(cx, |n, cx| n.add_recent_directory(&local, &format!("/d{index}"), cx));
+    }
+    names.update(cx, |n, cx| n.add_recent_directory(&local, "/d5", cx));
+
+    let expected = ["/d5", "/d11", "/d10", "/d9", "/d8", "/d7", "/d6", "/d4", "/d3", "/d2"];
+    assert_eq!(names.read_with(cx, |n, _| n.recent_directories(&local).to_vec()), expected);
+    assert_eq!(SessionNames::new(Some(path)).recent_directories(&local), expected, "saved to disk");
+}

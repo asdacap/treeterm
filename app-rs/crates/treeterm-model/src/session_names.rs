@@ -1,11 +1,13 @@
 //! Per-session sidebar state (`sessionNames.ts`): custom names (renaming a session in the
-//! sidebar) and the order sessions were dragged into, kept in `ui-state.json` by connection
-//! target so they survive reconnects and restarts.
+//! sidebar), the order sessions were dragged into, and the directories recently opened as
+//! workspaces (`recentDirectories.ts`), kept in `ui-state.json` by connection target so they
+//! survive reconnects and restarts.
 
 use std::path::PathBuf;
 
 use gpui_kit::Context;
 use treeterm_core::connection::ConnectionTarget;
+use treeterm_core::settings::MAX_RECENT_DIRECTORIES;
 use treeterm_core::ui_state::{self, UiState};
 
 pub struct SessionNames {
@@ -103,6 +105,21 @@ impl SessionNames {
             Side::After => at + 1,
         });
         order.insert(at, dragged);
+        self.save();
+        cx.notify();
+    }
+
+    /// The directories opened as workspaces on `target`, most recent first.
+    pub fn recent_directories(&self, target: &ConnectionTarget) -> &[String] {
+        self.state.recent_directories.get(&ui_state::session_key(target)).map_or(&[], Vec::as_slice)
+    }
+
+    /// `addRecent`: `path` moves to the front; the oldest beyond the limit drop off.
+    pub fn add_recent_directory(&mut self, target: &ConnectionTarget, path: &str, cx: &mut Context<Self>) {
+        let recent = self.state.recent_directories.entry(ui_state::session_key(target)).or_default();
+        recent.retain(|existing| existing != path);
+        recent.insert(0, path.to_owned());
+        recent.truncate(MAX_RECENT_DIRECTORIES);
         self.save();
         cx.notify();
     }

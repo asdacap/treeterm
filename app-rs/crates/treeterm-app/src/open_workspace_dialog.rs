@@ -1,6 +1,6 @@
-//! "Open Workspace": `OpenWorkspaceDialog.tsx`. A path is typed, or "Browse..." picks one:
-//! the native folder picker on this machine, `RemoteDirectoryBrowser.tsx` on a remote host
-//! (the native picker only sees this machine).
+//! "Open Workspace": `OpenWorkspaceDialog.tsx`. A path is typed, picked from the recent
+//! directories, or "Browse..." picks one: the native folder picker on this machine,
+//! `RemoteDirectoryBrowser.tsx` on a remote host (the native picker only sees this machine).
 
 use std::rc::Rc;
 
@@ -46,6 +46,8 @@ struct Browser {
 
 pub struct OpenWorkspaceDialog {
     folder: Entity<InputState>,
+    /// "Recent Directories", most recent first; the section is hidden when empty.
+    recent: Vec<String>,
     picker: Picker,
     on_picked: OnPicked,
     _subscriptions: Vec<Subscription>,
@@ -59,8 +61,22 @@ fn parent_of(path: &str) -> String {
     }
 }
 
+/// `getFolderName`: the last path segment, else the path itself.
+fn folder_name(path: &str) -> &str {
+    match path.rsplit(['/', '\\']).next() {
+        Some("") | None => path,
+        Some(name) => name,
+    }
+}
+
 impl OpenWorkspaceDialog {
-    fn new(location: Location, on_picked: OnPicked, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    fn new(
+        location: Location,
+        recent: Vec<String>,
+        on_picked: OnPicked,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let (picker, placeholder) = match location {
             Location::Local => (Picker::Native { picking: false }, "Enter or browse for a folder..."),
             Location::Remote(session) => {
@@ -74,7 +90,7 @@ impl OpenWorkspaceDialog {
             InputEvent::Change => cx.notify(),
             InputEvent::Focus | InputEvent::Blur => {}
         });
-        Self { folder, picker, on_picked, _subscriptions: vec![subscription] }
+        Self { folder, recent, picker, on_picked, _subscriptions: vec![subscription] }
     }
 
     fn selected(&self, cx: &App) -> String {
@@ -329,6 +345,58 @@ impl OpenWorkspaceDialog {
             )
             .into_any_element()
     }
+
+    /// `.recent-directories-list`: each row the folder name over its path; a click fills the
+    /// folder field (`handleSelectRecent`).
+    fn render_recent(&self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
+        let c = colors(cx);
+        let (primary, secondary, border, hover, tertiary) =
+            (c.text_primary, c.text_secondary, c.border, c.bg_hover, c.bg_tertiary);
+        let mut list = div().id("recent-directories").flex().flex_col().gap(px(4.)).max_h(px(200.)).overflow_y_scroll();
+        for (i, dir) in self.recent.iter().enumerate() {
+            let path = dir.clone();
+            list = list.child(
+                div()
+                    .id(SharedString::from(format!("recent-{i}")))
+                    .flex()
+                    .flex_col()
+                    .flex_shrink_0()
+                    .px(px(12.))
+                    .py(px(8.))
+                    .rounded(px(4.))
+                    .border_1()
+                    .border_color(border)
+                    .bg(tertiary)
+                    .cursor_pointer()
+                    .hover(move |d| d.bg(hover))
+                    .child(
+                        div()
+                            .text_size(px(ui::BODY))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(primary)
+                            .child(folder_name(dir).to_owned()),
+                    )
+                    .child(div().truncate().text_size(px(11.)).text_color(secondary).child(dir.clone()))
+                    .on_click(cx.listener(move |dialog, _, window, cx| {
+                        let path = path.clone();
+                        dialog.folder.update(cx, |input, cx| input.set_value(path, window, cx));
+                    })),
+            );
+        }
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(6.))
+            .child(
+                div()
+                    .text_size(px(12.))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(secondary)
+                    .child("Recent Directories"),
+            )
+            .child(list)
+            .into_any_element()
+    }
 }
 
 impl Render for OpenWorkspaceDialog {
@@ -364,6 +432,7 @@ impl Render for OpenWorkspaceDialog {
             Picker::Remote { browser: Some(browser), .. } => Some(self.render_browser(browser, cx)),
             Picker::Remote { browser: None, .. } | Picker::Native { .. } => None,
         };
+        let recent = (!self.recent.is_empty()).then(|| self.render_recent(cx));
         let disabled = self.selected(cx).is_empty() || picking;
         let open = ui::dialog_button("open-submit", "Open", ui::ButtonKind::Primary, disabled, cx)
             .when(!disabled, |b| b.on_click(cx.listener(|dialog, _, window, cx| dialog.open_selected(window, cx))));
@@ -375,6 +444,7 @@ impl Render for OpenWorkspaceDialog {
                     .flex_col()
                     .gap(px(16.))
                     .p(px(20.))
+                    .children(recent)
                     .child(
                         // `.open-workspace-field`: a 12px label 6px above the row.
                         div()
@@ -405,8 +475,9 @@ impl Render for OpenWorkspaceDialog {
     }
 }
 
-pub fn open(location: Location, on_picked: OnPicked, window: &mut Window, cx: &mut App) {
-    let view = cx.new(|cx| OpenWorkspaceDialog::new(location, on_picked, window, cx));
+/// `recent`: the "Recent Directories" to offer, most recent first (none hides the section).
+pub fn open(location: Location, recent: Vec<String>, on_picked: OnPicked, window: &mut Window, cx: &mut App) {
+    let view = cx.new(|cx| OpenWorkspaceDialog::new(location, recent, on_picked, window, cx));
     // `autoFocus` on the folder, once the dialog has taken the focus.
     let folder = view.read(cx).folder.clone();
     window.defer(cx, move |window, cx| folder.update(cx, |input, cx| input.focus(window, cx)));
@@ -415,7 +486,15 @@ pub fn open(location: Location, on_picked: OnPicked, window: &mut Window, cx: &m
 
 #[cfg(test)]
 mod tests {
-    use super::parent_of;
+    use super::{folder_name, parent_of};
+
+    #[test]
+    fn folder_names_are_the_last_segment() {
+        assert_eq!(folder_name("/home/me/src"), "src");
+        assert_eq!(folder_name("C:\\work\\repo"), "repo");
+        assert_eq!(folder_name("/home/me/"), "/home/me/");
+        assert_eq!(folder_name("repo"), "repo");
+    }
 
     #[test]
     fn parents_stop_at_the_root() {

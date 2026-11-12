@@ -64,6 +64,7 @@ impl SshUploadView {
         });
         crate::open_workspace_dialog::open(
             crate::open_workspace_dialog::Location::Remote(self.session.clone()),
+            Vec::new(), // a destination, not a workspace: no recents
             on_picked,
             window,
             cx,

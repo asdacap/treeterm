@@ -1,5 +1,6 @@
-//! Local UI state Electron kept in `localStorage` (`sessionNames`: names and sidebar order),
-//! stored next to `settings.json` as `ui-state.json`. Unknown keys are kept on save.
+//! Local UI state Electron kept in `localStorage` (`sessionNames`: names and sidebar order;
+//! `recentDirectories`: the Open Workspace dialog's list), stored next to `settings.json`
+//! as `ui-state.json`. Unknown keys are kept on save.
 
 use std::collections::BTreeMap;
 use std::io;
@@ -18,6 +19,9 @@ pub struct UiState {
     /// Sidebar order by [`session_key`], set by dragging sessions; unlisted ones go last.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub session_order: Vec<String>,
+    /// Directories opened as workspaces by [`session_key`], most recent first.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub recent_directories: BTreeMap<String, Vec<String>>,
     #[serde(flatten)]
     pub extra: serde_json::Map<String, serde_json::Value>,
 }
@@ -83,8 +87,10 @@ mod tests {
         assert_eq!(state.session_names.get("local").map(String::as_str), Some("Laptop"));
         state.session_names.insert("ssh:me@box:22".to_owned(), "Box".to_owned());
         state.session_order = vec!["ssh:me@box:22".to_owned(), "local".to_owned()];
+        state.recent_directories.insert("local".to_owned(), vec!["/work/a".to_owned()]);
         save(&path, &state).unwrap();
         let again = load(&path).unwrap();
+        assert_eq!(again.recent_directories["local"], ["/work/a"]);
         assert_eq!(again.session_names.len(), 2);
         assert_eq!(again.session_order, ["ssh:me@box:22", "local"]);
         assert_eq!(again.extra["other"]["x"], 1);

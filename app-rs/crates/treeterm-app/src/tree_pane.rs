@@ -146,10 +146,15 @@ impl TreePane {
         } else {
             crate::open_workspace_dialog::Location::Local
         };
+        let recent = self.names.read(cx).recent_directories(&self.target).to_vec();
         crate::open_workspace_dialog::open(
             location,
+            recent,
             std::rc::Rc::new(move |path, _window, cx| {
                 match pane.update(cx, |pane, cx| {
+                    // `handleOpen`: remembered for this connection's next Open Workspace.
+                    let target = pane.target.clone();
+                    pane.names.update(cx, |names, cx| names.add_recent_directory(&target, &path, cx));
                     let id = pane.session.update(cx, |s, cx| s.open_workspace(path, cx));
                     pane.select(id, cx);
                 }) {
