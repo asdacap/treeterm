@@ -8,6 +8,7 @@
 //! - `newtab <workspace-id>` / `closetab <workspace-id> <tab-id>`
 //! - `open <directory>` — open a directory as a workspace (no folder picker)
 //! - `type <text>` — type text as keystrokes; `key <keystroke>` — e.g. `enter`, `ctrl-c`
+//! - `scroll <x> <y> <dy>` — a wheel scroll of `dy` points over (x, y), in window points
 //! - `screenshot <path.png>` — render the last frame offscreen (no screen-capture permission)
 
 use std::path::PathBuf;
@@ -208,6 +209,31 @@ fn handle(line: &str, window: AnyWindowHandle, view: &Entity<AppView>, cx: &mut 
                         cx,
                     );
                 }
+                Ok(json!({ "ok": true }))
+            }
+            "scroll" => {
+                // `scroll <x> <y> <dy>`: a wheel scroll of `dy` points over (x, y); a negative
+                // `dy` scrolls the content up (reveals what is below).
+                let coords: Vec<f32> = rest.split_whitespace().filter_map(|v| v.parse().ok()).collect();
+                let [x, y, dy] = coords[..] else {
+                    return Err("usage: scroll <x> <y> <dy>".to_owned());
+                };
+                let position = gpui_kit::point(gpui_kit::px(x), gpui_kit::px(y));
+                let modifiers = gpui_kit::Modifiers::default();
+                window.dispatch_event(
+                    gpui_kit::PlatformInput::MouseMove(gpui_kit::MouseMoveEvent { position, pressed_button: None, modifiers }),
+                    cx,
+                );
+                window.dispatch_event(
+                    gpui_kit::PlatformInput::Scroll(gpui_kit::ScrollEvent {
+                        position,
+                        delta: gpui_kit::ScrollDelta::Pixels(gpui_kit::point(gpui_kit::px(0.), gpui_kit::px(dy))),
+                        modifiers,
+                        touch_phase: gpui_kit::TouchPhase::Moved,
+                        source: gpui_kit::ScrollSource::Pointer,
+                    }),
+                    cx,
+                );
                 Ok(json!({ "ok": true }))
             }
             "key" => {

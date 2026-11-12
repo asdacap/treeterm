@@ -357,6 +357,7 @@ impl ReviewView {
         let this = cx.weak_entity();
         let model = self.model.clone();
         let state_for_headers = state.clone();
+        let sticky = (items.clone(), this.clone(), model.clone(), state.clone());
         let draft_label = draft.map(|d| format!("Comment on line {} ({})", d.line_number, d.side.as_str()));
         // Pierre tints changed rows (`--diffs-deletion/addition-color`) on its near-black body.
         let mut decorations = Vec::new();
@@ -399,6 +400,15 @@ impl ReviewView {
                 }
             })
             .annotations(annotations)
+            // `.file-diff-header` is `position: sticky; top: 0` in its file's section.
+            .render_sticky_header(move |file, _, cx| {
+                let (items, view, model, state) = &sticky;
+                let id = ElementId::from(SharedString::from(format!("header-{}", file.path())));
+                match items.get(&id) {
+                    Some(Annotated::Header(header)) => sticky_header(header, state, view, model, cx),
+                    Some(Annotated::Comments { .. }) | None => div().into_any_element(),
+                }
+            })
             .render_annotation(move |annotation, window, cx| {
                 let Some(item) = items.get(annotation.id()) else {
                     return div().into_any_element();
@@ -490,7 +500,8 @@ impl Element for RemScope {
     }
 }
 
-/// `.file-diff-header`: chevron, status, path, stats, Stage / Unstage, refresh, Viewed.
+/// A file's header in the diff (an annotation of its first row), with an image file's
+/// sides or a binary file's placeholder under it.
 fn file_header(
     header: &Header,
     state: &Entity<DiffState>,
@@ -499,6 +510,50 @@ fn file_header(
     window: &mut Window,
     cx: &mut App,
 ) -> AnyElement {
+    let (bg_primary, secondary) = (colors(cx).bg_primary, colors(cx).text_secondary);
+    // GPUI Kit pads (0.75rem) and borders every annotation, painting the borders over its
+    // content: the header fills the padding and the borders are its own. (Pierre's 8px above
+    // the code would sit above the bottom border, so it is left out.)
+    let pad = window.rem_size() * 0.75;
+    v_flex()
+        .mx(-pad)
+        .my(-pad)
+        .child(header_row(header, state, view, model, cx))
+        .when(header.binary == Some(false), |d| match header.image.clone() {
+            Some(sides) => d.child(image_diff(&header.file.path, sides, cx)),
+            // `.file-diff-placeholder`.
+            None => d.child(
+                div().px(px(12.)).py(px(16.)).bg(bg_primary).text_size(px(12.)).italic().text_color(secondary).child("Binary file \u{2014} diff not shown"),
+            ),
+        })
+        .into_any_element()
+}
+
+/// The header pinned over the top of the diff while its file scrolls under it: the row
+/// alone, between the borders GPUI Kit draws around it in the list.
+fn sticky_header(
+    header: &Header,
+    state: &Entity<DiffState>,
+    view: &WeakEntity<ReviewView>,
+    model: &Entity<ReviewModel>,
+    cx: &mut App,
+) -> AnyElement {
+    v_flex()
+        .border_t_1()
+        .border_b_1()
+        .border_color(colors(cx).border)
+        .child(header_row(header, state, view, model, cx))
+        .into_any_element()
+}
+
+/// `.file-diff-header`: chevron, status, path, stats, Stage / Unstage, refresh, Viewed.
+fn header_row(
+    header: &Header,
+    state: &Entity<DiffState>,
+    view: &WeakEntity<ReviewView>,
+    model: &Entity<ReviewModel>,
+    cx: &mut App,
+) -> gpui_kit::Stateful<gpui_kit::Div> {
     let c = colors(cx);
     let (secondary, primary, accent, hover, tertiary, border) =
         (c.text_secondary, c.text_primary, c.accent, c.bg_hover, c.bg_tertiary, c.border);
@@ -592,7 +647,7 @@ fn file_header(
                 })
             })
     };
-    let row = h_flex()
+    h_flex()
         .id(SharedString::from(format!("header-{}", file.path)))
         .items_center()
         .gap(px(6.))
@@ -613,23 +668,7 @@ fn file_header(
         .children(stage)
         .child(refresh)
         .child(viewed)
-        .on_click(toggle);
-    // GPUI Kit pads (0.75rem) and borders every annotation, painting the borders over its
-    // content: the header fills the padding and the borders are its own. (Pierre's 8px above
-    // the code would sit above the bottom border, so it is left out.)
-    let pad = window.rem_size() * 0.75;
-    v_flex()
-        .mx(-pad)
-        .my(-pad)
-        .child(row)
-        .when(header.binary == Some(false), |d| match header.image.clone() {
-            Some(sides) => d.child(image_diff(&file.path, sides, cx)),
-            // `.file-diff-placeholder`.
-            None => d.child(
-                div().px(px(12.)).py(px(16.)).bg(c.bg_primary).text_size(px(12.)).italic().text_color(secondary).child("Binary file \u{2014} diff not shown"),
-            ),
-        })
-        .into_any_element()
+        .on_click(toggle)
 }
 
 /// `ImageDiffViewer`: before and after side by side on a checkerboard.
