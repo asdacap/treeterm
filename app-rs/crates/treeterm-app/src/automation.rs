@@ -7,6 +7,7 @@
 //! - `select <workspace-id>` / `tab <workspace-id> <tab-id>`
 //! - `newtab <workspace-id>` / `closetab <workspace-id> <tab-id>`
 //! - `open <directory>` — open a directory as a workspace (no folder picker)
+//! - `workspacedialog` — the current session's "+" (the Open Workspace dialog)
 //! - `type <text>` — type text as keystrokes; `key <keystroke>` — e.g. `enter`, `ctrl-c`
 //! - `scroll <x> <y> <dy>` — a wheel scroll of `dy` points over (x, y), in window points
 //! - `screenshot <path.png>` — render the last frame offscreen (no screen-capture permission)
@@ -117,6 +118,10 @@ fn handle(line: &str, window: AnyWindowHandle, view: &Entity<AppView>, cx: &mut 
             "open" => {
                 let id = view.update(cx, |view, cx| view.automation_open_workspace(rest.to_owned(), cx));
                 Ok(json!({ "ok": id.is_some(), "id": id }))
+            }
+            "workspacedialog" => {
+                let ok = view.update(cx, |view, cx| view.automation_open_workspace_dialog(window, cx));
+                Ok(json!({ "ok": ok }))
             }
             "childdialog" => {
                 let session = view.read(cx).automation_session().ok_or("not connected")?;

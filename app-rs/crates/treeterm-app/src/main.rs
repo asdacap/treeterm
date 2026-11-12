@@ -5,7 +5,7 @@ mod app_view;
 mod assets;
 mod auto_open_dialog;
 mod connection_picker;
-mod remote_dir_dialog;
+mod open_workspace_dialog;
 mod session_info_view;
 mod child_dialog;
 mod cli;

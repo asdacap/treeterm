@@ -58,11 +58,16 @@ impl SshUploadView {
     /// "Browse…": pick the directory on the host.
     fn browse(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let (model, input) = (self.model.clone(), self.remote_dir.clone());
-        let on_picked: crate::remote_dir_dialog::OnPicked = std::rc::Rc::new(move |path, window, cx| {
+        let on_picked: crate::open_workspace_dialog::OnPicked = std::rc::Rc::new(move |path, window, cx| {
             input.update(cx, |input, cx| input.set_value(path.clone(), window, cx));
             model.update(cx, |m, cx| m.set_remote_dir(&path, cx));
         });
-        crate::remote_dir_dialog::open(self.session.clone(), on_picked, window, cx);
+        crate::open_workspace_dialog::open(
+            crate::open_workspace_dialog::Location::Remote(self.session.clone()),
+            on_picked,
+            window,
+            cx,
+        );
     }
 }
 

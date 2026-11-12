@@ -1,6 +1,6 @@
-//! "Open Workspace" for a remote session: `OpenWorkspaceDialog.tsx` with its
-//! `RemoteDirectoryBrowser.tsx` (the native folder picker only sees this machine). A path is
-//! typed, or picked by browsing the remote filesystem.
+//! "Open Workspace": `OpenWorkspaceDialog.tsx`. A path is typed, or "Browse..." picks one:
+//! the native folder picker on this machine, `RemoteDirectoryBrowser.tsx` on a remote host
+//! (the native picker only sees this machine).
 
 use std::rc::Rc;
 
@@ -16,6 +16,20 @@ use crate::ui;
 /// Called with the chosen directory.
 pub type OnPicked = Rc<dyn Fn(String, &mut Window, &mut App)>;
 
+/// Where the directory lives.
+pub enum Location {
+    Local,
+    Remote(Entity<SessionStore>),
+}
+
+/// What "Browse..." does.
+enum Picker {
+    /// The native folder picker; `picking` while it is up ("Opening...").
+    Native { picking: bool },
+    /// The remote filesystem, browsed under the folder field while `browser` is shown.
+    Remote { session: Entity<SessionStore>, browser: Option<Browser> },
+}
+
 enum Listing {
     Loading,
     Loaded(Vec<(String, String)>),
@@ -30,10 +44,9 @@ struct Browser {
     _load: Option<Task<()>>,
 }
 
-pub struct RemoteDirDialog {
-    session: Entity<SessionStore>,
+pub struct OpenWorkspaceDialog {
     folder: Entity<InputState>,
-    browser: Option<Browser>,
+    picker: Picker,
     on_picked: OnPicked,
     _subscriptions: Vec<Subscription>,
 }
@@ -46,39 +59,90 @@ fn parent_of(path: &str) -> String {
     }
 }
 
-impl RemoteDirDialog {
-    fn new(session: Entity<SessionStore>, on_picked: OnPicked, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let folder = cx.new(|cx| {
-            InputState::new(window, cx).placeholder("Enter remote path (e.g. /home/user/project)")
-        });
+impl OpenWorkspaceDialog {
+    fn new(location: Location, on_picked: OnPicked, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let (picker, placeholder) = match location {
+            Location::Local => (Picker::Native { picking: false }, "Enter or browse for a folder..."),
+            Location::Remote(session) => {
+                (Picker::Remote { session, browser: None }, "Enter remote path (e.g. /home/user/project)")
+            }
+        };
+        let folder = cx.new(|cx| InputState::new(window, cx).placeholder(placeholder));
         let subscription = cx.subscribe_in(&folder, window, |dialog, _, event: &InputEvent, window, cx| match event {
             // `handleKeyDown`: Enter opens.
             InputEvent::PressEnter { .. } => dialog.open_selected(window, cx),
             InputEvent::Change => cx.notify(),
             InputEvent::Focus | InputEvent::Blur => {}
         });
-        Self { session, folder, browser: None, on_picked, _subscriptions: vec![subscription] }
+        Self { folder, picker, on_picked, _subscriptions: vec![subscription] }
     }
 
     fn selected(&self, cx: &App) -> String {
         self.folder.read(cx).value().to_string()
     }
 
+    /// `isSelecting`: Open waits for the native picker.
+    fn picking(&self) -> bool {
+        matches!(self.picker, Picker::Native { picking: true })
+    }
+
     fn open_selected(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let path = self.selected(cx);
-        if path.is_empty() {
+        if path.is_empty() || self.picking() {
             return;
         }
         window.close_dialog(cx);
         (self.on_picked)(path, window, cx);
     }
 
-    /// "Browse..." / "Hide": the browser starts at the typed path, else the root.
-    fn toggle_browser(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.browser.take().is_some() {
-            cx.notify();
-            return;
+    fn browse(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        match &mut self.picker {
+            Picker::Native { picking: true } => {}
+            Picker::Native { picking } => {
+                *picking = true;
+                self.pick_native(window, cx);
+            }
+            Picker::Remote { browser, .. } => match browser.take() {
+                Some(_) => cx.notify(), // "Hide"
+                None => self.show_browser(window, cx),
+            },
         }
+    }
+
+    /// `handleSelectFolder`: the chosen folder replaces the typed path.
+    fn pick_native(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let picked = cx.prompt_for_paths(gpui_kit::PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: Some("Open Workspace".into()),
+        });
+        cx.spawn_in(window, async move |dialog, cx| {
+            let path = match picked.await {
+                Ok(Ok(Some(mut paths))) if !paths.is_empty() => Some(paths.remove(0)),
+                Ok(Ok(_)) | Err(_) => None, // cancelled
+                Ok(Err(error)) => {
+                    tracing::error!(%error, "folder picker failed");
+                    None
+                }
+            };
+            match dialog.update_in(cx, |dialog, window, cx| {
+                dialog.picker = Picker::Native { picking: false };
+                if let Some(path) = path {
+                    let path = path.to_string_lossy().into_owned();
+                    dialog.folder.update(cx, |input, cx| input.set_value(path, window, cx));
+                }
+                cx.notify();
+            }) {
+                Ok(()) | Err(_) => {} // Err: the dialog closed
+            }
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// "Browse..." on a remote host: the browser starts at the typed path, else the root.
+    fn show_browser(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let typed = self.selected(cx);
         let start = if typed.is_empty() { "/".to_owned() } else { typed };
         let path = cx.new(|cx| {
@@ -94,15 +158,24 @@ impl RemoteDirDialog {
         });
         self._subscriptions.truncate(1);
         self._subscriptions.push(enter);
-        self.browser = Some(Browser { current: String::new(), path, listing: Listing::Loading, _load: None });
+        if let Picker::Remote { browser, .. } = &mut self.picker {
+            *browser = Some(Browser { current: String::new(), path, listing: Listing::Loading, _load: None });
+        }
         self.navigate(start, window, cx);
     }
 
+    fn hide_browser(&mut self, cx: &mut Context<Self>) {
+        if let Picker::Remote { browser, .. } = &mut self.picker {
+            *browser = None;
+        }
+        cx.notify();
+    }
+
     fn navigate(&mut self, path: String, window: &mut Window, cx: &mut Context<Self>) {
-        let read = self.session.read(cx).connection().fs_client().read_directory("/", &path);
-        let Some(browser) = self.browser.as_mut() else {
+        let Picker::Remote { session, browser: Some(browser) } = &mut self.picker else {
             return;
         };
+        let read = session.read(cx).connection().fs_client().read_directory("/", &path);
         browser.path.update(cx, |input, cx| input.set_value(path.clone(), window, cx));
         browser.current = path;
         browser.listing = Listing::Loading;
@@ -115,7 +188,7 @@ impl RemoteDirDialog {
                 Err(lost) => Listing::Failed(lost.to_string()),
             };
             match this.update(cx, |dialog, cx| {
-                if let Some(browser) = dialog.browser.as_mut() {
+                if let Picker::Remote { browser: Some(browser), .. } = &mut dialog.picker {
                     browser.listing = listing;
                 }
                 cx.notify();
@@ -244,17 +317,13 @@ impl RemoteDirDialog {
                     .border_t_1()
                     .border_color(border)
                     .child(ui::dialog_button("dir-cancel", "Cancel", ui::ButtonKind::Secondary, false, cx).on_click(
-                        cx.listener(|dialog, _, _, cx| {
-                            dialog.browser = None;
-                            cx.notify();
-                        }),
+                        cx.listener(|dialog, _, _, cx| dialog.hide_browser(cx)),
                     ))
                     .child(ui::dialog_button("dir-select", "Select", ui::ButtonKind::Primary, false, cx).on_click(
                         cx.listener(move |dialog, _, window, cx| {
                             let path = current.clone();
                             dialog.folder.update(cx, |input, cx| input.set_value(path, window, cx));
-                            dialog.browser = None;
-                            cx.notify();
+                            dialog.hide_browser(cx);
                         }),
                     )),
             )
@@ -262,13 +331,19 @@ impl RemoteDirDialog {
     }
 }
 
-impl Render for RemoteDirDialog {
+impl Render for OpenWorkspaceDialog {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let c = colors(cx);
         let (primary, secondary, border, hover, tertiary) =
             (c.text_primary, c.text_secondary, c.border, c.bg_hover, c.bg_tertiary);
-        let showing = self.browser.is_some();
-        // `.open-workspace-dialog .dialog-btn.browse`: bg-tertiary with a border.
+        let picking = self.picking();
+        let label = match &self.picker {
+            Picker::Native { picking: true } => "Opening...",
+            Picker::Remote { browser: Some(_), .. } => "Hide",
+            Picker::Native { picking: false } | Picker::Remote { browser: None, .. } => "Browse...",
+        };
+        // `.open-workspace-dialog .dialog-btn.browse`: bg-tertiary with a border; disabled
+        // while the native picker is up.
         let browse = div()
             .id("browse")
             .flex_shrink_0()
@@ -281,14 +356,17 @@ impl Render for RemoteDirDialog {
             .text_size(px(ui::BODY))
             .line_height(px(15.5))
             .text_color(primary)
-            .cursor_pointer()
-            .hover(move |d| d.bg(hover))
-            .child(if showing { "Hide" } else { "Browse..." })
-            .on_click(cx.listener(|dialog, _, window, cx| dialog.toggle_browser(window, cx)));
-        let browser = self.browser.as_ref().map(|browser| self.render_browser(browser, cx));
-        let empty = self.selected(cx).is_empty();
-        let open = ui::dialog_button("open-remote", "Open", ui::ButtonKind::Primary, empty, cx)
-            .when(!empty, |b| b.on_click(cx.listener(|dialog, _, window, cx| dialog.open_selected(window, cx))));
+            .when(picking, |d| d.opacity(0.5).cursor_not_allowed())
+            .when(!picking, |d| d.cursor_pointer().hover(move |d| d.bg(hover)))
+            .child(label)
+            .on_click(cx.listener(|dialog, _, window, cx| dialog.browse(window, cx)));
+        let browser = match &self.picker {
+            Picker::Remote { browser: Some(browser), .. } => Some(self.render_browser(browser, cx)),
+            Picker::Remote { browser: None, .. } | Picker::Native { .. } => None,
+        };
+        let disabled = self.selected(cx).is_empty() || picking;
+        let open = ui::dialog_button("open-submit", "Open", ui::ButtonKind::Primary, disabled, cx)
+            .when(!disabled, |b| b.on_click(cx.listener(|dialog, _, window, cx| dialog.open_selected(window, cx))));
         ui::dialog_root(cx)
             .child(ui::dialog_header("Open Workspace", "×", primary, cx))
             .child(
@@ -327,8 +405,8 @@ impl Render for RemoteDirDialog {
     }
 }
 
-pub fn open(session: Entity<SessionStore>, on_picked: OnPicked, window: &mut Window, cx: &mut App) {
-    let view = cx.new(|cx| RemoteDirDialog::new(session, on_picked, window, cx));
+pub fn open(location: Location, on_picked: OnPicked, window: &mut Window, cx: &mut App) {
+    let view = cx.new(|cx| OpenWorkspaceDialog::new(location, on_picked, window, cx));
     // `autoFocus` on the folder, once the dialog has taken the focus.
     let folder = view.read(cx).folder.clone();
     window.defer(cx, move |window, cx| folder.update(cx, |input, cx| input.focus(window, cx)));

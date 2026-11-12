@@ -2544,6 +2544,15 @@ impl AppView {
         self.current().map(|connected| connected.session.clone())
     }
 
+    /// "+" on the current session: the Open Workspace dialog.
+    pub fn automation_open_workspace_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let Some(connected) = self.current() else {
+            return false;
+        };
+        connected.tree.update(cx, |tree, cx| tree.open_workspace(window, cx));
+        true
+    }
+
     pub fn automation_open_workspace(&mut self, path: String, cx: &mut Context<Self>) -> Option<String> {
         let connected = self.current()?;
         let id = connected.session.update(cx, |s, cx| s.open_workspace(path, cx));

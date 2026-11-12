@@ -246,6 +246,25 @@ fn terminal_output_survives_an_app_restart() {
 
 #[test]
 #[ignore = "opens the app window; run with --ignored"]
+fn a_typed_folder_opens_as_a_workspace() {
+    let sandbox = Sandbox::new();
+    let folder = sandbox.root.path().join("typed-folder");
+    std::fs::create_dir_all(&folder).unwrap();
+    let app = sandbox.launch();
+    assert_eq!(app.command("workspacedialog")["ok"], true);
+    app.command(&format!("type {}", folder.display()));
+    // Enter in the folder field opens it (the dialog must not just close).
+    app.command("key enter");
+    app.wait_for("the typed folder as a workspace", |state| {
+        state["workspaces"]
+            .as_array()
+            .is_some_and(|workspaces| workspaces.iter().any(|w| w["entry"]["name"] == "typed-folder"))
+    });
+    app.quit();
+}
+
+#[test]
+#[ignore = "opens the app window; run with --ignored"]
 fn a_terminal_works_after_the_daemon_dies() {
     let sandbox = Sandbox::new();
     let app = sandbox.launch();

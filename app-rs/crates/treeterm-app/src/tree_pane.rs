@@ -26,7 +26,7 @@ pub struct TreePane {
     target: treeterm_core::connection::ConnectionTarget,
     /// Renaming the session in place (double-click its name); saved on Enter or blur.
     renaming: Option<(Entity<InputState>, gpui_kit::Subscription)>,
-    /// A remote session: "+" browses the remote filesystem instead of a local folder picker.
+    /// A remote session: "+" browses the remote filesystem instead of the native folder picker.
     remote: bool,
     /// The whole session's rows are hidden.
     folded: bool,
@@ -138,12 +138,16 @@ impl TreePane {
         cx.notify();
     }
 
-    /// Remote sessions: browse the remote filesystem for the directory.
-    fn open_remote_workspace(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// "+": type or pick a directory and open it as a root workspace (`OpenWorkspaceDialog`).
+    pub fn open_workspace(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let pane = cx.entity().downgrade();
-        let session = self.session.clone();
-        crate::remote_dir_dialog::open(
-            session,
+        let location = if self.remote {
+            crate::open_workspace_dialog::Location::Remote(self.session.clone())
+        } else {
+            crate::open_workspace_dialog::Location::Local
+        };
+        crate::open_workspace_dialog::open(
+            location,
             std::rc::Rc::new(move |path, _window, cx| {
                 match pane.update(cx, |pane, cx| {
                     let id = pane.session.update(cx, |s, cx| s.open_workspace(path, cx));
@@ -163,32 +167,6 @@ impl TreePane {
             self.selected = Selection::Nothing;
             cx.notify();
         }
-    }
-
-    /// Pick a directory and open it as a root workspace (`OpenWorkspaceDialog`, local only).
-    fn open_workspace(&mut self, cx: &mut Context<Self>) {
-        let picked = cx.prompt_for_paths(gpui_kit::PathPromptOptions {
-            files: false,
-            directories: true,
-            multiple: false,
-            prompt: Some("Open Workspace".into()),
-        });
-        cx.spawn(async move |pane, cx| {
-            let path = match picked.await {
-                Ok(Ok(Some(mut paths))) if !paths.is_empty() => paths.remove(0),
-                Ok(Ok(_)) => return, // cancelled
-                Ok(Err(error)) => return tracing::error!(%error, "folder picker failed"),
-                Err(_canceled) => return,
-            };
-            let path = path.to_string_lossy().into_owned();
-            match pane.update(cx, |pane, cx| {
-                let id = pane.session.update(cx, |s, cx| s.open_workspace(path, cx));
-                pane.select(id, cx);
-            }) {
-                Ok(()) | Err(_) => {} // Err: the pane closed
-            }
-        })
-        .detach();
     }
 
     pub fn select(&mut self, id: String, cx: &mut Context<Self>) {
@@ -261,7 +239,6 @@ impl Render for TreePane {
                 list.into_any_element()
             }
         };
-        let remote = self.remote;
         let locked = self.session.read(cx).is_locked();
         let title = match &self.renaming {
             Some((input, _)) => div()
@@ -367,11 +344,7 @@ impl Render for TreePane {
                             .child("+")
                             .on_click(cx.listener(move |pane, _: &ClickEvent, window, cx| {
                                 cx.stop_propagation();
-                                if remote {
-                                    pane.open_remote_workspace(window, cx);
-                                } else {
-                                    pane.open_workspace(cx);
-                                }
+                                pane.open_workspace(window, cx);
                             })),
                     ),
             )

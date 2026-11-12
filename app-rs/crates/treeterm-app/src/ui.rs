@@ -241,6 +241,10 @@ use gpui_kit::{Entity, FontWeight, SharedString, relative};
 /// [`dialog_actions`] as children.
 pub fn dialog_frame(dialog: Dialog, width: f32, cx: &App) -> Dialog {
     dialog
+        // Enter in a single-line input also fires the Kit's `Confirm`, whose default closes
+        // the dialog, and the view is released before the input's `PressEnter` reaches it:
+        // Enter would close without submitting. The dialogs handle Enter themselves.
+        .on_ok(|_, _, _| false)
         .w(px(width))
         .close_button(false)
         .centered()
