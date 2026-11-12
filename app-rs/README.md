@@ -112,9 +112,10 @@ Done (tested against a real in-process daemon unless noted):
 - **Workspace pane:** header with git status, PR link, Pull, ▶ Run (npm/make/just/Taskfile/
   VS Code tasks, custom runners), Review & Merge / Abandon; AI-harness Prompt Commit /
   Prompt Rebase; activity glyphs on tabs.
-- **Tree and sidebar:** sessions, favourites, drag and drop (reorder / reparent), unread
-  markers, PR badges, collapsible rail, title/branch refresh, Auto Open All Recent
-  Worktrees (worktree registry shared with Electron), upstream warning before forking,
+- **Tree and sidebar:** sessions (dragged into order, kept in `ui-state.json`), favourites,
+  drag and drop (reorder / reparent), unread markers, PR badges, collapsible rail,
+  title/branch refresh, Auto Open All Recent Worktrees (worktree registry shared with
+  Electron), upstream warning before forking,
   force-unlock of a held session lock; session renaming (double-click its name; kept in
   `ui-state.json` by connection target); session pane with info, logs, port forwards, a system
   monitor, the session as JSON and its TTYs.

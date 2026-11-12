@@ -10,6 +10,7 @@ use indexmap::IndexMap;
 use treeterm_core::connection::ConnectionId;
 use treeterm_model::app_store::{AppStore, ConnState};
 use treeterm_model::keybinding_store::KeybindingStore;
+use treeterm_model::session_names::Side;
 use treeterm_model::session_store::{SessionStore, WorkspaceEntry};
 use treeterm_model::workspace_store::{ActivityStyle as _, PageHost, TabContent, WorkspaceStore};
 
@@ -43,6 +44,8 @@ pub struct AppView {
     sidebar_collapsed: bool,
     /// Dragged on the divider, 150–400px (`App.tsx` `treeWidth`).
     sidebar_width: f32,
+    /// Where a session being dragged in the sidebar would land.
+    session_drop_hint: Option<(ConnectionId, Side)>,
 }
 
 /// Dragging the sidebar divider.
@@ -52,6 +55,20 @@ struct SidebarResize;
 impl Render for SidebarResize {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         gpui_kit::Empty
+    }
+}
+
+/// A session being dragged in the sidebar (and its drag preview).
+#[derive(Clone)]
+struct DraggedSession {
+    id: ConnectionId,
+    name: SharedString,
+}
+
+impl Render for DraggedSession {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let c = colors(cx);
+        div().px_2().py_1().rounded_sm().bg(c.bg_active).text_sm().child(self.name.clone())
     }
 }
 
@@ -114,7 +131,11 @@ impl AppView {
         cx: &mut Context<Self>,
     ) -> Self {
         cx.observe(&store, |view, store, cx| view.sync(&store, cx)).detach();
-        cx.observe(&names, |_, _, cx| cx.notify()).detach();
+        cx.observe(&names, |view, _, cx| {
+            let store = view.store.clone();
+            view.sync(&store, cx);
+        })
+        .detach();
         // The attention ding (`playDing`): the system bell, when sound is on.
         cx.subscribe_in(&store, window, |view, _, event: &treeterm_model::app_store::AppEvent, window, cx| match event {
             treeterm_model::app_store::AppEvent::Attention { .. } => {
@@ -139,6 +160,7 @@ impl AppView {
             open_on_start: None,
             sidebar_collapsed: false,
             sidebar_width: 250.,
+            session_drop_hint: None,
         };
         view.sync(&store, cx);
         view
@@ -163,7 +185,9 @@ impl AppView {
             }
         }
         // Keep sidebar order.
-        let order: Vec<ConnectionId> = store.read(cx).sessions().map(|slot| slot.id.clone()).collect();
+        let mut slots: Vec<_> = store.read(cx).sessions().collect();
+        self.names.read(cx).sort(&mut slots, |slot| &slot.target);
+        let order: Vec<ConnectionId> = slots.into_iter().map(|slot| slot.id.clone()).collect();
         self.sessions.sort_by(|a, _, b, _| {
             let rank = |id: &ConnectionId| order.iter().position(|o| o == id).unwrap_or(usize::MAX);
             rank(a).cmp(&rank(b))
@@ -382,14 +406,12 @@ impl AppView {
         let c = colors(cx);
         let (bg, secondary, border, fg) = (c.bg_secondary, c.text_secondary, c.border, c.text_primary);
         let names = self.names.read(cx);
-        let slots: Vec<(ConnectionId, String, ConnState, bool)> = self
-            .store
-            .read(cx)
-            .sessions()
-            .map(|slot| (slot.id.clone(), names.name(&slot.target), slot.state.clone(), slot.is_local()))
-            .collect();
+        let mut slots: Vec<_> = self.store.read(cx).sessions().collect();
+        names.sort(&mut slots, |slot| &slot.target);
+        let slots: Vec<(ConnectionId, String, ConnState)> =
+            slots.into_iter().map(|slot| (slot.id.clone(), names.name(&slot.target), slot.state.clone())).collect();
         let mut list = v_flex().w_full();
-        for (index, (id, name, state, _local)) in slots.into_iter().enumerate() {
+        for (index, (id, name, state)) in slots.into_iter().enumerate() {
             let section = match state {
                 ConnState::Connected(_) => match self.sessions.get(&id) {
                     Some(connected) => connected.tree.clone().into_any_element(),
@@ -438,7 +460,7 @@ impl AppView {
                     session_panel(&id, &name, SessionIcon::Failed, Some(banner), None, cx)
                 }
             };
-            list = list.child(div().when(index > 0, |d| d.mt(px(12.))).child(section));
+            list = list.child(self.session_drag_handle(index, id, name, section, cx));
         }
         let on = self.settings.read(cx).settings().notifications.sound_enabled;
         let tip = |text: &'static str| move |window: &mut Window, cx: &mut App| gpui_kit::component::tooltip::Tooltip::new(text).build(window, cx);
@@ -494,6 +516,70 @@ impl AppView {
             .children(self.favourites(cx))
             .child(div().id("sessions").flex_1().overflow_y_scroll().child(list))
             .into_any_element()
+    }
+
+    /// A session's sidebar section as a drag source and drop target (`.session-drag-handle`):
+    /// dropped on the top half of another session it goes before it, else after it. Rows
+    /// inside drag their workspace instead (the innermost drag source wins).
+    fn session_drag_handle(
+        &self,
+        index: usize,
+        id: ConnectionId,
+        name: String,
+        section: AnyElement,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement + use<> {
+        let accent = colors(cx).accent;
+        let hint = self.session_drop_hint.as_ref().filter(|(over, _)| *over == id).map(|(_, side)| *side);
+        let (move_id, drop_id) = (id.clone(), id.clone());
+        div()
+            .id(SharedString::from(format!("session-drag-{id}")))
+            .relative()
+            .when(index > 0, |d| d.mt(px(12.)))
+            .on_drag(DraggedSession { id, name: name.into() }, |dragged, _, _, cx| cx.new(|_| dragged.clone()))
+            .on_drag_move(cx.listener(move |view, event: &gpui_kit::DragMoveEvent<DraggedSession>, _, cx| {
+                let position = event.event.position;
+                let next = (event.bounds.contains(&position) && event.drag(cx).id != move_id).then(|| {
+                    let middle = event.bounds.top() + event.bounds.size.height / 2.;
+                    (move_id.clone(), if position.y < middle { Side::Before } else { Side::After })
+                });
+                let changed = match (&view.session_drop_hint, &next) {
+                    (Some((old, _)), None) => *old == move_id,
+                    (old, Some(_)) => old.as_ref() != next.as_ref(),
+                    (None, None) => false,
+                };
+                if changed {
+                    view.session_drop_hint = next;
+                    cx.notify();
+                }
+            }))
+            .on_drop(cx.listener(move |view, dragged: &DraggedSession, _, cx| view.drop_session(&dragged.id, &drop_id, cx)))
+            .child(section)
+            // `inset 0 ±2px 0 0 var(--accent)`: a line over the section's edge, no layout shift.
+            .when_some(hint, |d, side| {
+                let line = div().absolute().left_0().right_0().h(px(2.)).bg(accent);
+                d.child(match side {
+                    Side::Before => line.top_0(),
+                    Side::After => line.bottom_0(),
+                })
+            })
+    }
+
+    /// `dragged` was dropped on `onto`'s section: move it to the side the hint showed.
+    fn drop_session(&mut self, dragged: &ConnectionId, onto: &ConnectionId, cx: &mut Context<Self>) {
+        cx.notify();
+        let side = match self.session_drop_hint.take() {
+            Some((over, side)) if over == *onto => side,
+            Some(_) | None => return, // dropped on itself
+        };
+        let store = self.store.read(cx);
+        let target = |id: &ConnectionId| store.session_slot(id).map(|slot| slot.target.clone());
+        // Either may have been disconnected while dragging.
+        let (Some(dragged), Some(onto)) = (target(dragged), target(onto)) else {
+            return;
+        };
+        let shown: Vec<_> = store.sessions().map(|slot| slot.target.clone()).collect();
+        self.names.update(cx, |names, cx| names.reorder(&shown, &dragged, &onto, side, cx));
     }
 
     /// Favourite workspaces of every connected session (`FavouritesPanel`); none, no panel.
