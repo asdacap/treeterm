@@ -98,7 +98,9 @@ Done (tested against a real in-process daemon unless noted):
 - **Review (M7):** committed / uncommitted / commits views, stage/unstage/commit, inline
   comments (Electron's metadata format), viewed files, image diffs (before / after),
   favourites outside the diff shown in the Files viewer (with its comments) in the diff's place,
-  prompting the AI harness; live merge
+  find in the diff (Cmd/Ctrl+F: matches in the file being read, then the rest of the diff,
+  then the repo; the diff's menu searches or copies the selected text), prompting the AI
+  harness; live merge
   output; git status (uncommitted / conflicts / behind, Pull) and PR indicators.
 - **Web (M8):** Browser tabs in a native webview (localhost guard); Web App tabs (free port
   probed on the daemon's host, dev server with `$PORT`, page once it answers, ephemeral SSH
@@ -162,8 +164,10 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   resize grip.
 - With the sidebar collapsed the header keeps clear of the macOS window buttons (Electron's
   title runs under them).
-- Not ported: Cmd+F in Review, the merge output inside the Review tab (it shows over the
-  workspace), Markdown rendering of `.md` pages in the browser, and the remote Browser tab's
+- Review's find: GPUI Kit's diff does not report the word under the pointer or the file at
+  the top of the scroll, so the right-click menu needs a selection (double-click a word) and
+  "In this file" is the file last under the pointer (else the one last selected).
+- Not ported: Markdown rendering of `.md` pages in the browser, and the remote Browser tab's
   Port Forward sub-tab.
 
 ## Known differences from Electron (deliberate)

@@ -19,6 +19,7 @@ mod json_view;
 mod keybinding_overlay;
 mod menus;
 mod review_view;
+mod search_panel;
 mod settings_view;
 mod terminal_element;
 mod text_editor_view;
@@ -176,6 +177,7 @@ fn main() {
         terminal_view::bind_keys(cx);
         text_editor_view::bind_keys(cx);
         file_browser_view::bind_keys(cx);
+        review_view::bind_keys(cx);
         let settings = cx.new(|cx| SettingsStore::new(paths::user_data_dir().ok(), cx));
         let store = cx.new(|cx| AppStore::new(rt, spec, settings.clone(), cx));
         if let Some(config) = initial_ssh {

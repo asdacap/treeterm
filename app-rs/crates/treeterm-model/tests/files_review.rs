@@ -7,7 +7,10 @@ use treeterm_model::file_browser::{
     Anchor, DefinitionLookup, Favourites, FileBrowser, FileView, Host, LineDraft, NAME_SEARCH_DEBOUNCE, NameResults,
     REPO_SEARCH_DEBOUNCE, RepoResults, SearchPanel, SearchRow, Star,
 };
-use treeterm_model::review::{Direction, FavouriteSelection, GitOp, Head, Notice, ReviewContent, ReviewModel};
+use treeterm_model::review::{
+    DiffFind, Direction, FavouriteSelection, GitOp, Head, Notice, ReviewContent, ReviewMode, ReviewModel,
+};
+use treeterm_model::review_find::DiffLayout;
 use treeterm_model::session_store::{SessionState, SessionStore, WorkspaceEntry};
 use treeterm_model::settings_store::SettingsStore;
 use treeterm_model::workspace_store::{TabContent, WorkspaceStore};
@@ -695,6 +698,114 @@ fn a_review_favourite_outside_the_diff_shows_in_a_viewer_that_takes_comments(cx:
     assert_eq!(review.read_with(cx, |r, _| r.favourite_selection().relative_path().map(str::to_owned)), Some("notes.md".to_owned()));
     workspace.update(cx, |w, cx| w.remove_favourite_path("a.txt", cx));
     wait_review(cx, &review, "selection dropped", |r, _| r.favourite_selection().relative_path().is_none());
+}
+
+#[gpui_kit::test]
+fn review_find_lists_the_diffs_matches_this_file_first_and_steps_through_them(cx: &mut TestAppContext) {
+    use treeterm_core::search::{DiffStyle, UnchangedRegions};
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let repo = TempRepo::new(&h);
+    repo.write("a.txt", "one\nneedle two\nthree\n");
+    repo.write("b.txt", "needle b\n");
+    repo.write("c.txt", "a needle elsewhere\n");
+    repo.commit_all("base");
+    repo.write("a.txt", "one\nneedle TWO\nthree\n");
+    repo.write("b.txt", "needle B\n");
+    let store = open_store(cx, &h);
+    let workspace = open_repo_workspace(cx, &h, &store, &repo);
+    let review = open_review(cx, &workspace);
+    wait_review(cx, &review, "loaded", |r, _| matches!(r.content(), ReviewContent::Uncommitted(_)));
+    let ReviewContent::Uncommitted(uncommitted) = review.read_with(cx, |r, _| r.content().clone()) else { unreachable!() };
+    let patch = uncommitted.patch.clone();
+    let files = vec!["a.txt".to_owned(), "b.txt".to_owned()];
+    let layout = DiffLayout { style: DiffStyle::Split, unchanged: UnchangedRegions::Collapsed };
+    let matches = |review: &Entity<ReviewModel>, cx: &mut TestAppContext| {
+        review.read_with(cx, |r, _| r.find_matches(&patch, &files, layout))
+    };
+
+    // Cmd+F opens an empty bar on the file being read.
+    assert_eq!(review.read_with(cx, |r, _| r.find().clone()), DiffFind::Closed { query: String::new() });
+    review.update(cx, |r, cx| r.open_find("b.txt", cx));
+    let DiffFind::Open(opened) = review.read_with(cx, |r, _| r.find().clone()) else { panic!("not open") };
+    assert_eq!((opened.query.as_str(), opened.file.as_str(), opened.active.is_none()), ("", "b.txt", true));
+    assert!(matches(&review, cx).is_empty());
+
+    // That file's matches come first, then the rest of the diff; both sides of a change.
+    review.update(cx, |r, cx| r.set_find_query("needle", cx));
+    let found = matches(&review, cx);
+    assert_eq!(
+        found.iter().map(|m| (m.path.as_str(), m.side, m.line)).collect::<Vec<_>>(),
+        vec![
+            ("b.txt", Side::Original, 1),
+            ("b.txt", Side::Modified, 1),
+            ("a.txt", Side::Original, 2),
+            ("a.txt", Side::Modified, 2),
+        ]
+    );
+    assert_eq!(found[3].preview, "needle TWO");
+    assert_eq!(review.read_with(cx, |r, _| r.find_count_label(&found)), "4 found");
+
+    // Enter and Shift+Enter walk them, wrapping; each choice is a new target to reveal.
+    review.update(cx, |r, cx| r.step_find(&found, true, cx));
+    assert_eq!(review.read_with(cx, |r, _| r.find_count_label(&found)), "1/4");
+    review.update(cx, |r, cx| r.step_find(&found, false, cx));
+    assert_eq!(review.read_with(cx, |r, _| r.find_count_label(&found)), "4/4");
+    let target = |review: &Entity<ReviewModel>, cx: &mut TestAppContext| match review.read_with(cx, |r, _| r.find().clone()) {
+        DiffFind::Open(state) => state.active.clone().expect("a match is chosen"),
+        DiffFind::Closed { .. } => panic!("closed"),
+    };
+    let last = target(&review, cx);
+    assert_eq!((last.path.as_str(), last.side, last.line), ("a.txt", Side::Modified, 2));
+    review.update(cx, |r, cx| r.select_find_match(&found, 3, cx));
+    assert!(target(&review, cx).seq > last.seq, "choosing it again moves there again");
+
+    // The repo search lists other files only.
+    cx.executor().advance_clock(treeterm_model::search_panel::REPO_SEARCH_DEBOUNCE);
+    wait_review(cx, &review, "repo searched", |r, _| match r.find() {
+        DiffFind::Open(state) => matches!(state.repo, RepoResults::Done { .. } | RepoResults::Failed { .. }),
+        DiffFind::Closed { .. } => false,
+    });
+    let rows = review.read_with(cx, |r, _| r.find_rows(&found, &files));
+    assert_eq!(rows[0], SearchRow::Section("In this file"));
+    assert_eq!(rows[1], SearchRow::File("b.txt".into()));
+    assert!(matches!(rows[2], SearchRow::InDiff { index: 0, side: Side::Original, line_number: 1, active: false, .. }));
+    assert_eq!(rows[4], SearchRow::Section("In diff"));
+    assert_eq!(rows[5], SearchRow::File("a.txt".into()));
+    assert!(matches!(rows[7], SearchRow::InDiff { index: 3, active: true, .. }), "{rows:?}");
+    assert_eq!(rows[8], SearchRow::Section("In repo"));
+    assert_eq!(rows[9], SearchRow::File("c.txt".into()), "{rows:?}");
+    let SearchRow::InRepo(hit) = rows[10].clone() else { panic!("{rows:?}") };
+    assert_eq!(rows.len(), 12, "the diff's files are not listed again: {rows:?}");
+
+    // A repo hit opens a Files tab at its line.
+    review.update(cx, |r, cx| r.open_find_hit(&hit, cx));
+    let files_tab = workspace.read_with(cx, |w, _| {
+        w.file().app_states.values().find(|tab| tab.application_id == "filesystem").map(|tab| tab.state.clone())
+    });
+    let files_tab = files_tab.expect("a Files tab");
+    assert_eq!(files_tab["selectedPath"], serde_json::json!(format!("{}/c.txt", repo.root())));
+    assert_eq!(files_tab["scrollToLine"], serde_json::json!(1));
+
+    // Closing keeps the query for the next Cmd+F, which focuses the box again.
+    review.update(cx, |r, cx| r.close_find(cx));
+    assert_eq!(review.read_with(cx, |r, _| r.find().clone()), DiffFind::Closed { query: "needle".to_owned() });
+    assert!(matches(&review, cx).is_empty());
+    review.update(cx, |r, cx| r.open_find("a.txt", cx));
+    let DiffFind::Open(reopened) = review.read_with(cx, |r, _| r.find().clone()) else { panic!("not open") };
+    assert_eq!((reopened.query.as_str(), reopened.file.as_str()), ("needle", "a.txt"));
+    assert!(reopened.focus > opened.focus);
+    assert_eq!(matches(&review, cx)[0].path, "a.txt", "the file being read comes first");
+
+    // "Search" from the diff's menu starts over on the selection.
+    review.update(cx, |r, cx| r.search_in_diff("TWO", "a.txt", cx));
+    let found = matches(&review, cx);
+    assert_eq!(found.iter().map(|m| (m.side, m.line)).collect::<Vec<_>>(), vec![(Side::Modified, 2)]);
+
+    // Another view, another diff: the bar goes.
+    review.update(cx, |r, cx| r.set_mode(ReviewMode::Commits, cx));
+    assert_eq!(review.read_with(cx, |r, _| r.find().clone()), DiffFind::Closed { query: String::new() });
 }
 
 /// A Review tab with `state` (e.g. a base override) on the repo's workspace, and its tab id.

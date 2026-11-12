@@ -28,6 +28,8 @@ use treeterm_core::review::{
 use treeterm_core::files::FavouriteFile;
 
 use crate::file_browser::FileBrowser;
+use crate::review_find::{DiffLayout, DiffMatch, find_in_patch, in_file_first};
+use crate::search_panel::{RepoResults, SearchRow, count_label, push_repo_section, spawn_repo_search};
 use crate::review_metadata::{Blame, Later, Now};
 use crate::session_store::{AfterMerge, RemoveMode};
 use crate::workspace_store::WorkspaceStore;
@@ -167,6 +169,43 @@ impl FavouriteSelection {
     }
 }
 
+/// Find in the diff (`StackedDiffList`'s find bar).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DiffFind {
+    /// The last query stays for the next Cmd/Ctrl+F.
+    Closed { query: String },
+    Open(FindState),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FindState {
+    pub query: String,
+    /// The file whose matches are listed first, as "In this file".
+    pub file: String,
+    /// The selected match.
+    pub active: Option<FindTarget>,
+    pub repo: RepoResults,
+    /// Bumped whenever the bar is (re)opened, so the view focuses its box (`focusNonce`).
+    pub focus: u64,
+}
+
+/// A match the diff should scroll to and select.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FindTarget {
+    pub path: String,
+    pub side: Side,
+    /// 1-based, in `side`'s file.
+    pub line: u32,
+    /// Bumped on every selection, so choosing the same match again moves there again.
+    pub seq: u64,
+}
+
+impl FindTarget {
+    fn is(&self, found: &DiffMatch) -> bool {
+        self.path == found.path && self.side == found.side && self.line == found.line
+    }
+}
+
 /// A failure the tab shows until dismissed (a metadata write, a prompt).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Notice {
@@ -266,6 +305,10 @@ pub struct ReviewModel {
     favourites: crate::file_browser::Favourites,
     favourite_paths: Vec<String>,
     favourite: FavouriteSelection,
+    find: DiffFind,
+    /// Find selections and openings so far (each gets a new `seq` / `focus`).
+    find_seq: u64,
+    _find: Option<Task<()>>,
     _favourites: Option<Task<()>>,
     /// Both sides of each image file shown.
     images: HashMap<String, ImageSides>,
@@ -390,6 +433,9 @@ impl ReviewModel {
             favourites: crate::file_browser::Favourites::Empty,
             favourite_paths: Vec::new(),
             favourite: FavouriteSelection::None,
+            find: DiffFind::Closed { query: String::new() },
+            find_seq: 0,
+            _find: None,
             _favourites: None,
             images: HashMap::new(),
             _images: Vec::new(),
@@ -816,6 +862,9 @@ impl ReviewModel {
         self.mode = mode;
         self.draft = None;
         self.focused_file = None;
+        // Another view, another diff (Electron's find bar goes with its list).
+        self.find = DiffFind::Closed { query: String::new() };
+        self._find = None;
         cx.emit(ReviewEvent::StateChanged(json!({ "viewMode": mode.as_str() })));
         self.load(cx);
     }
@@ -1369,6 +1418,199 @@ impl ReviewModel {
         let target = unviewed_from(&order, &viewed, self.focused_file.as_deref(), direction)?.to_owned();
         self.focus_file(&target, cx);
         Some(target)
+    }
+
+    // ---- find --------------------------------------------------------------------------
+
+    pub fn find(&self) -> &DiffFind {
+        &self.find
+    }
+
+    /// Cmd/Ctrl+F: open the bar (keeping its query) on `file`, the file being read, and
+    /// focus it.
+    pub fn open_find(&mut self, file: &str, cx: &mut Context<Self>) {
+        self.find_seq += 1;
+        match &mut self.find {
+            DiffFind::Open(state) => {
+                state.file = file.to_owned();
+                state.focus = self.find_seq;
+            }
+            DiffFind::Closed { query } => {
+                let query = std::mem::take(query);
+                self.find = DiffFind::Open(FindState {
+                    query,
+                    file: file.to_owned(),
+                    active: None,
+                    repo: RepoResults::Idle,
+                    focus: self.find_seq,
+                });
+                self.start_find_repo_search(cx);
+            }
+        }
+        cx.notify();
+    }
+
+    /// "Search …" from the diff's menu: open the bar on `query`, with `file`'s matches first.
+    pub fn search_in_diff(&mut self, query: &str, file: &str, cx: &mut Context<Self>) {
+        self.find_seq += 1;
+        self.find = DiffFind::Open(FindState {
+            query: query.to_owned(),
+            file: file.to_owned(),
+            active: None,
+            repo: RepoResults::Idle,
+            focus: self.find_seq,
+        });
+        self.start_find_repo_search(cx);
+        cx.notify();
+    }
+
+    /// Escape / the close button: close the bar; its repo search stops.
+    pub fn close_find(&mut self, cx: &mut Context<Self>) {
+        if let DiffFind::Open(state) = &mut self.find {
+            self.find = DiffFind::Closed { query: std::mem::take(&mut state.query) };
+            self._find = None;
+            cx.notify();
+        }
+    }
+
+    /// The query changed: no match is selected and the repo search restarts after a pause.
+    pub fn set_find_query(&mut self, query: &str, cx: &mut Context<Self>) {
+        let DiffFind::Open(state) = &mut self.find else {
+            return;
+        };
+        if state.query == query {
+            return;
+        }
+        state.query = query.to_owned();
+        state.active = None;
+        self.start_find_repo_search(cx);
+        cx.notify();
+    }
+
+    fn start_find_repo_search(&mut self, cx: &mut Context<Self>) {
+        let DiffFind::Open(state) = &mut self.find else {
+            return;
+        };
+        if state.query.is_empty() {
+            state.repo = RepoResults::Idle;
+            self._find = None;
+            return;
+        }
+        state.repo = RepoResults::Searching { hits: Vec::new() };
+        let query = state.query.clone();
+        let exec: std::sync::Arc<dyn treeterm_core::exec::ExecApi> = std::sync::Arc::new(self.exec.clone());
+        self._find = Some(spawn_repo_search(exec, &self.path, &query, cx, Self::apply_find_repo_event));
+    }
+
+    fn apply_find_repo_event(&mut self, event: treeterm_core::search::RepoSearchEvent, cx: &mut Context<Self>) {
+        if let DiffFind::Open(state) = &mut self.find {
+            state.repo.apply(event);
+            cx.notify();
+        }
+    }
+
+    /// The lines of `patch` the diff shows for `files` (in list order, as laid out) that
+    /// match the query: the bar's file first, then the rest of the diff.
+    pub fn find_matches(&self, patch: &str, files: &[String], layout: DiffLayout) -> Vec<DiffMatch> {
+        let DiffFind::Open(state) = &self.find else {
+            return Vec::new();
+        };
+        in_file_first(find_in_patch(patch, files, &state.query, layout), &state.file)
+    }
+
+    fn active_index(&self, matches: &[DiffMatch]) -> Option<usize> {
+        let DiffFind::Open(FindState { active: Some(target), .. }) = &self.find else {
+            return None;
+        };
+        matches.iter().position(|found| target.is(found))
+    }
+
+    /// The bar's counter for `matches` (`3/12`, `12 found`).
+    pub fn find_count_label(&self, matches: &[DiffMatch]) -> String {
+        match &self.find {
+            DiffFind::Open(state) => count_label(&state.query, self.active_index(matches), matches.len(), false),
+            DiffFind::Closed { .. } => String::new(),
+        }
+    }
+
+    /// The bar's results: "In this file", "In diff", then the rest of the repo (the diff's
+    /// own `files` left out).
+    pub fn find_rows(&self, matches: &[DiffMatch], files: &[String]) -> Vec<SearchRow> {
+        let DiffFind::Open(state) = &self.find else {
+            return Vec::new();
+        };
+        if state.query.is_empty() {
+            return Vec::new();
+        }
+        let active = self.active_index(matches);
+        let mut rows = Vec::new();
+        for (title, in_file) in [("In this file", true), ("In diff", false)] {
+            rows.push(SearchRow::Section(title));
+            let section: Vec<(usize, &DiffMatch)> =
+                matches.iter().enumerate().filter(|(_, found)| (found.path == state.file) == in_file).collect();
+            if section.is_empty() {
+                rows.push(SearchRow::Note("No matches".to_owned()));
+            }
+            let mut last: Option<&str> = None;
+            for (index, found) in section {
+                if last != Some(found.path.as_str()) {
+                    rows.push(SearchRow::File(found.path.clone()));
+                    last = Some(found.path.as_str());
+                }
+                rows.push(SearchRow::InDiff {
+                    index,
+                    side: found.side,
+                    line_number: found.line,
+                    preview: found.preview.clone(),
+                    active: active == Some(index),
+                });
+            }
+        }
+        push_repo_section(&mut rows, &state.repo, |hit| !files.contains(&hit.file_path));
+        rows
+    }
+
+    /// Select match `index` of `matches`: the view scrolls the diff there and selects it.
+    pub fn select_find_match(&mut self, matches: &[DiffMatch], index: usize, cx: &mut Context<Self>) {
+        let Some(found) = matches.get(index) else {
+            return;
+        };
+        let DiffFind::Open(state) = &mut self.find else {
+            return;
+        };
+        self.find_seq += 1;
+        state.active = Some(FindTarget { path: found.path.clone(), side: found.side, line: found.line, seq: self.find_seq });
+        cx.notify();
+    }
+
+    /// Enter / Shift+Enter: the next or previous match, wrapping around.
+    pub fn step_find(&mut self, matches: &[DiffMatch], forward: bool, cx: &mut Context<Self>) {
+        let total = matches.len();
+        if total == 0 {
+            return;
+        }
+        let next = match (self.active_index(matches), forward) {
+            (None, true) => 0,
+            (None, false) => total - 1,
+            (Some(index), true) => (index + 1) % total,
+            (Some(index), false) => (index + total - 1) % total,
+        };
+        self.select_find_match(matches, next, cx);
+    }
+
+    /// A repo hit outside the diff: a Files tab at its line (`openInFileBrowser`).
+    pub fn open_find_hit(&mut self, hit: &treeterm_core::search::RepoHit, cx: &mut Context<Self>) {
+        let Some(workspace) = self.workspace.upgrade() else {
+            return;
+        };
+        let state = json!({
+            "selectedPath": treeterm_core::search::to_workspace_absolute(&self.path, &hit.file_path),
+            "scrollToLine": hit.line_number,
+        });
+        if workspace.update(cx, |w, cx| w.add_tab_with("filesystem", state, cx)).is_none() {
+            self.notice = Notice::Error("The file browser is not registered".to_owned());
+            cx.notify();
+        }
     }
 
     // ---- comments ----------------------------------------------------------------------

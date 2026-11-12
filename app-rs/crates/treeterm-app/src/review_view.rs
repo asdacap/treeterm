@@ -5,10 +5,14 @@
 //! commit box. Sizes and colours are `index.css`'s.
 
 mod files;
+mod find;
 mod parts;
 mod stacked;
 
+pub use find::bind_keys;
+
 use std::collections::HashSet;
+use std::rc::Rc;
 
 use gpui_kit::assets::IconName;
 use gpui_kit::component::input::{InputEvent, InputState};
@@ -36,6 +40,9 @@ const MONO_12_ADVANCE: f32 = 7.224;
 pub struct ReviewView {
     model: Entity<ReviewModel>,
     workspace: Entity<WorkspaceStore>,
+    /// Focused when the tab is selected, so its shortcuts (Cmd/Ctrl+F) reach it before
+    /// anything inside it is clicked.
+    focus: gpui_kit::FocusHandle,
     /// The selected favourite's viewer, and the model it shows.
     favourite_view: Option<(EntityId, Entity<crate::file_browser_view::FileBrowserView>)>,
     /// The stacked diff of what is shown, rebuilt when the patch or the filter changes.
@@ -75,6 +82,15 @@ pub struct ReviewView {
     /// shown when it last scrolled.
     merge_scroll: ScrollHandle,
     merge_len: usize,
+    /// The file under the pointer last ("In this file" for Cmd/Ctrl+F).
+    hovered_file: Option<String>,
+    /// The find bar's box, its results list, and the matches it lists.
+    find_input: Option<(Entity<InputState>, Subscription)>,
+    find_results: crate::search_panel::ResultsList,
+    find_matches: Rc<Vec<treeterm_model::review_find::DiffMatch>>,
+    /// The bar opening and the chosen match last applied (`focus`, `seq`).
+    find_focused: u64,
+    find_revealed: u64,
     _observe: Subscription,
     _events: Subscription,
 }
@@ -96,6 +112,7 @@ impl ReviewView {
         Self {
             model,
             workspace,
+            focus: cx.focus_handle(),
             favourite_view: None,
             diff: None,
             split: true,
@@ -118,6 +135,12 @@ impl ReviewView {
             commits_scroll: ScrollHandle::new(),
             merge_scroll: ScrollHandle::new(),
             merge_len: 0,
+            hovered_file: None,
+            find_input: None,
+            find_results: crate::search_panel::ResultsList::new(),
+            find_matches: Rc::new(Vec::new()),
+            find_focused: 0,
+            find_revealed: 0,
             _observe: observe,
             _events: events,
         }
@@ -963,6 +986,10 @@ impl ReviewView {
         div().flex_shrink_0().p(px(20.)).text_size(px(16.)).text_color(color).child(text).into_any_element()
     }
 
+    pub fn focus_handle(&self) -> &gpui_kit::FocusHandle {
+        &self.focus
+    }
+
     /// Show the selected favourite's PDF / model webview only while this tab is shown.
     pub fn set_shown(&mut self, shown: bool, cx: &mut Context<Self>) {
         let selected = self.model.read(cx).favourite_selection().relative_path().is_some();
@@ -1478,6 +1505,10 @@ impl Render for ReviewView {
             .min_w(px(0.))
             .overflow_hidden()
             .bg(colors(cx).bg_primary)
+            .track_focus(&self.focus)
+            .key_context(find::CONTEXT)
+            .on_action(cx.listener(Self::on_find))
+            .on_action(cx.listener(Self::on_search))
             .child(header_el)
             .children(banners)
             .children(merge)

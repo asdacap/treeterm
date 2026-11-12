@@ -1879,6 +1879,10 @@ fn workspace_pane(
                     .entry(model.entity_id())
                     .or_insert_with(|| cx.new(|cx| crate::review_view::ReviewView::new(model.clone(), workspace.clone(), cx)))
                     .clone();
+                if std::mem::take(&mut connected.focus_pending) {
+                    let focus = view.read(cx).focus_handle().clone();
+                    window.focus(&focus, cx);
+                }
                 div().size_full().child(view).into_any_element()
             }
             Some(TabContent::Browser { url, home }) => {

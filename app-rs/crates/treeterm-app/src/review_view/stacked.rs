@@ -27,6 +27,7 @@ use crate::comment_ui::{CommentActions, Placement, comment_display, comment_inpu
 use super::parts::{change_stats, checkbox, outline_button, plain_icon, spinner, status_badge};
 use crate::file_browser_view::language_for;
 use crate::theme::colors;
+use treeterm_model::review_find::{DIFF_CONTEXT, MIN_COLLAPSED_LINES};
 
 /// A changed file as the list and the diff headers show it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -120,6 +121,7 @@ impl ReviewView {
         let shown_viewed = order.iter().filter(|f| viewed.contains(&f.path)).count();
         let all_viewed = !order.is_empty() && shown_viewed == order.len();
         let paths: Vec<String> = order.iter().map(|f| f.path.clone()).collect();
+        let listed = paths.clone();
         // `.stacked-diff-list-header`; its bottom border is the first file's top border
         // (GPUI Kit borders every file header).
         let header = h_flex()
@@ -176,7 +178,9 @@ impl ReviewView {
                     })),
             );
         let diff = self.diff_element(&state, patch, &order, viewed, comments, window, cx);
-        v_flex().size_full().child(header).child(div().flex_1().min_h_0().child(diff)).into_any_element()
+        let diff = self.with_diff_menu(diff, &state, cx);
+        let find = self.find_panel(&state, patch, &listed, window, cx);
+        v_flex().size_full().child(header).child(div().flex_1().min_h_0().child(diff)).children(find).into_any_element()
     }
 
     /// The cached `DiffState`, rebuilt when the patch or the listed files change. New
@@ -203,7 +207,10 @@ impl ReviewView {
                 }
             }
             let mode = if self.split { DiffMode::Split } else { DiffMode::Unified };
-            let state = cx.new(|cx| DiffState::new(files, cx).with_mode(mode).with_context_lines(Some(PIERRE_CONTEXT)));
+            let state = cx.new(|cx| DiffState::new(files, cx)
+                    .with_mode(mode)
+                    .with_context_lines(Some(DIFF_CONTEXT))
+                    .with_min_collapsed_lines(MIN_COLLAPSED_LINES));
             let top = shown.first().cloned();
             state.update(cx, |s, cx| {
                 for path in &binary {
@@ -379,6 +386,18 @@ impl ReviewView {
             .bg(colors(cx).bg_primary)
             .border_0()
             .decorations(decorations)
+            .on_line_hover({
+                // The file being read, for the find bar's "In this file".
+                let this = this.clone();
+                move |position, _, cx| {
+                    if let Some(position) = position {
+                        let path = position.path().to_string();
+                        match this.update(cx, |view, _| view.hovered_file = Some(path)) {
+                            Ok(()) | Err(_) => {} // Err: the tab closed
+                        }
+                    }
+                }
+            })
             .annotations(annotations)
             .render_annotation(move |annotation, window, cx| {
                 let Some(item) = items.get(annotation.id()) else {
@@ -398,9 +417,6 @@ impl ReviewView {
         RemScope { rem: px(16. * 12. / 13.), child: diff }.into_any_element()
     }
 }
-
-/// Unchanged lines Pierre keeps around each change before folding the rest.
-const PIERRE_CONTEXT: usize = 4;
 
 /// Pierre's body and its changed-row tints, as Chromium draws them.
 const DIFF_BG: u32 = 0x070707;

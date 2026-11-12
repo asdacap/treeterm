@@ -23,16 +23,13 @@ use std::ops::Range;
 use std::sync::Arc;
 use std::time::Duration;
 
-use futures::StreamExt as _;
 use gpui_kit::{App, Context, Entity, EventEmitter, Subscription, Task, WeakEntity};
 use serde_json::{Value, json};
 use treeterm_core::exec::{ExecApi, ExecError};
 use treeterm_core::files::{FavouriteFile, detect_monaco_language, normalize_favourite_path, resolve_favourite_files};
 use treeterm_core::fs::{FsClient, ReadOutcome};
 use treeterm_core::git::GitApi;
-use treeterm_core::search::{
-    self, Completion, DefinitionLocation, RepoHit, RepoSearchEvent, RepoSearchTool,
-};
+use treeterm_core::search::{self, DefinitionLocation, RepoHit, RepoSearchEvent};
 use treeterm_proto::treeterm::FileEntry;
 
 use crate::workspace_store::WorkspaceStore;
@@ -48,8 +45,8 @@ pub const MAX_VIEW_BYTES: u64 = treeterm_core::files::MAX_READ_FILE_BYTES;
 /// The tree's file name search waits for a pause in typing (`FileTree`'s 300ms debounce).
 pub const NAME_SEARCH_DEBOUNCE: Duration = Duration::from_millis(300);
 
-/// Typing restarts the repo search; it waits for a pause first (`REPO_SEARCH_DEBOUNCE_MS`).
-pub const REPO_SEARCH_DEBOUNCE: Duration = Duration::from_millis(250);
+pub use crate::search_panel::{REPO_SEARCH_DEBOUNCE, RepoResults, SearchRow};
+use crate::search_panel::{count_label, push_repo_section, spawn_repo_search};
 
 /// Monaco languages Electron registers its grep definition provider for.
 const DEFINITION_LANGUAGES: [&str; 16] = [
@@ -133,16 +130,6 @@ pub struct FileRow {
     pub expanded: bool,
 }
 
-/// The worktree search (`RepoResults` in `SearchPanel.tsx`). Hits keep arriving while it runs.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RepoResults {
-    /// Nothing to search for.
-    Idle,
-    Searching { hits: Vec<RepoHit> },
-    Done { hits: Vec<RepoHit>, tool: RepoSearchTool, completion: Completion },
-    Failed { hits: Vec<RepoHit>, message: String },
-}
-
 /// The open search panel.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SearchState {
@@ -169,19 +156,6 @@ pub struct FileMatch {
     pub range: Range<usize>,
     /// The whole line.
     pub preview: String,
-}
-
-/// A row of the search panel, in display order. Consecutive hits in one file share a
-/// [`SearchRow::File`] heading.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SearchRow {
-    Section(&'static str),
-    File(String),
-    /// A match in the open file; `index` is its place in [`FileBrowser::file_matches`].
-    InFile { index: usize, line_number: usize, preview: String, active: bool },
-    InRepo(RepoHit),
-    Note(String),
-    Error(String),
 }
 
 /// Where the viewer should move: select `len` bytes from `column` of `line_number` in
@@ -366,36 +340,6 @@ pub fn line_range(text: &str, line_number: usize, column: usize, len: usize) -> 
     let from = column.saturating_sub(1).min(line.len());
     let to = (from + len).min(line.len());
     Some(start + from..start + to)
-}
-
-/// `countLabel`: the search panel's match counter.
-fn count_label(query: &str, active: Option<usize>, total: usize, pending: bool) -> String {
-    if query.is_empty() {
-        return String::new();
-    }
-    if pending && total == 0 {
-        return "Searching…".to_owned();
-    }
-    let count = match active {
-        Some(index) => format!("{}/{total}", index + 1),
-        None => format!("{total} found"),
-    };
-    if pending { format!("{count}…") } else { count }
-}
-
-/// Consecutive hits of one file under one heading (`groupByFile`).
-fn push_repo_rows(rows: &mut Vec<SearchRow>, hits: impl IntoIterator<Item = RepoHit>) -> usize {
-    let mut shown = 0;
-    let mut last_file: Option<String> = None;
-    for hit in hits {
-        if last_file.as_deref() != Some(hit.file_path.as_str()) {
-            rows.push(SearchRow::File(hit.file_path.clone()));
-            last_file = Some(hit.file_path.clone());
-        }
-        rows.push(SearchRow::InRepo(hit));
-        shown += 1;
-    }
-    shown
 }
 
 impl FileBrowser {
@@ -853,37 +797,15 @@ impl FileBrowser {
             return;
         }
         search.repo = RepoResults::Searching { hits: Vec::new() };
-        // The command starts on the first poll, after the pause.
-        let events = search::repo_search(self.exec.clone(), &self.root, &search.query);
-        let pause = cx.background_executor().timer(REPO_SEARCH_DEBOUNCE);
-        self._search = Some(cx.spawn(async move |this, cx| {
-            pause.await;
-            let mut events = std::pin::pin!(events);
-            while let Some(event) = events.next().await {
-                if this.update(cx, |browser, cx| browser.apply_repo_event(event, cx)).is_err() {
-                    return; // tab closed
-                }
-            }
-        }));
+        let query = search.query.clone();
+        self._search = Some(spawn_repo_search(self.exec.clone(), &self.root, &query, cx, Self::apply_repo_event));
     }
 
     fn apply_repo_event(&mut self, event: RepoSearchEvent, cx: &mut Context<Self>) {
-        let SearchPanel::Open(search) = &mut self.search else {
-            return;
-        };
-        let RepoResults::Searching { hits } = &mut search.repo else {
-            return; // the search ended; a replaced one was dropped with its task
-        };
-        match event {
-            RepoSearchEvent::Hits(more) => hits.extend(more),
-            RepoSearchEvent::Done { tool, completion } => {
-                search.repo = RepoResults::Done { hits: std::mem::take(hits), tool, completion };
-            }
-            RepoSearchEvent::Failed(error) => {
-                search.repo = RepoResults::Failed { hits: std::mem::take(hits), message: error.to_string() };
-            }
+        if let SearchPanel::Open(search) = &mut self.search {
+            search.repo.apply(event);
+            cx.notify();
         }
-        cx.notify();
     }
 
     /// Every occurrence of the query in the open file; none while the panel is closed or the
@@ -963,31 +885,8 @@ impl FileBrowser {
                 });
             }
         }
-        rows.push(SearchRow::Section("In repo"));
         // The open file's matches are listed above.
-        let elsewhere = |hits: &[RepoHit]| -> Vec<RepoHit> {
-            hits.iter().filter(|hit| Some(hit.file_path.as_str()) != current).cloned().collect()
-        };
-        match &search.repo {
-            RepoResults::Idle => {}
-            RepoResults::Searching { hits } => {
-                push_repo_rows(&mut rows, elsewhere(hits));
-                rows.push(SearchRow::Note("Searching repo…".to_owned()));
-            }
-            RepoResults::Done { hits, tool, completion } => {
-                let shown = push_repo_rows(&mut rows, elsewhere(hits));
-                let found = if shown == 0 { "No matches".to_owned() } else { format!("{shown} found") };
-                let truncated = match completion {
-                    Completion::Complete => "",
-                    Completion::Truncated => " (stopped at the result limit)",
-                };
-                rows.push(SearchRow::Note(format!("{found}{truncated} · {}", tool.as_str())));
-            }
-            RepoResults::Failed { hits, message } => {
-                push_repo_rows(&mut rows, elsewhere(hits));
-                rows.push(SearchRow::Error(format!("Search failed: {message}")));
-            }
-        }
+        push_repo_section(&mut rows, &search.repo, |hit| Some(hit.file_path.as_str()) != current);
         rows
     }
 
@@ -1205,10 +1104,6 @@ mod tests {
         }
     }
 
-    fn hit(file: &str, line: u64) -> RepoHit {
-        RepoHit { file_path: file.to_owned(), line_number: line, column: 1, preview: format!("{file}:{line}") }
-    }
-
     #[test]
     fn files_are_presented_by_extension() {
         assert_eq!(presentation_of("/w/a.PNG"), Presentation::Image(ImageKind::Png));
@@ -1238,34 +1133,6 @@ mod tests {
         assert_eq!(line_range(text, 3, 1, 0), Some(14..14));
         assert_eq!(line_range(text, 4, 1, 0), None);
         assert_eq!(line_range(text, 0, 1, 0), None);
-    }
-
-    #[test]
-    fn the_counter_follows_electrons_count_label() {
-        assert_eq!(count_label("", None, 3, false), "");
-        assert_eq!(count_label("x", None, 0, true), "Searching…");
-        assert_eq!(count_label("x", None, 3, false), "3 found");
-        assert_eq!(count_label("x", Some(1), 3, false), "2/3");
-        assert_eq!(count_label("x", Some(0), 3, true), "1/3…");
-    }
-
-    #[test]
-    fn repo_hits_are_grouped_by_consecutive_file() {
-        let mut rows = Vec::new();
-        let shown = push_repo_rows(&mut rows, vec![hit("a.rs", 1), hit("a.rs", 4), hit("b.rs", 2), hit("a.rs", 9)]);
-        assert_eq!(shown, 4);
-        assert_eq!(
-            rows,
-            vec![
-                SearchRow::File("a.rs".into()),
-                SearchRow::InRepo(hit("a.rs", 1)),
-                SearchRow::InRepo(hit("a.rs", 4)),
-                SearchRow::File("b.rs".into()),
-                SearchRow::InRepo(hit("b.rs", 2)),
-                SearchRow::File("a.rs".into()),
-                SearchRow::InRepo(hit("a.rs", 9)),
-            ]
-        );
     }
 
     #[test]

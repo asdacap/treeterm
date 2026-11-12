@@ -20,20 +20,19 @@ use std::rc::Rc;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::Icon;
 use gpui_kit::component::input::{
-    Copy as CopyText, Editor, EditorState, Escape, GutterDecoration, Input, InputEvent, InputState, RangeDecoration,
+    Copy as CopyText, Editor, EditorState, GutterDecoration, Input, InputEvent, InputState, RangeDecoration,
     RangeDecorationCollection, RangeDecorationStyle, Search, SelectAll, TextareaState,
 };
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    AnyElement, App, Bounds, Context, DragMoveEvent, Entity, Focusable as _, FontWeight, Hsla, KeyBinding, ListAlignment,
-    ListState, MouseButton, MouseUpEvent, Pixels, Point, SharedString, Subscription, Window, actions, div, list, px,
-    relative, rgb, rgba,
+    AnyElement, App, Bounds, Context, DragMoveEvent, Entity, Focusable as _, FontWeight, Hsla, KeyBinding, MouseButton,
+    MouseUpEvent, Pixels, Point, SharedString, Subscription, Window, actions, div, px, relative, rgb, rgba,
 };
 use treeterm_core::review::{Freshness, MetadataError, ReviewComment};
 use treeterm_core::files::{detect_monaco_language, favourite_file_name, max_read_bytes_for};
 use treeterm_model::file_browser::{
-    DefinitionLookup, Favourites, FileBrowser, FileView, LineDraft, Listing, NameResults, SearchPanel, SearchRow, Star,
+    DefinitionLookup, Favourites, FileBrowser, FileView, LineDraft, Listing, NameResults, SearchPanel, Star,
 };
 use treeterm_model::review::Notice;
 
@@ -240,8 +239,7 @@ pub struct FileBrowserView {
     /// The search panel's query box, made when the panel first opens (it needs the window).
     search_input: Option<(Entity<InputState>, Subscription)>,
     /// The search panel's results, and the rows the list was last told about.
-    search_list: ListState,
-    search_rows: Vec<SearchRow>,
+    search_results: crate::search_panel::ResultsList,
     /// The tree's "Search files..." box.
     name_input: Option<(Entity<InputState>, Subscription)>,
     tree_width: f32,
@@ -332,10 +330,6 @@ fn split_match<'a>(name: &'a str, query: &str) -> Option<(&'a str, &'a str, &'a 
 }
 
 /// The length of the common prefix of two row lists.
-fn common_prefix(a: &[SearchRow], b: &[SearchRow]) -> usize {
-    a.iter().zip(b).take_while(|(a, b)| a == b).count()
-}
-
 impl FileBrowserView {
     pub fn new(
         model: Entity<FileBrowser>,
@@ -357,8 +351,7 @@ impl FileBrowserView {
             brackets: None,
             revealed: 0,
             search_input: None,
-            search_list: ListState::new(0, ListAlignment::Top, px(200.)),
-            search_rows: Vec::new(),
+            search_results: crate::search_panel::ResultsList::new(),
             name_input: None,
             tree_width: TREE_WIDTH,
             tree_collapsed: false,
@@ -1472,174 +1465,25 @@ impl FileBrowserView {
 
     // ---- search panel ------------------------------------------------------------------
 
-    /// One row of the search panel's results.
-    fn search_row(row: SearchRow, index: usize, model: &Entity<FileBrowser>, cx: &App) -> AnyElement {
-        let c = colors(cx);
-        let (secondary, primary, hover, active) = (c.text_secondary, c.text_primary, c.bg_hover, c.bg_active);
-        let hit = |label: String, preview: String, is_active: bool| {
-            h_flex()
-                .id(("search-hit", index))
-                .w_full()
-                .gap(px(8.))
-                .pl(px(16.))
-                .pr(px(8.))
-                .py(px(2.))
-                .font_family(MONO)
-                .text_size(px(ui::SMALL))
-                .text_color(if is_active { primary } else { secondary })
-                .cursor_pointer()
-                .when(is_active, |d| d.bg(active))
-                .when(!is_active, |d| d.hover(move |d| d.bg(hover).text_color(primary)))
-                .child(div().flex_shrink_0().min_w(px(32.)).flex().justify_end().child(label))
-                .child(div().min_w_0().truncate().child(preview.replace('\t', "    ")))
-        };
-        match row {
-            SearchRow::Section(title) => div()
-                .pt(px(8.))
-                .px(px(8.))
-                .pb(px(4.))
-                .text_size(px(ui::SMALL))
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(secondary)
-                .child(title.to_uppercase())
-                .into_any_element(),
-            SearchRow::File(path) => div()
-                .pt(px(4.))
-                .px(px(8.))
-                .pb(px(2.))
-                .text_size(px(ui::SMALL))
-                .text_color(primary)
-                .truncate()
-                .child(path)
-                .into_any_element(),
-            SearchRow::Note(text) => h_flex()
-                .gap(px(4.))
-                .px(px(8.))
-                .py(px(4.))
-                .text_size(px(ui::SMALL))
-                .text_color(secondary)
-                .when(text == "Searching repo…", |d| {
-                    use gpui_kit::component::Sizable as _;
-                    d.child(
-                        gpui_kit::component::spinner::Spinner::new()
-                            .icon(Icon::new(IconName::LoaderCircle))
-                            .with_size(px(12.))
-                            .color(secondary),
-                    )
-                })
-                .child(text)
-                .into_any_element(),
-            SearchRow::Error(text) => {
-                div().px(px(8.)).py(px(4.)).text_size(px(ui::SMALL)).text_color(rgb(ui::FILE_ERROR)).child(text).into_any_element()
-            }
-            SearchRow::InFile { index: at, line_number, preview, active: is_active } => {
-                let model = model.clone();
-                hit(line_number.to_string(), preview, is_active)
-                    .on_click(move |_, _, cx| model.update(cx, |m, cx| m.select_match(at, cx)))
-                    .into_any_element()
-            }
-            SearchRow::InRepo(found) => {
-                let model = model.clone();
-                hit(found.line_number.to_string(), found.preview.clone(), false)
-                    .on_click(move |_, _, cx| model.update(cx, |m, cx| m.open_repo_hit(&found, cx)))
-                    .into_any_element()
-            }
-        }
-    }
-
     /// `.search-panel`: the find bar over the results, along the bottom of the viewer.
     fn search_panel(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
         let SearchPanel::Open(search) = self.model.read(cx).search().clone() else {
             return None;
         };
         let input = self.search_input(window, cx);
-        let c = colors(cx);
-        let focused = input.read(cx).focus_handle(cx).is_focused(window);
         let (rows, count, has_matches) = {
             let model = self.model.read(cx);
             (model.search_rows(), model.match_count_label(), !model.file_matches().is_empty())
         };
-        // Tell the list which rows changed; the scroll position survives appended hits.
-        let unchanged = common_prefix(&self.search_rows, &rows);
-        if unchanged != self.search_rows.len() || unchanged != rows.len() {
-            // One more row than results: the bottom padding.
-            let old = if self.search_rows.is_empty() { self.search_list.item_count() } else { self.search_rows.len() + 1 };
-            self.search_list.splice(unchanged..old, rows.len() + 1 - unchanged);
-            self.search_rows = rows.clone();
-        }
-        let rows = Rc::new(rows);
-        let model = self.model.clone();
-        let results = (!search.query.is_empty()).then(|| {
-            let rows = rows.clone();
-            list(self.search_list.clone(), move |index, _, cx| match rows.get(index) {
-                Some(row) => Self::search_row(row.clone(), index, &model, cx),
-                None => div().h(px(8.)).into_any_element(),
-            })
-            .flex_1()
-            .min_h_0()
-        });
-        let step = |forward: bool| move |view: &mut Self, _: &gpui_kit::ClickEvent, _: &mut Window, cx: &mut Context<Self>| {
-            view.model.update(cx, |m, cx| m.step_match(forward, cx));
+        let (select, open, step, close) = (self.model.clone(), self.model.clone(), self.model.clone(), self.model.clone());
+        let actions = crate::search_panel::PanelActions {
+            select: Rc::new(move |index, cx| select.update(cx, |m, cx| m.select_match(index, cx))),
+            open_repo: Rc::new(move |hit, cx| open.update(cx, |m, cx| m.open_repo_hit(hit, cx))),
+            step: Rc::new(move |forward, cx| step.update(cx, |m, cx| m.step_match(forward, cx))),
+            close: Rc::new(move |cx| close.update(cx, |m, cx| m.close_search(cx))),
         };
-        let prev = ui::find_button("search-prev", IconName::ChevronUp, !has_matches, cx)
-            .tooltip(|window, cx| gpui_kit::component::tooltip::Tooltip::new("Previous match (Shift+Enter)").build(window, cx));
-        let next = ui::find_button("search-next", IconName::ChevronDown, !has_matches, cx)
-            .tooltip(|window, cx| gpui_kit::component::tooltip::Tooltip::new("Next match (Enter)").build(window, cx));
-        let close = ui::find_button("search-close", IconName::X, false, cx)
-            .tooltip(|window, cx| gpui_kit::component::tooltip::Tooltip::new("Close (Escape)").build(window, cx))
-            .on_click(cx.listener(|view, _, _, cx| view.model.update(cx, |m, cx| m.close_search(cx))));
-        Some(
-            v_flex()
-                .h(relative(0.35))
-                .min_h(px(160.))
-                .flex_shrink_0()
-                .bg(c.bg_secondary)
-                .border_t_1()
-                .border_color(c.border)
-                .on_action(cx.listener(|view, _: &Escape, _, cx| view.model.update(cx, |m, cx| m.close_search(cx))))
-                .child(
-                    h_flex()
-                        .flex_shrink_0()
-                        .gap(px(4.))
-                        .px(px(8.))
-                        .py(px(4.))
-                        .bg(c.bg_secondary)
-                        .border_b_1()
-                        .border_color(c.border)
-                        .child(div().flex_shrink_0().text_color(c.text_secondary).child(Icon::new(IconName::Search).size(px(12.))))
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .max_w(px(360.))
-                                .h(px(22.))
-                                .px(px(6.))
-                                .flex()
-                                .items_center()
-                                .border_1()
-                                .border_color(if focused { c.accent } else { c.border })
-                                .rounded(px(3.))
-                                .bg(c.bg_primary)
-                                .text_size(px(12.))
-                                .text_color(c.text_primary)
-                                .child(Styled::h(Input::new(&input).appearance(false).text_size(px(12.)).px_0().py_0(), px(14.))),
-                        )
-                        .child(
-                            div()
-                                .flex_shrink_0()
-                                .min_w(px(64.))
-                                .whitespace_nowrap()
-                                .text_size(px(ui::SMALL))
-                                .text_color(c.text_secondary)
-                                .child(count),
-                        )
-                        .child(if has_matches { prev.on_click(cx.listener(step(false))) } else { prev })
-                        .child(if has_matches { next.on_click(cx.listener(step(true))) } else { next })
-                        .child(close),
-                )
-                .children(results)
-                .into_any_element(),
-        )
+        let bar = crate::search_panel::Bar { input, count, has_matches, has_query: !search.query.is_empty() };
+        Some(crate::search_panel::panel(bar, rows, &mut self.search_results, &actions, window, cx))
     }
 }
 
