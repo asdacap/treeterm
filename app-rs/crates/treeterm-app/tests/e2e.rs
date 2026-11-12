@@ -246,6 +246,24 @@ fn terminal_output_survives_an_app_restart() {
 
 #[test]
 #[ignore = "opens the app window; run with --ignored"]
+fn tab_and_shift_tab_reach_the_terminal() {
+    let sandbox = Sandbox::new();
+    let app = sandbox.launch();
+    // The marker shows once the shell has handed the tty to `cat` (cooked mode), so the
+    // keys below are not taken by the line editor. The quotes keep the echoed command
+    // from matching it.
+    app.run(r#"echo rea""dy; cat -t"#);
+    app.wait_for("cat to start", |state| screen(state).contains("ready"));
+    // Root (GPUI Kit) binds these to focus navigation; the terminal must get them instead.
+    app.command("key tab");
+    app.command("key shift-tab");
+    app.command("key enter");
+    app.wait_for("cat to echo Tab and Shift-Tab", |state| screen(state).contains("^I^[[Z"));
+    app.quit();
+}
+
+#[test]
+#[ignore = "opens the app window; run with --ignored"]
 fn a_typed_folder_opens_as_a_workspace() {
     let sandbox = Sandbox::new();
     let folder = sandbox.root.path().join("typed-folder");

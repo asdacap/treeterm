@@ -14,8 +14,9 @@ use gpui_kit::component::v_flex;
 use gpui_kit::prelude::*;
 use gpui_kit::{
     App, Bounds, ClipboardItem, Context, Entity, FocusHandle, KeyBinding, KeyDownEvent,
-    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, ScrollDelta,
-    ScrollEvent, SharedString, Subscription, Task, UTF16Selection, Window, actions, div, px, rgba,
+    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, NoAction, Pixels, Point,
+    ScrollDelta, ScrollEvent, SharedString, Subscription, Task, UTF16Selection, Window, actions,
+    div, px, rgba,
 };
 use treeterm_model::terminal::{CellPoint, Overlay, SelectionKind, TerminalEvent, TerminalModel};
 use treeterm_term::alacritty_terminal::vte::ansi::Rgb;
@@ -46,6 +47,12 @@ const CONTEXT: &str = "Terminal";
 const BLINK_INTERVAL: Duration = Duration::from_millis(600);
 
 pub fn bind_keys(cx: &mut App) {
+    // GPUI Kit's Root binds Tab/Shift-Tab to focus navigation, and bindings run before
+    // `on_key_down`: unbind them here so the keys reach the PTY (`\t`, `\x1b[Z`).
+    cx.bind_keys([
+        KeyBinding::new("tab", NoAction, Some(CONTEXT)),
+        KeyBinding::new("shift-tab", NoAction, Some(CONTEXT)),
+    ]);
     if cfg!(target_os = "macos") {
         cx.bind_keys([
             KeyBinding::new("cmd-c", Copy, Some(CONTEXT)),
