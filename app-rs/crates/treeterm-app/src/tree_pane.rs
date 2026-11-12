@@ -244,6 +244,8 @@ impl Render for TreePane {
             Some((input, _)) => div()
                 .id("session-rename")
                 .flex_1()
+                // Selecting text must not drag the session.
+                .on_mouse_down(gpui_kit::MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .on_click(|_: &ClickEvent, _, cx| cx.stop_propagation())
                 .on_key_down(cx.listener(|pane, event: &gpui_kit::KeyDownEvent, _, cx| {
                     if event.keystroke.key == "escape" {

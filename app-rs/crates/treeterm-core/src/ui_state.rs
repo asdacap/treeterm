@@ -1,5 +1,5 @@
-//! Local UI state Electron kept in `localStorage` (`sessionNames`), stored next to
-//! `settings.json` as `ui-state.json`. Unknown keys are kept on save.
+//! Local UI state Electron kept in `localStorage` (`sessionNames`: names and sidebar order),
+//! stored next to `settings.json` as `ui-state.json`. Unknown keys are kept on save.
 
 use std::collections::BTreeMap;
 use std::io;
@@ -15,6 +15,9 @@ pub struct UiState {
     /// Custom session names by [`session_key`].
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub session_names: BTreeMap<String, String>,
+    /// Sidebar order by [`session_key`], set by dragging sessions; unlisted ones go last.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub session_order: Vec<String>,
     #[serde(flatten)]
     pub extra: serde_json::Map<String, serde_json::Value>,
 }
@@ -79,9 +82,11 @@ mod tests {
         let mut state = load(&path).unwrap();
         assert_eq!(state.session_names.get("local").map(String::as_str), Some("Laptop"));
         state.session_names.insert("ssh:me@box:22".to_owned(), "Box".to_owned());
+        state.session_order = vec!["ssh:me@box:22".to_owned(), "local".to_owned()];
         save(&path, &state).unwrap();
         let again = load(&path).unwrap();
         assert_eq!(again.session_names.len(), 2);
+        assert_eq!(again.session_order, ["ssh:me@box:22", "local"]);
         assert_eq!(again.extra["other"]["x"], 1);
     }
 

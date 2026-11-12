@@ -1,5 +1,6 @@
-//! Custom session names (`sessionNames.ts`): renaming a session in the sidebar, kept in
-//! `ui-state.json` by connection target so they survive reconnects and restarts.
+//! Per-session sidebar state (`sessionNames.ts`): custom names (renaming a session in the
+//! sidebar) and the order sessions were dragged into, kept in `ui-state.json` by connection
+//! target so they survive reconnects and restarts.
 
 use std::path::PathBuf;
 
@@ -11,6 +12,13 @@ pub struct SessionNames {
     /// `None`: nowhere to persist (no config dir); renames last for this run.
     path: Option<PathBuf>,
     state: UiState,
+}
+
+/// Where a dragged session lands relative to the one it is dropped on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Side {
+    Before,
+    After,
 }
 
 /// "Local", or the ssh label / `user@host` (`deriveDefaultSessionName`).
@@ -53,11 +61,57 @@ impl SessionNames {
         } else {
             self.state.session_names.insert(key, name.to_owned());
         }
+        self.save();
+        cx.notify();
+    }
+
+    /// Put `items` in sidebar order (`getSortedIds`): sessions placed by a drag first, as
+    /// placed; the others after them, keeping their order.
+    pub fn sort<T>(&self, items: &mut [T], target: impl Fn(&T) -> &ConnectionTarget) {
+        let order = &self.state.session_order;
+        items.sort_by_cached_key(|item| {
+            let key = ui_state::session_key(target(item));
+            order.iter().position(|placed| *placed == key).unwrap_or(usize::MAX)
+        });
+    }
+
+    /// Drag and drop in the sidebar (`reorderSession`). `shown` is every session on screen:
+    /// each gets a place, so one never dragged before can be dragged or dropped on too.
+    pub fn reorder(
+        &mut self,
+        shown: &[ConnectionTarget],
+        dragged: &ConnectionTarget,
+        onto: &ConnectionTarget,
+        side: Side,
+        cx: &mut Context<Self>,
+    ) {
+        let (dragged, onto) = (ui_state::session_key(dragged), ui_state::session_key(onto));
+        if dragged == onto {
+            return;
+        }
+        let order = &mut self.state.session_order;
+        // Appended in the order given: unplaced sessions already show in that order, after
+        // the placed ones, so the list stays what the sidebar shows.
+        for key in shown.iter().map(ui_state::session_key) {
+            if !order.contains(&key) {
+                order.push(key);
+            }
+        }
+        order.retain(|key| *key != dragged);
+        let at = order.iter().position(|key| *key == onto).map_or(order.len(), |at| match side {
+            Side::Before => at,
+            Side::After => at + 1,
+        });
+        order.insert(at, dragged);
+        self.save();
+        cx.notify();
+    }
+
+    fn save(&self) {
         if let Some(path) = &self.path
             && let Err(error) = ui_state::save(path, &self.state)
         {
-            tracing::error!(%error, "session name not saved");
+            tracing::error!(%error, "session names not saved");
         }
-        cx.notify();
     }
 }
