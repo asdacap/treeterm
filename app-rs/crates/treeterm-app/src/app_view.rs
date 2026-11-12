@@ -667,18 +667,7 @@ impl Render for AppView {
             }
             },
         };
-        // A merge's live output stays over the right side until dismissed.
-        let merge = self
-            .current()
-            .and_then(|c| c.session.read(cx).merge_output().cloned().map(|output| (c.session.clone(), output)));
-        let pane = div()
-            .relative()
-            .flex()
-            .flex_1()
-            .h_full()
-            .min_w_0()
-            .child(pane)
-            .when_some(merge, |d, (session, output)| d.child(merge_panel(session, output, cx)));
+        let pane = div().relative().flex().flex_1().h_full().min_w_0().child(pane);
         // `.divider`: 4px, accent while hovered or dragged.
         let divider = (!self.sidebar_collapsed).then(|| {
             div()
@@ -1286,55 +1275,6 @@ fn git_status_items(
         );
     }
     items
-}
-
-/// `mergeOutput`: a merge's title, git's output so far and how it ended.
-fn merge_panel(
-    session: Entity<SessionStore>,
-    output: treeterm_model::session_store::MergeOutput,
-    cx: &mut Context<AppView>,
-) -> AnyElement {
-    use gpui_kit::component::Sizable as _;
-    use gpui_kit::component::button::{Button, ButtonVariants as _};
-    use treeterm_model::session_store::MergeState;
-    let c = colors(cx);
-    let (status, color) = match &output.state {
-        MergeState::Running => ("Running…".to_owned(), c.text_secondary),
-        MergeState::Succeeded => ("Done".to_owned(), gpui_kit::rgb(0x4caf50).into()),
-        MergeState::Failed(error) => (format!("Failed: {error}"), c.error),
-    };
-    let finished = output.state != MergeState::Running;
-    let mut lines = v_flex().id("merge-output").flex_1().min_h_0().overflow_y_scroll().px_3().py_1().font_family("Menlo").text_size(px(12.));
-    for line in output.lines.iter().rev().take(200).rev() {
-        lines = lines.child(div().child(line.clone()));
-    }
-    v_flex()
-        .absolute()
-        .bottom_0()
-        .left_0()
-        .right_0()
-        .h(px(220.))
-        .bg(c.bg_secondary)
-        .border_t_1()
-        .border_color(c.border)
-        .child(
-            h_flex()
-                .px_3()
-                .py_1()
-                .gap_3()
-                .items_center()
-                .border_b_1()
-                .border_color(c.border)
-                .child(div().text_sm().child(output.title.clone()))
-                .child(div().flex_1().truncate().text_sm().text_color(color).child(status))
-                .when(finished, |d| {
-                    d.child(Button::new("merge-output-close").xsmall().ghost().label("Close").on_click(move |_, _, cx| {
-                        session.update(cx, |s, cx| s.dismiss_merge_output(cx));
-                    }))
-                }),
-        )
-        .child(lines)
-        .into_any_element()
 }
 
 /// A session's name in the sidebar; clicking it opens the session pane.

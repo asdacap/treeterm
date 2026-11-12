@@ -24,6 +24,7 @@ use treeterm_model::review::{
     ReviewModel, StageTarget,
 };
 use treeterm_model::session_store::AfterMerge;
+use treeterm_model::workspace_store::{MergeOutput, MergeState};
 
 use crate::theme::colors;
 use parts::{ERROR_RED, MONO, action_button, branch_pill, plain_icon, spinner, toolbar_button, totals};
@@ -67,6 +68,10 @@ pub struct ReviewView {
     /// The merge button's menu is open.
     merge_menu: bool,
     commits_scroll: ScrollHandle,
+    /// The merge output, kept scrolled to its end (`AutoScrollPre`), and how much of it was
+    /// shown when it last scrolled.
+    merge_scroll: ScrollHandle,
+    merge_len: usize,
     _observe: Subscription,
     _events: Subscription,
 }
@@ -106,6 +111,8 @@ impl ReviewView {
             base_query: String::new(),
             merge_menu: false,
             commits_scroll: ScrollHandle::new(),
+            merge_scroll: ScrollHandle::new(),
+            merge_len: 0,
             _observe: observe,
             _events: events,
         }
@@ -344,10 +351,13 @@ impl ReviewView {
     fn header_actions(&mut self, header: &ReviewHeader, cx: &mut Context<Self>) -> AnyElement {
         let c = colors(cx);
         let (secondary, tertiary, hover, primary, accent) = (c.text_secondary, c.bg_tertiary, c.bg_hover, c.text_primary, c.accent);
-        let (overview, conflicts, refreshing) = {
+        let (overview, conflicts, refreshing, merge) = {
             let model = self.model.read(cx);
-            (model.overview(), model.conflicts().clone(), model.is_refreshing())
+            (model.overview(), model.conflicts().clone(), model.is_refreshing(), model.merge_output(cx))
         };
+        // `isProcessing`: the actions wait for a running merge.
+        let merging = merge.as_ref().filter(|m| m.state == MergeState::Running);
+        let idle = merging.is_none();
         let has_uncommitted = overview.uncommitted > 0;
         let white = gpui_kit::white();
         let mut actions = h_flex().gap(px(8.)).items_center().flex_shrink_0();
@@ -372,14 +382,14 @@ impl ReviewView {
                 .on_click(cx.listener(|view, _: &ClickEvent, _, cx| view.model.update(cx, |m, cx| m.refresh(cx)))),
         );
         let prompt_commit = (has_uncommitted && header.harness).then(|| {
-            action_button("review-prompt-commit", rgb(0x6366f1).into(), rgb(0x7c7ff7).into(), white, true)
+            action_button("review-prompt-commit", rgb(0x6366f1).into(), rgb(0x7c7ff7).into(), white, idle)
                 .child("Prompt Commit")
-                .on_click(cx.listener(|view, _: &ClickEvent, _, cx| view.model.update(cx, |m, cx| m.prompt_commit(cx))))
+                .when(idle, |d| d.on_click(cx.listener(|view, _: &ClickEvent, _, cx| view.model.update(cx, |m, cx| m.prompt_commit(cx)))))
         });
         let cancel = |label: &'static str, cx: &mut Context<Self>| {
-            action_button("review-cancel", tertiary, hover, primary, true)
+            action_button("review-cancel", tertiary, hover, primary, idle)
                 .child(label)
-                .on_click(cx.listener(|view, _: &ClickEvent, _, cx| view.model.update(cx, |m, cx| m.close(cx))))
+                .when(idle, |d| d.on_click(cx.listener(|view, _: &ClickEvent, _, cx| view.model.update(cx, |m, cx| m.close(cx)))))
         };
         match (&header.parent_branch, header.detached) {
             (None, _) => {
@@ -389,9 +399,11 @@ impl ReviewView {
                 actions = actions
                     .children(prompt_commit)
                     .child(
-                        action_button("review-close-and-clean", rgb(0x0066cc).into(), rgb(0x0077ee).into(), white, true)
+                        action_button("review-close-and-clean", rgb(0x0066cc).into(), rgb(0x0077ee).into(), white, idle)
                             .child("Close and Clean")
-                            .on_click(cx.listener(|view, _: &ClickEvent, window, cx| view.confirm_close_and_clean(window, cx))),
+                            .when(idle, |d| {
+                                d.on_click(cx.listener(|view, _: &ClickEvent, window, cx| view.confirm_close_and_clean(window, cx)))
+                            }),
                     )
                     .child(cancel("Cancel", cx));
             }
@@ -405,25 +417,29 @@ impl ReviewView {
                     .children(prompt_commit)
                     .when(has_conflicts && header.harness, |d| {
                         d.child(
-                            action_button("review-prompt-rebase", violet.0, violet.1, white, true)
+                            action_button("review-prompt-rebase", violet.0, violet.1, white, idle)
                                 .child("Prompt Rebase")
-                                .on_click(cx.listener(|view, _: &ClickEvent, _, cx| view.model.update(cx, |m, cx| m.prompt_rebase(cx)))),
+                                .when(idle, |d| {
+                                    d.on_click(cx.listener(|view, _: &ClickEvent, _, cx| view.model.update(cx, |m, cx| m.prompt_rebase(cx))))
+                                }),
                         )
                     })
                     .when(parent_moved && header.harness, |d| {
                         d.child(
-                            action_button("review-prompt-update", violet.0, violet.1, white, true)
+                            action_button("review-prompt-update", violet.0, violet.1, white, idle)
                                 .tooltip({
                                     let tip = SharedString::from(format!("Ask the AI harness to merge {parent} into this branch"));
                                     move |window, cx| gpui_kit::component::tooltip::Tooltip::new(tip.clone()).build(window, cx)
                                 })
                                 .child("Prompt Update from Parent")
-                                .on_click(cx.listener(|view, _: &ClickEvent, _, cx| {
-                                    view.model.update(cx, |m, cx| m.prompt_update_from_parent(cx))
-                                })),
+                                .when(idle, |d| {
+                                    d.on_click(cx.listener(|view, _: &ClickEvent, _, cx| {
+                                        view.model.update(cx, |m, cx| m.prompt_update_from_parent(cx))
+                                    }))
+                                }),
                         )
                     })
-                    .child(self.merge_group(has_conflicts, has_uncommitted, accent, cx))
+                    .child(self.merge_group(has_conflicts, has_uncommitted, merging.cloned(), accent, cx))
                     .child(cancel("Cancel", cx));
             }
         }
@@ -431,15 +447,27 @@ impl ReviewView {
     }
 
     /// `.merge-btn-group`: "Merge" and a chevron opening the other merges.
-    fn merge_group(&mut self, has_conflicts: bool, has_uncommitted: bool, accent: gpui_kit::Hsla, cx: &mut Context<Self>) -> AnyElement {
+    /// `merging`: the merge running, whose button reads "Merging..." (`processingAction`).
+    fn merge_group(
+        &mut self,
+        has_conflicts: bool,
+        has_uncommitted: bool,
+        merging: Option<MergeOutput>,
+        accent: gpui_kit::Hsla,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let c = colors(cx);
         let (hover, primary, bg) = (c.bg_hover, c.text_primary, c.bg_secondary);
-        let enabled = !has_conflicts;
+        let enabled = !has_conflicts && merging.is_none();
         let white = gpui_kit::white();
         let blue_hover: gpui_kit::Hsla = rgb(0x006cbf).into();
+        // Only the plain merge is on the button; the others are in the closed menu.
+        let plain_merge = merging.is_some_and(|m| !m.squash && m.after == AfterMerge::Remove);
         let main = action_button("review-merge", accent, blue_hover, white, enabled)
             .rounded_r(px(0.))
-            .child(if has_conflicts { "Merge (has conflicts)" } else { "Merge" })
+            // `.btn-spinner`: 12px, 6px before the label.
+            .when(plain_merge, |d| d.child(div().mr(px(6.)).child(spinner(12., white))))
+            .child(format!("{}{}", if plain_merge { "Merging..." } else { "Merge" }, if has_conflicts { " (has conflicts)" } else { "" }))
             .when(enabled, |d| {
                 d.on_click(cx.listener(move |view, _: &ClickEvent, window, cx| view.start_merge(false, AfterMerge::Remove, has_uncommitted, window, cx)))
             });
@@ -612,6 +640,71 @@ impl ReviewView {
             ConflictCheck::Idle | ConflictCheck::Checking | ConflictCheck::Checked { .. } => {}
         }
         banners
+    }
+
+    /// `.review-merge-output-panel`: the merge's title and git's output, under the banners.
+    /// Closable once the merge has finished.
+    fn merge_panel(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let output = self.model.read(cx).merge_output(cx)?;
+        let c = colors(cx);
+        let (secondary, primary) = (c.text_secondary, c.text_primary);
+        if output.output.len() != self.merge_len {
+            self.merge_len = output.output.len();
+            self.merge_scroll.scroll_to_bottom();
+        }
+        let icon = match output.state {
+            MergeState::Running => spinner(14., primary),
+            MergeState::Succeeded => crate::ui::icon(IconName::Check, 14., rgb(0x4ec9b0)).into_any_element(),
+            MergeState::Failed => crate::ui::icon(IconName::X, 14., rgb(ERROR_RED)).into_any_element(),
+        };
+        let header = h_flex()
+            .items_center()
+            .gap(px(8.))
+            .px(px(20.))
+            .py(px(6.))
+            .font_family(MONO)
+            .text_size(px(12.))
+            .text_color(primary)
+            .bg(c.bg_secondary)
+            .child(icon)
+            .child(div().flex_1().min_w_0().truncate().child(output.title()))
+            .when(output.state != MergeState::Running, |d| {
+                d.child(
+                    div()
+                        .id("review-merge-output-close")
+                        .flex()
+                        .cursor_pointer()
+                        .text_color(secondary)
+                        .hover(move |d| d.text_color(primary))
+                        .child(plain_icon(IconName::X, 14.))
+                        .tooltip(|window, cx| gpui_kit::component::tooltip::Tooltip::new("Hide merge output").build(window, cx))
+                        .on_click(cx.listener(|view, _: &ClickEvent, _, cx| view.model.update(cx, |m, cx| m.dismiss_merge_output(cx)))),
+                )
+            });
+        // A `<pre>` does not show its last newline.
+        let text = output.output.strip_suffix('\n').unwrap_or(&output.output).to_owned();
+        let body = div()
+            .id("review-merge-output")
+            .track_scroll(&self.merge_scroll)
+            .min_h(px(48.))
+            .max_h(px(200.))
+            .overflow_y_scroll()
+            .px(px(20.))
+            .py(px(8.))
+            .font_family(MONO)
+            .text_size(px(12.))
+            .text_color(primary)
+            .child(text);
+        Some(
+            v_flex()
+                .flex_shrink_0()
+                .border_b_1()
+                .border_color(c.border)
+                .bg(c.bg_primary)
+                .child(header)
+                .child(body)
+                .into_any_element(),
+        )
     }
 
     /// `.diff-tabs`: Committed Changes / Uncommitted / Commits, each with its count.
@@ -1340,6 +1433,7 @@ impl Render for ReviewView {
         let has_base = base != ReviewBase::None;
         let header_el = self.header(&header, window, cx);
         let banners = self.banners(cx);
+        let merge = self.merge_panel(cx);
         let tabs = self.view_tabs(mode, has_base, cx);
         let body = self.body(mode, window, cx);
         v_flex()
@@ -1349,6 +1443,7 @@ impl Render for ReviewView {
             .bg(colors(cx).bg_primary)
             .child(header_el)
             .children(banners)
+            .children(merge)
             .child(tabs)
             .child(div().flex_1().min_h_0().child(body))
     }

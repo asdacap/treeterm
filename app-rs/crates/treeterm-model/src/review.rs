@@ -647,10 +647,27 @@ impl ReviewModel {
         cx.emit(ReviewEvent::CloseRequested);
     }
 
-    /// The merge buttons (`mergeAndRemove` / `mergeAndKeep`). The session runs the merge and
-    /// shows its output.
+    /// The merge buttons (`mergeAndRemove` / `mergeAndKeep`). The session runs the merge;
+    /// its output is the workspace's [`Self::merge_output`].
     pub fn merge(&mut self, squash: bool, after: AfterMerge, cx: &mut Context<Self>) {
         cx.emit(ReviewEvent::MergeRequested { squash, after });
+    }
+
+    /// This workspace's merge into its parent, running or finished (`mergeOutput`).
+    pub fn merge_output(&self, cx: &App) -> Option<crate::workspace_store::MergeOutput> {
+        self.workspace.upgrade()?.read(cx).merge_output().cloned()
+    }
+
+    /// A merge is running (`isProcessing`): the header's actions wait for it.
+    pub fn is_merging(&self, cx: &App) -> bool {
+        self.merge_output(cx).is_some_and(|o| o.state == crate::workspace_store::MergeState::Running)
+    }
+
+    /// The merge output's close button.
+    pub fn dismiss_merge_output(&mut self, cx: &mut Context<Self>) {
+        if let Some(workspace) = self.workspace.upgrade() {
+            workspace.update(cx, |w, cx| w.dismiss_merge_output(cx));
+        }
     }
 
     /// "Close and Clean": remove the worktree, keep the branch.

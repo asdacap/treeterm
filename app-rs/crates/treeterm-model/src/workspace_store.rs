@@ -51,6 +51,38 @@ pub enum WorkspaceEvent {
 
 impl EventEmitter<WorkspaceEvent> for WorkspaceStore {}
 
+/// A merge of this workspace into its parent, running or finished, as its Review tab shows
+/// it (`ReviewBrowser`'s `mergeOutput`). Runtime only: it goes with the workspace.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MergeOutput {
+    pub squash: bool,
+    pub after: crate::session_store::AfterMerge,
+    /// The branch merged, as it was when the merge started.
+    pub branch: String,
+    /// git's output so far, as it arrived (with the error appended when it failed).
+    pub output: String,
+    pub state: MergeState,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MergeState {
+    Running,
+    Succeeded,
+    Failed,
+}
+
+impl MergeOutput {
+    /// `startMergeOutput`'s title.
+    pub fn title(&self) -> String {
+        format!(
+            "{} {}{}",
+            if self.squash { "Squash merge" } else { "Merge" },
+            self.branch,
+            if self.after == crate::session_store::AfterMerge::Remove { " and remove worktree" } else { "" }
+        )
+    }
+}
+
 pub use treeterm_core::activity::ActivityState;
 
 /// How an activity state is shown (`ActivityStateBadge.tsx`).
@@ -195,6 +227,8 @@ pub struct WorkspaceStore {
     /// PTY bytes received by this workspace's terminals, and their rate.
     traffic: Entity<crate::traffic::TrafficMeter>,
     traffic_counter: treeterm_core::traffic::ByteCounter,
+    /// The merge into the parent running or last finished, until dismissed.
+    merge_output: Option<MergeOutput>,
     _git_refresh: Option<Task<()>>,
 }
 
@@ -248,6 +282,7 @@ impl WorkspaceStore {
             llm,
             traffic,
             traffic_counter,
+            merge_output: None,
             _git_refresh: None,
         };
         let tab_ids: Vec<String> = store.workspace.file.app_states.keys().cloned().collect();
@@ -1352,6 +1387,67 @@ impl WorkspaceStore {
     }
 
     /// `updateStatus`: merged or abandoned.
+    /// The merge into the parent running or last finished, if not dismissed.
+    pub fn merge_output(&self) -> Option<&MergeOutput> {
+        self.merge_output.as_ref()
+    }
+
+    /// Hide a finished merge's output (a running one cannot be hidden).
+    pub fn dismiss_merge_output(&mut self, cx: &mut Context<Self>) {
+        if self.merge_output.as_ref().is_some_and(|o| o.state != MergeState::Running) {
+            self.merge_output = None;
+            cx.notify();
+        }
+    }
+
+    /// The session started merging this workspace into its parent.
+    pub(crate) fn start_merge_output(&mut self, squash: bool, after: crate::session_store::AfterMerge, cx: &mut Context<Self>) {
+        self.merge_output = Some(MergeOutput {
+            squash,
+            after,
+            branch: self.workspace.file.git_branch.clone().unwrap_or_default(),
+            output: String::new(),
+            state: MergeState::Running,
+        });
+        cx.notify();
+    }
+
+    pub(crate) fn append_merge_output(&mut self, text: &str, cx: &mut Context<Self>) {
+        if let Some(output) = &mut self.merge_output {
+            output.output.push_str(text);
+            cx.notify();
+        }
+    }
+
+    /// `finishMergeOutput`. A merge that kept the workspace changed what its Review tabs
+    /// compare, so they reload (`handleMergeAndKeep`).
+    pub(crate) fn finish_merge_output(&mut self, result: &Result<(), String>, cx: &mut Context<Self>) {
+        let Some(output) = &mut self.merge_output else {
+            return;
+        };
+        match result {
+            Ok(()) => output.state = MergeState::Succeeded,
+            Err(error) => {
+                output.output.push_str(&format!("\n{error}\n"));
+                output.state = MergeState::Failed;
+            }
+        }
+        if result.is_ok() && output.after == crate::session_store::AfterMerge::Keep {
+            let reviews: Vec<Entity<crate::review::ReviewModel>> = self
+                .tabs
+                .values()
+                .filter_map(|tab| match tab {
+                    TabRef::Review { model, .. } => Some(model.clone()),
+                    TabRef::Terminal(_) | TabRef::Files { .. } | TabRef::Editor { .. } | TabRef::Browser { .. } | TabRef::Tool(_) => None,
+                })
+                .collect();
+            for review in reviews {
+                review.update(cx, |r, cx| r.refresh(cx));
+            }
+        }
+        cx.notify();
+    }
+
     pub fn set_status(&mut self, status: treeterm_core::wire::workspace_file::WorkspaceStatus, cx: &mut Context<Self>) {
         if self.workspace.file.status != status {
             self.workspace.file.status = status;

@@ -6,7 +6,7 @@ use gpui_kit::{AppContext as _, Entity, TestAppContext};
 use treeterm_core::wire::workspace_file::{WorkspaceFile, WorkspaceStatus, WorktreeSettings};
 use treeterm_model::session_store::{RemoveMode, SessionState, SessionStore, WorkspaceEntry};
 use treeterm_model::settings_store::SettingsStore;
-use treeterm_model::workspace_store::{TabContent, Workspace, WorkspaceStore};
+use treeterm_model::workspace_store::{MergeState, TabContent, Workspace, WorkspaceStore};
 use treeterm_proto::treeterm::WorkspaceRef;
 
 mod common;
@@ -463,6 +463,9 @@ fn merging_a_child_brings_its_commits_into_the_parent_and_removes_it(cx: &mut Te
     let Some(TabContent::Review(review)) = child_ws.read_with(cx, |w, _| w.tab_content(&tab)) else {
         panic!("not a review tab");
     };
+    // As a user would: once the tab has loaded. Its git reads in the worktree would race
+    // the auto-commit for the index lock.
+    wait_until(cx, &review, |r| !r.is_refreshing());
     review.update(cx, |r, cx| r.merge(false, AfterMerge::Remove, cx));
     wait_until(cx, &store, |s| s.entry(&child).is_none() || matches!(s.entry(&child), Some(WorkspaceEntry::OperationError { .. })));
     if let Some(error) = store.read_with(cx, |s, _| match s.entry(&child) {
@@ -475,14 +478,88 @@ fn merging_a_child_brings_its_commits_into_the_parent_and_removes_it(cx: &mut Te
     assert!(git_in(&repo, &["log", "--oneline"]).contains("WIP: Auto-commit before merge from feat-merge"));
     wait_for_disk(cx, || !child_dir.exists());
     assert!(!git_in(&repo, &["branch", "--list", "feat-merge"]).contains("feat-merge"));
-    // The output panel's record says how it ended.
-    wait_until(cx, &store, |s| {
-        s.merge_output().is_some_and(|o| o.state == treeterm_model::session_store::MergeState::Succeeded)
-    });
-    let title = store.read_with(cx, |s, _| s.merge_output().map(|o| o.title.clone()));
-    assert_eq!(title.as_deref(), Some("Merge feat-merge and remove worktree"));
-    store.update(cx, |s, cx| s.dismiss_merge_output(cx));
-    assert!(store.read_with(cx, |s, _| s.merge_output().is_none()));
+    // git's output went to the merged workspace (its Review tab), and went with it.
+    wait_until(cx, &child_ws, |w| w.merge_output().is_some_and(|o| o.state == MergeState::Succeeded));
+    let output = child_ws.read_with(cx, |w, _| w.merge_output().cloned()).unwrap();
+    assert_eq!(output.title(), "Merge feat-merge and remove worktree");
+    assert!(output.output.contains("$ git merge feat-merge"), "{}", output.output);
+    let root_ws = store.read_with(cx, |s, _| ws(s, &root));
+    assert!(root_ws.read_with(cx, |w, _| w.merge_output().is_none()), "the parent shows no merge output");
+}
+
+#[gpui_kit::test]
+fn a_failed_merge_shows_on_the_merged_workspace_only(cx: &mut TestAppContext) {
+    use treeterm_model::session_store::AfterMerge;
+    cx.executor().allow_parking();
+    let h = harness();
+    publish(&h, &[]);
+    let repo = TempRepo::new(&h);
+    let store = open_store(cx, &h, "client-a");
+    let root = open_repo_workspace(cx, &store, &repo);
+    let child = store.update(cx, |s, cx| s.add_child_workspace(&root, "feat-fail".into(), false, None, cx)).unwrap();
+    wait_child(cx, &store, &child);
+    // The parent's uncommitted work refuses the merge.
+    std::fs::write(repo.path.join("dirty.txt"), "x\n").unwrap();
+    let child_ws = store.read_with(cx, |s, _| ws(s, &child));
+    let tab = child_ws.update(cx, |w, cx| w.add_tab("review", cx)).unwrap();
+    let Some(TabContent::Review(review)) = child_ws.read_with(cx, |w, _| w.tab_content(&tab)) else {
+        panic!("not a review tab");
+    };
+    review.update(cx, |r, cx| r.merge(true, AfterMerge::Keep, cx));
+    assert!(review.read_with(cx, |r, cx| r.is_merging(cx)));
+    // A running merge's output cannot be hidden.
+    review.update(cx, |r, cx| r.dismiss_merge_output(cx));
+    assert!(review.read_with(cx, |r, cx| r.merge_output(cx).is_some()));
+
+    wait_until(cx, &child_ws, |w| w.merge_output().is_some_and(|o| o.state == MergeState::Failed));
+    let output = review.read_with(cx, |r, cx| r.merge_output(cx)).unwrap();
+    assert_eq!(output.title(), "Squash merge feat-fail");
+    assert!(
+        output.output.ends_with("\nParent workspace has uncommitted changes. Commit or stash them before merging.\n"),
+        "{}",
+        output.output
+    );
+    assert!(!review.read_with(cx, |r, cx| r.is_merging(cx)));
+    assert!(store.read_with(cx, |s, _| matches!(s.entry(&child), Some(WorkspaceEntry::OperationError { .. }))));
+    let root_ws = store.read_with(cx, |s, _| ws(s, &root));
+    assert!(root_ws.read_with(cx, |w, _| w.merge_output().is_none()), "the parent shows no merge output");
+    review.update(cx, |r, cx| r.dismiss_merge_output(cx));
+    assert!(child_ws.read_with(cx, |w, _| w.merge_output().is_none()));
+}
+
+#[gpui_kit::test]
+fn merge_and_keep_reloads_the_review(cx: &mut TestAppContext) {
+    use treeterm_model::session_store::AfterMerge;
+    cx.executor().allow_parking();
+    let h = harness();
+    publish(&h, &[]);
+    let repo = TempRepo::new(&h);
+    let store = open_store(cx, &h, "client-a");
+    let root = open_repo_workspace(cx, &store, &repo);
+    let child = store.update(cx, |s, cx| s.add_child_workspace(&root, "feat-keep".into(), false, None, cx)).unwrap();
+    wait_child(cx, &store, &child);
+    let child_ws = store.read_with(cx, |s, _| ws(s, &child));
+    let child_dir = std::path::PathBuf::from(child_ws.read_with(cx, |w, _| w.workspace().path.clone()));
+    std::fs::write(child_dir.join("kept.txt"), "kept\n").unwrap();
+    for args in [&["add", "kept.txt"][..], &["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "kept"]] {
+        let out = std::process::Command::new("git").args(args).current_dir(&child_dir).output().unwrap();
+        assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    }
+    let tab = child_ws.update(cx, |w, cx| w.add_tab("review", cx)).unwrap();
+    let Some(TabContent::Review(review)) = child_ws.read_with(cx, |w, _| w.tab_content(&tab)) else {
+        panic!("not a review tab");
+    };
+    wait_until(cx, &review, |r| r.overview().committed == 1);
+
+    review.update(cx, |r, cx| r.merge(false, AfterMerge::Keep, cx));
+    wait_until(cx, &child_ws, |w| w.merge_output().is_some_and(|o| o.state != MergeState::Running));
+    let output = child_ws.read_with(cx, |w, _| w.merge_output().cloned()).unwrap();
+    assert_eq!(output.state, MergeState::Succeeded, "{}", output.output);
+    assert_eq!(output.title(), "Merge feat-keep");
+    assert_eq!(std::fs::read_to_string(repo.path.join("kept.txt")).unwrap(), "kept\n");
+    // The branch is in its base now: nothing left to review.
+    wait_until(cx, &review, |r| r.overview().committed == 0);
+    assert!(store.read_with(cx, |s, _| loaded(s, &child)), "the workspace is kept");
 }
 
 /// A temp git repo with one commit, plus cleanup of what tests create for it under the
