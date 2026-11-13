@@ -159,6 +159,19 @@ are not ours). Its changes are marked `TreeTerm patch` (`grep -rn "TreeTerm patc
   TypeScript's captures to the JavaScript query, so `.tsx` files (in the Files viewer, the
   Editor tab and Review) showed type names coloured but strings, comments and most
   keywords plain.
+- `src/highlighter/languages.rs`, `Cargo.toml`, `src/highlighter/languages/{proto,cmake,graphql}/`
+  (new): the languages the Kit left uncoloured get highlight queries. C++ layers its rules
+  over C's query, as upstream's `tree-sitter.json` does (the Kit used the C++ additions
+  alone, so the `tree-sitter-cpp` feature now also pulls in `tree-sitter-c`). C# and Swift
+  use their grammar crates' queries. Protobuf's comes from its crate, which does not export
+  it, plus the `"proto3"` version string. CMake's comes from its crate with Neovim's
+  `#lua-match?` rewritten as `#match?`: tree-sitter skips predicates it does not know, so as
+  shipped it would colour every argument as a constant and every file's first comment as a
+  `#!` line. GraphQL's crate ships none, so that one is written for it.
+- `src/highlighter/highlighter.rs`: captures that no theme can colour (`@spell`,
+  `@local.reference`, `@_name`, …) are dropped before captures of one range are merged.
+  The merge keeps the first name, so Scala's `(comment) @spell @comment` left comments
+  plain.
 
 When `gpui-kit` is upgraded, copy the new `gpui-component` over this directory and re-apply
 the marked changes (or drop the patch if the Kit gained the option).

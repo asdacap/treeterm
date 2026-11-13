@@ -25,6 +25,18 @@ const MAX_INJECTION_LANGUAGE_BYTES: usize = 64;
 const MAX_NON_COMBINED_INJECTION_PARSES: usize = 512;
 const INJECTION_PARSE_TIMEOUT: Duration = Duration::from_millis(20);
 
+/// TreeTerm patch: whether a theme can colour capture `name` (as `SyntaxColors::style`
+/// resolves it: the name, else its first segment). Other captures are dropped before they
+/// are merged: two captures of one range keep the first one's name, so Neovim's
+/// `(comment) @spell @comment` (Scala) left comments uncoloured, and a locals capture
+/// (`@local.reference`) could likewise hide the highlight of the same identifier.
+fn is_highlight_name(name: &str) -> bool {
+    let prefix = name.split('.').next().unwrap_or(name);
+    super::registry::HIGHLIGHT_NAMES
+        .iter()
+        .any(|known| *known == name || *known == prefix)
+}
+
 /// A syntax highlighter that supports incremental parsing, multiline text,
 /// and caching of highlight results.
 #[allow(unused)]
@@ -1075,7 +1087,12 @@ impl SyntaxHighlighter {
                         continue;
                     }
 
-                    if let Some(highlight_name) = query.capture_names().get(cap.index as usize) {
+                    if let Some(highlight_name) = query
+                        .capture_names()
+                        .get(cap.index as usize)
+                        // TreeTerm patch: see `is_highlight_name`.
+                        .filter(|name| is_highlight_name(name))
+                    {
                         if !allow_overlapping_captures {
                             last_end = node_range.end;
                         }
@@ -1100,6 +1117,10 @@ impl SyntaxHighlighter {
                 let Some(highlight_name) = query.capture_names().get(cap.index as usize) else {
                     continue;
                 };
+                // TreeTerm patch: see `is_highlight_name`.
+                if !is_highlight_name(highlight_name) {
+                    continue;
+                }
 
                 let node_range: Range<usize> = node.start_byte()..node.end_byte();
                 let highlight_name = SharedString::from(highlight_name.to_string());

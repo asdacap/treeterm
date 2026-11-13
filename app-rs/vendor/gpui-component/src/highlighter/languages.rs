@@ -429,7 +429,10 @@ impl Language {
             #[cfg(feature = "tree-sitter-cpp")]
             Self::Cpp => (
                 tree_sitter_cpp::LANGUAGE,
-                tree_sitter_cpp::HIGHLIGHT_QUERY,
+                // TreeTerm patch: `tree_sitter_cpp::HIGHLIGHT_QUERY` only adds the C++ rules to
+                // C's query (upstream's `tree-sitter.json` lists C's first), so alone it left
+                // comments, strings and most keywords plain.
+                cpp_highlights(),
                 "",
                 "",
             ),
@@ -497,7 +500,8 @@ impl Language {
                 "",
             ),
             #[cfg(feature = "tree-sitter-swift")]
-            Self::Swift => (tree_sitter_swift::LANGUAGE, "", "", ""),
+            // TreeTerm patch: the grammar crate's query (GPUI Kit left Swift without one).
+            Self::Swift => (tree_sitter_swift::LANGUAGE, tree_sitter_swift::HIGHLIGHTS_QUERY, "", ""),
             #[cfg(feature = "tree-sitter-scala")]
             Self::Scala => (
                 tree_sitter_scala::LANGUAGE,
@@ -513,11 +517,24 @@ impl Language {
                 "",
             ),
             #[cfg(feature = "tree-sitter-csharp")]
-            Self::CSharp => (tree_sitter_c_sharp::LANGUAGE, "", "", ""),
+            // TreeTerm patch: the grammar crate's query (GPUI Kit left C# without one).
+            Self::CSharp => (tree_sitter_c_sharp::LANGUAGE, tree_sitter_c_sharp::HIGHLIGHTS_QUERY, "", ""),
             #[cfg(feature = "tree-sitter-graphql")]
-            Self::GraphQL => (tree_sitter_graphql::LANGUAGE, "", "", ""),
+            // TreeTerm patch: the grammar crate ships no query; see the file.
+            Self::GraphQL => (
+                tree_sitter_graphql::LANGUAGE,
+                include_str!("languages/graphql/highlights.scm"),
+                "",
+                "",
+            ),
             #[cfg(feature = "tree-sitter-proto")]
-            Self::Proto => (tree_sitter_proto::LANGUAGE, "", "", ""),
+            // TreeTerm patch: the grammar crate's query, which it does not export.
+            Self::Proto => (
+                tree_sitter_proto::LANGUAGE,
+                include_str!("languages/proto/highlights.scm"),
+                "",
+                "",
+            ),
             #[cfg(feature = "tree-sitter-make")]
             Self::Make => (
                 tree_sitter_make::LANGUAGE,
@@ -526,7 +543,13 @@ impl Language {
                 "",
             ),
             #[cfg(feature = "tree-sitter-cmake")]
-            Self::CMake => (tree_sitter_cmake::LANGUAGE, "", "", ""),
+            // TreeTerm patch: the grammar crate's query, made portable; see the file.
+            Self::CMake => (
+                tree_sitter_cmake::LANGUAGE,
+                include_str!("languages/cmake/highlights.scm"),
+                "",
+                "",
+            ),
             #[cfg(feature = "tree-sitter-typescript")]
             Self::TypeScript => (
                 tree_sitter_typescript::LANGUAGE_TYPESCRIPT,
@@ -621,6 +644,15 @@ impl Language {
             locals,
         )
     }
+}
+
+/// TreeTerm patch: C's query, then the C++ rules (see `Language::Cpp` in `config`).
+#[cfg(feature = "tree-sitter-cpp")]
+fn cpp_highlights() -> &'static str {
+    static QUERY: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+        [tree_sitter_c::HIGHLIGHT_QUERY, tree_sitter_cpp::HIGHLIGHT_QUERY].join("\n")
+    });
+    &QUERY
 }
 
 #[cfg(test)]

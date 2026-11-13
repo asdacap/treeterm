@@ -118,4 +118,56 @@ mod tests {
             assert_eq!(token_color("a.tsx", text, token), color, "{token} in .tsx");
         }
     }
+
+    /// Every language the viewer maps paints a comment, a keyword and a string as `vs-dark`
+    /// does. GPUI Kit shipped C#, Swift, Protobuf, GraphQL and CMake without a highlight
+    /// query, C++ with only its additions to C's, and Scala's comments uncoloured.
+    #[test]
+    fn every_language_colours_comments_keywords_and_strings() {
+        const COMMENT: u32 = 0x6a9955;
+        const KEYWORD: u32 = 0x569cd6;
+        const STRING: u32 = 0xce9178;
+        /// A file's path and text, and tokens in it with the colour each is painted in.
+        type Case<'a> = (&'a str, &'a str, &'a [(&'a str, u32)]);
+        let cases: &[Case] = &[
+            ("a.rs", "// c1\nfn f() { let s = \"x1\"; }\n", &[("// c1", COMMENT), ("fn", KEYWORD), ("\"x1\"", STRING)]),
+            ("a.ts", "// c1\nconst s = \"x1\"\n", &[("// c1", COMMENT), ("const", KEYWORD), ("\"x1\"", STRING)]),
+            ("a.tsx", "// c1\nconst s = \"x1\"\n", &[("// c1", COMMENT), ("const", KEYWORD), ("\"x1\"", STRING)]),
+            ("a.js", "// c1\nconst s = \"x1\"\n", &[("// c1", COMMENT), ("const", KEYWORD), ("\"x1\"", STRING)]),
+            ("a.json", "{\"k\": \"x1\"}\n", &[("\"x1\"", STRING)]),
+            ("a.toml", "# c1\nk = \"x1\"\n", &[("# c1", COMMENT), ("\"x1\"", STRING)]),
+            ("a.yaml", "# c1\nk: \"x1\"\n", &[("# c1", COMMENT), ("\"x1\"", STRING)]),
+            ("a.py", "# c1\ndef f():\n    return \"x1\"\n", &[("# c1", COMMENT), ("def", KEYWORD), ("\"x1\"", STRING)]),
+            ("a.go", "// c1\npackage main\nfunc f() string { return \"x1\" }\n", &[("// c1", COMMENT), ("func", KEYWORD), ("\"x1\"", STRING)]),
+            ("a.sh", "# c1\nif true; then echo \"x1\"; fi\n", &[("# c1", COMMENT), ("then", KEYWORD), ("\"x1\"", STRING)]),
+            ("a.css", "/* c1 */\na { content: \"x1\"; }\n", &[("/* c1 */", COMMENT), ("\"x1\"", STRING)]),
+            ("a.html", "<!-- c1 -->\n<div></div>\n", &[("<!-- c1 -->", COMMENT), ("div", KEYWORD)]),
+            ("a.c", "// c1\nint f() { return \"x1\"; }\n", &[("// c1", COMMENT), ("return", KEYWORD), ("\"x1\"", STRING)]),
+            // `namespace` is C++'s rule, the rest C's.
+            ("a.cpp", "// c1\nnamespace n { int f() { return \"x1\"; } }\n", &[("// c1", COMMENT), ("namespace", KEYWORD), ("return", KEYWORD), ("\"x1\"", STRING)]),
+            ("a.cs", "// c1\nclass A { string s = \"x1\"; }\n", &[("// c1", COMMENT), ("class", KEYWORD), ("\"x1\"", STRING)]),
+            ("a.java", "// c1\nclass A { String s = \"x1\"; }\n", &[("// c1", COMMENT), ("class", KEYWORD), ("\"x1\"", STRING)]),
+            ("a.kt", "// c1\nfun f() { val s = \"x1\" }\n", &[("// c1", COMMENT), ("val", KEYWORD), ("\"x1\"", STRING)]),
+            ("a.swift", "// c1\nfunc f() { let s = \"x1\" }\n", &[("// c1", COMMENT), ("func", KEYWORD), ("\"x1\"", STRING)]),
+            ("a.rb", "# c1\ndef f\n  \"x1\"\nend\n", &[("# c1", COMMENT), ("def", KEYWORD), ("\"x1\"", STRING)]),
+            ("a.php", "<?php\n// c1\nfunction f() { return \"x1\"; }\n", &[("// c1", COMMENT), ("function", KEYWORD), ("\"x1\"", STRING)]),
+            ("a.sql", "-- c1\nSELECT 'x1' FROM t;\n", &[("-- c1", COMMENT), ("SELECT", KEYWORD), ("'x1'", STRING)]),
+            ("a.zig", "// c1\nconst s = \"x1\";\n", &[("// c1", COMMENT), ("const", KEYWORD), ("\"x1\"", STRING)]),
+            ("a.lua", "-- c1\nlocal s = \"x1\"\n", &[("-- c1", COMMENT), ("local", KEYWORD), ("\"x1\"", STRING)]),
+            ("a.proto", "// c1\nsyntax = \"proto3\";\nmessage A { string s = 1; }\n", &[("// c1", COMMENT), ("message", KEYWORD), ("\"proto3\"", STRING)]),
+            ("a.ex", "# c1\nif x do\n  \"x1\"\nend\n", &[("# c1", COMMENT), ("do", KEYWORD), ("\"x1\"", STRING)]),
+            ("a.scala", "// c1\nobject A { val s = \"x1\" }\n", &[("// c1", COMMENT), ("val", KEYWORD), ("\"x1\"", STRING)]),
+            ("a.graphql", "# c1\nquery Q { a(b: \"x1\") }\n", &[("# c1", COMMENT), ("query", KEYWORD), ("\"x1\"", STRING)]),
+            ("a.svelte", "<!-- c1 -->\n<script>let s = \"x1\"</script>\n", &[("<!-- c1 -->", COMMENT), ("let", KEYWORD), ("\"x1\"", STRING)]),
+            ("Makefile", "# c1\nall:\n", &[("# c1", COMMENT)]),
+            ("CMakeLists.txt", "# c1\nif(A)\n  set(x \"x1\")\nendif()\n", &[("# c1", COMMENT), ("if", KEYWORD), ("\"x1\"", STRING)]),
+        ];
+        for (path, text, tokens) in cases {
+            for (token, hex) in *tokens {
+                assert_eq!(token_color(path, text, token), Some(rgb(*hex).into()), "{token} in {path}");
+            }
+        }
+        // CMake's upper-case-argument rule, whose Neovim-only predicate tree-sitter skipped.
+        assert_ne!(token_color("CMakeLists.txt", "set(foo bar)\n", "bar"), Some(rgb(KEYWORD).into()));
+    }
 }

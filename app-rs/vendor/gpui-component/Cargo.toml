@@ -97,6 +97,8 @@ tree-sitter-cmake = [
 tree-sitter-cpp = [
     "tree-sitter",
     "dep:tree-sitter-cpp",
+    # TreeTerm patch: C++'s highlight query builds on C's (see `cpp_highlights`).
+    "dep:tree-sitter-c",
 ]
 tree-sitter-csharp = [
     "tree-sitter",
