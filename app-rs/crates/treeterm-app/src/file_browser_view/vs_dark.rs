@@ -92,4 +92,30 @@ mod tests {
         assert_eq!(colors["keyword"]["color"], serde_json::to_value(Hsla::from(rgb(0x569cd6))).unwrap());
         assert!(colors["title"]["font_weight"].is_number());
     }
+
+    /// The colour the viewer paints the first `token` of `text` in, for a file at `path`.
+    fn token_color(path: &str, text: &str, token: &str) -> Option<Hsla> {
+        use gpui_kit::component::highlighter::SyntaxHighlighter;
+        use gpui_kit::component::input::Rope;
+        let mut highlighter = SyntaxHighlighter::new(crate::file_browser_view::language_for(path));
+        highlighter.update(None, &Rope::from(text), None);
+        let start = text.find(token).unwrap();
+        let theme = theme();
+        highlighter
+            .styles(&(0..text.len()), theme.as_ref())
+            .into_iter()
+            .find(|(range, _)| range.contains(&start))
+            .and_then(|(_, style)| style.color)
+    }
+
+    #[test]
+    fn tsx_is_coloured_as_typescript() {
+        let text = "// note\nimport { a } from 'b'\nexport function f(): number {\n  const s = \"x\"\n  return <div className=\"c\">{s}</div>\n}\n";
+        let ts = text.replace("<div className=\"c\">{s}</div>", "1");
+        for (token, hex) in [("// note", 0x6a9955), ("import", 0x569cd6), ("'b'", 0xce9178), ("const", 0x569cd6), ("number", 0x3dc9b0)] {
+            let color = Some(rgb(hex).into());
+            assert_eq!(token_color("a.ts", &ts, token), color, "{token} in .ts");
+            assert_eq!(token_color("a.tsx", text, token), color, "{token} in .tsx");
+        }
+    }
 }

@@ -537,7 +537,11 @@ impl Language {
             #[cfg(feature = "tree-sitter-tsx")]
             Self::Tsx => (
                 tree_sitter_typescript::LANGUAGE_TSX,
-                tree_sitter_typescript::HIGHLIGHTS_QUERY,
+                // TreeTerm patch: the TypeScript query, as `TypeScript` uses.
+                // `tree_sitter_typescript::HIGHLIGHTS_QUERY` only adds the
+                // TypeScript captures to the JavaScript query, so on its own it
+                // left strings, comments and most keywords plain.
+                include_str!("languages/typescript/highlights.scm"),
                 "",
                 tree_sitter_typescript::LOCALS_QUERY,
             ),
