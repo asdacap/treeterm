@@ -411,7 +411,7 @@ impl AppView {
         let slots: Vec<(ConnectionId, String, ConnState)> =
             slots.into_iter().map(|slot| (slot.id.clone(), names.name(&slot.target), slot.state.clone())).collect();
         let mut list = v_flex().w_full();
-        for (index, (id, name, state)) in slots.into_iter().enumerate() {
+        for (id, name, state) in slots {
             let section = match state {
                 ConnState::Connected(_) => match self.sessions.get(&id) {
                     Some(connected) => connected.tree.clone().into_any_element(),
@@ -460,7 +460,7 @@ impl AppView {
                     session_panel(&id, &name, SessionIcon::Failed, Some(banner), None, cx)
                 }
             };
-            list = list.child(self.session_drag_handle(index, id, name, section, cx));
+            list = list.child(self.session_drag_handle(id, name, section, cx));
         }
         let on = self.settings.read(cx).settings().notifications.sound_enabled;
         let tip = |text: &'static str| move |window: &mut Window, cx: &mut App| gpui_kit::component::tooltip::Tooltip::new(text).build(window, cx);
@@ -523,7 +523,6 @@ impl AppView {
     /// inside drag their workspace instead (the innermost drag source wins).
     fn session_drag_handle(
         &self,
-        index: usize,
         id: ConnectionId,
         name: String,
         section: AnyElement,
@@ -535,7 +534,6 @@ impl AppView {
         div()
             .id(SharedString::from(format!("session-drag-{id}")))
             .relative()
-            .when(index > 0, |d| d.mt(px(12.)))
             .on_drag(DraggedSession { id, name: name.into() }, |dragged, _, _, cx| cx.new(|_| dragged.clone()))
             .on_drag_move(cx.listener(move |view, event: &gpui_kit::DragMoveEvent<DraggedSession>, _, cx| {
                 let position = event.event.position;
