@@ -59,6 +59,11 @@ pub struct DiffCache {
     binary: HashSet<String>,
     /// Viewed files already collapsed (a file collapses when it becomes viewed).
     collapsed_viewed: HashSet<String>,
+    /// An open file just checked off from its header's "Viewed", and how far below the top
+    /// of the diff that header was: once the file collapses, the next file's header takes
+    /// its place, so the next "Viewed" is under the pointer (`FileDiffSection`'s
+    /// `pendingScrollAnchor`). Taken by the next render.
+    viewed_anchor: Option<(String, Pixels)>,
     _events: Subscription,
 }
 
@@ -114,7 +119,7 @@ impl ReviewView {
             .into_iter()
             .map(|index| files[index].clone())
             .collect();
-        let state = match self.diff_state(patch, &order, viewed, cx) {
+        let state = match self.diff_state(patch, &order, viewed, window, cx) {
             Ok(state) => state,
             Err(text) => return Self::message(format!("Cannot show this diff: {text}"), rgb(super::parts::ERROR_RED).into(), 20.),
         };
@@ -185,7 +190,14 @@ impl ReviewView {
 
     /// The cached `DiffState`, rebuilt when the patch or the listed files change. New
     /// viewed files collapse (`FileDiffSection` starts collapsed when viewed).
-    fn diff_state(&mut self, patch: &str, order: &[ListedFile], viewed: &HashSet<String>, cx: &mut Context<Self>) -> Result<Entity<DiffState>, String> {
+    fn diff_state(
+        &mut self,
+        patch: &str,
+        order: &[ListedFile],
+        viewed: &HashSet<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<Entity<DiffState>, String> {
         let key = format!("{patch}\u{0}{}", order.iter().map(|f| f.path.as_str()).collect::<Vec<_>>().join("\u{0}"));
         if self.diff.as_ref().is_none_or(|diff| diff.key != key) {
             let mut parsed: HashMap<String, DiffFile> = HashMap::new();
@@ -238,7 +250,15 @@ impl ReviewView {
                     view.model.update(cx, |m, cx| m.start_comment(&path, side, line, cx));
                 }
             });
-            self.diff = Some(DiffCache { key, state, order: shown, binary, collapsed_viewed: HashSet::new(), _events: comments });
+            self.diff = Some(DiffCache {
+                key,
+                state,
+                order: shown,
+                binary,
+                collapsed_viewed: HashSet::new(),
+                viewed_anchor: None,
+                _events: comments,
+            });
         }
         let Some(diff) = &mut self.diff else {
             unreachable!("made above")
@@ -246,6 +266,7 @@ impl ReviewView {
         let newly: Vec<String> =
             diff.order.iter().filter(|p| viewed.contains(*p) && !diff.collapsed_viewed.contains(*p)).cloned().collect();
         diff.collapsed_viewed.retain(|p| viewed.contains(p));
+        let anchor = diff.viewed_anchor.take();
         if !newly.is_empty() {
             diff.collapsed_viewed.extend(newly.iter().cloned());
             let binary = diff.binary.clone();
@@ -254,6 +275,17 @@ impl ReviewView {
                     s.set_file_collapsed(path, true, cx);
                 }
             });
+            if let Some((path, top)) = anchor.filter(|(path, _)| newly.contains(path))
+                && let Some(next) = diff.order.iter().skip_while(|p| **p != path).nth(1).cloned()
+            {
+                // A text file's header row keeps its height, so the next header goes there
+                // now. An image or binary placeholder folds with its header, a row measured
+                // open: that header stays put until it is laid out folded.
+                let now = if binary.contains(&path) { path } else { next.clone() };
+                diff.state.update(cx, |s, cx| s.scroll_file_header_to(&now, top, cx));
+                let state = diff.state.clone();
+                window.on_next_frame(move |_, cx| state.update(cx, |s, cx| s.scroll_file_header_to(&next, top, cx)));
+            }
             self.closed_binary.extend(newly.into_iter().filter(|p| binary.contains(p)));
         }
         Ok(diff.state.clone())
@@ -617,7 +649,8 @@ fn header_row(
             })
     };
     let viewed = {
-        let (model, path, above, view) = (model.clone(), file.path.clone(), header.above.clone(), view.clone());
+        let (model, path, above, view, state) =
+            (model.clone(), file.path.clone(), header.above.clone(), view.clone(), state.clone());
         let mark_above = model.clone();
         let is_viewed = header.viewed;
         h_flex()
@@ -634,10 +667,17 @@ fn header_row(
             .child("Viewed")
             .on_click(move |_, _, cx| {
                 cx.stop_propagation();
+                // Checking off an open file: where its header (in the list, or pinned) is now.
+                let anchor = if is_viewed || collapsed { None } else { state.read(cx).file_header_top(&path) };
                 model.update(cx, |m, cx| m.toggle_viewed(&path, cx));
                 // The view collapses it when it sees it viewed.
-                match view.update(cx, |_, cx| cx.notify()) {
-                    Ok(()) | Err(_) => {}
+                match view.update(cx, |view, cx| {
+                    if let Some(diff) = &mut view.diff {
+                        diff.viewed_anchor = anchor.map(|top| (path.clone(), top));
+                    }
+                    cx.notify();
+                }) {
+                    Ok(()) | Err(_) => {} // Err: the tab closed
                 }
             })
             .when(!above.is_empty(), |d| {
@@ -823,5 +863,79 @@ mod tests {
         assert!(date.ends_with("/2026"), "{date}");
         assert!(!date.starts_with('0'), "{date}");
         assert_eq!(locale_date("garbage"), "garbage");
+    }
+
+    /// A 400 x 300 diff of three files, each far taller than the viewport.
+    struct Host {
+        state: Entity<DiffState>,
+    }
+
+    impl gpui_kit::Render for Host {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().w(px(400.)).h(px(300.)).child(Diff::new(&self.state).size_full())
+        }
+    }
+
+    fn draw(cx: &mut gpui_kit::VisualTestContext) {
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+    }
+
+    fn three_files(cx: &mut gpui_kit::TestAppContext) -> (Entity<DiffState>, &mut gpui_kit::VisualTestContext) {
+        cx.update(gpui_kit::init);
+        let mut patch = String::new();
+        for name in ["a.txt", "b.txt", "c.txt"] {
+            patch.push_str(&format!("diff --git a/{name} b/{name}\n--- a/{name}\n+++ b/{name}\n@@ -1,40 +1,40 @@\n"));
+            patch.extend((0..40).map(|line| format!("-old {line}\n")));
+            patch.extend((0..40).map(|line| format!("+new {line}\n")));
+        }
+        let files = DiffFile::parse(&patch).expect("a valid patch");
+        let state = cx.new(|cx| DiffState::new(files, cx));
+        let (_, cx) = cx.add_window_view({
+            let state = state.clone();
+            move |_, _| Host { state }
+        });
+        // The body records its size on the first paint and lays out again.
+        for _ in 0..3 {
+            draw(cx);
+        }
+        (state, cx)
+    }
+
+    fn header_top(state: &Entity<DiffState>, path: &str, cx: &mut gpui_kit::VisualTestContext) -> Option<Pixels> {
+        cx.update(|_, cx| state.read(cx).file_header_top(path))
+    }
+
+    #[gpui_kit::test]
+    fn the_next_header_takes_the_place_of_a_collapsed_one(cx: &mut gpui_kit::TestAppContext) {
+        let (state, cx) = three_files(cx);
+        assert_eq!(header_top(&state, "a.txt", cx), Some(px(0.)));
+        assert_eq!(header_top(&state, "b.txt", cx), None, "a screen and more below");
+
+        // The rows above it are estimated until laid out: again once they are on screen.
+        for _ in 0..2 {
+            state.update(cx, |s, cx| s.scroll_file_header_to("b.txt", px(100.), cx));
+            draw(cx);
+        }
+        assert_eq!(header_top(&state, "b.txt", cx), Some(px(100.)));
+
+        // Checking off b.txt from its header, 100px down.
+        state.update(cx, |s, cx| {
+            s.set_file_collapsed("b.txt", true, cx);
+            s.scroll_file_header_to("c.txt", px(100.), cx);
+        });
+        draw(cx);
+        assert_eq!(header_top(&state, "c.txt", cx), Some(px(100.)));
+    }
+
+    #[gpui_kit::test]
+    fn a_header_scrolled_past_is_pinned_at_the_top(cx: &mut gpui_kit::TestAppContext) {
+        let (state, cx) = three_files(cx);
+        state.update(cx, |s, cx| s.scroll_file_header_to("b.txt", px(-60.), cx));
+        draw(cx);
+        assert_eq!(header_top(&state, "b.txt", cx), Some(px(0.)));
+        assert_eq!(header_top(&state, "a.txt", cx), None);
+        assert_eq!(header_top(&state, "c.txt", cx), None);
+        assert_eq!(header_top(&state, "missing.txt", cx), None);
     }
 }

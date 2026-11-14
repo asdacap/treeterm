@@ -848,6 +848,41 @@ impl DiffState {
         cx.notify();
     }
 
+    /// TreeTerm patch: how far below the top of the viewport the header of the file at
+    /// `path` was drawn at the last layout: its own row, or the sticky header pinned at the
+    /// top (see [`super::Diff::render_sticky_header`]) once that row has started to scroll
+    /// out of view. `None` when it was not on screen.
+    pub fn file_header_top(&self, path: &str) -> Option<Pixels> {
+        let file = self.file_ix(path)?;
+        let row = *self.header_rows.get(file)?;
+        let viewport = self.list.viewport_bounds();
+        match self.list.bounds_for_item(row) {
+            Some(bounds) if bounds.top() >= viewport.top() => {
+                (bounds.top() < viewport.bottom()).then(|| bounds.top() - viewport.top())
+            }
+            Some(_) | None => (super::sticky::pinned(&self.list, &self.rows, &self.header_rows)
+                == Some(file))
+            .then_some(px(0.)),
+        }
+    }
+
+    /// TreeTerm patch: scrolls so the header of the file at `path` sits `top` below the top
+    /// of the viewport, measuring the rows above it as they were last laid out.
+    pub fn scroll_file_header_to(&mut self, path: &str, top: Pixels, cx: &mut Context<Self>) {
+        let Some(item_ix) = self
+            .file_ix(path)
+            .and_then(|file| self.header_rows.get(file).copied())
+        else {
+            return;
+        };
+        self.list.scroll_to(ListOffset {
+            item_ix,
+            offset_in_item: px(0.),
+        });
+        self.list.scroll_by(-top);
+        cx.notify();
+    }
+
     /// Moves to the next changed group after the current viewport, across files,
     /// wrapping to the first once the list is scrolled to its end.
     pub fn next_change(&mut self, cx: &mut Context<Self>) {

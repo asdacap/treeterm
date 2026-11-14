@@ -80,7 +80,9 @@ fn handle(line: &str, window: AnyWindowHandle, view: &Entity<AppView>, cx: &mut 
     let (command, rest) = line.split_once(' ').unwrap_or((line, ""));
     let result = window.update(cx, |_, window, cx| -> Result<Value, String> {
         // An occluded window gets no frames from the display link; render one so the reply
-        // reflects the current state (views are built and sized while rendering).
+        // reflects the current state (views are built and sized while rendering), running
+        // what the last one scheduled for it first, as a frame does.
+        window.simulate_next_frame(cx);
         window.draw(cx).clear(cx);
         match command {
             "state" => Ok(view.read(cx).automation_state(window, cx)),

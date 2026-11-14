@@ -25,15 +25,13 @@ pub(super) struct StickyHeader {
     pub(super) render: FileRenderer,
 }
 
-impl StickyHeader {
-    /// The file at the top of the viewport, once its own header row has started to scroll
-    /// out of view.
-    fn pinned(&self) -> Option<usize> {
-        let top = self.list.logical_scroll_top();
-        let file = self.rows.get(top.item_ix)?.file();
-        let header = *self.header_rows.get(file)?;
-        (top.item_ix > header || top.offset_in_item > px(0.)).then_some(file)
-    }
+/// The file whose header is pinned: the file at the top of the viewport, once its own
+/// header row has started to scroll out of view.
+pub(super) fn pinned(list: &ListState, rows: &[DisplayRow], header_rows: &[usize]) -> Option<usize> {
+    let top = list.logical_scroll_top();
+    let file = rows.get(top.item_ix)?.file();
+    let header = *header_rows.get(file)?;
+    (top.item_ix > header || top.offset_in_item > px(0.)).then_some(file)
 }
 
 impl IntoElement for StickyHeader {
@@ -82,7 +80,7 @@ impl Element for StickyHeader {
         window: &mut Window,
         cx: &mut App,
     ) -> Self::PrepaintState {
-        let file = self.pinned()?;
+        let file = pinned(&self.list, &self.rows, &self.header_rows)?;
         let viewport = self.list.viewport_bounds();
         // Blocks clicks and hovers from the rows beneath, but not the wheel.
         let mut header = div()

@@ -154,6 +154,10 @@ are not ours). Its changes are marked `TreeTerm patch` (`grep -rn "TreeTerm patc
   `Diff::render_sticky_header` pins the header of the file at the top of the viewport while
   its rows scroll under it, and the next file's header pushes it out, as Electron's
   `.file-diff-header` (`position: sticky; top: 0`) does; the Kit's headers scroll away.
+- `src/diff/state.rs`, `src/diff/sticky.rs`: `DiffState::file_header_top` (where a file's
+  header, in the list or pinned, was drawn) and `DiffState::scroll_file_header_to`, so
+  checking "Viewed" on an open file brings the next file's header to where the checked one
+  was, its "Viewed" under the pointer, as Electron's `FileDiffSection` does.
 - `src/highlighter/languages.rs`: TSX is highlighted with the Kit's TypeScript query, as
   TypeScript is. The Kit used `tree_sitter_typescript::HIGHLIGHTS_QUERY`, which only adds
   TypeScript's captures to the JavaScript query, so `.tsx` files (in the Files viewer, the
