@@ -6,21 +6,23 @@ A personal terminal multiplexer built for my own use. It makes it easy to run mu
 
 Session state is stored in a daemon process per host, so I can update the client UI without losing anything, or disconnect my laptop and reconnect later without losing any agent sessions.
 
-Under the hood, it's an Electron app that manages multiple workspaces using Git worktrees, enabling branching development with AI agents.
+Under the hood, it's a native Rust app (built on [GPUI](https://www.gpui.rs/)) that manages multiple workspaces using Git worktrees, enabling branching development with AI agents.
+
+> [!WARNING]
+> **The Electron app is deprecated** in favour of the native Rust rework in [`app-rs/`](app-rs/README.md). It still works (both apps talk to the same daemon and share sessions, workspaces and `settings.json`, so they can run side by side), but new work goes into the native app, and `src/main`, `src/preload` and `src/renderer` will be removed once the native app reaches parity.
 
 <img width="3024" height="1896" alt="image" src="https://github.com/user-attachments/assets/b0e0ae76-311e-48c2-a249-e7455440feb9" />
 
 ## Architecture
 
-TreeTerm uses a three-layer architecture connected by IPC and gRPC:
+TreeTerm is a client app plus a persistent daemon per host, connected by gRPC over a Unix socket:
 
-- **Renderer** (React) — UI components, Zustand state, thin orchestration layer
-- **Main** (Electron) — High-level business logic, Git operations, IPC bridge, gRPC client
-- **Daemon** (Rust, persistent process) — Low-level primitives: PTY, exec, file I/O, session persistence
+- **Native app** (`app-rs/`, Rust/GPUI, single process) — UI, business logic, Git operations, SSH connections, gRPC client. See [app-rs/README.md](app-rs/README.md).
+- **Daemon** (`daemon-rs/`, Rust, persistent process) — Low-level primitives: PTY, exec, file I/O, session persistence
 
-Communication: Renderer ↔ Main via Electron IPC; Main ↔ Daemon via gRPC over Unix socket.
+The daemon survives app restarts — terminal sessions and state persist when the app closes.
 
-The daemon survives app restarts — terminal sessions and state persist when Electron closes.
+The deprecated Electron app (`src/`) is a three-layer client over the same daemon: a React **renderer**, an Electron **main** process (IPC bridge, gRPC client) and the daemon, with Renderer ↔ Main over Electron IPC.
 
 ## Features
 
@@ -28,12 +30,12 @@ The daemon survives app restarts — terminal sessions and state persist when El
 - **Multi-Tab Interface** - Each workspace supports multiple tabs for different applications
 - **Git Integration** - Full Git support including worktree management, merging with optional squashing, conflict detection, and diff viewing
 - **Built-in Applications**:
-  - **Terminal** - Full PTY support with xterm.js, run in the persistent daemon
+  - **Terminal** - Full PTY support, run in the persistent daemon
   - **Custom Runner** - Custom terminal instances with configurable startup commands
   - **Filesystem** - File browser and viewer
-  - **Editor** - Monaco-based code editor with vim mode, go-to-definition via grep-based search
+  - **Editor** - Code editor with go-to-definition via grep-based search
   - **AI Harness** - Integration with configurable AI CLI tools (Claude is the default)
-  - **Review** - Review and merge changes from parent workspaces with collapsible diff tree view, powered by [@pierre/diffs](https://www.npmjs.com/package/@pierre/diffs) (from [Pierre](https://github.com/nichochar/pierre))
+  - **Review** - Review and merge changes from parent workspaces with collapsible diff tree view
   - **Chat** - Built-in LLM chat with configurable model, reasoning, and effort level settings
   - **Comments** - Comment display and management
   - **Terminal Analyzer Debugger** - Debug and inspect AI system prompts with model/reasoning/timing controls
@@ -53,85 +55,76 @@ The daemon survives app restarts — terminal sessions and state persist when El
 - **Status Bar** - Bottom status bar with auto-approve safe permissions toggle
 - **Persistent State** - Workspaces and tabs persist across sessions
 
-## Installation
+## Installation and usage
 
-### Using npm
+### Native app
 
-```bash
-npm install
-```
-
-### Using Nix (Recommended for reproducible environments)
-
-With [Nix flakes](https://nixos.wiki/wiki/Flakes) enabled:
+Build the daemon, then the app (`app-rs/` pins its own Rust toolchain in `app-rs/rust-toolchain.toml`):
 
 ```bash
-# Enter development shell with all dependencies
-nix develop
-
-# Or build the application
-nix build
-
-# Or run directly
-nix run
+(cd daemon-rs && cargo build)
+cd app-rs
+cargo build -p treeterm-app
+./target/debug/treeterm   # finds or starts the local daemon
 ```
 
-See [NIX_SETUP.md](NIX_SETUP.md) for detailed Nix setup instructions.
-
-## Usage
-
-### Development
+Packaging (from `app-rs/`):
 
 ```bash
-npm run dev
+cargo run -p xtask -- dist   # macOS: target/dist/TreeTerm.app + zip; Linux: tarball
 ```
 
-Starts the application in development mode with hot reload.
-
-### Build
+With [Nix flakes](https://nixos.wiki/wiki/Flakes) on Linux:
 
 ```bash
-npm run build
+nix build .#treeterm-native   # or: nix run .#treeterm-native
 ```
 
-Builds the application for distribution. Output is placed in the `out/` directory.
+See [app-rs/README.md](app-rs/README.md) for packaging details, end-to-end tests and the parity status, and [NIX_SETUP.md](NIX_SETUP.md) for Nix setup.
 
-### Preview
+### CLI
 
 ```bash
-npm run preview
+treeterm [directory]           # Open with optional workspace directory
+treeterm ssh user@host[:port]  # Open a remote session
+treeterm shutdown-daemon       # Shutdown the daemon process
 ```
-
-Runs the built application.
 
 ### Testing
 
 ```bash
-npm test               # Run tests in watch mode
-npm run test:run       # Run tests once
-npm run test:coverage  # Run tests with coverage report
-npm run test:e2e       # Run Playwright end-to-end tests
+npm run test:app-rs   # Native app tests
+cd app-rs && cargo clippy --workspace --all-targets
 ```
 
-### Global CLI
+### Electron app (deprecated)
 
 ```bash
-npm install -g
-treeterm [directory]   # Open with optional workspace directory
-treeterm list-sessions # List all active daemon sessions
-treeterm shutdown-daemon  # Shutdown the daemon process
-treeterm status        # Show daemon status
-treeterm --help        # Show help
+npm install
+npm run dev            # Development mode with hot reload
+npm run build          # Build into out/
+npm run preview        # Run the built app
+npm run test:run       # Unit tests
+npm run test:e2e       # Playwright end-to-end tests
+nix run                # Run it via Nix
 ```
 
 ## Project Structure
 
 ```
+app-rs/                 # Native Rust/GPUI app
+├── crates/
+│   ├── treeterm-core/  # Daemon client, connections, paths, wire formats (no UI)
+│   ├── treeterm-term/  # Terminal emulation on alacritty_terminal (no UI)
+│   ├── treeterm-model/ # Stores and business logic (GPUI entities)
+│   ├── treeterm-app/   # GPUI views and the treeterm binary
+│   └── treeterm-testkit/# In-process daemon for tests
+└── xtask/              # Packaging
 daemon-rs/              # Rust daemon (persistent process)
 ├── crates/
 │   ├── treeterm-proto/ # Generated gRPC stubs from treeterm.proto
 │   └── treeterm-daemon/# Daemon logic + binary (PTY, exec, filesystem, sessions)
-src/
+src/                    # Deprecated Electron app
 ├── main/             # Electron main process (git, IPC bridge, gRPC client, settings)
 ├── preload/          # Electron context bridge
 ├── renderer/         # React UI (components, Zustand stores, hooks)
@@ -143,7 +136,7 @@ src/
 
 ## Configuration
 
-Settings are stored in the Electron userData directory:
+Settings are stored in `settings.json`, shared by the native and Electron apps:
 
 - **macOS**: `~/Library/Application Support/treeterm/settings.json`
 - **Linux**: `~/.config/treeterm/settings.json`
@@ -209,24 +202,14 @@ All keybindings are customizable in settings.
 
 ## Tech Stack
 
-- **Electron 33** - Desktop application runtime
-- **React** - UI framework
-- **TypeScript** - Type-safe language
-- **Zustand** - State management
-- **xterm.js** - Terminal emulation
-- **forkpty** - Pseudo-terminal creation (in the Rust daemon via libc)
-- **@grpc/grpc-js** + **ts-proto** - gRPC communication between Main and Daemon
-- **Monaco Editor** - Code editor with vim mode support (monaco-vim)
-- **@pierre/diffs** - Diff viewer with Shiki syntax highlighting
-- **pino** - Structured logging
-- **lucide-react** - Icons
-- **OpenAI SDK** - Speech-to-text via Whisper API
-- **tinykeys** - Keybinding management
-- **react-markdown** - Markdown rendering
-- **@aptre/flex-layout** - Flexible panel layout
-- **electron-vite** - Build tooling
-- **Vitest** - Unit and integration tests
-- **Playwright** - End-to-end tests
+- **Rust** - Native app and daemon
+- **GPUI** + **GPUI Kit** (`gpui-component`) - UI framework
+- **alacritty_terminal** - Terminal emulation
+- **tonic** - gRPC between the app and the daemon
+- **tokio** - Async runtime
+- **forkpty** - Pseudo-terminal creation (in the daemon via libc)
+
+The deprecated Electron app uses Electron 33, React, TypeScript, Zustand, xterm.js, Monaco Editor, `@grpc/grpc-js` + ts-proto, `@pierre/diffs`, electron-vite, Vitest and Playwright.
 
 ## License
 

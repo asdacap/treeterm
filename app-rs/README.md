@@ -1,7 +1,7 @@
 # TreeTerm native app (`app-rs/`)
 
 A single-process Rust/GPUI replacement for the Electron app (`src/main`, `src/preload`,
-`src/renderer`). It talks to the same daemon, session, workspace files and `settings.json`, so
+`src/renderer`), which is deprecated in its favour. It talks to the same daemon, session, workspace files and `settings.json`, so
 both apps run side by side until the native one reaches parity. Crate layout and rules are in
 `AGENTS.md` ("Native app"); the full plan (milestones M0–M10) lives with the project notes.
 
