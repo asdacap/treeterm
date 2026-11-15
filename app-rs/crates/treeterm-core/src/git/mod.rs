@@ -367,6 +367,28 @@ impl Runner {
         ))
     }
 
+    /// Every worktree git knows of, detached ones included.
+    async fn worktree_paths(
+        &self,
+        repo_path: &str,
+        options: RunOptions<'_>,
+    ) -> Result<Vec<String>, GitError> {
+        let result = succeeded(
+            self.git_with(
+                repo_path,
+                owned!["worktree", "list", "--porcelain"],
+                options,
+            )
+            .await?,
+        )?;
+        Ok(result
+            .stdout
+            .lines()
+            .filter_map(|line| line.strip_prefix("worktree "))
+            .map(str::to_owned)
+            .collect())
+    }
+
     /// `$HOME` on the daemon's host (port of `renderer/lib/homedir.ts`).
     async fn resolve_homedir(&self) -> Result<String, GitError> {
         let result = self
@@ -743,14 +765,25 @@ impl GitApi {
             timeout: WORKTREE_REMOVE_TIMEOUT,
             progress,
         };
-        succeeded(
-            r.git_with(
+        let removed = r
+            .git_with(
                 repo_path,
                 owned!["worktree", "remove", worktree_path, "--force"],
                 remove,
             )
-            .await?,
-        )?;
+            .await?;
+        if removed.exit_code != 0 {
+            // Once git has forgotten the worktree (its directory deleted, then pruned), the
+            // removal fails with "'<path>' is not a working tree". Nothing is left to remove.
+            if r.worktree_paths(repo_path, step)
+                .await?
+                .iter()
+                .any(|path| path == worktree_path)
+            {
+                return Err(interpret_error(&removed).into());
+            }
+            tracing::warn!(stderr = %removed.stderr, %worktree_path, "[git] worktree already unknown to git; nothing to remove");
+        }
 
         if let Some(branch_name) = branch_name.filter(|name| !name.is_empty()) {
             match r

@@ -2057,10 +2057,93 @@ mod get_branches_in_worktrees {
 mod remove_worktree_failure_branches {
     use super::*;
 
+    /// `git worktree list --porcelain` with the worktree being removed still registered.
+    const LISTED: &str = "worktree /repo\nHEAD abc\nbranch refs/heads/main\n\nworktree /repo/.worktrees/feature\nHEAD def\nbranch refs/heads/feature\n\n";
+    const FORGOTTEN: &str = "fatal: '/repo/.worktrees/feature' is not a working tree";
+
+    #[test]
+    fn succeeds_when_git_has_already_forgotten_the_worktree() {
+        let exec = FakeExec::new(vec![
+            err(FORGOTTEN, 128),                                         // worktree remove
+            out("worktree /repo\nHEAD abc\nbranch refs/heads/main\n\n"), // worktree list
+        ]);
+        let git = api(&exec, FakeFs::missing());
+        run(git.remove_worktree(
+            "/repo",
+            "/repo/.worktrees/feature",
+            BranchDisposal::Keep,
+            Progress::Silent,
+        ))
+        .unwrap();
+        assert_nth_call(
+            &exec,
+            2,
+            "/repo",
+            "git",
+            &["worktree", "list", "--porcelain"],
+        );
+    }
+
+    #[test]
+    fn deletes_the_branch_when_git_has_already_forgotten_the_worktree() {
+        let exec = FakeExec::new(vec![
+            out("feature\n"),                                            // rev-parse
+            err(FORGOTTEN, 128),                                         // worktree remove
+            out("worktree /repo\nHEAD abc\nbranch refs/heads/main\n\n"), // worktree list
+            out(""),                                                     // branch -D
+        ]);
+        let git = api(&exec, FakeFs::missing());
+        run(git.remove_worktree(
+            "/repo",
+            "/repo/.worktrees/feature",
+            BranchDisposal::Delete,
+            Progress::Silent,
+        ))
+        .unwrap();
+        assert_nth_call(&exec, 4, "/repo", "git", &["branch", "-D", "feature"]);
+    }
+
+    #[test]
+    fn reports_the_removal_failure_while_git_still_has_a_detached_worktree() {
+        let exec = FakeExec::new(vec![
+            err("permission denied", 1), // worktree remove
+            out(
+                "worktree /repo\nHEAD abc\nbranch refs/heads/main\n\nworktree /repo/.worktrees/feature\nHEAD def\ndetached\n\n",
+            ), // worktree list
+        ]);
+        let git = api(&exec, FakeFs::missing());
+        let error = error_of(run(git.remove_worktree(
+            "/repo",
+            "/repo/.worktrees/feature",
+            BranchDisposal::Keep,
+            Progress::Silent,
+        )));
+        assert!(error.contains("permission denied"), "{error}");
+    }
+
+    #[test]
+    fn returns_failure_when_the_worktree_list_fails() {
+        let exec = FakeExec::new(vec![
+            err(FORGOTTEN, 128),              // worktree remove
+            err("not a git repository", 128), // worktree list
+        ]);
+        let git = api(&exec, FakeFs::missing());
+        assert!(
+            run(git.remove_worktree(
+                "/repo",
+                "/repo/.worktrees/feature",
+                BranchDisposal::Keep,
+                Progress::Silent
+            ))
+            .is_err()
+        );
+    }
+
     #[test]
     fn returns_failure_when_worktree_remove_fails() {
         let exec = FakeExec::new(vec![
             err("worktree is dirty", 1), // worktree remove fails
+            out(LISTED),                 // worktree list: git still has it
         ]);
         let git = api(&exec, FakeFs::missing());
         assert!(
@@ -2079,6 +2162,7 @@ mod remove_worktree_failure_branches {
         let exec = FakeExec::new(vec![
             out("feature\n"),            // rev-parse
             err("worktree is dirty", 1), // worktree remove fails
+            out(LISTED),                 // worktree list: git still has it
         ]);
         let git = api(&exec, FakeFs::missing());
         assert!(
@@ -2092,7 +2176,7 @@ mod remove_worktree_failure_branches {
         );
         assert_eq!(
             exec.calls().len(),
-            2,
+            3,
             "no branch deletion after a failed removal"
         );
     }

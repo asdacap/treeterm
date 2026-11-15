@@ -412,6 +412,54 @@ fn a_child_workspace_is_a_new_worktree_from_the_parent_branch(cx: &mut TestAppCo
     assert!(loaded_now(&store, cx, &root));
 }
 
+#[gpui_kit::test]
+fn a_child_whose_worktree_git_has_forgotten_still_closes(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    publish(&h, &[]);
+    let repo_name = format!("tt-test-{}", uuid::Uuid::new_v4().simple());
+    let repo = h.daemon.root().join(&repo_name);
+    let worktrees_home = dirs::home_dir().unwrap().join(".treeterm/worktrees").join(&repo_name);
+    struct Cleanup(std::path::PathBuf);
+    impl Drop for Cleanup {
+        fn drop(&mut self) {
+            if self.0.exists() && std::fs::remove_dir_all(&self.0).is_err() {
+                eprintln!("could not remove {}", self.0.display());
+            }
+        }
+    }
+    let _cleanup = Cleanup(worktrees_home.clone());
+    std::fs::create_dir_all(&repo).unwrap();
+    let git = |args: &[&str]| {
+        let out = std::process::Command::new("git").args(args).current_dir(&repo).output().unwrap();
+        assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+    git(&["init", "-q", "-b", "main"]);
+    git(&["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init"]);
+
+    let store = open_store(cx, &h, "client-a");
+    wait_until(cx, &store, |s| matches!(s.state(), SessionState::Live));
+    let root = store.update(cx, |s, cx| s.open_workspace(repo.to_string_lossy().into_owned(), cx));
+    wait_until(cx, &store, |s| loaded(s, &root));
+    let child = store.update(cx, |s, cx| s.add_child_workspace(&root, "gone".into(), false, None, cx)).unwrap();
+    wait_until(cx, &store, |s| loaded(s, &child));
+    let child_dir = worktrees_home.join("gone");
+    wait_for_disk(cx, || child_dir.exists());
+    // Wait for the lock to be released after publishing, so removal is not refused.
+    wait_until(cx, &store, |s| s.version() >= 5);
+
+    // The checkout is deleted by hand and git forgets it: `git worktree remove` now fails
+    // with "is not a working tree".
+    std::fs::remove_dir_all(&child_dir).unwrap();
+    git(&["worktree", "prune"]);
+    assert_eq!(git(&["worktree", "list", "--porcelain"]).matches("worktree ").count(), 1);
+
+    store.update(cx, |s, cx| s.remove_workspace(&child, RemoveMode::DeleteWorktreeAndBranch, cx));
+    wait_until(cx, &store, |s| s.entry(&child).is_none());
+    assert!(loaded_now(&store, cx, &root));
+}
+
 fn loaded_now(store: &Entity<SessionStore>, cx: &mut TestAppContext, id: &str) -> bool {
     store.read_with(cx, |s, _| loaded(s, id))
 }
