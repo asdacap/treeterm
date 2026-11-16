@@ -6,7 +6,8 @@
 //!
 //! Where the TS client resolved `{ success: false, error }`, these methods return
 //! `Err(GitError)` with the same message. The few TS methods that never fail keep doing so:
-//! [`GitApi::get_info`] reports a failure as [`GitInfo::NotRepo`].
+//! [`GitApi::get_info`] reports a failure as [`GitInfo::NotRepo`] ([`GitApi::read_info`]
+//! returns it).
 
 mod error;
 mod parse;
@@ -657,7 +658,7 @@ impl GitApi {
     /// Whether `dir_path` is in a git work tree, and its branch and main root. Any failure
     /// (including the daemon being unreachable) reads as [`GitInfo::NotRepo`], as in TS.
     pub async fn get_info(&self, dir_path: &str) -> GitInfo {
-        match self.try_get_info(dir_path).await {
+        match self.read_info(dir_path).await {
             Ok(info) => info,
             Err(error) => {
                 tracing::warn!(%error, "[git] getGitInfo failed, treating as non-repo");
@@ -666,7 +667,10 @@ impl GitApi {
         }
     }
 
-    async fn try_get_info(&self, dir_path: &str) -> Result<GitInfo, GitError> {
+    /// [`Self::get_info`], but failing to run git (the daemon unreachable, a timeout, a
+    /// directory that is gone) is an error instead of [`GitInfo::NotRepo`]: only git saying
+    /// `dir_path` is not in a work tree reads as one.
+    pub async fn read_info(&self, dir_path: &str) -> Result<GitInfo, GitError> {
         let r = &self.runner;
         let result = r
             .git(dir_path, owned!["rev-parse", "--is-inside-work-tree"])

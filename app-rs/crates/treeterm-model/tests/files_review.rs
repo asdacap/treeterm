@@ -2363,6 +2363,43 @@ fn the_workspaces_own_branch_changing_reloads_the_review(cx: &mut TestAppContext
 }
 
 #[gpui_kit::test]
+fn a_checkout_the_git_info_refresh_finds_reloads_the_review(cx: &mut TestAppContext) {
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let repo = TempRepo::new(&h);
+    repo.write("a.txt", "one\n");
+    repo.commit_all("base");
+    repo.git(&["checkout", "-q", "-b", "other"]);
+    repo.write("b.txt", "bee\n");
+    repo.commit_all("on other");
+    repo.git(&["checkout", "-q", "main"]);
+    repo.git(&["checkout", "-q", "-b", "feature"]);
+    repo.write("a.txt", "ONE\n");
+    repo.commit_all("on feature");
+    let store = open_store(cx, &h);
+    let workspace = open_repo_workspace(cx, &h, &store, &repo);
+    let (_, review) =
+        open_review_with(cx, &workspace, serde_json::json!({ "viewMode": "commits", "baseBranchOverride": "main" }));
+    let messages = |r: &ReviewModel| match r.content() {
+        ReviewContent::Commits(commits) => commits.into_iter().map(|c| c.message).collect::<Vec<_>>(),
+        _ => Vec::new(),
+    };
+    wait_review(cx, &review, "commits", |r, _| messages(r) == ["on feature"] && !r.is_loading());
+    // The git status refresh on load has recorded `feature` and finished.
+    let id = workspace.read_with(cx, |w, _| w.workspace().id.clone());
+    wait_until_app(cx, &store, |s, cx| {
+        s.workspace_store(&id).is_some_and(|w| w.read(cx).file().git_branch.as_deref() == Some("feature"))
+            && s.git_controller(&id).is_some_and(|c| !c.read(cx).is_refreshing())
+    });
+
+    // Checked out in the terminal; the AI going idle re-reads the git info.
+    repo.git(&["checkout", "-q", "other"]);
+    workspace.update(cx, |w, cx| w.refresh_git_info(cx));
+    wait_review(cx, &review, "the other branch", |r, _| messages(r) == ["on other"] && !r.is_loading());
+}
+
+#[gpui_kit::test]
 fn the_parents_branch_changing_keeps_the_review_and_moves_its_default_base(cx: &mut TestAppContext) {
     use treeterm_model::review::ReviewBase;
     let _serial = serial();

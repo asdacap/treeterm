@@ -881,23 +881,28 @@ impl WorkspaceStore {
         }
     }
 
-    /// The AI went idle or completed (`refreshGitInfo` + `refreshGit`): re-read the branch,
+    /// The AI went idle or completed (`refreshGitInfo` + `refreshGit`): re-read the git info,
     /// and have the session refresh the git status.
     pub fn refresh_git(&mut self, cx: &mut Context<Self>) {
-        self.refresh_git_branch(cx);
+        self.refresh_git_info(cx);
         cx.emit(WorkspaceEvent::GitRefreshRequested);
     }
 
-    /// Re-read the checked-out branch (the analyzer saw the program change things).
-    pub fn refresh_git_branch(&mut self, cx: &mut Context<Self>) {
+    /// `refreshGitInfo`: re-read whether the directory is a repo, its branch and its root
+    /// (the analyzer saw the program change things: a `git init`, a checkout). When git
+    /// cannot be run the recorded info stays; the status refresh that follows reports why.
+    pub fn refresh_git_info(&mut self, cx: &mut Context<Self>) {
         let git = self.conn.git();
         let path = self.workspace.path.clone();
         self._git_refresh = Some(cx.spawn(async move |this, cx| {
-            let info = git.get_info(&path).await;
-            match this.update(cx, |store, cx| match info {
-                treeterm_core::git::GitInfo::Repo { branch, .. } => store.set_git_branch(&branch, cx),
-                treeterm_core::git::GitInfo::NotRepo => {}
-            }) {
+            let info = match git.read_info(&path).await {
+                Ok(info) => info,
+                Err(error) => {
+                    tracing::warn!(%path, %error, "re-reading git info failed");
+                    return;
+                }
+            };
+            match this.update(cx, |store, cx| store.set_git_info(&info, cx)) {
                 Ok(()) | Err(_) => {} // Err: workspace gone
             }
         }));
@@ -2105,13 +2110,39 @@ impl WorkspaceStore {
         }
     }
 
-    /// Git reports another branch than the body records (`updateGitInfo`).
+    /// The checked-out branch is now `branch` (renamed, or read again before a worktree is
+    /// branched off it); [`Self::set_git_info`] records a whole re-read.
     pub fn set_git_branch(&mut self, branch: &str, cx: &mut Context<Self>) {
         if self.workspace.file.git_branch.as_deref() == Some(branch) {
             return;
         }
         self.workspace.file.git_branch = Some(branch.to_owned());
         self.reload_reviews_for_branch(cx);
+        self.changed(cx);
+    }
+
+    /// `updateGitInfo`: record what git reports for the directory: whether it is a repo, its
+    /// branch and its main root (neither outside a repo). Nothing is written when all three
+    /// are as recorded: git refreshes run often, and every write is a new body that other
+    /// windows apply.
+    pub fn set_git_info(&mut self, info: &treeterm_core::git::GitInfo, cx: &mut Context<Self>) {
+        use treeterm_core::git::GitInfo;
+        let (is_git_repo, git_branch, git_root_path) = match info {
+            GitInfo::NotRepo => (false, None, None),
+            GitInfo::Repo { branch, root_path } => (true, Some(branch), Some(root_path)),
+        };
+        let file = &self.workspace.file;
+        let branch_changed = file.git_branch.as_ref() != git_branch;
+        if file.is_git_repo == is_git_repo && !branch_changed && file.git_root_path.as_ref() == git_root_path {
+            return;
+        }
+        let file = &mut self.workspace.file;
+        file.is_git_repo = is_git_repo;
+        file.git_branch = git_branch.cloned();
+        file.git_root_path = git_root_path.cloned();
+        if branch_changed {
+            self.reload_reviews_for_branch(cx);
+        }
         self.changed(cx);
     }
 

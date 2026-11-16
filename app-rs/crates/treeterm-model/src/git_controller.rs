@@ -9,7 +9,7 @@ use futures::FutureExt as _;
 use futures::channel::oneshot;
 use futures::future::LocalBoxFuture;
 use gpui_kit::{AsyncApp, Context, Task, WeakEntity};
-use treeterm_core::git::{GitApi, GitInfo};
+use treeterm_core::git::GitApi;
 use treeterm_core::git_status::{
     DepError, GitControllerDeps, GitStatus, GitWorkspace, Next, RefreshScheduler, StatusGitApi, WorkingTree,
     refresh_git,
@@ -44,21 +44,20 @@ impl Deps {
             .flatten()
     }
 
-    /// `refreshGitInfo(id)`: re-read the branch and record it in the workspace body.
+    /// `refreshGitInfo(id)`: re-read whether the workspace's directory is a repo, its branch
+    /// and its root, and record them in the workspace body. When git cannot be run the
+    /// recorded info stays and the error is the step's failure (Electron recorded a
+    /// non-repo).
     fn refresh_info(&self, id: &str) -> LocalBoxFuture<'static, Result<(), DepError>> {
         let Some(workspace) = self.read(id) else {
             return async { Ok(()) }.boxed_local();
         };
         let (git, session, id, cx) = (self.git.clone(), self.session.clone(), id.to_owned(), self.cx.clone());
         async move {
-            let info = git.get_info(&workspace.path).await;
-            let branch = match info {
-                GitInfo::Repo { branch, .. } => branch,
-                GitInfo::NotRepo => return Ok(()),
-            };
+            let info = git.read_info(&workspace.path).await?;
             match session.update(&mut cx.clone(), |session, cx| {
                 if let Some(store) = session.workspace_store(&id).cloned() {
-                    store.update(cx, |w, cx| w.set_git_branch(&branch, cx));
+                    store.update(cx, |w, cx| w.set_git_info(&info, cx));
                 }
             }) {
                 Ok(()) | Err(_) => Ok(()), // Err: the session went away

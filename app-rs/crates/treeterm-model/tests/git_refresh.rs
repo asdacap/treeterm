@@ -2,6 +2,8 @@
 //! callers do: every workspace on load, every select (the shown one too), the AI going idle,
 //! Review's refresh / stage / unstage / commit, and merges (the parent, and a kept child).
 //! And the header's Pull (`pullFromRemote`), whose outcome the button alerts when it fails.
+//! And the git info a refresh re-reads first (`refreshGitInfo` → `updateGitInfo`): whether
+//! the directory is a repo, its branch and its root.
 //!
 //! The scheduler's clock is the test clock: within the cooldown since a run started,
 //! requests wait for [`cool_down`], so each check below sees what one trigger asked for.
@@ -13,6 +15,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use gpui_kit::{AppContext as _, Entity, Task, TestAppContext};
+use treeterm_core::git::GitInfo;
 use treeterm_core::git_status::{
     GitStatus, ParentConflicts, ParentDiff, REFRESH_COOLDOWN, WorkingTree,
 };
@@ -22,7 +25,7 @@ use treeterm_model::review::{GitOp, ReviewEvent, ReviewModel, StageTarget};
 use treeterm_model::session_store::{AfterMerge, SessionState, SessionStore, WorkspaceEntry};
 use treeterm_model::settings_store::SettingsStore;
 use treeterm_model::traffic::ConnectionTraffic;
-use treeterm_model::workspace_store::{MergeState, TabContent, WorkspaceStore};
+use treeterm_model::workspace_store::{MergeState, TabContent, WorkspaceEvent, WorkspaceStore};
 
 mod common;
 use common::{Harness, harness, wait_until, wait_until_app};
@@ -620,4 +623,230 @@ fn a_pull_whose_workspace_goes_first_says_so(cx: &mut TestAppContext) {
     drop(git);
     cx.update(|_| {});
     assert_eq!(finish(cx, pull), Err(PULL_GONE.to_owned()));
+}
+
+/// `(isGitRepo, gitBranch, gitRootPath)`.
+type GitInfoFields = (bool, Option<String>, Option<String>);
+
+const NOT_A_REPO: GitInfoFields = (false, None, None);
+
+/// A repo's fields, its root as git reports it (`/tmp` resolved on macOS).
+fn repo_fields(branch: &str, root: &Path) -> GitInfoFields {
+    let root = std::fs::canonicalize(root).unwrap();
+    (
+        true,
+        Some(branch.to_owned()),
+        Some(root.to_string_lossy().into_owned()),
+    )
+}
+
+/// What the workspace records of git.
+fn git_fields(w: &WorkspaceStore) -> GitInfoFields {
+    let file = w.file();
+    (
+        file.is_git_repo,
+        file.git_branch.clone(),
+        file.git_root_path.clone(),
+    )
+}
+
+/// What the workspace's written body says of git, a key left out as `None` (never `null`).
+fn git_fields_on_disk(h: &Harness, id: &str) -> GitInfoFields {
+    let bytes = std::fs::read(h.daemon.workspaces_dir().join(format!("{id}.json"))).unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    let text = |key: &str| {
+        body.get(key)
+            .map(|value| value.as_str().expect("a string, not null").to_owned())
+    };
+    (
+        body["isGitRepo"].as_bool().unwrap(),
+        text("gitBranch"),
+        text("gitRootPath"),
+    )
+}
+
+fn wait_fields_on_disk(
+    cx: &mut TestAppContext,
+    h: &Harness,
+    store: &Entity<SessionStore>,
+    id: &str,
+    fields: &GitInfoFields,
+) {
+    wait_until(cx, store, |_| git_fields_on_disk(h, id) == *fields);
+}
+
+/// A folder that is not a repo, in the daemon's temp root.
+fn new_folder(h: &Harness) -> PathBuf {
+    let path = h
+        .daemon
+        .root()
+        .join(format!("plain-{}", uuid::Uuid::new_v4().simple()));
+    std::fs::create_dir_all(&path).unwrap();
+    path
+}
+
+/// `git init` in `dir`, on `main` with one (empty) commit.
+fn init_repo(dir: &Path) {
+    git(dir, &["init", "-q", "-b", "main"]);
+    git(dir, &["config", "user.email", "t@t"]);
+    git(dir, &["config", "user.name", "t"]);
+    git(dir, &["commit", "-q", "--allow-empty", "-m", "init"]);
+}
+
+/// How often the workspace asks for its body to be written, from now on.
+fn count_writes(
+    cx: &mut TestAppContext,
+    workspace: &Entity<WorkspaceStore>,
+) -> (Rc<RefCell<usize>>, gpui_kit::Subscription) {
+    let writes = Rc::new(RefCell::new(0));
+    let counter = writes.clone();
+    let subscription = cx.update(|cx| {
+        cx.subscribe(workspace, move |_, event: &WorkspaceEvent, _| {
+            if matches!(event, WorkspaceEvent::Changed) {
+                *counter.borrow_mut() += 1;
+            }
+        })
+    });
+    (writes, subscription)
+}
+
+#[gpui_kit::test]
+fn a_folder_that_becomes_a_repo_records_its_git_info(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    publish_empty(&h);
+    let folder = new_folder(&h);
+    let store = open_store(cx, &h, "client-a");
+    let id = open(cx, &store, &folder);
+    settle(cx, &store, &[&id]);
+    let ws = workspace(cx, &store, &id);
+    assert_eq!(ws.read_with(cx, |w, _| git_fields(w)), NOT_A_REPO);
+
+    // `git init` in its terminal: the next refresh records the repo, its branch and root.
+    init_repo(&folder);
+    store.update(cx, |s, cx| s.refresh_git_status(&id, cx));
+    cool_down(cx);
+    let fields = repo_fields("main", &folder);
+    wait_until(cx, &ws, |w| git_fields(w) == fields);
+    wait_fields_on_disk(cx, &h, &store, &id, &fields);
+}
+
+#[gpui_kit::test]
+fn a_repo_that_stops_being_one_loses_its_git_info(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    publish_empty(&h);
+    let repo = new_repo(&h);
+    let store = open_store(cx, &h, "client-a");
+    let id = open(cx, &store, &repo);
+    settle(cx, &store, &[&id]);
+    let ws = workspace(cx, &store, &id);
+    assert_eq!(
+        ws.read_with(cx, |w, _| git_fields(w)),
+        repo_fields("main", &repo)
+    );
+
+    std::fs::remove_dir_all(repo.join(".git")).unwrap();
+    store.update(cx, |s, cx| s.refresh_git_status(&id, cx));
+    cool_down(cx);
+    wait_until(cx, &ws, |w| git_fields(w) == NOT_A_REPO);
+    // Written without the branch and root (never as `null`).
+    wait_fields_on_disk(cx, &h, &store, &id, &NOT_A_REPO);
+}
+
+#[gpui_kit::test]
+fn unchanged_git_info_writes_nothing(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    publish_empty(&h);
+    let repo = new_repo(&h);
+    let store = open_store(cx, &h, "client-a");
+    let id = open(cx, &store, &repo);
+    settle(cx, &store, &[&id]);
+    let ws = workspace(cx, &store, &id);
+    let (writes, _subscription) = count_writes(cx, &ws);
+    let root = std::fs::canonicalize(&repo)
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    let read = |root: &str| GitInfo::Repo {
+        branch: "main".to_owned(),
+        root_path: root.to_owned(),
+    };
+
+    // What every refresh of an unchanged repo reads.
+    ws.update(cx, |w, cx| w.set_git_info(&read(&root), cx));
+    assert_eq!(*writes.borrow(), 0);
+    // Any one field that changes is written.
+    ws.update(cx, |w, cx| w.set_git_info(&read("/moved"), cx));
+    assert_eq!(*writes.borrow(), 1);
+    assert_eq!(
+        ws.read_with(cx, |w, _| git_fields(w)),
+        (true, Some("main".to_owned()), Some("/moved".to_owned()))
+    );
+    ws.update(cx, |w, cx| w.set_git_info(&GitInfo::NotRepo, cx));
+    ws.update(cx, |w, cx| w.set_git_info(&GitInfo::NotRepo, cx));
+    assert_eq!(*writes.borrow(), 2);
+}
+
+#[gpui_kit::test]
+fn git_info_that_cannot_be_read_stays_and_the_refresh_says_why(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    publish_empty(&h);
+    let repo = new_repo(&h);
+    let store = open_store(cx, &h, "client-a");
+    let id = open(cx, &store, &repo);
+    settle(cx, &store, &[&id]);
+    let ws = workspace(cx, &store, &id);
+    let fields = repo_fields("main", &repo);
+    assert_eq!(ws.read_with(cx, |w, _| git_fields(w)), fields);
+
+    // Git cannot even start there (Electron read any failure as "not a repo").
+    std::fs::remove_dir_all(&repo).unwrap();
+    store.update(cx, |s, cx| s.refresh_git_status(&id, cx));
+    cool_down(cx);
+    wait_until_app(cx, &store, |s, cx| {
+        s.git_controller(&id).is_some_and(|c| {
+            c.read(cx)
+                .failures()
+                .iter()
+                .any(|f| f.starts_with("refreshing the workspace's branch failed: "))
+        })
+    });
+    assert_eq!(ws.read_with(cx, |w, _| git_fields(w)), fields);
+}
+
+#[gpui_kit::test]
+fn the_ai_going_idle_records_the_git_info(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    publish_empty(&h);
+    let folder = new_folder(&h);
+    let store = open_store(cx, &h, "client-a");
+    let id = open(cx, &store, &folder);
+    settle(cx, &store, &[&id]);
+    let ws = workspace(cx, &store, &id);
+
+    // What `AnalyzerEvent::RefreshGit` runs before it asks for the status refresh.
+    init_repo(&folder);
+    ws.update(cx, |w, cx| w.refresh_git_info(cx));
+    let fields = repo_fields("main", &folder);
+    wait_until(cx, &ws, |w| git_fields(w) == fields);
+
+    std::fs::remove_dir_all(folder.join(".git")).unwrap();
+    ws.update(cx, |w, cx| w.refresh_git_info(cx));
+    wait_until(cx, &ws, |w| git_fields(w) == NOT_A_REPO);
+
+    // A directory git cannot run in leaves it as it was.
+    init_repo(&folder);
+    ws.update(cx, |w, cx| w.refresh_git_info(cx));
+    wait_until(cx, &ws, |w| git_fields(w) == fields);
+    std::fs::remove_dir_all(&folder).unwrap();
+    ws.update(cx, |w, cx| w.refresh_git_info(cx));
+    for _ in 0..30 {
+        cx.run_until_parked();
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(ws.read_with(cx, |w, _| git_fields(w)), fields);
 }

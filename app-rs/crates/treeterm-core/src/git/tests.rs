@@ -584,6 +584,60 @@ mod get_info {
     }
 }
 
+mod read_info {
+    use super::*;
+
+    #[test]
+    fn a_directory_outside_a_work_tree_is_not_a_repo() {
+        let exec = FakeExec::new(vec![err("not a git repository", 128)]);
+        let git = api(&exec, FakeFs::missing());
+        assert_eq!(run(git.read_info("/plain")).unwrap(), GitInfo::NotRepo);
+    }
+
+    #[test]
+    fn reads_the_branch_and_the_main_root() {
+        let exec = FakeExec::new(vec![
+            out("true"),
+            out("feature"),
+            out("worktree /repo\n"),
+            out("/repo/.worktrees/feature"),
+        ]);
+        let git = api(&exec, FakeFs::missing());
+        assert_eq!(
+            run(git.read_info("/repo/.worktrees/feature")).unwrap(),
+            GitInfo::Repo {
+                branch: "feature".to_owned(),
+                root_path: "/repo".to_owned()
+            }
+        );
+    }
+
+    #[test]
+    fn failing_to_run_git_is_an_error_not_a_non_repo() {
+        // The daemon could not start git (its cwd is gone, say).
+        let exec = FakeExec::always(Completion::ErrorEvent(
+            "spawn error: No such file or directory".to_owned(),
+        ));
+        let git = api(&exec, FakeFs::missing());
+        assert_eq!(
+            error_of(run(git.read_info("/gone"))),
+            "spawn error: No such file or directory"
+        );
+        // get_info still reads it as a non-repo, as in TS.
+        assert_eq!(run(git.get_info("/gone")), GitInfo::NotRepo);
+    }
+
+    #[test]
+    fn an_unreachable_daemon_is_an_error() {
+        let exec = FakeExec::always(reject("daemon crash"));
+        let git = api(&exec, FakeFs::missing());
+        assert!(
+            error_of(run(git.read_info("/repo"))).contains("daemon crash"),
+            "an error"
+        );
+    }
+}
+
 mod has_uncommitted_changes {
     use super::*;
 

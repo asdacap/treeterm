@@ -20,9 +20,11 @@ use treeterm_proto::treeterm::WorkspaceRef;
 mod common;
 use common::{Harness, Proxy, harness, recv, refusing_daemon, wait_until, wait_until_app};
 
+/// A body for a workspace in a folder that is no repo, as [`publish`] places it: the git
+/// info read on load finds it as recorded, so nothing is written.
 fn body(name: &str, parent: Option<&str>) -> String {
     let mut json = serde_json::json!({
-        "name": name, "status": "active", "isGitRepo": true, "isWorktree": parent.is_some(),
+        "name": name, "status": "active", "isGitRepo": false, "isWorktree": parent.is_some(),
         "appStates": {}, "metadata": {}, "createdAt": 1, "lastActivity": 1, "parentHash": ""
     });
     if let Some(parent) = parent {
@@ -33,6 +35,19 @@ fn body(name: &str, parent: Option<&str>) -> String {
 
 fn publish(h: &Harness, ids: &[&str]) {
     let path = h.daemon.root().to_string_lossy().into_owned();
+    let refs = ids
+        .iter()
+        .map(|id| WorkspaceRef { id: (*id).into(), path: path.clone() })
+        .collect();
+    futures::executor::block_on(h.conn.update_session(refs, None, "test-writer"))
+        .unwrap()
+        .unwrap();
+}
+
+/// [`publish`] in a directory that is gone: git cannot run there, so the git info read on
+/// load keeps the git fields the bodies make up.
+fn publish_gone(h: &Harness, ids: &[&str]) {
+    let path = h.daemon.root().join("gone").to_string_lossy().into_owned();
     let refs = ids
         .iter()
         .map(|id| WorkspaceRef { id: (*id).into(), path: path.clone() })
@@ -1667,7 +1682,7 @@ fn a_close_and_clean_that_cannot_run_shows_on_the_workspace_and_frees_the_review
     });
     std::fs::write(h.daemon.workspaces_dir().join("root.json"), root.to_string()).unwrap();
     std::fs::write(h.daemon.workspaces_dir().join("child.json"), detached_body("child", true, "root")).unwrap();
-    publish(&h, &["root", "child"]);
+    publish_gone(&h, &["root", "child"]);
     let store = open_store(cx, &h, "client-a");
     wait_until(cx, &store, |s| loaded(s, "root") && loaded(s, "child"));
     // Another connection holds the session lock: the removal cannot start.
@@ -1889,9 +1904,14 @@ fn a_quick_fork_that_cannot_run_says_why_and_adds_nothing(cx: &mut TestAppContex
     std::fs::write(dir.join("rootless.json"), body("rootless", None)).unwrap();
     std::fs::write(dir.join("unlisted.json"), with_root("unlisted", true, &not_a_repo)).unwrap();
     std::fs::write(dir.join("plain.json"), with_root("plain", false, &repo.path)).unwrap();
-    publish(&h, &["rootless", "unlisted", "plain"]);
+    publish_gone(&h, &["rootless", "unlisted", "plain"]);
     let store = open_store(cx, &h, "client-a");
-    wait_until(cx, &store, |s| ["rootless", "unlisted", "plain"].iter().all(|id| loaded(s, id)));
+    wait_until_app(cx, &store, |s, cx| {
+        ["rootless", "unlisted", "plain"].iter().all(|id| {
+            loaded(s, id)
+                && s.git_controller(id).is_some_and(|c| !c.read(cx).failures().is_empty() && !c.read(cx).is_refreshing())
+        })
+    });
 
     let fork = |cx: &mut TestAppContext, id: &str| {
         let forked = store.update(cx, |s, cx| s.quick_fork(id, cx));
