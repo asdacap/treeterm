@@ -223,4 +223,35 @@ mod tests {
         cx.run_until_parked();
         assert_eq!(field(cx), "/home/me");
     }
+
+    /// "Choose file...": the open panel's file (`dialog:selectFile`: one file, with the default
+    /// "Open" button) fills the local field; a cancelled panel keeps the file chosen before.
+    #[gpui_kit::test]
+    fn a_chosen_file_fills_the_local_field(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        cx.update(crate::theme::install);
+        let model = cx.new(|cx| SshUpload::new(None, cx));
+        let (view, cx) = cx.add_window_view({
+            let model = model.clone();
+            move |window, cx| SshUploadView::new(model, window, cx)
+        });
+        let field = |cx: &mut VisualTestContext| {
+            cx.update(|_, cx| view.read(cx).local_path.read(cx).value().to_string())
+        };
+        assert_eq!(field(cx), "");
+
+        for answer in [Some("/home/me/notes.txt"), None] {
+            cx.update(|window, cx| view.update(cx, |view, cx| view.choose_file(window, cx)));
+            assert!(cx.did_prompt_for_paths(), "{answer:?}");
+            cx.simulate_path_prompt_response(|options| {
+                assert!(options.files, "{answer:?}");
+                assert!(!options.directories, "{answer:?}");
+                assert!(!options.multiple, "{answer:?}");
+                assert_eq!(options.prompt, None, "{answer:?}");
+                answer.map(|path| vec![std::path::PathBuf::from(path)])
+            });
+            cx.run_until_parked();
+            assert_eq!(field(cx), "/home/me/notes.txt", "{answer:?}");
+        }
+    }
 }

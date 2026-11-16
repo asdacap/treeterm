@@ -130,6 +130,16 @@ impl OpenWorkspaceDialog {
         matches!(self.picker, Picker::Native { picking: true, .. })
     }
 
+    /// The "Browse..." button's text: "Opening..." while the native picker is up, "Hide"
+    /// while the remote browser is shown.
+    fn browse_label(&self) -> &'static str {
+        match &self.picker {
+            Picker::Native { picking: true, .. } => "Opening...",
+            Picker::Remote { browser: Inline::Shown { .. }, .. } => "Hide",
+            Picker::Native { picking: false, .. } | Picker::Remote { browser: Inline::Hidden, .. } => "Browse...",
+        }
+    }
+
     /// `handleOpen`: the workspace opens with the chosen default application as its own.
     fn open_selected(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let path = self.selected(cx);
@@ -350,11 +360,7 @@ impl Render for OpenWorkspaceDialog {
         let (primary, secondary, border, hover, tertiary) =
             (c.text_primary, c.text_secondary, c.border, c.bg_hover, c.bg_tertiary);
         let picking = self.picking();
-        let label = match &self.picker {
-            Picker::Native { picking: true, .. } => "Opening...",
-            Picker::Remote { browser: Inline::Shown { .. }, .. } => "Hide",
-            Picker::Native { picking: false, .. } | Picker::Remote { browser: Inline::Hidden, .. } => "Browse...",
-        };
+        let label = self.browse_label();
         // `.open-workspace-dialog .dialog-btn.browse`: bg-tertiary with a border; disabled
         // while the native picker is up.
         let browse = ui::key_button("browse", 4., window, cx)
@@ -453,6 +459,7 @@ fn show(view: Entity<OpenWorkspaceDialog>, window: &mut Window, cx: &mut App) {
 #[cfg(test)]
 mod tests {
     use std::cell::RefCell;
+    use std::path::PathBuf;
     use std::rc::Rc;
 
     use gpui_kit::{
@@ -479,6 +486,8 @@ mod tests {
         dialog: Entity<OpenWorkspaceDialog>,
         /// The paths it opened.
         opened: Rc<RefCell<Vec<String>>>,
+        /// `settings.json`, in memory: where a folder picked by "Browse..." is recorded.
+        settings: Entity<SettingsStore>,
     }
 
     /// A window showing Open Workspace on this machine with `recent` offered.
@@ -496,14 +505,15 @@ mod tests {
         let on_open: OnOpen = Rc::new(move |path, _, _, _| sink.borrow_mut().push(path));
         let recent = recent.iter().map(|dir| (*dir).to_owned()).collect();
         let choices = vec![DefaultAppChoice { id: String::new(), label: "Use Global Default".to_owned() }];
-        let dialog = cx.update(|window, cx| {
-            let location = Location::Local(cx.new(|_| SettingsStore::in_memory(Settings::default())));
+        let (dialog, settings) = cx.update(|window, cx| {
+            let settings = cx.new(|_| SettingsStore::in_memory(Settings::default()));
+            let location = Location::Local(settings.clone());
             let dialog = cx.new(|cx| OpenWorkspaceDialog::new(location, recent, choices, on_open, window, cx));
             show(dialog.clone(), window, cx);
-            dialog
+            (dialog, settings)
         });
         draw(cx);
-        Shown { cx, dialog, opened }
+        Shown { cx, dialog, opened, settings }
     }
 
     /// Which recent rows have the focus, in order.
@@ -529,6 +539,41 @@ mod tests {
         cx.update(gpui_kit::component::WindowExt::has_active_dialog)
     }
 
+    /// Tab from the folder field to "Browse..." and press it with Space (Enter would open the
+    /// typed folder: `handleKeyDown`).
+    fn press_browse(cx: &mut VisualTestContext) {
+        press("tab", cx);
+        press("space", cx);
+    }
+
+    /// Answer the open panel "Browse..." showed with `folder`, or cancel it. It is
+    /// `dialog:selectFolder`'s: one folder, with the default "Open" button (Electron sets no
+    /// `buttonLabel`). A test window has no AppKit window to attach a sheet to, so the panel
+    /// is GPUI's, which the test platform answers.
+    fn answer_panel(folder: Option<&str>, cx: &mut VisualTestContext) {
+        assert!(cx.did_prompt_for_paths(), "Browse... shows the open panel");
+        cx.simulate_path_prompt_response(|options| {
+            assert!(options.directories, "folders can be chosen");
+            assert!(!options.files, "files cannot be chosen");
+            assert!(!options.multiple, "one folder");
+            assert_eq!(options.prompt, None, "the default \"Open\" button");
+            folder.map(|folder| vec![PathBuf::from(folder)])
+        });
+        draw(cx);
+    }
+
+    fn browse_label(dialog: &Entity<OpenWorkspaceDialog>, cx: &mut VisualTestContext) -> &'static str {
+        cx.update(|_, cx| dialog.read(cx).browse_label())
+    }
+
+    fn selected(dialog: &Entity<OpenWorkspaceDialog>, cx: &mut VisualTestContext) -> String {
+        cx.update(|_, cx| dialog.read(cx).selected(cx))
+    }
+
+    fn recent_directories(settings: &Entity<SettingsStore>, cx: &mut VisualTestContext) -> Vec<String> {
+        cx.update(|_, cx| settings.read(cx).settings().recent_directories.clone())
+    }
+
     #[gpui_kit::test]
     fn enter_opens_the_typed_folder_once(cx: &mut TestAppContext) {
         let Shown { cx, opened, .. } = open_dialog(&[], cx);
@@ -545,7 +590,7 @@ mod tests {
     #[gpui_kit::test]
     fn enter_presses_a_focused_button_until_a_folder_is_chosen(cx: &mut TestAppContext) {
         for key in ["enter", "space"] {
-            let Shown { cx, dialog, opened } = open_dialog(&["/home/me/src", "/home/me/web"], cx);
+            let Shown { cx, dialog, opened, .. } = open_dialog(&["/home/me/src", "/home/me/web"], cx);
             assert_eq!(focused_rows(&dialog, cx), vec![false, false], "{key}");
             // Back from the folder field to the last recent row.
             press("shift-tab", cx);
@@ -564,7 +609,7 @@ mod tests {
     /// opens the folder.
     #[gpui_kit::test]
     fn a_clicked_recent_row_takes_the_focus(cx: &mut TestAppContext) {
-        let Shown { cx, dialog, opened } = open_dialog(&["/home/me/src", "/home/me/web"], cx);
+        let Shown { cx, dialog, opened, .. } = open_dialog(&["/home/me/src", "/home/me/web"], cx);
         let row = cx.debug_bounds("recent-0").expect("the first recent row is drawn");
         cx.simulate_click(row.center(), Modifiers::none());
         draw(cx);
@@ -586,6 +631,43 @@ mod tests {
             assert!(opened.borrow().is_empty(), "{key}");
             assert!(!is_open(cx), "{key}");
         }
+    }
+
+    /// "Browse..." shows the open panel and reads "Opening..." until it closes, while Enter
+    /// opens nothing (`isSelecting`). The chosen folder replaces the typed path and goes to
+    /// the front of `settings.json`'s recent directories (`dialog:selectFolder`).
+    #[gpui_kit::test]
+    fn a_browsed_folder_replaces_the_typed_path_and_is_recent(cx: &mut TestAppContext) {
+        let Shown { cx, dialog, opened, settings } = open_dialog(&[], cx);
+        cx.simulate_input("/srv/typed");
+        draw(cx);
+        press_browse(cx);
+        assert_eq!(browse_label(&dialog, cx), "Opening...");
+        press("enter", cx);
+        assert!(opened.borrow().is_empty());
+        assert!(is_open(cx));
+
+        answer_panel(Some("/home/me/chosen"), cx);
+        assert_eq!(selected(&dialog, cx), "/home/me/chosen");
+        assert_eq!(recent_directories(&settings, cx), vec!["/home/me/chosen".to_owned()]);
+        assert_eq!(browse_label(&dialog, cx), "Browse...");
+        assert!(opened.borrow().is_empty());
+        assert!(is_open(cx));
+    }
+
+    /// A cancelled open panel keeps the typed path and records no recent directory.
+    #[gpui_kit::test]
+    fn a_cancelled_browse_keeps_the_typed_path(cx: &mut TestAppContext) {
+        let Shown { cx, dialog, settings, .. } = open_dialog(&[], cx);
+        cx.simulate_input("/srv/typed");
+        draw(cx);
+        press_browse(cx);
+        assert_eq!(browse_label(&dialog, cx), "Opening...");
+
+        answer_panel(None, cx);
+        assert_eq!(selected(&dialog, cx), "/srv/typed");
+        assert_eq!(recent_directories(&settings, cx), Vec::<String>::new());
+        assert_eq!(browse_label(&dialog, cx), "Browse...");
     }
 
     #[test]
