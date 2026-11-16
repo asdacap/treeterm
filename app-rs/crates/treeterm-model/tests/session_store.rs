@@ -981,7 +981,7 @@ fn an_ai_harness_tab_says_it_is_starting_and_that_a_state_without_a_sandbox_is_i
 }
 
 #[gpui_kit::test]
-fn a_ghostty_tab_copies_its_selection_as_it_is_made(cx: &mut TestAppContext) {
+fn a_ghostty_tab_is_named_terminal_ghostty_and_copies_its_selection_as_it_is_made(cx: &mut TestAppContext) {
     use treeterm_model::terminal::SelectionCopy;
     cx.executor().allow_parking();
     let h = harness();
@@ -994,6 +994,9 @@ fn a_ghostty_tab_copies_its_selection_as_it_is_made(cx: &mut TestAppContext) {
     let workspace = store.read_with(cx, |s, _| ws(s, "a"));
     let ghostty = workspace.update(cx, |w, cx| w.add_tab("ghostty-terminal", cx)).unwrap();
     let shell = workspace.update(cx, |w, cx| w.add_tab("terminal", cx)).unwrap();
+    let title = |cx: &mut TestAppContext, tab: &str| workspace.read_with(cx, |w, _| w.file().app_states[tab].title.clone());
+    assert_eq!(title(cx, &ghostty), "Terminal (Ghostty) 1");
+    assert_eq!(title(cx, &shell), "Terminal 1");
     wait_until(cx, &workspace, |w| terminal_of(w, &ghostty).is_some() && terminal_of(w, &shell).is_some());
     let copy = |cx: &mut TestAppContext, tab: &str| {
         let terminal = workspace.read_with(cx, |w, _| terminal_of(w, tab).unwrap());

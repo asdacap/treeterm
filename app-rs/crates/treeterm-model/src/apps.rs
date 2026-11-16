@@ -442,21 +442,22 @@ pub struct AppRegistry {
 impl AppRegistry {
     /// Built-ins first, then the variants from settings, in Electron's registration order.
     pub fn from_settings(settings: &Settings) -> Self {
-        let terminal = |id: &str, show: bool| AppDef {
+        let terminal = |id: &str, name: &str, icon: &str, is_default: bool| AppDef {
             id: id.to_owned(),
-            name: "Terminal".to_owned(),
-            icon: ">".to_owned(),
+            name: name.to_owned(),
+            icon: icon.to_owned(),
             kind: AppKind::Terminal {
                 startup_command: None,
             },
             can_close: true,
-            show_in_new_tab_menu: show,
-            is_default: show,
+            show_in_new_tab_menu: true,
+            is_default,
         };
         let mut apps = vec![
-            terminal("terminal", true),
-            // The Electron app's alternate terminal frontend; natively it is the same terminal.
-            terminal(GHOSTTY_TERMINAL, false),
+            terminal("terminal", "Terminal", ">", true),
+            // Electron draws these tabs with ghostty-web; natively they open the same terminal
+            // as Terminal, copying a selection as it is made (`selection_copy`).
+            terminal(GHOSTTY_TERMINAL, "Terminal (Ghostty)", "\u{1F47B}", false),
             AppDef {
                 id: "filesystem".to_owned(),
                 name: "Files".to_owned(),
@@ -934,16 +935,24 @@ mod tests {
     }
 
     #[test]
-    fn the_ghostty_alias_is_hidden_from_the_menu() {
+    fn ghostty_terminal_is_offered_as_terminal_ghostty() {
         let registry = AppRegistry::from_settings(&Settings::default());
-        assert!(registry.get("ghostty-terminal").is_some());
         let menu: Vec<_> = registry.new_tab_menu().map(|app| app.id.as_str()).collect();
         // Electron's default settings carry one AI harness ("Claude").
         let expected = [
-            "terminal", "filesystem", "review", "comments", "chat", "system-prompt-debugger", "github", "tty-list",
-            "ssh-upload", "aiharness-claude",
+            "terminal", "ghostty-terminal", "filesystem", "review", "comments", "chat", "system-prompt-debugger",
+            "github", "tty-list", "ssh-upload", "aiharness-claude",
         ];
         assert_eq!(menu, expected);
+
+        let ghostty = registry.get(GHOSTTY_TERMINAL).unwrap();
+        assert_eq!((ghostty.name.as_str(), ghostty.icon.as_str()), ("Terminal (Ghostty)", "\u{1F47B}"));
+        assert_eq!(ghostty.kind, AppKind::Terminal { startup_command: None });
+        assert!(ghostty.can_close && !ghostty.is_default);
+        let terminal = registry.get("terminal").unwrap();
+        assert_eq!((terminal.name.as_str(), terminal.icon.as_str()), ("Terminal", ">"));
+        assert!(terminal.is_default);
+        assert_eq!(registry.default_app().map(|app| app.id.as_str()), Some("terminal"));
     }
 
     #[test]

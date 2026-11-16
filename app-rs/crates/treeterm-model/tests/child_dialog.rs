@@ -469,6 +469,7 @@ fn open_existing_waits_in_the_dialog_and_uses_the_chosen_application(cx: &mut Te
     loaded(cx, &model);
     let apps = model.read_with(cx, |m, cx| m.available_apps(cx));
     assert!(apps.iter().any(|(id, _)| id == "filesystem"), "{apps:?}");
+    assert!(apps.iter().any(|(id, name)| id == "ghostty-terminal" && name == "Terminal (Ghostty)"), "{apps:?}");
     model.update(cx, |m, cx| {
         m.pick(&side, "", "", cx);
         m.set_app_choice(AppChoice::Custom(Some("filesystem".into())), cx);

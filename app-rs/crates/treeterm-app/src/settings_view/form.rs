@@ -879,6 +879,8 @@ mod tests {
                 "aiharness-claude"
             ]
         );
+        assert_eq!(default_app_label(&choices, "terminal"), "Terminal");
+        assert_eq!(default_app_label(&choices, "ghostty-terminal"), "Terminal (Ghostty)");
         assert_eq!(default_app_label(&choices, "terminal-term-1"), "Zsh");
         assert_eq!(default_app_label(&choices, "webapp-next"), "webapp-next (not available)");
     }

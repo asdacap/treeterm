@@ -41,6 +41,7 @@ mod tests {
         assert_eq!(choices[0].id, "");
         assert_eq!(default_app_label(&choices, ""), "Use Global Default");
         assert_eq!(default_app_label(&choices, "filesystem"), "Files");
+        assert_eq!(default_app_label(&choices, "ghostty-terminal"), "Terminal (Ghostty)");
         assert_eq!(default_app_label(&choices, "webapp-next"), "webapp-next (not available)");
         assert!(!choices.iter().any(|choice| choice.id == "workspace-settings"));
     }

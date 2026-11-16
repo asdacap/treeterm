@@ -564,8 +564,9 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   only to an `http(s)` URI, as in xterm.js, also where Electron's Ghostty tabs opened any.
 - A double-click, or a right-click on macOS, on an OSC 8 hyperlink selects the word under the
   pointer, as on any other text. xterm.js selected the hyperlink's whole text.
-- Electron's Ghostty tabs (`ghostty-terminal`, drawn by ghostty-web there) open as the native
-  terminal. They copy a selection to the clipboard as a drag, double-click or triple-click
+- "Terminal (Ghostty)" tabs (`ghostty-terminal`, 👻, offered in the new-tab menu as in
+  Electron, which draws them with ghostty-web) run in the same native terminal as
+  "Terminal". They copy a selection to the clipboard as a drag, double-click or triple-click
   makes it, as ghostty-web does (it has no triple-click), but otherwise select as xterm.js
   does (its word separators, Shift+click, Alt+drag and Alt+click, the macOS right-click). A
   plain click copies nothing; ghostty-web copied the character under it.
