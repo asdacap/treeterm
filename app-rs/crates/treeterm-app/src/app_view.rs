@@ -702,7 +702,7 @@ impl AppView {
         if flashing {
             window.request_animation_frame();
         }
-        let sound_toggle = self.sound_toggle(crate::ui::icon_button("sound-toggle", cx), primary, cx);
+        let sound_toggle = self.sound_toggle(primary, cx);
         v_flex()
             .h_full()
             .w(px(36.))
@@ -730,19 +730,15 @@ impl AppView {
             .into_any_element()
     }
 
-    /// `SoundToggle` (`.sound-toggle`): `button` (with the caller's tooltip) shows whether the
-    /// attention sound is on and toggles it. While the toggle saves, it spins (the store
-    /// ignores clicks). Its status box is drawn by [`Self::sound_status`], under where this was
-    /// laid out.
-    fn sound_toggle(
-        &self,
-        button: gpui_kit::Stateful<gpui_kit::Div>,
-        color: gpui_kit::Hsla,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
+    /// `SoundToggle` (`.sound-toggle`), the same in the expanded and the collapsed sidebar:
+    /// shows whether the attention sound is on, says so in its tooltip and toggles it. While
+    /// the toggle saves, it spins (the store ignores clicks). Its status box is drawn by
+    /// [`Self::sound_status`], under where this was laid out.
+    fn sound_toggle(&self, color: gpui_kit::Hsla, cx: &mut Context<Self>) -> AnyElement {
         use treeterm_model::settings_store::SoundSave;
         let store = self.settings.read(cx);
         let on = store.settings().notifications.sound_enabled;
+        let label = if on { "Mute workspace notification sounds" } else { "Enable workspace notification sounds" };
         let volume = || crate::ui::icon(if on { IconName::Volume2 } else { IconName::VolumeX }, 14., color).into_any_element();
         let (icon, status_shown) = match store.sound_save() {
             SoundSave::Idle => (volume(), false),
@@ -781,7 +777,8 @@ impl AppView {
             .relative()
             .flex()
             .child(
-                button
+                crate::ui::icon_button("sound-toggle", cx)
+                    .tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(label).build(window, cx))
                     .child(icon)
                     .on_click(cx.listener(|view, _, _, cx| view.settings.update(cx, |store, cx| store.toggle_sound(cx)))),
             )
@@ -849,7 +846,6 @@ impl AppView {
         for (id, name, tree) in sections {
             list = list.child(self.session_drag_handle(id, name, tree.into_any_element(), cx));
         }
-        let on = self.settings.read(cx).settings().notifications.sound_enabled;
         let tip = |text: &'static str| move |window: &mut Window, cx: &mut App| gpui_kit::component::tooltip::Tooltip::new(text).build(window, cx);
         v_flex()
             .h_full()
@@ -867,12 +863,7 @@ impl AppView {
                     .items_center()
                     .border_b_1()
                     .border_color(border)
-                    .child(self.sound_toggle(
-                        crate::ui::icon_button("sound-toggle", cx)
-                            .tooltip(tip(if on { "Mute workspace attention sound" } else { "Unmute workspace attention sound" })),
-                        fg,
-                        cx,
-                    ))
+                    .child(self.sound_toggle(fg, cx))
                     .child(crate::ui::caps_title("Sessions", cx))
                     .child(
                         h_flex()
