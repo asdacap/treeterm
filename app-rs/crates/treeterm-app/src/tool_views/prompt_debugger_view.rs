@@ -5,7 +5,7 @@ use gpui_kit::component::input::{InputEvent, InputState, TextareaState};
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::*;
-use gpui_kit::{AnyElement, Context, Entity, FontWeight, Subscription, Window, div, px, rgb};
+use gpui_kit::{AnyElement, Context, Entity, FocusHandle, FontWeight, Subscription, Window, div, px, rgb};
 use treeterm_core::settings::ClassifierProvider;
 use treeterm_model::settings_store::SettingsStore;
 use treeterm_model::tool_tabs::prompt_debugger::{DebugMode, PromptDebugger, PromptDebuggerEvent, REASONING_CHOICES};
@@ -30,6 +30,11 @@ pub struct PromptDebuggerView {
     analyzer: ModeInputs,
     title: ModeInputs,
     buffer: Entity<TextareaState>,
+    /// The pane's own focus. A mouse-down anywhere in the pane but a field moves focus here
+    /// (Electron: a mousedown on non-editable content blurs the textarea), so after a drag
+    /// over the output Cmd/Ctrl+C reaches the Kit root's Copy rather than the field, whose
+    /// Copy takes the keystroke even with nothing selected.
+    focus: FocusHandle,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -79,7 +84,7 @@ impl PromptDebuggerView {
             }
             PromptDebuggerEvent::SetActivity { .. } => {}
         }));
-        Self { model, settings, analyzer, title, buffer, _subscriptions: subscriptions }
+        Self { model, settings, analyzer, title, buffer, focus: cx.focus_handle(), _subscriptions: subscriptions }
     }
 
     fn inputs(&self, mode: DebugMode) -> &ModeInputs {
@@ -158,6 +163,7 @@ impl Render for PromptDebuggerView {
         };
         v_flex()
             .id("prompt-debugger")
+            .track_focus(&self.focus)
             .size_full()
             .p(px(16.))
             .gap(px(12.))
@@ -266,5 +272,105 @@ impl Render for PromptDebuggerView {
                         .child(SelectableText::new("debugger-result", result)),
                 )
             })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui_kit::base::TextSelection;
+    use gpui_kit::test::TestQueryExt as _;
+    use gpui_kit::{
+        Focusable as _, Modifiers, MouseButton, Pixels, Point, TestAppContext, VisualTestContext, WeakEntity, WindowOptions, point,
+    };
+    use treeterm_core::settings::Settings;
+
+    use super::*;
+
+    const COPY: &str = if cfg!(target_os = "macos") { "cmd-c" } else { "ctrl-c" };
+    const PASTE: &str = if cfg!(target_os = "macos") { "cmd-v" } else { "ctrl-v" };
+
+    fn draw(cx: &mut VisualTestContext) {
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+    }
+
+    /// The left end of the first line below `top` that a drag selects text in (hit testing
+    /// follows the pointer, so the pointer moves down until it is over text).
+    fn first_selectable_line(top: Pixels, cx: &mut VisualTestContext) -> Point<Pixels> {
+        (0..200)
+            .map(|dy| point(px(16.5), top + px(dy as f32)))
+            .find(|at| {
+                cx.simulate_mouse_move(*at, None, Modifiers::none());
+                cx.update(|window, cx| TextSelection::is_selectable_at(*at, window, cx))
+            })
+            .expect("selectable text below the buffer")
+    }
+
+    fn buffer_focused(view: &Entity<PromptDebuggerView>, cx: &mut VisualTestContext) -> bool {
+        cx.update(|window, cx| view.read(cx).buffer.read(cx).focus_handle(cx).is_focused(window))
+    }
+
+    /// Electron: a mousedown on the output blurs the textarea, so Cmd/Ctrl+C copies the
+    /// selected output. Here a field's own Copy takes the keystroke while it has focus,
+    /// even with nothing selected.
+    #[gpui_kit::test]
+    fn a_drag_over_the_output_takes_focus_from_the_fields_so_copy_copies_it(cx: &mut TestAppContext) {
+        let (debugger, window, view) = cx.update(|cx| {
+            gpui_kit::init(cx);
+            crate::theme::install(cx);
+            let settings = cx.new(|_| SettingsStore::in_memory(Settings::default()));
+            let debugger =
+                cx.new(|_| PromptDebugger::new(None, &Settings::default(), &serde_json::json!({}), WeakEntity::new_invalid()));
+            let model = debugger.clone();
+            let (window, view) = gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
+                cx.new(|cx| PromptDebuggerView::new(model, settings, window, cx))
+            })
+            .expect("open a window");
+            (debugger, window, view)
+        });
+        let cx = VisualTestContext::from_window(window, cx).into_mut();
+        draw(cx);
+        let buffer = cx.update(|window, _| {
+            window
+                .elements()
+                .into_iter()
+                .find(|element| element.placeholder() == Some("Paste terminal buffer lines here..."))
+                .expect("the buffer field")
+                .bounds()
+        });
+
+        // Type in the buffer; a test comes back while the buffer still has focus.
+        cx.simulate_click(buffer.center(), Modifiers::none());
+        cx.simulate_input("ls -la");
+        draw(cx);
+        assert!(buffer_focused(&view, cx), "a click focuses the buffer");
+        cx.update(|_, cx| {
+            debugger.update(cx, |d, cx| {
+                d.set_model(DebugMode::Analyzer, "");
+                d.test(cx);
+            })
+        });
+        draw(cx);
+        let error = "Model must be configured.";
+        assert_eq!(cx.update(|_, cx| debugger.read(cx).output().error().map(str::to_owned)), Some(error.to_owned()));
+
+        // Drag over the output, then Copy.
+        let from = first_selectable_line(buffer.bottom(), cx);
+        let to = point(from.x + px(400.), from.y);
+        cx.simulate_mouse_down(from, MouseButton::Left, Modifiers::none());
+        cx.simulate_mouse_move(to, MouseButton::Left, Modifiers::none());
+        cx.simulate_mouse_up(to, MouseButton::Left, Modifiers::none());
+        draw(cx);
+        assert!(!buffer_focused(&view, cx), "the drag took focus from the buffer");
+        cx.simulate_keystrokes(COPY);
+        assert_eq!(cx.read_from_clipboard().and_then(|item| item.text()).as_deref(), Some(error));
+
+        // A click in the field still focuses it, and the copied text pastes there.
+        cx.simulate_click(buffer.center(), Modifiers::none());
+        draw(cx);
+        assert!(buffer_focused(&view, cx), "a click focuses the buffer again");
+        cx.simulate_keystrokes(PASTE);
+        draw(cx);
+        assert_eq!(cx.update(|_, cx| debugger.read(cx).buffer().to_owned()), format!("ls -la{error}"));
     }
 }
