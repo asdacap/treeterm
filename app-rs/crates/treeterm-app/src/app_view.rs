@@ -3030,7 +3030,8 @@ fn harness_prompt_buttons(session: &Entity<SessionStore>, workspace_id: &str, cx
                 .text_size(px(13.))
                 .font_weight(gpui_kit::FontWeight::SEMIBOLD)
                 .whitespace_nowrap()
-                .opacity(0.9)
+                // `.terminal-floating-buttons button` (0.7) outranks the button's own 0.9.
+                .opacity(0.7)
                 .cursor_pointer()
                 .hover(|d| d.bg(gpui_kit::rgb(0xffb820)).border_color(gpui_kit::rgb(0xf0a000)).opacity(1.))
                 .tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(title).build(window, cx))
