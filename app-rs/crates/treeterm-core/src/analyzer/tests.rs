@@ -221,6 +221,11 @@ impl Harness {
                     let outputs = self.detector.request_idle_edge();
                     self.feed(outputs);
                 }
+                Effect::ConfigurationChanged => {
+                    let timeout = idle_timeout(&self.settings.terminal_analyzer, self.unread);
+                    let outputs = self.detector.mark_changed(self.now, timeout);
+                    self.feed(outputs);
+                }
                 Effect::UpdateMetadata { key, value, reason } => {
                     self.metadata.push((key, value, reason))
                 }
@@ -1107,8 +1112,10 @@ fn does_not_auto_approve_for_non_safe_states() {
 fn approves_once_per_change_into_the_safe_state() {
     let mut h = safe_permission(false, ActivityState::SafePermissionRequested);
     // Turning it on while already asking approves nothing, and neither does classifying the
-    // same prompt again (here after a settings change): only a state change does...
+    // same prompt again (here after a settings change, with the tab's idle detector off so
+    // that no Working comes between): only a state change does...
     h.analyzer.set_auto_approve(true);
+    h.idle_disabled = true;
     let mut s = settings();
     s.terminal_analyzer.safe_paths.push("/other".to_owned());
     h.set_settings(s);
@@ -1116,6 +1123,7 @@ fn approves_once_per_change_into_the_safe_state() {
     assert_eq!(h.classify_calls.len(), 2);
     assert!(h.writes.is_empty());
     // ...so the next safe request (after output marked the tab Working) is approved.
+    h.idle_disabled = false;
     h.emit("Allow write? (y/n)");
     h.advance_async(1000);
     assert_eq!(h.states()[h.states().len() - 2], ActivityState::Working);
@@ -1416,9 +1424,19 @@ fn reclassifies_an_unchanged_buffer_when_provider_safe_paths_or_criteria_change_
     assert_eq!(h.classify_calls[0].input.cwd, "/test");
 
     s.terminal_analyzer.provider = ClassifierProvider::Classifier;
+    h.activity.clear();
     h.set_settings(s.clone());
-    h.advance_async(1000);
+    // The configuration is part of the idle detector's snapshot: the unchanged screen is a
+    // new burst, Working and then classified once it has been quiet for the debounce.
+    h.advance_async(499);
+    assert_eq!(h.classify_calls.len(), 1);
+    assert!(h.activity.is_empty());
+    h.advance_async(1);
     assert_eq!(h.classify_calls.len(), 2);
+    assert_eq!(
+        h.states(),
+        vec![ActivityState::Working, ActivityState::Idle]
+    );
     // Only the chat provider carries a reasoning effort.
     assert_eq!(h.classify_calls[1].settings.provider, Provider::Classifier);
     assert_eq!(h.classify_calls[1].settings.model, "test-model");
@@ -1441,6 +1459,33 @@ fn reclassifies_an_unchanged_buffer_when_provider_safe_paths_or_criteria_change_
         (last.kind, last.model.as_str()),
         (HistoryKind::Title, "test-model")
     );
+}
+
+#[test]
+fn a_configuration_change_classifies_again_without_working_while_the_idle_detector_is_disabled() {
+    let mut h = Harness::new();
+    h.idle_disabled = true;
+    h.emit("$ ");
+    h.advance_async(1000);
+    h.activity.clear();
+    let mut s = settings();
+    s.terminal_analyzer.provider = ClassifierProvider::Classifier;
+    h.set_settings(s);
+    h.advance_async(500);
+    assert_eq!(h.classify_calls.len(), 2);
+    assert_eq!(h.states(), vec![ActivityState::Idle]);
+}
+
+#[test]
+fn a_configuration_change_marks_a_safe_prompt_working_so_it_is_approved_again() {
+    let mut h = safe_permission(true, ActivityState::SafePermissionRequested);
+    assert_eq!(h.writes, vec!["\r"]);
+    let mut s = settings();
+    s.terminal_analyzer.safe_paths.push("/other".to_owned());
+    h.set_settings(s);
+    h.advance_async(1000);
+    assert_eq!(h.classify_calls.len(), 2);
+    assert_eq!(h.writes, vec!["\r", "\r"]);
 }
 
 #[test]

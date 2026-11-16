@@ -127,6 +127,16 @@ pub struct SizeMismatch {
     pub actual: GridSize,
 }
 
+/// Which viewport changes the idle detector looks at.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IdleSnapshots {
+    /// After output, as a terminal tab's detector does in Electron (`BaseTerminal`).
+    AfterOutput,
+    /// After output and after a resize (a reflowed screen is a change), as Electron's
+    /// analyzer does with the AI harness it reads.
+    AfterOutputAndResize,
+}
+
 /// Whether the grid has the PTY's size. The daemon reports it in every attachment's replay;
 /// until then the grid is a placeholder that no fit may be compared with.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -252,6 +262,7 @@ pub struct TerminalModel {
     /// Bumped on every batch with output; lets tests and automation wait for output.
     data_version: u64,
     idle: Option<IdleDetector>,
+    idle_snapshots: IdleSnapshots,
     idle_timer: Option<Task<()>>,
     /// A scroll badge click waiting [`BADGE_DOUBLE_CLICK`] for a second one.
     badge_click: Option<Task<()>>,
@@ -303,6 +314,7 @@ impl TerminalModel {
             exited: None,
             data_version: 0,
             idle,
+            idle_snapshots: IdleSnapshots::AfterOutput,
             idle_timer: None,
             badge_click: None,
             pointer: None,
@@ -460,12 +472,29 @@ impl TerminalModel {
         }
     }
 
+    /// Which viewport changes the idle detector looks at from now on.
+    pub fn set_idle_snapshots(&mut self, snapshots: IdleSnapshots) {
+        self.idle_snapshots = snapshots;
+    }
+
     /// Report an idle edge now if output is quiet, else at the end of the current burst.
     pub fn request_idle_edge(&mut self, cx: &mut Context<Self>) {
         let Some(detector) = self.idle.as_mut() else {
             return;
         };
         let outputs = detector.request_idle_edge();
+        self.emit_idle(outputs, cx);
+        self.schedule_idle_timer(cx);
+    }
+
+    /// Something the viewport text does not show changed (the analyzer's configuration): the
+    /// idle detector counts it as a change of screen, as it would new output.
+    pub fn mark_viewport_changed(&mut self, cx: &mut Context<Self>) {
+        let (Some(detector), Some(timeout)) = (self.idle.as_mut(), self.options.idle_timeout) else {
+            return;
+        };
+        let now = cx.background_executor().now();
+        let outputs = detector.mark_changed(now, timeout);
         self.emit_idle(outputs, cx);
         self.schedule_idle_timer(cx);
     }
@@ -1065,7 +1094,8 @@ impl TerminalModel {
             None => {}
         }
         self.refresh_viewport_state();
-        if batch.data {
+        let resize_snapshot = self.idle_snapshots == IdleSnapshots::AfterOutputAndResize;
+        if batch.data || (batch.resized.is_some() && resize_snapshot) {
             self.detect_activity(cx);
         }
         cx.notify();

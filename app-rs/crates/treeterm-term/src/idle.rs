@@ -4,7 +4,9 @@
 //! calling [`IdleDetector::on_timer`] when it fires. Consumers feed rendered viewport
 //! snapshots; a frame identical to the last one repainted nothing visible and is not
 //! activity. A short burst that goes quiet on the screen it started from (a blip) reports
-//! nothing, so it neither rings nor triggers a reclassification.
+//! nothing, so it neither rings nor triggers a reclassification. A change the text does not
+//! show (the analyzer's configuration, part of Electron's snapshot) is reported with
+//! [`IdleDetector::mark_changed`].
 
 use std::time::{Duration, Instant};
 
@@ -33,15 +35,24 @@ struct Armed {
     timeout: Duration,
 }
 
+/// What consecutive frames are compared by: the viewport text, and how many changes the
+/// text does not show were marked before it (Electron compared
+/// `${configurationIdentity()}\0${buffer}`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct Frame {
+    changes: u64,
+    text: String,
+}
+
 #[derive(Debug)]
 pub struct IdleDetector {
     timer: Option<Armed>,
-    last_snapshot: String,
+    last_snapshot: Frame,
     /// No resting state is known until the first burst resolves. That burst is usually the
     /// attach replay or initial paint, not work starting, so a short one is not reported;
     /// otherwise every tab of a freshly opened session would go Working → Idle and ring.
     settled: bool,
-    burst_baseline: String,
+    burst_baseline: Frame,
     burst_started_at: Instant,
     reported: bool,
     force_edge: bool,
@@ -52,11 +63,15 @@ impl IdleDetector {
     /// `initial_snapshot` is what is on screen at creation; the first differing snapshot is
     /// the first activity.
     pub fn new(initial_snapshot: String, idle_timeout: Duration, now: Instant) -> Self {
+        let initial = Frame {
+            changes: 0,
+            text: initial_snapshot,
+        };
         Self {
             timer: None,
-            last_snapshot: initial_snapshot.clone(),
+            last_snapshot: initial.clone(),
             settled: false,
-            burst_baseline: initial_snapshot,
+            burst_baseline: initial,
             burst_started_at: now,
             reported: false,
             force_edge: false,
@@ -72,13 +87,32 @@ impl IdleDetector {
     /// `idle_timeout` is read every time the timer is (re)armed so settings and the
     /// workspace's unread state apply live.
     pub fn process_snapshot(&mut self, snapshot: String, now: Instant, idle_timeout: Duration) -> Vec<IdleOutput> {
+        let frame = Frame {
+            changes: self.last_snapshot.changes,
+            text: snapshot,
+        };
+        self.process(frame, now, idle_timeout)
+    }
+
+    /// Something the snapshot text does not show changed (the analyzer's configuration).
+    /// The screen counts as changed, as a differing snapshot would: it goes quiet again one
+    /// idle timeout later, reported as activity once a resting state is known.
+    pub fn mark_changed(&mut self, now: Instant, idle_timeout: Duration) -> Vec<IdleOutput> {
+        let frame = Frame {
+            changes: self.last_snapshot.changes + 1,
+            text: self.last_snapshot.text.clone(),
+        };
+        self.process(frame, now, idle_timeout)
+    }
+
+    fn process(&mut self, snapshot: Frame, now: Instant, idle_timeout: Duration) -> Vec<IdleOutput> {
         let mut out = Vec::new();
         if snapshot == self.last_snapshot {
             return out;
         }
         if self.timer.take().is_some() {
             if !self.reported && now.duration_since(self.burst_started_at) >= idle_timeout {
-                self.report(&snapshot, &mut out);
+                self.report(&snapshot.text, &mut out);
             }
         } else {
             self.burst_baseline = std::mem::take(&mut self.last_snapshot);
@@ -115,12 +149,12 @@ impl IdleDetector {
                     return out;
                 }
             } else if was_settled {
-                let snapshot = self.last_snapshot.clone();
+                let snapshot = self.last_snapshot.text.clone();
                 self.report(&snapshot, &mut out);
             }
         }
         out.push(IdleOutput::Idle(IdleEdge {
-            snapshot: self.last_snapshot.clone(),
+            snapshot: self.last_snapshot.text.clone(),
             idle_timeout: armed.timeout,
         }));
         out
@@ -135,7 +169,7 @@ impl IdleDetector {
             return Vec::new();
         }
         vec![IdleOutput::Idle(IdleEdge {
-            snapshot: self.last_snapshot.clone(),
+            snapshot: self.last_snapshot.text.clone(),
             idle_timeout: self.last_timeout,
         })]
     }
@@ -214,6 +248,11 @@ mod tests {
 
         fn request_edge(&mut self) {
             let outputs = self.detector.request_idle_edge();
+            self.record(outputs);
+        }
+
+        fn mark_changed(&mut self) {
+            let outputs = self.detector.mark_changed(self.now, self.timeout);
             self.record(outputs);
         }
 
@@ -430,5 +469,45 @@ mod tests {
         let early = h.now + 100 * MS;
         assert!(h.detector.on_timer(early).is_empty());
         assert!(h.detector.deadline().is_some());
+    }
+
+    #[test]
+    fn a_marked_change_on_a_quiet_screen_reports_activity_then_idle_one_timeout_later() {
+        let mut h = Harness::new();
+        h.settle();
+        h.mark_changed();
+        h.advance(499 * MS);
+        assert!(h.order.is_empty());
+        h.advance(MS);
+        assert_eq!(h.activity, vec!["boot"]);
+        assert_eq!(h.idle, vec![Harness::edge("boot", 500)]);
+        assert_eq!(h.order, vec![true, false]);
+        // The marked frame is the one later snapshots compare with: the same text is no change.
+        h.snap("boot");
+        h.advance(5000 * MS);
+        assert_eq!(h.order.len(), 2);
+    }
+
+    #[test]
+    fn a_marked_change_before_a_resting_state_is_known_reports_only_idle() {
+        let mut h = Harness::new();
+        h.mark_changed();
+        h.advance(500 * MS);
+        assert!(h.activity.is_empty());
+        assert_eq!(h.idle, vec![Harness::edge("", 500)]);
+    }
+
+    #[test]
+    fn a_marked_change_during_a_burst_re_arms_the_timer() {
+        let mut h = Harness::new();
+        h.settle();
+        h.snap("work");
+        h.advance(300 * MS);
+        h.mark_changed();
+        h.advance(300 * MS);
+        assert!(h.idle.is_empty());
+        h.advance(200 * MS);
+        assert_eq!(h.activity, vec!["work"]);
+        assert_eq!(h.idle, vec![Harness::edge("work", 500)]);
     }
 }

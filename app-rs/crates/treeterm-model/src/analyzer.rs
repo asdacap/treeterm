@@ -22,7 +22,7 @@ use treeterm_core::llm::{AnalyzerCache, HttpLlm, Llm, LlmApi, LlmError, RetryPol
 use treeterm_core::rt::Rt;
 use treeterm_core::settings::Settings;
 
-use crate::terminal::{TerminalEvent, TerminalModel};
+use crate::terminal::{IdleSnapshots, TerminalEvent, TerminalModel};
 use crate::workspace_store::WorkspaceStore;
 
 /// The LLM client and the runtime its requests run on, shared by every analyzer.
@@ -121,6 +121,9 @@ impl AnalyzerModel {
     ) -> Self {
         let mut analyzer = Analyzer::new(cwd, settings);
         analyzer.start();
+        // Electron's analyzer snapshots its terminal after a resize too: a reflowed screen is
+        // a change to classify.
+        terminal.update(cx, |terminal, _| terminal.set_idle_snapshots(IdleSnapshots::AfterOutputAndResize));
         let events = cx.subscribe(&terminal, |model, _, event: &TerminalEvent, cx| model.on_terminal(event, cx));
         Self {
             analyzer,
@@ -272,6 +275,7 @@ impl AnalyzerModel {
                 Effect::SetActivity { state, detail } => cx.emit(AnalyzerEvent::SetActivity { state, detail }),
                 Effect::Write(text) => cx.emit(AnalyzerEvent::Write(text)),
                 Effect::RequestIdleEdge => self.terminal.update(cx, |t, cx| t.request_idle_edge(cx)),
+                Effect::ConfigurationChanged => self.terminal.update(cx, |t, cx| t.mark_viewport_changed(cx)),
                 Effect::UpdateMetadata { key, value, reason } => {
                     tracing::debug!(tab = %self.tab_id, key, reason, "analyzer updates metadata");
                     cx.emit(AnalyzerEvent::UpdateMetadata { key, value });

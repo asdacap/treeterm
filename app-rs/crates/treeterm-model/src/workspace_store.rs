@@ -2103,6 +2103,8 @@ impl WorkspaceStore {
     pub fn apply_settings(&mut self, registry: Rc<AppRegistry>, settings: Rc<Settings>, cx: &mut Context<Self>) {
         self.registry = registry;
         self.settings = settings;
+        // Before the analyzers: a configuration change arms their idle timers.
+        self.sync_idle_timeouts(cx);
         for tab in self.tabs.values() {
             if let TabRef::Terminal(TerminalTab::Attached { model, analyzer, .. }) = tab {
                 let terminal = self.settings.terminal.clone();
@@ -2114,7 +2116,6 @@ impl WorkspaceStore {
             }
         }
         self.sync_terminal_options(cx);
-        self.sync_idle_timeouts(cx);
         // Tabs of applications that just appeared (a new AI harness instance) start now.
         let tab_ids: Vec<String> = self.workspace.file.app_states.keys().cloned().collect();
         for tab_id in tab_ids {

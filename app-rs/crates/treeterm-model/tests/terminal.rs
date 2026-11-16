@@ -9,12 +9,13 @@ use gpui_kit::{AppContext as _, Entity, Subscription, TestAppContext};
 use treeterm_core::pty::CreatePty;
 use treeterm_core::settings::TerminalSettings;
 use treeterm_model::terminal::{
-    ALT_CLICK_MOVE_CURSOR_TIME, BADGE_DOUBLE_CLICK, CellPoint, DRAG_SCROLL_INTERVAL, LinkPress, Overlay, Pointer,
-    ScrollbarVisibility, SelectionCopy, SelectionKind, TerminalEvent, TerminalModel, TerminalOptions,
+    ALT_CLICK_MOVE_CURSOR_TIME, BADGE_DOUBLE_CLICK, CellPoint, DRAG_SCROLL_INTERVAL, IdleSnapshots, LinkPress, Overlay,
+    Pointer, ScrollbarVisibility, SelectionCopy, SelectionKind, TerminalEvent, TerminalModel, TerminalOptions,
 };
 use treeterm_term::keys::Modifiers;
 use treeterm_term::core::GridSize;
 use treeterm_term::fit::WidthLimit;
+use treeterm_term::idle::IdleEdge;
 use treeterm_term::links::{Link, LinkKind};
 use treeterm_term::palette::DEFAULT_BACKGROUND;
 use treeterm_term::view::ScrollPosition;
@@ -28,6 +29,15 @@ fn spawn_shell(h: &Harness) -> String {
 }
 
 fn spawn_shell_sized(h: &Harness, size: (u16, u16)) -> String {
+    spawn(h, size, None)
+}
+
+/// A shell that execs `cat`: nothing redraws when the PTY is resized.
+fn spawn_cat(h: &Harness) -> String {
+    spawn(h, (80, 24), Some("cat".to_owned()))
+}
+
+fn spawn(h: &Harness, size: (u16, u16), startup_command: Option<String>) -> String {
     let mut env = HashMap::new();
     env.insert("ZDOTDIR".to_owned(), h.daemon.root().to_string_lossy().into_owned());
     env.insert("PS1".to_owned(), "$ ".to_owned());
@@ -35,6 +45,7 @@ fn spawn_shell_sized(h: &Harness, size: (u16, u16)) -> String {
         cwd: h.daemon.root().to_string_lossy().into_owned(),
         env,
         size: Some(size),
+        startup_command,
         ..CreatePty::default()
     }))
     .unwrap()
@@ -934,6 +945,41 @@ fn a_paste_is_input_as_written_with_its_line_endings_as_enter(cx: &mut TestAppCo
     // Bracketed if the shell's line editor asked for it.
     assert!(input.contains("echo one\recho two"), "{input:?}");
     assert!(!input.contains('\n'), "{input:?}");
+}
+
+const IDLE: Duration = Duration::from_millis(300);
+
+#[gpui_kit::test]
+fn a_resize_is_a_change_of_screen_only_where_resizes_are_snapshotted(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    let pty = spawn_cat(&h);
+    let analyzed = open(cx, &h, TerminalOptions { idle_timeout: Some(IDLE), ..options(pty.clone()) });
+    analyzed.update(cx, |m, _| m.set_idle_snapshots(IdleSnapshots::AfterOutputAndResize));
+    let plain = open(cx, &h, TerminalOptions { idle_timeout: Some(IDLE), ..options(pty) });
+    // The daemon types the startup command once the shell is ready; `cat` runs once it echoes
+    // a line back, and nothing else is printed after that.
+    wait_until(cx, &analyzed, |m| m.screen_text().contains("exec cat"));
+    analyzed.update(cx, |m, cx| m.set_focused(true, cx));
+    type_line(cx, &analyzed, "cat-ready");
+    for model in [&analyzed, &plain] {
+        wait_until(cx, model, |m| m.screen_text().contains("cat-ready\ncat-ready"));
+    }
+    // The first burst goes quiet: a resting state is known.
+    advance(cx, IDLE);
+    let (analyzed_events, _analyzed) = record(cx, &analyzed);
+    let (plain_events, _plain) = record(cx, &plain);
+
+    let shorter = GridSize { cols: 80, rows: 20 };
+    analyzed.update(cx, |m, _| m.fit(shorter));
+    for model in [&analyzed, &plain] {
+        wait_until(cx, model, |m| m.grid_size() == shorter);
+    }
+    advance(cx, IDLE);
+    let screen = analyzed.read_with(cx, |m, _| m.viewport());
+    let edge = IdleEdge { snapshot: screen.clone(), idle_timeout: IDLE };
+    assert_eq!(*analyzed_events.borrow(), vec![TerminalEvent::Activity(screen), TerminalEvent::Idle(edge)]);
+    assert_eq!(*plain_events.borrow(), Vec::new());
 }
 
 #[gpui_kit::test]

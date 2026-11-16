@@ -461,6 +461,11 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   plain click copies nothing; ghostty-web copied the character under it.
 - The attention ding is the system bell (Electron synthesised an 880 Hz tone).
 - The analyzer reads the tab's own terminal; Electron attached a second, headless one.
+- A change of the analyzer's classification settings (provider, model, reasoning effort,
+  endpoint, system prompt, criteria, safe paths) reaches an AI harness tab at once and counts
+  as a change of its screen even if changed back within the idle debounce: the tab goes
+  Working and its screen is classified again (from the remembered answer). Electron compared
+  the settings themselves every 500 ms, so a change undone in time went unnoticed.
 - A Prompt Description that sends nothing (no harness running yet, or the write failed)
   shows why in a notification; Electron failed silently. In both, the description is no
   longer offered.

@@ -10,9 +10,11 @@
 //! # Driving it
 //!
 //! - The tab's terminal runs the viewport idle detector (`treeterm_term::idle`) with
-//!   [`idle_timeout`] for the timeout. Feed its `Activity` to [`Analyzer::on_activity`] and
-//!   its `Idle` to [`Analyzer::on_idle`]; [`Effect::RequestIdleEdge`] asks that detector for
-//!   an edge (`request_idle_edge`), whose output is fed back the same way.
+//!   [`idle_timeout`] for the timeout, snapshotting after output and after a resize. Feed its
+//!   `Activity` to [`Analyzer::on_activity`] and its `Idle` to [`Analyzer::on_idle`];
+//!   [`Effect::RequestIdleEdge`] asks that detector for an edge (`request_idle_edge`), and
+//!   [`Effect::ConfigurationChanged`] tells it the screen changed (`mark_changed`): what
+//!   either reports is fed back the same way.
 //! - Run [`Effect::Classify`] with [`crate::llm::Llm::analyze_terminal`] and pass the outcome
 //!   (or why the call itself failed) to [`Analyzer::on_classified`]; likewise
 //!   [`Effect::GenerateTitle`] → `generate_title` → [`Analyzer::on_title`] and
@@ -118,6 +120,11 @@ pub enum Effect {
     Write(&'static str),
     /// Ask the tab's idle detector for an idle edge and feed what it reports.
     RequestIdleEdge,
+    /// The classification configuration changed, which in Electron is part of the idle
+    /// detector's snapshot: tell the tab's idle detector its screen changed
+    /// (`mark_changed`) and feed what it reports. The unchanged screen is classified again
+    /// one debounce later, after a Working edge, as after a burst of output.
+    ConfigurationChanged,
     /// Set a workspace metadata key.
     UpdateMetadata {
         key: &'static str,
@@ -441,14 +448,14 @@ impl Analyzer {
         self.auto_approve = value;
     }
 
-    /// New settings. A changed classification configuration classifies the screen again
-    /// (through an idle edge, so a running burst still debounces it).
+    /// New settings. A changed classification configuration counts as a change of screen,
+    /// so the screen is classified again once it has been quiet for the idle debounce.
     pub fn set_settings(&mut self, settings: &Settings) -> Vec<Effect> {
         let before = self.configuration();
         self.llm = settings.llm.clone();
         self.settings = settings.terminal_analyzer.clone();
         if self.is_running() && self.configuration() != before {
-            vec![Effect::RequestIdleEdge]
+            vec![Effect::ConfigurationChanged]
         } else {
             Vec::new()
         }

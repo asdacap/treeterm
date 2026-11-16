@@ -2029,6 +2029,99 @@ fn an_ai_harness_tab_is_classified_by_its_analyzer(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn a_classifier_configuration_change_or_a_resize_marks_an_ai_harness_working_then_classifies_it_again(
+    cx: &mut TestAppContext,
+) {
+    use std::sync::Arc;
+    use treeterm_core::activity::TransitionDetail;
+    use treeterm_core::llm::FakeLlm;
+    use treeterm_core::settings::ClassifierProvider;
+    use treeterm_model::analyzer::LlmService;
+    use treeterm_model::workspace_store::ActivityState;
+    cx.executor().allow_parking();
+    let h = harness();
+    std::fs::write(h.daemon.workspaces_dir().join("a.json"), body("a", None)).unwrap();
+    publish(&h, &["a"]);
+
+    let mut settings = treeterm_core::settings::from_value(serde_json::json!({
+        "aiHarness": { "instances": [{
+            "id": "bot", "name": "Bot", "icon": "B",
+            "command": "sh -c 'echo ready-$((40+2)); exec cat'",
+            "isDefault": false, "enableSandbox": false, "allowNetwork": true,
+            "backgroundColor": "#1a1a24", "disableScrollbar": false, "keepOnExit": true
+        }]}
+    }))
+    .unwrap();
+    settings.llm.api_key = "test-key".into();
+    settings.llm.base_url = "http://localhost".into();
+    settings.terminal_analyzer.provider = ClassifierProvider::ChatCompletions;
+    settings.terminal_analyzer.model = "test-model".into();
+    settings.terminal_analyzer.idle_debounce = std::time::Duration::from_millis(300);
+    let fake = FakeLlm::default();
+    fake.on_complete_chat(|_, _| Ok(r#"{"state":"idle","reason":"waiting"}"#.into()));
+    let llm = LlmService::new(Arc::new(fake.clone()), h.rt.clone());
+    let conn = h.conn.clone();
+    let settings_store = cx.new(|_| SettingsStore::in_memory(settings));
+    let traffic = cx.new(ConnectionTraffic::new);
+    let store =
+        cx.new(|cx| SessionStore::new(conn, "client-a".into(), settings_store.clone(), Some(llm), traffic, cx));
+    wait_until(cx, &store, |s| loaded(s, "a"));
+    let workspace = store.read_with(cx, |s, _| ws(s, "a"));
+    let tab = workspace.update(cx, |w, cx| w.add_tab("aiharness-bot", cx)).unwrap();
+    wait_until_app(cx, &workspace, |w, _| w.analyzer(&tab).is_some());
+    let pump = |cx: &mut TestAppContext, done: &dyn Fn(&mut TestAppContext) -> bool| {
+        for _ in 0..1000 {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            cx.executor().advance_clock(std::time::Duration::from_millis(100));
+            cx.run_until_parked();
+            if done(cx) {
+                return;
+            }
+        }
+        panic!("condition not reached");
+    };
+    // The harness's screen settles and is classified.
+    let analyzer = workspace.read_with(cx, |w, _| w.analyzer(&tab)).unwrap();
+    let classified_ready = |cx: &mut TestAppContext| {
+        let analyzing = analyzer.read_with(cx, |a, _| a.analyzer().analyzing());
+        let last = workspace.read_with(cx, |w, _| w.activity_states().transitions(&tab).last().cloned());
+        !analyzing
+            && last.is_some_and(|t| match &t.detail {
+                TransitionDetail::Classification { snapshot, .. } => {
+                    t.to == ActivityState::Idle && snapshot.contains("ready-42")
+                }
+                _ => false,
+            })
+    };
+    pump(cx, &classified_ready);
+    let calls = fake.chat_calls().len();
+    let seen = workspace.read_with(cx, |w, _| w.activity_states().transitions(&tab).len());
+
+    let since = |cx: &mut TestAppContext, seen: usize| -> Vec<ActivityState> {
+        workspace.read_with(cx, |w, _| w.activity_states().transitions(&tab)[seen..].iter().map(|t| t.to).collect())
+    };
+
+    // The unchanged screen goes Working and is classified with the new configuration.
+    let add_safe_path = |settings: &mut treeterm_core::settings::Settings| {
+        settings.terminal_analyzer.safe_paths.push("/other".into());
+    };
+    settings_store.update(cx, |s, cx| s.update(add_safe_path, cx));
+    pump(cx, &|cx| fake.chat_calls().len() > calls && classified_ready(cx));
+    assert_eq!(since(cx, seen), vec![ActivityState::Working, ActivityState::Idle]);
+    assert_eq!(fake.chat_calls().len(), calls + 1);
+
+    // A resize changes the screen though the program prints nothing: it is classified too.
+    let Some(TabContent::Terminal(terminal)) = workspace.read_with(cx, |w, _| w.tab_content(&tab)) else {
+        unreachable!()
+    };
+    let calls = fake.chat_calls().len();
+    let seen = workspace.read_with(cx, |w, _| w.activity_states().transitions(&tab).len());
+    terminal.update(cx, |t, _| t.fit(treeterm_term::core::GridSize { cols: 80, rows: 20 }));
+    pump(cx, &|cx| fake.chat_calls().len() > calls && classified_ready(cx));
+    assert_eq!(since(cx, seen), vec![ActivityState::Working, ActivityState::Idle]);
+}
+
+#[gpui_kit::test]
 fn finished_work_in_an_unviewed_workspace_is_marked_unread_until_viewed(cx: &mut TestAppContext) {
     use treeterm_model::workspace_store::ActivityState;
     cx.executor().allow_parking();
