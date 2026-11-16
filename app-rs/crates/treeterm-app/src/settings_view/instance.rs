@@ -42,9 +42,49 @@ pub trait InstanceForm: Clone + 'static {
     fn problem(&self) -> Option<String>;
 }
 
-/// Electron's `maxLength={2}` on the icon field (UTF-16 code units, so one emoji).
-pub fn icon_fits(icon: &str) -> bool {
-    icon.encode_utf16().count() <= 2
+/// Electron's `maxLength={2}` on the icon field, in UTF-16 code units (so one emoji).
+pub const MAX_ICON_UNITS: usize = 2;
+
+/// The icon field after an edit turned `old` into `new`, leaving the caret at byte `caret`
+/// (the end of what the edit inserted), and where the caret goes. As Chromium does for
+/// `maxLength`, the inserted text is cut to the room the rest of the text leaves, whole
+/// characters only (so a paste of "abc" keeps "ab", and an emoji with no room is dropped).
+/// Deleting is always allowed, so an icon saved longer than the limit can shrink but not grow.
+pub fn fit_icon(old: &str, new: &str, caret: usize) -> (String, usize) {
+    if utf16_len(new) <= MAX_ICON_UNITS {
+        return (new.to_owned(), caret);
+    }
+    // What the edit kept around the insertion; the caret tells where the insertion ends
+    // when its text also ends the kept text ("ab" -> "ba|b" inserted "ba", not "b").
+    let suffix = common_suffix(old, new).min(new.len() - caret);
+    let prefix = common_prefix(&old[..old.len() - suffix], &new[..new.len() - suffix]);
+    let (head, rest) = new.split_at(prefix);
+    let (inserted, tail) = rest.split_at(rest.len() - suffix);
+    let room = MAX_ICON_UNITS.saturating_sub(utf16_len(head) + utf16_len(tail));
+    let mut kept = 0;
+    let mut units = 0;
+    for character in inserted.chars() {
+        units += character.len_utf16();
+        if units > room {
+            break;
+        }
+        kept += character.len_utf8();
+    }
+    (format!("{head}{}{tail}", &inserted[..kept]), head.len() + kept)
+}
+
+fn utf16_len(text: &str) -> usize {
+    text.chars().map(char::len_utf16).sum()
+}
+
+/// The bytes `a` and `b` start with in common, in whole characters.
+fn common_prefix(a: &str, b: &str) -> usize {
+    a.chars().zip(b.chars()).take_while(|(x, y)| x == y).map(|(x, _)| x.len_utf8()).sum()
+}
+
+/// The bytes `a` and `b` end with in common, in whole characters.
+fn common_suffix(a: &str, b: &str) -> usize {
+    a.chars().rev().zip(b.chars().rev()).take_while(|(x, y)| x == y).map(|(x, _)| x.len_utf8()).sum()
 }
 
 /// A name and the command it runs.
@@ -659,13 +699,51 @@ mod tests {
         }
     }
 
+    /// `fit_icon` for an edit whose insertion ends at the `|` in `new`.
+    fn fit(old: &str, new: &str) -> String {
+        let caret = new.find('|').expect("the test marks the caret");
+        let (text, caret) = fit_icon(old, &new.replacen('|', "", 1), caret);
+        format!("{}|{}", &text[..caret], &text[caret..])
+    }
+
     #[test]
-    fn icons_hold_two_utf16_units() {
-        assert!(icon_fits(""));
-        assert!(icon_fits(">"));
-        assert!(icon_fits("🤖"));
-        assert!(icon_fits("ab"));
-        assert!(!icon_fits("abc"));
-        assert!(!icon_fits("🤖>"));
+    fn edits_within_two_utf16_units_stand() {
+        assert_eq!(fit("", ">|"), ">|");
+        assert_eq!(fit("", "🤖|"), "🤖|");
+        assert_eq!(fit("a", "ab|"), "ab|");
+        assert_eq!(fit("a", "b|a"), "b|a");
+        assert_eq!(fit("ab", "x|"), "x|");
+        assert_eq!(fit("ab", "|b"), "|b");
+        assert_eq!(fit("🤖", "|"), "|");
+    }
+
+    /// Chromium's `maxLength` cuts what is pasted or typed to the room left, in whole
+    /// characters, where the Kit's `validate` rejected the whole edit.
+    #[test]
+    fn insertions_are_cut_to_the_room_left() {
+        assert_eq!(fit("", "abc|"), "ab|");
+        assert_eq!(fit("x", "xabc|"), "xa|");
+        assert_eq!(fit("ab", "abc|"), "ab|");
+        // Pasted before the text.
+        assert_eq!(fit("a", "bc|a"), "b|a");
+        // Pasted over everything, or over part of it.
+        assert_eq!(fit("ab", "xyz|"), "xy|");
+        assert_eq!(fit("ab", "xyz|b"), "x|b");
+        // The pasted text repeats what follows it: the caret tells where the paste ends.
+        assert_eq!(fit("ab", "ba|b"), "b|b");
+        // An emoji is two units and is never split.
+        assert_eq!(fit("", "🤖🤖|"), "🤖|");
+        assert_eq!(fit("a", "a🤖|"), "a|");
+        assert_eq!(fit("a", "a🤖b|"), "a|");
+        assert_eq!(fit("", "a🤖|"), "a|");
+    }
+
+    /// An icon saved longer than the field allows can shrink but not grow.
+    #[test]
+    fn a_long_saved_icon_only_shrinks() {
+        assert_eq!(fit("abc", "abcd|"), "abc|");
+        assert_eq!(fit("abc", "ab|"), "ab|");
+        assert_eq!(fit("abcd", "ab|d"), "ab|d");
+        assert_eq!(fit("abcd", "ax|d"), "a|d");
     }
 }

@@ -9,7 +9,7 @@ use gpui_kit::prelude::*;
 use gpui_kit::{AnyElement, App, Context, Entity, SharedString, Subscription, Window, div, px, rgb, rgba};
 
 use super::form::{SandboxSupport, new_id};
-use super::instance::{InstanceForm, icon_fits};
+use super::instance::{InstanceForm, fit_icon};
 use super::{SettingsView, widgets};
 use crate::theme::colors;
 use crate::ui;
@@ -26,7 +26,7 @@ struct Row<T: InstanceForm> {
 impl<T: InstanceForm> Row<T> {
     fn new(instance: T, window: &mut Window, cx: &mut Context<SettingsView>) -> Self {
         let icon_text = instance.icon().to_owned();
-        let icon = cx.new(|cx| InputState::new(window, cx).validate(|text, _| icon_fits(text)).default_value(icon_text));
+        let icon = cx.new(|cx| InputState::new(window, cx).default_value(icon_text));
         let fields: Vec<(T::Field, Entity<InputState>)> = T::FIELDS
             .iter()
             .map(|&field| {
@@ -35,16 +35,14 @@ impl<T: InstanceForm> Row<T> {
                 (field, state)
             })
             .collect();
-        let _changes = std::iter::once(&icon)
-            .chain(fields.iter().map(|(_, state)| state))
-            .map(|state| {
-                cx.subscribe(state, |_, _, event: &InputEvent, cx| match event {
-                    InputEvent::Change => cx.notify(),
-                    InputEvent::PressEnter { .. } | InputEvent::Focus | InputEvent::Blur => {}
-                })
+        let mut changes = vec![limit_icon(&icon, window, cx)];
+        changes.extend(fields.iter().map(|(_, state)| {
+            cx.subscribe(state, |_, _, event: &InputEvent, cx| match event {
+                InputEvent::Change => cx.notify(),
+                InputEvent::PressEnter { .. } | InputEvent::Focus | InputEvent::Blur => {}
             })
-            .collect();
-        Self { instance, icon, fields, _changes }
+        }));
+        Self { instance, icon, fields, _changes: changes }
     }
 
     /// The instance with what is typed now.
@@ -56,6 +54,31 @@ impl<T: InstanceForm> Row<T> {
         }
         instance
     }
+}
+
+/// Holds `icon` to Electron's `maxLength={2}`: each edit is cut to fit (`fit_icon`), where the
+/// Kit's `validate` would reject a long paste whole. Re-renders the view on each change.
+fn limit_icon<V: 'static>(icon: &Entity<InputState>, window: &mut Window, cx: &mut Context<V>) -> Subscription {
+    let mut accepted = icon.read(cx).value().to_string();
+    cx.subscribe_in(icon, window, move |_, icon, event: &InputEvent, window, cx| match event {
+        InputEvent::Change => {
+            let (value, caret) = {
+                let state = icon.read(cx);
+                (state.value(), state.cursor())
+            };
+            let (fitted, caret) = fit_icon(&accepted, &value, caret);
+            if fitted != value.as_ref() {
+                // `set_value` emits no `Change`, so this handler does not run again.
+                icon.update(cx, |state, cx| {
+                    state.set_value(fitted.clone(), window, cx);
+                    state.set_selected_range(caret..caret, cx);
+                });
+            }
+            accepted = fitted;
+            cx.notify();
+        }
+        InputEvent::PressEnter { .. } | InputEvent::Focus | InputEvent::Blur => {}
+    })
 }
 
 pub struct InstanceList<T: InstanceForm> {
@@ -208,4 +231,69 @@ pub fn render<T: InstanceForm>(
         .child(add)
         .child(widgets::hint(T::OUTRO, cx))
         .into_any_element()
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui_kit::component::input::Input;
+    use gpui_kit::{ClipboardItem, Render, TestAppContext, VisualTestContext};
+
+    use super::*;
+
+    /// An icon field held to Electron's `maxLength={2}`.
+    struct IconField {
+        icon: Entity<InputState>,
+        _limit: Subscription,
+    }
+
+    impl Render for IconField {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().w(px(200.)).child(Input::new(&self.icon))
+        }
+    }
+
+    fn paste(text: &str, cx: &mut VisualTestContext) {
+        cx.write_to_clipboard(ClipboardItem::new_string(text.to_owned()));
+        cx.simulate_keystrokes(if cfg!(target_os = "macos") { "cmd-v" } else { "ctrl-v" });
+    }
+
+    /// The text with `|` at the caret.
+    fn shown(icon: &Entity<InputState>, cx: &mut VisualTestContext) -> String {
+        cx.update(|_, cx| {
+            let (text, caret) = (icon.read(cx).value(), icon.read(cx).cursor());
+            format!("{}|{}", &text[..caret], &text[caret..])
+        })
+    }
+
+    #[gpui_kit::test]
+    fn the_icon_field_cuts_what_is_typed_or_pasted_to_two_utf16_units(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let (field, cx) = cx.add_window_view(|window, cx| {
+            let icon = cx.new(|cx| InputState::new(window, cx).default_value("a"));
+            let limit = limit_icon(&icon, window, cx);
+            IconField { icon, _limit: limit }
+        });
+        let icon = cx.update(|_, cx| field.read(cx).icon.clone());
+        cx.update(|window, cx| {
+            icon.update(cx, |icon, cx| {
+                icon.focus(window, cx);
+                icon.set_selected_range(0..0, cx);
+            })
+        });
+        cx.run_until_parked();
+
+        // Pasted before "a": one unit is left, so "b" goes in and the caret after it.
+        paste("bc", cx);
+        assert_eq!(shown(&icon, cx), "b|a");
+        // Full: typing changes nothing, and the field takes typing again once there is room.
+        cx.simulate_input("x");
+        assert_eq!(shown(&icon, cx), "b|a");
+        cx.simulate_keystrokes("backspace");
+        cx.simulate_input("xy");
+        assert_eq!(shown(&icon, cx), "x|a");
+        // Over everything: an emoji is two units, and the second does not fit.
+        cx.update(|window, cx| icon.update(cx, |icon, cx| icon.select_all(window, cx)));
+        paste("🤖🤖", cx);
+        assert_eq!(shown(&icon, cx), "🤖|");
+    }
 }
