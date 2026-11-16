@@ -29,8 +29,8 @@ use gpui_kit::component::input::{self, InputEvent, InputState};
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    Animation, AnimationExt as _, AnyElement, App, Context, DispatchPhase, Div, Entity, FocusHandle, MouseDownEvent,
-    SharedString, Subscription, Task, WeakEntity, Window, canvas, div, px, relative, rgb,
+    Animation, AnimationExt as _, AnyElement, App, Context, DispatchPhase, Div, Entity, FocusHandle, HitboxBehavior,
+    MouseDownEvent, SharedString, Subscription, Task, WeakEntity, Window, canvas, div, px, relative, rgb,
 };
 use gpui_webview::WebView;
 use treeterm_model::apps::{
@@ -575,7 +575,9 @@ impl Render for BrowserView {
 /// A shown page's part in the Edit menu, as Electron's edit roles act on a focused `<webview>`.
 /// A press on the page gives its webview's `focus` GPUI's focus: WebKitGTK passes presses on to
 /// GPUI (AppKit does not, see `menus::FocusedPage`). While it has the focus, the Edit menu's
-/// commands go to the page (`edit`), not to the field GPUI's focus was on before.
+/// commands go to the page (`edit`), not to the field GPUI's focus was on before. A press on
+/// what lies above the page (a dialog, under which the page is hidden, or a menu) does not
+/// reach it, and leaves the focus where that press puts it.
 fn page_edits(page: Div, focus: FocusHandle, edit: impl Fn(EditCommand, &mut App) + 'static) -> Div {
     let edit = Rc::new(edit);
     let to_page = |command: EditCommand| {
@@ -587,10 +589,10 @@ fn page_edits(page: Div, focus: FocusHandle, edit: impl Fn(EditCommand, &mut App
         (to_page(EditCommand::Copy), to_page(EditCommand::Paste), to_page(EditCommand::PasteAsPlainText));
     let (delete, select_all) = (to_page(EditCommand::Delete), to_page(EditCommand::SelectAll));
     let pressed = canvas(
-        |bounds, _, _| bounds,
-        move |_, bounds, window, _| {
-            window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
-                if phase == DispatchPhase::Bubble && bounds.contains(&event.position) {
+        |bounds, window, _| window.insert_hitbox(bounds, HitboxBehavior::Normal),
+        move |_, page, window, _| {
+            window.on_mouse_event(move |_: &MouseDownEvent, phase, window, cx| {
+                if phase == DispatchPhase::Bubble && page.is_hovered(window) {
                     window.focus(&focus, cx);
                 }
             });
@@ -946,7 +948,10 @@ mod tests {
                 |_, _, _, _| {},
             )
             .size_full();
-            let page = div().size_full().child(div().size_full().track_focus(&self.page).child(native));
+            let page = div()
+                .size_full()
+                .debug_selector(|| "page".into())
+                .child(div().size_full().track_focus(&self.page).child(native));
             v_flex()
                 .size_full()
                 .child(gpui_kit::component::input::Input::new(&self.field))
@@ -993,6 +998,43 @@ mod tests {
         cx.run_until_parked();
         assert_eq!(*taken.borrow(), expected);
         assert_eq!(cx.update(|_, cx| field.read(cx).value().to_string()), "hello");
+    }
+
+    /// A dialog's field over the page (the app hides the native page under a dialog, but the
+    /// tab still draws its place): a press on the field leaves the focus in it, so typing and
+    /// the dialog's keys (Escape, Enter, Tab) still reach the dialog.
+    #[gpui_kit::test]
+    fn a_press_on_a_dialog_over_the_page_leaves_it_the_focus(cx: &mut gpui_kit::TestAppContext) {
+        use gpui_kit::component::WindowExt as _;
+
+        let (window, view) = cx.update(|cx| {
+            gpui_kit::init(cx);
+            gpui_kit::open_window(gpui_kit::WindowOptions::default(), cx, |window, cx| {
+                let field = cx.new(|cx| InputState::new(window, cx));
+                cx.new(|cx| PageUnderField { field, page: cx.focus_handle(), taken: Rc::default() })
+            })
+            .expect("open a window")
+        });
+        let cx = gpui_kit::VisualTestContext::from_window(window, cx).into_mut();
+        let page = view.read_with(cx, |view, _| view.page.clone());
+        let field = cx.update(|window, cx| cx.new(|cx| InputState::new(window, cx)));
+        let in_dialog = field.clone();
+        cx.update(|window, cx| {
+            window.open_dialog(cx, move |dialog, _, _| {
+                dialog.child(div().debug_selector(|| "dialog-field".into()).child(input::Input::new(&in_dialog)))
+            })
+        });
+        cx.run_until_parked();
+        let at = cx.debug_bounds("dialog-field").expect("the dialog's field is drawn").center();
+        let under = cx.debug_bounds("page").expect("the page is drawn");
+        assert!(under.contains(&at), "the dialog's field {at:?} lies over the page {under:?}");
+
+        cx.simulate_click(at, gpui_kit::Modifiers::default());
+        let focus = cx.update(|_, cx| gpui_kit::Focusable::focus_handle(field.read(cx), cx));
+        assert!(cx.update(|window, _| focus.is_focused(window)), "the dialog's field has the focus");
+        assert!(!cx.update(|window, _| page.is_focused(window)), "the page has not");
+        cx.simulate_input("typed");
+        assert_eq!(cx.update(|_, cx| field.read(cx).value().to_string()), "typed");
     }
 
     #[test]
