@@ -660,6 +660,12 @@ fn default_mono_family() -> &'static str {
     if cfg!(target_os = "macos") { "Menlo" } else { "DejaVu Sans Mono" }
 }
 
+/// `.terminal-overlay`'s `'Monaco', 'Menlo', 'Ubuntu Mono', monospace`: Monaco ships with
+/// macOS; elsewhere the monospace default.
+fn overlay_font_family() -> &'static str {
+    if cfg!(target_os = "macos") { "Monaco" } else { default_mono_family() }
+}
+
 fn rgb_hsla(color: Rgb) -> gpui_kit::Hsla {
     gpui_kit::rgb((u32::from(color.r) << 16) | (u32::from(color.g) << 8) | u32::from(color.b)).into()
 }
@@ -727,15 +733,17 @@ impl Render for TerminalView {
         root = if pointer_cursor { root.cursor_pointer() } else { root.cursor_text() };
 
         if let Some(message) = overlay.message() {
-            let c = colors(cx);
+            // `.terminal-overlay-info` and `.terminal-overlay-error`.
             let (bg, fg): (gpui_kit::Hsla, gpui_kit::Hsla) = match overlay {
-                Overlay::Loading => (rgba(0xffffff0d).into(), c.text_secondary),
+                Overlay::Loading => (rgba(0xffffff0d).into(), gpui_kit::rgb(0x888888).into()),
                 Overlay::Hidden
                 | Overlay::Error(_)
                 | Overlay::AttachFailed(_)
                 | Overlay::ExitedImmediately(_)
-                | Overlay::Disconnected => (rgba(0xcd313126).into(), c.error),
+                | Overlay::Disconnected => (rgba(0xcd313126).into(), gpui_kit::rgb(0xf48771).into()),
             };
+            // Every banner shows `.terminal-overlay`'s pointer; the model keeps "Loading
+            // terminal..." on a click, as Electron gives it no click handler.
             root = root.child(
                 div()
                     .id("terminal-overlay")
@@ -745,7 +753,10 @@ impl Render for TerminalView {
                     .right_0()
                     .px(px(12.))
                     .py(px(6.))
+                    .font_family(overlay_font_family())
                     .text_size(px(12.))
+                    // Chromium's `line-height: normal` for 12px Monaco.
+                    .line_height(px(16.))
                     .text_center()
                     .bg(bg)
                     .text_color(fg)

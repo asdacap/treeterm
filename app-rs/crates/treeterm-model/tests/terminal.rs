@@ -337,6 +337,9 @@ fn refresh_rebuilds_the_screen_from_the_replay(cx: &mut TestAppContext) {
 
     model.update(cx, |m, cx| m.refresh(cx));
     assert_eq!(model.read_with(cx, |m, _| m.overlay().clone()), Overlay::Loading);
+    // "Loading terminal..." cannot be clicked away, as Electron's has no click handler.
+    model.update(cx, |m, cx| m.dismiss_overlay(cx));
+    assert_eq!(model.read_with(cx, |m, _| m.overlay().clone()), Overlay::Loading);
     wait_until(cx, &model, |m| m.screen_text().contains("before-6"));
     // Still focused after the refresh: input keeps working.
     type_line(cx, &model, "echo after-$((3*3))");
@@ -371,7 +374,9 @@ fn typing_or_pasting_after_the_stream_ended_shows_why(cx: &mut TestAppContext) {
     });
     assert_eq!(model.read_with(cx, |m, _| m.overlay().clone()), ended);
 
+    // A click clears an error banner.
     model.update(cx, |m, cx| m.dismiss_overlay(cx));
+    assert_eq!(model.read_with(cx, |m, _| m.overlay().clone()), Overlay::Hidden);
     model.update(cx, |m, cx| m.paste("y", cx));
     wait_until(cx, &model, |m| *m.overlay() == ended);
 }

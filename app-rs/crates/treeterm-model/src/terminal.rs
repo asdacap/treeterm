@@ -1102,9 +1102,19 @@ impl TerminalModel {
         cx.notify();
     }
 
+    /// A click on the banner. "Loading terminal..." has no click handler in Electron: it
+    /// stays until the daemon answers.
     pub fn dismiss_overlay(&mut self, cx: &mut Context<Self>) {
-        self.overlay = Overlay::Hidden;
-        cx.notify();
+        match self.overlay {
+            Overlay::Loading | Overlay::Hidden => {}
+            Overlay::Error(_)
+            | Overlay::AttachFailed(_)
+            | Overlay::ExitedImmediately(_)
+            | Overlay::Disconnected => {
+                self.overlay = Overlay::Hidden;
+                cx.notify();
+            }
+        }
     }
 
     /// Destroy the PTY. This is close, not detach; the stream then reports the exit.
