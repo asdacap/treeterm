@@ -128,8 +128,9 @@ impl ConnectionTraffic {
         }
     }
 
-    /// A new connection generation is up: what its daemon socket receives counts on from the
-    /// connection's total so far. What the last one still receives is not counted.
+    /// A new connection generation is up: the gRPC message bytes it receives from its daemon
+    /// count on from the connection's total so far. What the last one still receives is not
+    /// counted.
     pub fn attach_generation(&mut self, received: ByteCounter, cx: &mut Context<Self>) {
         self.connection.update(cx, |meter, _| meter.attach(received));
     }
@@ -192,7 +193,7 @@ mod tests {
 
         let second = ByteCounter::default();
         meter.update(cx, |m, _| m.attach(second.clone()));
-        first.add(1_000); // the old generation's socket, being dropped
+        first.add(1_000); // the old generation's connection, being dropped
         second.add(50);
         tick(cx);
 
