@@ -467,7 +467,9 @@ impl Language {
             #[cfg(feature = "tree-sitter-python")]
             Self::Python => (
                 tree_sitter_python::LANGUAGE,
-                tree_sitter_python::HIGHLIGHTS_QUERY,
+                // TreeTerm patch: the grammar crate's query with control keywords apart; see
+                // the file.
+                include_str!("languages/python/highlights.scm"),
                 "",
                 "",
             ),

@@ -77,32 +77,37 @@
 ; Keywords
 
 [
-  "break"
-  "case"
   "chan"
   "const"
+  "func"
+  "interface"
+  "map"
+  "package"
+  "struct"
+  "type"
+  "var"
+] @keyword
+
+; TreeTerm patch: control-flow keywords and `import`, which VS Code's Go grammar scopes
+; `keyword.control.go` and `keyword.control.import.go` and Dark+ colours apart.
+[
+  "break"
+  "case"
   "continue"
   "default"
   "defer"
   "else"
   "fallthrough"
   "for"
-  "func"
   "go"
   "goto"
   "if"
   "import"
-  "interface"
-  "map"
-  "package"
   "range"
   "return"
   "select"
-  "struct"
   "switch"
-  "type"
-  "var"
-] @keyword
+] @keyword.control
 
 ; Literals
 

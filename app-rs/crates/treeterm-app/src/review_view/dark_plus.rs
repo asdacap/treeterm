@@ -5,9 +5,10 @@
 //! Shiki tokenises with TextMate grammars and GPUI Kit with tree-sitter, so each capture
 //! below carries the colour Dark+ gives the TextMate scope that marks the same construct:
 //! function names `#DCDCAA`, variables, parameters and properties `#9CDCFE`, types
-//! `#4EC9B0`, keywords and literals such as `true` `#569CD6`. Dark+ paints control keywords
-//! (`if`, `return`, `import`) `#C586C0`, but the grammars' queries capture every keyword as
-//! `@keyword`, so they stay `#569CD6`.
+//! `#4EC9B0`, keywords and literals such as `true` `#569CD6`, and control keywords (`if`,
+//! `return`, `import`, `keyword.control`) `#C586C0`, which the vendored Rust, JavaScript,
+//! TypeScript, Python and Go queries capture as `@keyword.control`; other languages' queries
+//! capture them as `@keyword`, so they stay `#569CD6`.
 
 use std::sync::{Arc, LazyLock};
 
@@ -48,6 +49,7 @@ fn syntax() -> SyntaxColors {
         "enum": { "color": "#4EC9B0" },
         "function": { "color": "#DCDCAA" },
         "keyword": { "color": "#569CD6" },
+        "keyword.control": { "color": "#C586C0" },
         // Rust lifetimes (`entity.name.type.lifetime`).
         "label": { "color": "#4EC9B0" },
         // Markdown: `string.other.link.title`, then `markup.underline.link`.
@@ -163,9 +165,11 @@ mod tests {
             ("rx+", 0xd16969),
             ("true", 0x569cd6),
             ("1", 0xb5cea8),
-            // Dark+ paints control keywords #C586C0; the query captures them as `@keyword`.
-            ("import", 0x569cd6),
-            ("return", 0x569cd6),
+            ("import", 0xc586c0),
+            ("from", 0xc586c0),
+            ("export", 0xc586c0),
+            ("if", 0xc586c0),
+            ("return", 0xc586c0),
         ];
         assert_colors("a.ts", text, &tokens);
         assert_colors("a.tsx", text, &tokens);
@@ -230,6 +234,157 @@ mod tests {
                 ("cell", 0x4ec9b0),
                 ("Vec", 0x4ec9b0),
                 ("new", 0xdcdcaa),
+            ],
+        );
+    }
+
+    /// Dark+ paints control keywords (`keyword.control.*`) `#C586C0` and the others `#569CD6`,
+    /// as shiki scopes them in each language. Each token is looked up by its first occurrence.
+    #[test]
+    fn control_keywords_are_purple_as_in_dark_plus() {
+        const CONTROL: u32 = 0xc586c0;
+        const KEYWORD: u32 = 0x569cd6;
+        let rust = "fn f(xs: &[u8]) -> u8 {\n    for x in xs { if *x > 0 { continue } else { break } }\n    while true { loop { return 1 } }\n    let v = match g().await { Some(y) => y as u8, None => 0 };\n    let t = try { 1 };\n    impl A for B {}\n    0\n}\n";
+        assert_colors(
+            "a.rs",
+            rust,
+            &[
+                ("for x", CONTROL),
+                ("if *x", CONTROL),
+                ("continue", CONTROL),
+                ("else", CONTROL),
+                ("break", CONTROL),
+                ("while", CONTROL),
+                ("loop", CONTROL),
+                ("return", CONTROL),
+                ("match", CONTROL),
+                ("await", CONTROL),
+                ("try", CONTROL),
+                ("for B", CONTROL),
+                ("fn", KEYWORD),
+                ("in xs", KEYWORD),
+                ("let", KEYWORD),
+                ("as u8", KEYWORD),
+                ("impl", KEYWORD),
+            ],
+        );
+        let javascript = "import a, { b as c } from 'm'\nexport default async function* f(x) {\n  switch (x) { case 1: break; default: throw new Error() }\n  for (const k of xs) { try { await g(k) } catch (e) { continue } finally { } }\n  do { yield x } while (x in o)\n  if (typeof x) { return } else { with (o) {} }\n}\n";
+        let tokens = [
+            ("import", CONTROL),
+            ("as c", CONTROL),
+            ("from", CONTROL),
+            ("export", CONTROL),
+            ("default async", CONTROL),
+            ("switch", CONTROL),
+            ("case", CONTROL),
+            ("break", CONTROL),
+            ("default:", CONTROL),
+            ("throw", CONTROL),
+            ("for (", CONTROL),
+            ("try", CONTROL),
+            ("await", CONTROL),
+            ("catch", CONTROL),
+            ("continue", CONTROL),
+            ("finally", CONTROL),
+            ("do {", CONTROL),
+            ("yield", CONTROL),
+            ("while", CONTROL),
+            ("if (", CONTROL),
+            ("return", CONTROL),
+            ("else", CONTROL),
+            ("with", CONTROL),
+            ("async", KEYWORD),
+            ("function", KEYWORD),
+            ("new", KEYWORD),
+            ("const", KEYWORD),
+            ("of xs", KEYWORD),
+            ("in o", KEYWORD),
+            ("typeof", KEYWORD),
+        ];
+        assert_colors("a.js", javascript, &tokens);
+        assert_colors("a.ts", javascript, &tokens);
+        assert_colors("a.tsx", javascript, &tokens);
+        // TypeScript's own: `type` is a control keyword in an import or export only.
+        let typescript = "import type { T } from 'm'\nimport { type V } from 'n'\nexport type { U }\nimport fs = require('fs')\nconst v = x as T satisfies U\ntype A = B\ninterface I {}\n";
+        assert_colors(
+            "a.ts",
+            typescript,
+            &[
+                ("type { T", CONTROL),
+                ("type V", CONTROL),
+                ("type { U", CONTROL),
+                ("require", CONTROL),
+                ("as T", CONTROL),
+                ("satisfies", CONTROL),
+                ("type A", KEYWORD),
+                ("interface", KEYWORD),
+            ],
+        );
+        let python = "import os\nfrom a import b as c\nasync def f(xs):\n    for x in xs:\n        if x: pass\n        elif x: continue\n        else: break\n    while True: return [y async for y in xs if y]\n    try: assert x\n    except E as e: raise\n    finally: del x\n    async with a as b: await g()\n    with a: yield from xs\n    match x:\n        case 1: pass\n    global g\n    lambda: 1\nclass C: pass\n";
+        assert_colors(
+            "a.py",
+            python,
+            &[
+                ("import", CONTROL),
+                ("from", CONTROL),
+                ("as c", CONTROL),
+                ("for x", CONTROL),
+                ("in xs:", CONTROL),
+                ("if x", CONTROL),
+                ("pass", CONTROL),
+                ("elif", CONTROL),
+                ("continue", CONTROL),
+                ("else", CONTROL),
+                ("break", CONTROL),
+                ("while", CONTROL),
+                ("return", CONTROL),
+                ("async for", CONTROL),
+                ("in xs if", CONTROL),
+                ("if y", CONTROL),
+                ("try", CONTROL),
+                ("assert", CONTROL),
+                ("except", CONTROL),
+                ("raise", CONTROL),
+                ("finally", CONTROL),
+                ("del", CONTROL),
+                ("async with", CONTROL),
+                ("await", CONTROL),
+                ("with a:", CONTROL),
+                ("yield", CONTROL),
+                ("from xs", CONTROL),
+                ("match", CONTROL),
+                ("case", CONTROL),
+                ("async def", KEYWORD),
+                ("def", KEYWORD),
+                ("global", KEYWORD),
+                ("lambda", KEYWORD),
+                ("class", KEYWORD),
+            ],
+        );
+        let go = "package main\nimport \"fmt\"\nfunc f(xs []int) int {\n\tfor _, x := range xs { if x > 0 { continue } else { break } }\n\tswitch { case true: fallthrough; default: }\n\tselect { }\n\tgo g(); defer h(); goto L\n\tvar v = 1\n\treturn v\n}\n";
+        assert_colors(
+            "a.go",
+            go,
+            &[
+                ("import", CONTROL),
+                ("for", CONTROL),
+                ("range", CONTROL),
+                ("if", CONTROL),
+                ("continue", CONTROL),
+                ("else", CONTROL),
+                ("break", CONTROL),
+                ("switch", CONTROL),
+                ("case", CONTROL),
+                ("fallthrough", CONTROL),
+                ("default", CONTROL),
+                ("select", CONTROL),
+                ("go g", CONTROL),
+                ("defer", CONTROL),
+                ("goto", CONTROL),
+                ("return", CONTROL),
+                ("package", KEYWORD),
+                ("func", KEYWORD),
+                ("var", KEYWORD),
             ],
         );
     }

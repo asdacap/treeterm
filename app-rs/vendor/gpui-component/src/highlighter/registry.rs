@@ -15,7 +15,7 @@ use anyhow::Result;
 
 use crate::{ActiveTheme, DEFAULT_THEME_COLORS, ThemeMode, highlighter::languages};
 
-pub(super) const HIGHLIGHT_NAMES: [&str; 42] = [
+pub(super) const HIGHLIGHT_NAMES: [&str; 43] = [
     "attribute",
     "boolean",
     "comment",
@@ -29,6 +29,8 @@ pub(super) const HIGHLIGHT_NAMES: [&str; 42] = [
     "function",
     "hint",
     "keyword",
+    // TreeTerm patch: see `SyntaxColors::keyword_control`.
+    "keyword.control",
     "label",
     "link_text",
     "link_uri",
@@ -132,6 +134,10 @@ pub struct SyntaxColors {
     pub function: Option<ThemeStyle>,
     pub hint: Option<ThemeStyle>,
     pub keyword: Option<ThemeStyle>,
+    /// TreeTerm patch: control-flow keywords (`if`, `return`, `import`), which VS Code's Dark+
+    /// colours apart from other keywords. Unset, they take `keyword`'s style.
+    #[serde(rename = "keyword.control")]
+    pub keyword_control: Option<ThemeStyle>,
     pub label: Option<ThemeStyle>,
     #[serde(rename = "link_text")]
     pub link_text: Option<ThemeStyle>,
@@ -268,6 +274,7 @@ impl SyntaxColors {
             "function" => self.function,
             "hint" => self.hint,
             "keyword" => self.keyword,
+            "keyword.control" => self.keyword_control,
             "label" => self.label,
             "link_text" => self.link_text,
             "link_uri" => self.link_uri,

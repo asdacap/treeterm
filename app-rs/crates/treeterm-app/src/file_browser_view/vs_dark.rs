@@ -168,6 +168,21 @@ mod tests {
         assert_eq!(token_color("a.ts", ts, "super"), Some(rgb(0x569cd6).into()));
     }
 
+    /// Monaco's grammars tokenise control keywords as keywords, which `vs-dark` paints like the
+    /// rest; Review's Dark+ paints them apart (`review_view/dark_plus.rs`).
+    #[test]
+    fn control_keywords_are_coloured_as_other_keywords_as_in_monaco() {
+        let cases = [
+            ("a.rs", "fn f() { if x { return } }\n", "if"),
+            ("a.ts", "import a from 'b'\n", "from"),
+            ("a.py", "for x in y: pass\n", "for"),
+            ("a.go", "func f() { return }\n", "return"),
+        ];
+        for (path, text, token) in cases {
+            assert_eq!(token_color(path, text, token), Some(rgb(0x569cd6).into()), "{token} in {path}");
+        }
+    }
+
     /// Monaco's Rust grammar leaves a path's modules, what a `use` brings in, a module's
     /// name, a macro's name and an attribute plain, where Review colours some of them as
     /// Dark+ does (`review_view/dark_plus.rs`).

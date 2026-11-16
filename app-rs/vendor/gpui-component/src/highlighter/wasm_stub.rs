@@ -199,6 +199,9 @@ pub struct SyntaxColors {
     pub function: Option<ThemeStyle>,
     pub hint: Option<ThemeStyle>,
     pub keyword: Option<ThemeStyle>,
+    /// TreeTerm patch: as in `registry.rs`.
+    #[serde(rename = "keyword.control")]
+    pub keyword_control: Option<ThemeStyle>,
     pub label: Option<ThemeStyle>,
     #[serde(rename = "link_text")]
     pub link_text: Option<ThemeStyle>,
@@ -267,6 +270,7 @@ impl SyntaxColors {
             "function" => self.function,
             "hint" => self.hint,
             "keyword" => self.keyword,
+            "keyword.control" => self.keyword_control,
             "label" => self.label,
             "link_text" => self.link_text,
             "link_uri" => self.link_uri,
@@ -310,7 +314,7 @@ impl SyntaxColors {
     }
 
     pub fn style_for_index(&self, index: usize) -> Option<HighlightStyle> {
-        const HIGHLIGHT_NAMES: [&str; 42] = [
+        const HIGHLIGHT_NAMES: [&str; 43] = [
             "attribute",
             "boolean",
             "comment",
@@ -324,6 +328,7 @@ impl SyntaxColors {
             "function",
             "hint",
             "keyword",
+            "keyword.control",
             "label",
             "link_text",
             "link_uri",

@@ -199,31 +199,22 @@
 
 "as" @keyword
 "async" @keyword
-"await" @keyword
-"break" @keyword
 "const" @keyword
-"continue" @keyword
 "default" @keyword
 "dyn" @keyword
-"else" @keyword
 "enum" @keyword
 "extern" @keyword
 "fn" @keyword
-"for" @keyword
 "gen" @keyword
-"if" @keyword
 "impl" @keyword
 "in" @keyword
 "let" @keyword
-"loop" @keyword
 "macro_rules!" @keyword
-"match" @keyword
 "mod" @keyword
 "move" @keyword
 "pub" @keyword
 "raw" @keyword
 "ref" @keyword
-"return" @keyword
 "static" @keyword
 "struct" @keyword
 "trait" @keyword
@@ -232,8 +223,20 @@
 "unsafe" @keyword
 "use" @keyword
 "where" @keyword
-"while" @keyword
-"yield" @keyword
+; TreeTerm patch: control-flow keywords, which VS Code's Rust grammar scopes
+; `keyword.control.rust` and Dark+ colours apart; `try` was left plain.
+"await" @keyword.control
+"break" @keyword.control
+"continue" @keyword.control
+"else" @keyword.control
+"for" @keyword.control
+"if" @keyword.control
+"loop" @keyword.control
+"match" @keyword.control
+"return" @keyword.control
+"try" @keyword.control
+"while" @keyword.control
+"yield" @keyword.control
 (crate) @keyword
 (mutable_specifier) @keyword
 (use_list (self) @keyword)

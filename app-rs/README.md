@@ -299,6 +299,16 @@ are not ours). Its changes are marked `TreeTerm patch` (`grep -rn "TreeTerm patc
   TypeScript's `this` and `super` are `@variable.special` (they were `@variable.builtin`, a
   variable's colour). The Files viewer colours these as Monaco does, and Review as Dark+
   does, but for the names listed under Appearance.
+- `src/highlighter/languages/{rust,go,javascript,typescript,python}/highlights.scm`
+  (`python` new, from its grammar crate), `src/highlighter/languages.rs`,
+  `src/highlighter/{registry,wasm_stub}.rs`: control keywords (`if`, `for`, `return`,
+  `match`/`switch`/`case`, `try`/`catch`, `await`, `yield`, `import`/`export`/`from`, …)
+  are `@keyword.control`, a new highlight name a theme may colour apart (VS Code's Dark+
+  paints `keyword.control` `#C586C0`); unset, it takes `@keyword`'s colour, so the Files
+  viewer and the Editor tab keep Monaco's. Each language's list is the keywords VS Code's
+  grammar scopes `keyword.control`: among them Rust's `try` (left plain before),
+  TypeScript's `satisfies`, `as` and the `type` of an import or export, and Python's `pass`,
+  `as`, the `in` of a loop and the `async` of `async for` and `async with`.
 - `src/highlighter/languages.rs`: TSX is highlighted with the Kit's TypeScript query, as
   TypeScript is. The Kit used `tree_sitter_typescript::HIGHLIGHTS_QUERY`, which only adds
   TypeScript's captures to the JavaScript query, so `.tsx` files (in the Files viewer, the
@@ -377,8 +387,9 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   Chromium rewrites whole), so each app starts at its own last level.
 - Review's diff is coloured as Electron's (VS Code's Dark+), but through GPUI Kit's
   tree-sitter grammars, not shiki's TextMate ones: control keywords (`if`, `return`,
-  `import`) are blue like every other keyword, not purple (`#C586C0`), as the grammars
-  capture all keywords alike; a few names are classed differently (Rust's all-caps
+  `import`) are purple (`#C586C0`) in Rust, JavaScript, TypeScript, Python and Go only,
+  and blue like every other keyword elsewhere, as the other grammars' queries capture all
+  keywords alike; a few names are classed differently (Rust's all-caps
   constants and `macro_rules!` are blue, `Self` teal, TypeScript's class names in
   expressions and JSX tags light blue); and code inside Markdown (inline code, links,
   emphasis, a fenced block's language) is plain, and every name in a Rust macro's arguments

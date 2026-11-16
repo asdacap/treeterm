@@ -166,48 +166,53 @@
   "}" @punctuation.special) @embedded
 
 [
-  "as"
   "async"
-  "await"
-  "break"
-  "case"
-  "catch"
   "class"
   "const"
-  "continue"
   "debugger"
-  "default"
   "delete"
-  "do"
-  "else"
-  "export"
   "extends"
-  "finally"
-  "for"
-  "from"
   "function"
   "get"
-  "if"
-  "import"
   "in"
   "instanceof"
   "let"
   "new"
   "of"
-  "return"
   "set"
   "static"
-  "switch"
   "target"
-  "throw"
-  "try"
   "typeof"
   "var"
   "void"
+] @keyword
+
+; TreeTerm patch: control-flow and module keywords, which VS Code's grammar scopes
+; `keyword.control.*` (`.flow`, `.loop`, `.import`, `.export`, …) and Dark+ colours apart.
+[
+  "as"
+  "await"
+  "break"
+  "case"
+  "catch"
+  "continue"
+  "default"
+  "do"
+  "else"
+  "export"
+  "finally"
+  "for"
+  "from"
+  "if"
+  "import"
+  "return"
+  "switch"
+  "throw"
+  "try"
   "while"
   "with"
   "yield"
-] @keyword
+] @keyword.control
 
 
 (type_identifier) @type
@@ -227,10 +232,19 @@
 
 ; Keywords
 
+; TreeTerm patch: `satisfies`, `type` in an import or export and `require` in
+; `import x = require(…)` are control keywords, as VS Code's TypeScript grammar scopes them
+; (`keyword.control.satisfies.ts`, `keyword.control.type.ts`, `keyword.control.require.ts`);
+; `export` is one already (above).
+"satisfies" @keyword.control
+(import_statement "type" @keyword.control)
+(export_statement "type" @keyword.control)
+(import_specifier "type" @keyword.control)
+(import_require_clause "require" @keyword.control)
+
 [ "abstract"
   "declare"
   "enum"
-  "export"
   "implements"
   "interface"
   "keyof"
@@ -241,5 +255,4 @@
   "type"
   "readonly"
   "override"
-  "satisfies"
 ] @keyword
