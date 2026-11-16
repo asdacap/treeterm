@@ -91,6 +91,41 @@ fn a_corrupt_file_keeps_the_settings_and_reports(cx: &mut TestAppContext) {
     assert_eq!(std::fs::read(dir.path().join("settings.json")).unwrap(), b"{nope");
 }
 
+/// `dialog:selectFolder`: a folder picked in the native picker goes to the front of the
+/// saved recent directories, once, keeping ten.
+#[gpui_kit::test]
+fn a_picked_folder_goes_to_the_front_of_the_saved_recent_directories(cx: &mut TestAppContext) {
+    let dir = tempfile::tempdir().unwrap();
+    let mine =
+        Settings { recent_directories: (0..10).map(|index| format!("/d{index}")).collect(), ..Settings::default() };
+    let (store, _) = store_with(cx, dir.path(), &mine);
+
+    store.update(cx, |s, cx| s.add_recent_directory("/d4", cx));
+    store.update(cx, |s, cx| s.add_recent_directory("/new", cx));
+    cx.run_until_parked();
+    let expected = ["/new", "/d4", "/d0", "/d1", "/d2", "/d3", "/d5", "/d6", "/d7", "/d8"];
+    assert_eq!(saved_json(dir.path())["recentDirectories"], serde_json::json!(expected));
+    assert_eq!(settings::load(dir.path()).unwrap().recent_directories, expected);
+    store.read_with(cx, |s, _| assert_eq!(s.settings().recent_directories, expected));
+}
+
+/// A pick never writes the settings held in place of a `settings.json` that failed to load.
+#[gpui_kit::test]
+fn a_picked_folder_leaves_a_corrupt_settings_file_alone(cx: &mut TestAppContext) {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(settings::settings_path(dir.path()), b"{nope").unwrap();
+    let path = dir.path().to_owned();
+    let store = cx.new(|cx| SettingsStore::new(Some(path), cx));
+
+    store.update(cx, |s, cx| s.add_recent_directory("/picked", cx));
+    cx.run_until_parked();
+    assert_eq!(std::fs::read(settings::settings_path(dir.path())).unwrap(), b"{nope");
+    store.read_with(cx, |s, _| {
+        assert!(s.settings().recent_directories.is_empty());
+        assert!(s.error().is_some());
+    });
+}
+
 /// Electron's `loadSettings` writes the defaults when there is no file.
 #[gpui_kit::test]
 fn a_missing_settings_file_is_created_with_the_defaults(cx: &mut TestAppContext) {

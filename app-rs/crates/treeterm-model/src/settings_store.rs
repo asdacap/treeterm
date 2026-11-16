@@ -201,6 +201,19 @@ impl SettingsStore {
         result
     }
 
+    /// A folder picked in the native folder picker (`dialog:selectFolder`) goes to the front
+    /// of `recentDirectories`, without waiting: see [`Self::update`]. Skipped (and logged)
+    /// while [`Self::error`] says `settings.json` failed to load or save, so a pick never
+    /// writes the settings held in its place over a file that could not be read.
+    pub fn add_recent_directory(&mut self, dir: &str, cx: &mut Context<Self>) {
+        if let Some(error) = &self.error {
+            tracing::warn!(%error, dir, "settings.json is in error; the picked folder is not recorded");
+            return;
+        }
+        let dir = dir.to_owned();
+        self.update(move |settings| settings.add_recent_directory(&dir), cx);
+    }
+
     /// `toggleSound`: flip the attention sound and save it, tracked in [`Self::sound_save`].
     /// Ignored while the last toggle is still saving.
     pub fn toggle_sound(&mut self, cx: &mut Context<Self>) {

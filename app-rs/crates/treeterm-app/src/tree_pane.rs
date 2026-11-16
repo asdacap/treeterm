@@ -168,7 +168,7 @@ impl TreePane {
         let location = if self.remote {
             crate::open_workspace_dialog::Location::Remote(self.session.clone())
         } else {
-            crate::open_workspace_dialog::Location::Local
+            crate::open_workspace_dialog::Location::Local(self.app.read(cx).settings().clone())
         };
         let recent = self.names.read(cx).recent_directories(&self.target).to_vec();
         let choices = treeterm_model::tool_tabs::workspace_settings::default_app_choices(self.session.read(cx).registry());

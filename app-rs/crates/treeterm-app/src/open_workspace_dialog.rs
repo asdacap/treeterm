@@ -12,6 +12,7 @@ use gpui_kit::prelude::*;
 use gpui_kit::{App, Context, Div, Entity, FontWeight, Hsla, SharedString, Subscription, Window, div, px};
 use treeterm_core::wire::workspace_file::WorktreeSettings;
 use treeterm_model::session_store::SessionStore;
+use treeterm_model::settings_store::SettingsStore;
 use treeterm_model::tool_tabs::workspace_settings::{DefaultAppChoice, default_app_label};
 
 use crate::remote_dir_browser::{Inline, RemoteDirBrowserEvent};
@@ -23,14 +24,16 @@ pub type OnOpen = Rc<dyn Fn(String, WorktreeSettings, &mut Window, &mut App)>;
 
 /// Where the directory lives.
 pub enum Location {
-    Local,
+    /// This machine: a folder the native picker returns is added to `settings.json`'s
+    /// recent directories, as Electron's `dialog:selectFolder` does.
+    Local(Entity<SettingsStore>),
     Remote(Entity<SessionStore>),
 }
 
 /// What "Browse..." does.
 enum Picker {
     /// The native folder picker; `picking` while it is up ("Opening...").
-    Native { picking: bool },
+    Native { settings: Entity<SettingsStore>, picking: bool },
     /// The remote filesystem, browsed under the folder field while `browser` is shown.
     Remote { session: Entity<SessionStore>, browser: Inline },
 }
@@ -73,7 +76,9 @@ impl OpenWorkspaceDialog {
         cx: &mut Context<Self>,
     ) -> Self {
         let (picker, placeholder) = match location {
-            Location::Local => (Picker::Native { picking: false }, "Enter or browse for a folder..."),
+            Location::Local(settings) => {
+                (Picker::Native { settings, picking: false }, "Enter or browse for a folder...")
+            }
             Location::Remote(session) => {
                 (Picker::Remote { session, browser: Inline::Hidden }, "Enter remote path (e.g. /home/user/project)")
             }
@@ -102,7 +107,7 @@ impl OpenWorkspaceDialog {
 
     /// `isSelecting`: Open waits for the native picker.
     fn picking(&self) -> bool {
-        matches!(self.picker, Picker::Native { picking: true })
+        matches!(self.picker, Picker::Native { picking: true, .. })
     }
 
     /// `handleOpen`: the workspace opens with the chosen default application as its own.
@@ -117,10 +122,11 @@ impl OpenWorkspaceDialog {
 
     fn browse(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         match &mut self.picker {
-            Picker::Native { picking: true } => {}
-            Picker::Native { picking } => {
+            Picker::Native { picking: true, .. } => {}
+            Picker::Native { settings, picking } => {
                 *picking = true;
-                self.pick_native(window, cx);
+                let settings = settings.clone();
+                self.pick_native(settings, window, cx);
             }
             Picker::Remote { browser: Inline::Shown { .. }, .. } => self.hide_browser(cx), // "Hide"
             Picker::Remote { session, browser: Inline::Hidden } => {
@@ -130,8 +136,11 @@ impl OpenWorkspaceDialog {
         }
     }
 
-    /// `handleSelectFolder`: the chosen folder replaces the typed path.
-    fn pick_native(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// `handleSelectFolder`: the chosen folder replaces the typed path. As in
+    /// `dialog:selectFolder`, it also goes to the front of `settings.json`'s recent
+    /// directories, even when the dialog was closed meanwhile; a cancelled or failed pick
+    /// records nothing.
+    fn pick_native(&mut self, settings: Entity<SettingsStore>, window: &mut Window, cx: &mut Context<Self>) {
         let picked = cx.prompt_for_paths(gpui_kit::PathPromptOptions {
             files: false,
             directories: true,
@@ -140,17 +149,19 @@ impl OpenWorkspaceDialog {
         });
         cx.spawn_in(window, async move |dialog, cx| {
             let path = match picked.await {
-                Ok(Ok(Some(mut paths))) if !paths.is_empty() => Some(paths.remove(0)),
+                Ok(Ok(Some(mut paths))) if !paths.is_empty() => Some(paths.remove(0).to_string_lossy().into_owned()),
                 Ok(Ok(_)) | Err(_) => None, // cancelled
                 Ok(Err(error)) => {
                     tracing::error!(%error, "folder picker failed");
                     None
                 }
             };
+            if let Some(path) = &path {
+                settings.update(cx, |s, cx| s.add_recent_directory(path, cx));
+            }
             match dialog.update_in(cx, |dialog, window, cx| {
-                dialog.picker = Picker::Native { picking: false };
+                dialog.picker = Picker::Native { settings, picking: false };
                 if let Some(path) = path {
-                    let path = path.to_string_lossy().into_owned();
                     dialog.folder.update(cx, |input, cx| input.set_value(path, window, cx));
                 }
                 cx.notify();
@@ -282,9 +293,9 @@ impl Render for OpenWorkspaceDialog {
             (c.text_primary, c.text_secondary, c.border, c.bg_hover, c.bg_tertiary);
         let picking = self.picking();
         let label = match &self.picker {
-            Picker::Native { picking: true } => "Opening...",
+            Picker::Native { picking: true, .. } => "Opening...",
             Picker::Remote { browser: Inline::Shown { .. }, .. } => "Hide",
-            Picker::Native { picking: false } | Picker::Remote { browser: Inline::Hidden, .. } => "Browse...",
+            Picker::Native { picking: false, .. } | Picker::Remote { browser: Inline::Hidden, .. } => "Browse...",
         };
         // `.open-workspace-dialog .dialog-btn.browse`: bg-tertiary with a border; disabled
         // while the native picker is up.
