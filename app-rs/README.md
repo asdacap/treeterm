@@ -352,7 +352,9 @@ are not ours). Its changes are marked `TreeTerm patch` (`grep -rn "TreeTerm patc
 - `src/input/popovers/completion_menu.rs`: a snippet completion (`InsertTextFormat::SNIPPET`)
   inserts the text it stands for with its first tab stop selected, as Monaco's snippet
   controller leaves it (a JSON `{}` with the cursor between the braces, an HTML attribute's
-  between its quotes). The Kit inserted the snippet's source, `$1` and all.
+  between its quotes). The Kit inserted the snippet's source, `$1` and all. Only that first
+  stop is reached: there is no snippet session, so Tab indents rather than going on to the
+  later stops (`$2`, then `$0` or the end).
 - `src/menu/popup_menu.rs`: a custom element item (`PopupMenuItem::element`) can be
   narrower than its content, so in a menu given a max width its text can ellipsise, as the
   Run menu's long script names do in Electron. The Kit's row grew with its content and the
@@ -460,12 +462,16 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   workers give up only where JavaScript's stack runs out, a few thousand and about a
   thousand levels deep). Colours are painted behind their text, not as a swatch before it,
   and have no colour picker. A completed CSS property is inserted as `name: ` with the
-  cursor after it (Monaco's snippet puts it between `:` and `;`). Other suggestions are the
-  words of the file and of the Editor tabs and Files viewers of the workspace with a file of
-  its language open; what is a comment or a string, where typing suggests nothing, is read
-  from GPUI Kit's tree-sitter grammars, not Monaco's tokenizers. The Editor tab's
-  right-click menu has Format Document and Format Selection for JSON only, and no Go to
-  References, Peek References, Rename Symbol or Command Palette.
+  cursor after it (Monaco's snippet puts it between `:` and `;`). A picked snippet leaves the
+  cursor at its first tab stop, but Tab does not go on to its later ones, as Monaco's
+  snippet session does: after `data-` (`data-$1="$2"`) Tab indents there instead of moving
+  between the quotes, and inside an attribute's quotes (`name="$1"`) it indents instead of
+  moving past the closing one. Other suggestions are the words of the file and of the
+  Editor tabs and Files viewers of the workspace with a file of its language open; what is
+  a comment or a string, where typing suggests nothing, is read from GPUI Kit's tree-sitter
+  grammars, not Monaco's tokenizers. The Editor tab's right-click menu has Format Document
+  and Format Selection for JSON only, and no Go to References, Peek References, Rename
+  Symbol or Command Palette.
 - Peek Definition (Alt+F12, Ctrl+Shift+F10 on Linux, or the right-click menu's Peek
   submenu) lists the definitions found above the code, as go to definition lists several,
   not in Monaco's peek widget under the line (GPUI Kit's editor has no view zones to show a
