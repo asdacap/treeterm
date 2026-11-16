@@ -556,6 +556,94 @@ fn removing_a_workspace_while_a_tabs_pty_starts_kills_the_pty(cx: &mut TestAppCo
     closed_tabs_ptys_start_then_are_killed(cx, &h, 1);
 }
 
+/// A workspace whose removal fails after `close_all_tabs` (its git cleanup) keeps its
+/// store and tabs. A tab whose PTY was starting takes that PTY once it exists, as Electron's
+/// takes its id (`creating.then(updateTabState)`) before `close()` kills it, rather than
+/// saying it is starting for good; the PTY is killed all the same.
+#[gpui_kit::test]
+fn a_tab_whose_pty_starts_while_its_workspace_removal_fails_attaches_to_it_and_kills_it(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    std::fs::write(h.daemon.workspaces_dir().join("a.json"), body("a", None)).unwrap();
+    publish(&h, &["a"]);
+    // Kept on exit: the tab stays once its program is gone, however the exit reads.
+    let settings = treeterm_core::settings::from_value(serde_json::json!({
+        "aiHarness": { "instances": [{
+            "id": "bot", "name": "Bot", "icon": "B", "command": "sleep 60",
+            "isDefault": false, "enableSandbox": false, "allowNetwork": true,
+            "backgroundColor": "#1a1a24", "disableScrollbar": false, "keepOnExit": true
+        }]}
+    }))
+    .unwrap();
+    let settings = cx.new(|_| SettingsStore::in_memory(settings));
+    let conn = h.conn.clone();
+    let store = cx.new(|cx| SessionStore::new(conn, "client-a".into(), settings, None, cx.new(ConnectionTraffic::new), cx));
+    wait_until(cx, &store, |s| loaded(s, "a"));
+    let workspace = store.read_with(cx, |s, _| ws(s, "a"));
+
+    // `remove_workspace` closes every tab; the git cleanup then fails, so the store stays.
+    let tab = workspace.update(cx, |w, cx| {
+        let tab = w.add_tab("aiharness-bot", cx).unwrap();
+        w.close_all_tabs(cx);
+        assert!(matches!(w.tab_content(&tab), Some(TabContent::StartingHarness)));
+        tab
+    });
+    for _ in 0..500 {
+        if pty_ids(&h).len() == 1 {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let [pty] = <[String; 1]>::try_from(pty_ids(&h)).expect("the tab's PTY was created");
+    closed_tabs_ptys_start_then_are_killed(cx, &h, 1);
+
+    workspace.read_with(cx, |w, cx| {
+        let Some(TabContent::Terminal(terminal)) = w.tab_content(&tab) else {
+            panic!("the tab is attached, not starting");
+        };
+        assert_eq!(terminal.read(cx).pty_id(), pty);
+        assert_eq!(w.workspace().file.app_states[&tab].state["ptyId"], pty.as_str());
+    });
+}
+
+/// …and one whose PTY fails to start says why, as an open tab does.
+#[gpui_kit::test]
+fn a_tab_whose_pty_fails_while_its_workspace_removal_fails_says_why(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    std::fs::write(h.daemon.workspaces_dir().join("a.json"), body("a", None)).unwrap();
+    publish(&h, &["a"]);
+    let dir = tempfile::Builder::new().prefix("tt").tempdir_in("/tmp").unwrap();
+    let socket = dir.path().join("p.sock");
+    let proxy = Proxy::start(&socket, h.daemon.socket_path());
+    let conn = futures::executor::block_on(DaemonConnection::open(&h.rt, &socket)).unwrap().unwrap();
+    let settings = cx.new(|_| SettingsStore::in_memory(Default::default()));
+    let store = cx.new(|cx| {
+        SessionStore::new(conn.clone(), "client-a".into(), settings, None, cx.new(ConnectionTraffic::new), cx)
+    });
+    wait_until(cx, &store, |s| loaded(s, "a"));
+    let workspace = store.read_with(cx, |s, _| ws(s, "a"));
+
+    // The daemon cannot be reached: the tab's PTY fails to start.
+    drop(proxy);
+    for _ in 0..500 {
+        if futures::executor::block_on(conn.list_pty_sessions()).unwrap().is_err() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let tab = workspace.update(cx, |w, cx| {
+        let tab = w.add_tab("terminal", cx).unwrap();
+        w.close_all_tabs(cx);
+        tab
+    });
+    wait_until(cx, &workspace, |w| !matches!(w.tab_content(&tab), Some(TabContent::StartingTerminal)));
+    workspace.read_with(cx, |w, _| match w.tab_content(&tab) {
+        Some(TabContent::Failed(error)) => assert!(error.starts_with("Failed to start terminal: "), "{error}"),
+        Some(_) | None => panic!("the tab says its PTY failed to start"),
+    });
+}
+
 #[gpui_kit::test]
 fn a_tab_unloaded_while_its_pty_starts_gets_that_pty_when_it_loads_again(cx: &mut TestAppContext) {
     cx.executor().allow_parking();

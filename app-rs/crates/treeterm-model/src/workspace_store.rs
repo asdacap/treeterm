@@ -273,10 +273,23 @@ enum OnCreated {
     Kill,
 }
 
+/// Who takes the outcome of a closed tab's PTY creation
+/// ([`WorkspaceStore::on_closed_pty_created`]).
+enum ClosedCreation {
+    /// The tab is still there, waiting on this creation: its workspace's removal failed
+    /// after `close_all_tabs`. It took the PTY (and killed it) or the failure, as it would
+    /// have open.
+    KeptByTab,
+    /// Nothing references the PTY: the creation kills it, or logs its failure.
+    Orphaned,
+}
+
 impl PtyCreation {
     /// `close()` while the PTY is still being created (`creating.then(kill)`): the creation
     /// goes on without the tab and the store, either of which may go first, and kills the
-    /// PTY once its id is known.
+    /// PTY once its id is known. A tab still there by then (`close_all_tabs` on a
+    /// workspace whose removal failed) attaches to the PTY before it dies, as Electron's
+    /// `creating.then(updateTabState)` runs before the kill.
     fn close(&mut self) {
         tracing::debug!(handle = %self.handle, "tab closed while its PTY was starting");
         self.on_created.set(OnCreated::Kill);
@@ -1398,11 +1411,20 @@ impl WorkspaceStore {
                         Ok(()) | Err(_) => {} // Err: the workspace went away; the daemon kept the PTY
                     }
                 }
-                // Without the store, which may be gone by now.
-                OnCreated::Kill => match result {
-                    Ok(pty_id) => kill_orphaned_pty(&conn, &pty_id).await,
-                    Err(error) => tracing::error!(%tab_id, %error, "failed to create the PTY of a closed tab"),
-                },
+                // With the store only if it is still there, and its tab too.
+                OnCreated::Kill => {
+                    let settled = result.clone();
+                    let closed = this.update(cx, |store, cx| {
+                        store.on_closed_pty_created(&tab_id, &owned_handle, &then, settled, cx)
+                    });
+                    match (closed, result) {
+                        (Ok(ClosedCreation::KeptByTab), _) => {}
+                        (Ok(ClosedCreation::Orphaned) | Err(_), Ok(pty_id)) => kill_orphaned_pty(&conn, &pty_id).await,
+                        (Ok(ClosedCreation::Orphaned) | Err(_), Err(error)) => {
+                            tracing::error!(%tab_id, %error, "failed to create the PTY of a closed tab");
+                        }
+                    }
+                }
             }
         });
         TerminalTab::Creating(PtyCreation { handle, on_created, task })
@@ -1446,6 +1468,34 @@ impl WorkspaceStore {
         if let Some(web_app) = self.web_apps.get(tab_id) {
             web_app.model.update(cx, |app, _| app.server_pty_settled(Ok(())));
         }
+    }
+
+    /// The PTY of a tab closed while it was being created ([`PtyCreation::close`]) was
+    /// created, or failed to start. The tab is gone, unless `close_all_tabs` closed it and the
+    /// workspace's removal then failed (its git cleanup): that tab, still waiting on
+    /// `creation`, takes the PTY or the failure as it would have open, and the PTY attached
+    /// to it is killed, as `close_all_tabs` kills an attached tab's. Otherwise nothing
+    /// references the PTY.
+    fn on_closed_pty_created(
+        &mut self,
+        tab_id: &str,
+        handle: &str,
+        creation: &Rc<Cell<OnCreated>>,
+        result: Result<String, String>,
+        cx: &mut Context<Self>,
+    ) -> ClosedCreation {
+        let waiting = matches!(
+            self.tabs.get(tab_id),
+            Some(TabRef::Terminal(TerminalTab::Creating(pending))) if Rc::ptr_eq(&pending.on_created, creation)
+        );
+        if !waiting {
+            return ClosedCreation::Orphaned;
+        }
+        self.on_pty_created(tab_id, handle, result, cx);
+        if let Some(TabRef::Terminal(TerminalTab::Attached { model, .. })) = self.tabs.get(tab_id) {
+            model.update(cx, |model, cx| model.kill(cx));
+        }
+        ClosedCreation::KeptByTab
     }
 
     /// Release a tab's runtime state without touching the body (`disposeTabResources`).
@@ -2313,7 +2363,7 @@ impl WorkspaceStore {
                     model.update(cx, |model, cx| model.kill(cx));
                 }
                 // Killed once it exists, though the store goes first; the tab says it is
-                // starting until then.
+                // starting until then, and attaches to it first if the removal failed.
                 TabRef::Terminal(TerminalTab::Creating(creation)) => creation.close(),
                 TabRef::Browser { page, .. } => page.update(cx, |page, cx| page.close(cx)),
                 TabRef::Terminal(TerminalTab::Failed(_))
