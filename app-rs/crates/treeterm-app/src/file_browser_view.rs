@@ -159,8 +159,10 @@ pub(crate) fn reveal_in_center(editor: &Entity<EditorState>, range: std::ops::Ra
     });
 }
 
-/// A code editor for `text` with the defaults of Monaco's models: the file's own
-/// indentation (`detectIndentation`, else 4-space soft tabs, and tabs drawn that wide).
+/// A code editor for `text` with the defaults of Monaco's models and of Electron's editor
+/// options: the file's own indentation (`detectIndentation`, else 4-space soft tabs, and
+/// tabs drawn that wide) and nothing to scroll past the last line
+/// (`scrollBeyondLastLine: false`).
 pub(crate) fn code_editor(
     language: &'static str,
     text: String,
@@ -176,6 +178,7 @@ pub(crate) fn code_editor(
     EditorState::new(window, cx)
         .language(language)
         .tab_size(gpui_kit::component::input::TabSize { tab_size: indentation.tab_size, hard_tabs })
+        .scroll_beyond_last_line(Some(0))
         .default_value(text)
 }
 
@@ -1786,6 +1789,10 @@ mod tests {
         (editor, cx)
     }
 
+    fn numbered_lines(count: usize) -> String {
+        (1..=count).map(|line| format!("line {line}\n")).collect()
+    }
+
     #[gpui_kit::test]
     fn tab_indents_as_the_file_does(cx: &mut gpui_kit::TestAppContext) {
         cx.update(gpui_kit::init);
@@ -1798,6 +1805,24 @@ mod tests {
             cx.simulate_keystrokes("tab");
             assert_eq!(cx.update(|_, cx| editor.read(cx).value().to_string()), format!("{text}{indent}"), "{text:?}");
         }
+    }
+
+    #[gpui_kit::test]
+    fn the_last_line_scrolls_no_further_than_the_bottom(cx: &mut gpui_kit::TestAppContext) {
+        cx.update(gpui_kit::init);
+        // 100 lines and the empty one after the final newline.
+        let (editor, cx) = code_editor_host(&numbered_lines(100), cx);
+        editor.update(cx, |editor, cx| editor.set_scroll_offset(gpui_kit::point(px(0.), px(-1.0e6)), cx));
+        draw(cx);
+        draw(cx);
+        let (scroll, line_height, viewport) = cx.update(|_, cx| {
+            let editor = editor.read(cx);
+            (editor.scroll_offset().y, editor.line_height().unwrap(), editor.input_bounds().size.height)
+        });
+        let below_last_line = -scroll + viewport - line_height * 101.;
+        // GPUI Kit's default leaves half the viewport; only its bottom padding is left.
+        assert!(below_last_line <= px(16.), "{below_last_line:?} under the last line");
+        assert!(-scroll > px(0.), "scrolled");
     }
 
     #[test]
