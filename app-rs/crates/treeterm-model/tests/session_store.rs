@@ -225,9 +225,9 @@ fn an_opened_or_forked_workspace_is_active_from_its_placeholder_on(cx: &mut Test
     assert_eq!(active(cx, &store), Some(root.clone()));
 
     // A quick fork's child is active as soon as its row appears (`createChildWithLoading`).
-    store.update(cx, |s, cx| s.quick_fork(&root, cx)).unwrap();
-    wait_until(cx, &store, |s| s.active_workspace().is_some_and(|id| id != root));
-    let child = active(cx, &store).unwrap();
+    let forked = store.update(cx, |s, cx| s.quick_fork(&root, cx));
+    let child = recv(cx, forked).unwrap();
+    assert_eq!(active(cx, &store), Some(child.clone()), "active from its placeholder on");
     wait_child(cx, &store, &child);
     assert_eq!(file_of(cx, &store, &child).parent_id, Some(root.clone()));
     assert_eq!(active(cx, &store), Some(child.clone()));
