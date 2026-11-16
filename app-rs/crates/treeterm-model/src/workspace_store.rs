@@ -25,6 +25,7 @@ use treeterm_term::fit::WidthLimit;
 use treeterm_term::palette::{DEFAULT_BACKGROUND, SANDBOX_BACKGROUND};
 
 use crate::analyzer::{AnalyzerEvent, AnalyzerModel, LlmService};
+use crate::code_intel::links::Opening;
 use crate::apps::{AI_HARNESS_PREFIX, AppKind, AppRegistry};
 use crate::pty_writer::PtyWriter;
 use crate::terminal::{ScrollbarVisibility, TerminalEvent, TerminalModel, TerminalOptions};
@@ -1517,6 +1518,21 @@ impl WorkspaceStore {
         let title = path.rsplit('/').next().unwrap_or(path).to_owned();
         self.update_tab_title(&tab, &title, cx);
         Some(tab)
+    }
+
+    /// Open a link Cmd/Ctrl+clicked in a code editor where Monaco's opener takes it: a web
+    /// link in the system browser (Monaco's `window.open`, which Electron hands to
+    /// `shell.openExternal`), a `file:` link in an Editor tab at the line its `#L<n>` names
+    /// (TreeTerm's `registerEditorOpener`, `openFileAtLine`).
+    pub fn open_link(&mut self, url: &str, cx: &mut Context<Self>) {
+        match crate::code_intel::links::opening(url) {
+            Opening::Browser => cx.open_url(url),
+            Opening::Editor { path, line } => {
+                self.open_in_editor_at(&path, line, cx);
+            }
+            // Monaco reports the URI error and opens nothing.
+            Opening::Unreadable => tracing::warn!("link not opened: not a URI vscode-uri reads: {url}"),
+        }
     }
 
     /// `openOrFocusTab`: show the first tab running `application_id`, else add one.

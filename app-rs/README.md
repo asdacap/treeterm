@@ -118,8 +118,9 @@ Done (tested against a real in-process daemon unless noted):
   mark problems (their message on hover): JSON's (Monaco's JSON worker, ported), TypeScript
   and JavaScript syntax errors, and CSS lint warnings (empty rules, unknown and duplicate
   properties, unknown at-rules, incomplete `@font-face`); they paint CSS, SCSS and Less
-  colours, and underline links (`http(s)://`, `file://`), which Cmd/Ctrl+click opens in the
-  browser ("Follow link (cmd + click)" on hover).
+  colours, and underline links ("Follow link (cmd + click)" on hover): Cmd/Ctrl+click opens
+  an `http(s)://` link in the browser and a `file://` link in an Editor tab, at the line its
+  `#L<n>` names.
 - **Review (M7):** committed / uncommitted / commits views, stage/unstage/commit, inline
   comments (Electron's metadata format), viewed files, image diffs (before / after, SVG
   included), each file's diff loading, failing (also when its part of the patch does not

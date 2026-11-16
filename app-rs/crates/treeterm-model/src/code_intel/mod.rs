@@ -9,13 +9,15 @@
 //! - CSS, SCSS and Less ([`css`]): colours, property completions, and (CSS) the lint
 //!   warnings about rules and declarations.
 //! - HTML ([`html`]): element and attribute name completions.
-//! - Every language ([`links`]): the URLs the base editor worker links.
+//! - Every language ([`links`]): the URLs the base editor worker links, and where Monaco's
+//!   opener takes them.
 
 pub mod css;
 pub mod html;
 pub mod json;
 pub mod links;
 pub mod syntax;
+mod uri;
 mod web_data;
 
 use std::ops::Range;

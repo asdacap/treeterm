@@ -13,6 +13,7 @@
 use std::collections::HashMap;
 use std::ops::Range;
 
+use super::uri::{Uri, is_scheme};
 use super::{Problem, Severity};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -661,110 +662,6 @@ fn normalize_path(parts: &[&str]) -> String {
     if parts.first() == Some(&"") { format!("/{joined}") } else { joined }
 }
 
-/// `%XX` escapes read, as vscode-uri decodes a component.
-fn percent_decode(text: &str) -> String {
-    let bytes = text.as_bytes();
-    let mut decoded = Vec::with_capacity(bytes.len());
-    let mut index = 0;
-    while index < bytes.len() {
-        let hex = bytes.get(index + 1..index + 3).and_then(|hex| u8::from_str_radix(std::str::from_utf8(hex).ok()?, 16).ok());
-        match (bytes[index], hex) {
-            (b'%', Some(byte)) => {
-                decoded.push(byte);
-                index += 3;
-            }
-            (byte, _) => {
-                decoded.push(byte);
-                index += 1;
-            }
-        }
-    }
-    String::from_utf8_lossy(&decoded).into_owned()
-}
-
-/// Whether `scheme` is one (`/^\w[\w\d+.-]*$/`).
-fn is_scheme(scheme: &str) -> bool {
-    let mut chars = scheme.chars();
-    chars.next().is_some_and(|first| first.is_ascii_alphanumeric() || first == '_')
-        && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '+' | '.' | '-'))
-}
-
-/// vscode-uri's `URI`, its components decoded.
-struct Uri {
-    scheme: String,
-    authority: String,
-    path: String,
-    query: String,
-    fragment: String,
-}
-
-impl Uri {
-    /// `URI.parse(value)`; `None` where it throws.
-    fn parse(value: &str) -> Option<Self> {
-        // `^(([^:/?#]+?):)?(\/\/([^/?#]*))?([^?#]*)(\?([^#]*))?(#(.*))?`
-        let (scheme, rest) = match value.find([':', '/', '?', '#']) {
-            Some(colon) if colon > 0 && value[colon..].starts_with(':') => (&value[..colon], &value[colon + 1..]),
-            Some(_) | None => ("", value),
-        };
-        let (authority, rest) = match rest.strip_prefix("//") {
-            Some(after) => after.split_at(after.find(['/', '?', '#']).unwrap_or(after.len())),
-            None => ("", rest),
-        };
-        let (rest, fragment) = rest.split_once('#').unwrap_or((rest, ""));
-        let (path, query) = rest.split_once('?').unwrap_or((rest, ""));
-        // No scheme reads as `file`.
-        let scheme = if scheme.is_empty() { "file" } else { scheme };
-        let mut path = percent_decode(path);
-        // `_referenceResolution`
-        if matches!(scheme, "https" | "http" | "file") {
-            if path.is_empty() {
-                path = "/".to_owned();
-            } else if !path.starts_with('/') {
-                path.insert(0, '/');
-            }
-        }
-        let uri = Self {
-            scheme: scheme.to_owned(),
-            authority: percent_decode(authority),
-            path,
-            query: percent_decode(query),
-            fragment: percent_decode(fragment),
-        };
-        // `_validateUri`
-        let valid = is_scheme(&uri.scheme)
-            && (uri.path.is_empty()
-                || if uri.authority.is_empty() { !uri.path.starts_with("//") } else { uri.path.starts_with('/') });
-        valid.then_some(uri)
-    }
-
-    /// `toString(true)`: as read, but `#` and `?` in the path, and the authority in lower case.
-    fn to_display_string(&self) -> String {
-        let mut formatted = format!("{}:", self.scheme);
-        if !self.authority.is_empty() || self.scheme == "file" {
-            formatted.push_str("//");
-        }
-        formatted.push_str(&self.authority.to_lowercase());
-        formatted.push_str(&self.path.replace('#', "%23").replace('?', "%3F"));
-        if !self.query.is_empty() {
-            formatted.push('?');
-            formatted.push_str(&self.query.replace('#', "%23"));
-        }
-        if !self.fragment.is_empty() {
-            formatted.push('#');
-            formatted.push_str(&self.fragment);
-        }
-        formatted
-    }
-
-    /// `fsPath` (not on Windows).
-    fn fs_path(&self) -> String {
-        if !self.authority.is_empty() && self.path.len() > 1 {
-            return format!("//{}{}", self.authority, self.path);
-        }
-        self.path.clone()
-    }
-}
-
 /// The schema service's `normalizeId`: the id as vscode-uri writes it back, or as it is
 /// where vscode-uri cannot read it.
 fn normalize_id(id: &str) -> String {
@@ -1007,5 +904,11 @@ mod tests {
         assert_eq!(named("file:///x/y%20z.json"), "/x/y z.json");
         assert_eq!(named("x:y"), "x:y");
         assert_eq!(named("http:so:schema.org/s#"), "http:/so:schema.org/s");
+        // A drive letter in lower case, an escape that spells no text left as it is, a host
+        // as a UNC path.
+        assert_eq!(named("file:///C:/x.json"), "c:/x.json");
+        assert_eq!(named("file:///a%FF%41.json"), "/a%FFA.json");
+        assert_eq!(named("file://host/a/../b.json"), "//host/a/../b.json");
+        assert_eq!(named("https://x.org/s?a?b"), "https://x.org/s?a%3Fb");
     }
 }

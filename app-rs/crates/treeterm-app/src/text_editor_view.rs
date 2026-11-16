@@ -27,6 +27,7 @@ use gpui_kit::{
 };
 use treeterm_model::text_editor::{EditorDoc, SaveState, TextEditor};
 
+use crate::editor_hooks::Follow;
 use crate::file_browser_view::{GoToDefinition, PointerOver, language_for};
 use crate::theme::colors;
 use crate::ui;
@@ -122,9 +123,12 @@ impl TextEditorView {
         self._subscriptions.push(changes);
         let probe = self.model.read(cx).definition_probe();
         let model = self.model.downgrade();
-        let go = move |offset: usize, cx: &mut App| {
+        let go = move |follow: Follow, cx: &mut App| {
             if let Some(model) = model.upgrade() {
-                model.update(cx, |m, cx| m.go_to_definition(offset, cx));
+                model.update(cx, |m, cx| match follow {
+                    Follow::Definition(offset) => m.go_to_definition(offset, cx),
+                    Follow::Link(url) => m.open_link(&url, cx),
+                });
             }
         };
         crate::editor_hooks::install_definitions(&editor, probe, self.definition_clicked.clone(), go, cx);

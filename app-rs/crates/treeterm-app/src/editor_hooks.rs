@@ -3,8 +3,8 @@
 //! [`treeterm_model::code_intel`]):
 //! - both editors: the underline under a word with a definition while Cmd/Ctrl is held over
 //!   it, which a click follows; links (underlined, "Follow link (cmd + click)" on hover,
-//!   Cmd/Ctrl+click opens them); the language workers' problems (squiggles, their message on
-//!   hover); and CSS colours;
+//!   Cmd/Ctrl+click opens a web link in the browser and a `file:` link in an Editor tab);
+//!   the language workers' problems (squiggles, their message on hover); and CSS colours;
 //! - the Editor tab: suggestions while typing, the language's (CSS properties, HTML elements
 //!   and attributes) or else the file's words.
 
@@ -112,20 +112,30 @@ impl DefinitionProvider for GrepDefinitions {
     }
 }
 
+/// What a Cmd/Ctrl+click on the underline follows.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Follow {
+    /// The word at this byte offset: its definition.
+    Definition(usize),
+    /// A link: opened where Monaco's opener takes it (the model's `open_link`).
+    Link(String),
+}
+
 /// Give `editor` the Cmd/Ctrl+hover underline of `probe`'s file, and of its links. A click
 /// on an underlined word puts the cursor on it and calls `go` with its offset; one on a link
-/// opens it. Either sets `clicked` for the view's mouse-up handler, which would otherwise
-/// take the click as Cmd/Ctrl+click on the cursor (the Kit takes the press and leaves the
-/// cursor where it was). The element around the editor is a [`definition_frame`], which
-/// clears `clicked` at each press.
+/// calls `go` with its URL. Either sets `clicked` for the view's mouse-up handler, which
+/// would otherwise take the click as Cmd/Ctrl+click on the cursor (the Kit takes the press
+/// and leaves the cursor where it was). The element around the editor is a
+/// [`definition_frame`], which clears `clicked` at each press.
 pub(crate) fn install_definitions(
     editor: &Entity<EditorState>,
     probe: DefinitionProbe,
     clicked: Rc<Cell<bool>>,
-    go: impl Fn(usize, &mut App) + 'static,
+    go: impl Fn(Follow, &mut App) + 'static,
     cx: &mut App,
 ) {
     let weak = editor.downgrade();
+    let go = Rc::new(go);
     let show = move |params: &ShowDocumentParams, window: &mut Window, cx: &mut App| -> bool {
         let Some(target) = Target::of(&params.uri) else {
             return false;
@@ -134,17 +144,20 @@ pub(crate) fn install_definitions(
         // The editor is busy with the click until this returns.
         let editor = weak.clone();
         match target {
-            Target::Link(offset) => window.defer(cx, move |_, cx| {
-                // The link's text is read again: the Kit gives back only the target.
-                let Some(editor) = editor.upgrade() else {
-                    return;
-                };
-                let text = editor.read(cx).text().to_string();
-                match links::link_at(&text, offset) {
-                    Some(link) => cx.open_url(&link.url),
-                    None => tracing::error!("no link at {offset} to open"),
-                }
-            }),
+            Target::Link(offset) => {
+                let go = go.clone();
+                window.defer(cx, move |_, cx| {
+                    // The link's text is read again: the Kit gives back only the target.
+                    let Some(editor) = editor.upgrade() else {
+                        return;
+                    };
+                    let text = editor.read(cx).text().to_string();
+                    match links::link_at(&text, offset) {
+                        Some(link) => go(Follow::Link(link.url), cx),
+                        None => tracing::error!("no link at {offset} to open"),
+                    }
+                });
+            }
             Target::Definition(offset) => {
                 // Monaco moves the cursor to the clicked word first.
                 window.defer(cx, move |_, cx| {
@@ -152,7 +165,7 @@ pub(crate) fn install_definitions(
                         editor.update(cx, |editor, cx| editor.set_selected_range(offset..offset, cx));
                     }
                 });
-                go(offset, cx);
+                go(Follow::Definition(offset), cx);
             }
         }
         true
@@ -431,7 +444,7 @@ mod tests {
         cx.update(|_, cx| {
             let probe = DefinitionProbe::new(Arc::new(GrepFindsOne), "/w".into(), "/w/b.rs".into());
             let gone = gone.clone();
-            install_definitions(&editor, probe, clicked.clone(), move |offset, _| gone.borrow_mut().push(offset), cx);
+            install_definitions(&editor, probe, clicked.clone(), move |follow, _| gone.borrow_mut().push(follow), cx);
         });
         cx.run_until_parked();
         let helper = text.rfind("helper").unwrap();
@@ -449,7 +462,7 @@ mod tests {
         cx.run_until_parked();
         cx.simulate_mouse_down(word, MouseButton::Left, secondary);
         assert!(clicked.get(), "the press went to the underline");
-        assert_eq!(*gone.borrow(), [helper]);
+        assert_eq!(*gone.borrow(), [Follow::Definition(helper)]);
     }
 
     #[test]
@@ -501,9 +514,9 @@ mod tests {
     }
 
     #[gpui_kit::test]
-    fn cmd_click_on_a_link_opens_it_and_goes_to_no_definition(cx: &mut gpui_kit::TestAppContext) {
+    fn cmd_click_on_a_link_follows_it_and_goes_to_no_definition(cx: &mut gpui_kit::TestAppContext) {
         cx.update(gpui_kit::init);
-        let text = "// see https://example.com/docs.\nfn main() {}\n";
+        let text = "// see https://example.com/docs.\n// and file:///w/a.rs#L3\nfn main() {}\n";
         let clicked = Rc::new(Cell::new(false));
         let (host, cx) = cx.add_window_view(|window, cx| Host {
             editor: cx.new(|cx| EditorState::new(window, cx).language("rust").default_value(text)),
@@ -514,19 +527,27 @@ mod tests {
         cx.update(|_, cx| {
             let probe = DefinitionProbe::new(Arc::new(GrepFindsOne), "/w".into(), "/w/b.rs".into());
             let gone = gone.clone();
-            install_definitions(&editor, probe, clicked.clone(), move |offset, _| gone.borrow_mut().push(offset), cx);
+            install_definitions(&editor, probe, clicked.clone(), move |follow, _| gone.borrow_mut().push(follow), cx);
         });
         cx.run_until_parked();
-        let docs = text.find("docs").unwrap();
-        let link = cx.update(|_, cx| editor.read(cx).range_to_bounds(&(docs..docs + 4))).expect("laid out").center();
         let secondary = cx.update(|_, cx| Modifiers::secondary_key(cx));
-        cx.simulate_mouse_move(link, None, secondary);
-        cx.run_until_parked();
-        cx.simulate_mouse_down(link, MouseButton::Left, secondary);
-        cx.run_until_parked();
-        assert!(clicked.get(), "the press went to the link");
-        assert_eq!(cx.opened_url().as_deref(), Some("https://example.com/docs"));
-        assert!(gone.borrow().is_empty());
+        for word in ["docs", "a.rs"] {
+            clicked.set(false);
+            let at = text.find(word).unwrap();
+            let link = cx.update(|_, cx| editor.read(cx).range_to_bounds(&(at..at + 4))).expect("laid out").center();
+            cx.simulate_mouse_move(link, None, secondary);
+            cx.run_until_parked();
+            cx.simulate_mouse_down(link, MouseButton::Left, secondary);
+            cx.simulate_mouse_up(link, MouseButton::Left, secondary);
+            cx.run_until_parked();
+            assert!(clicked.get(), "the press went to the link at {word}");
+        }
+        // The model opens each where Monaco's opener takes it; the hook opens nothing itself.
+        assert_eq!(*gone.borrow(), [
+            Follow::Link("https://example.com/docs".to_owned()),
+            Follow::Link("file:///w/a.rs#L3".to_owned())
+        ]);
+        assert_eq!(cx.opened_url(), None);
     }
 
     #[test]

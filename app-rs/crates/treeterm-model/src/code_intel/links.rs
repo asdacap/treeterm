@@ -2,9 +2,11 @@
 //! Monaco 0.55.1): `http://`, `https://` and `file://` URLs, up to a space, a quote or
 //! bracket that does not belong to them, or one of the CJK punctuation marks; never ending
 //! in `.`, `,`, `;` or `:`, nor in the `)`, `]` or `}` closing a bracket opened before
-//! them.
+//! them. And where Monaco's opener takes one ([`opening`]): the browser, or an Editor tab.
 
 use std::ops::Range;
+
+use super::uri::Uri;
 
 /// A link: its bytes in the text, and the URL they spell.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -206,6 +208,47 @@ pub fn link_at(text: &str, offset: usize) -> Option<Link> {
     found.into_iter().find(|link| link.range.start <= offset && offset <= link.range.end)
 }
 
+/// Where Monaco's opener takes a link Cmd/Ctrl+clicked in the code editors.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Opening {
+    /// A web link (`http:`, `https:`): Monaco opens it in a window, which Electron hands to
+    /// the system browser.
+    Browser,
+    /// A `file:` link: Monaco's `EditorOpener` hands it to TreeTerm's editor opener
+    /// (`openFileAtLine`), which opens an Editor tab on `path` at 1-based `line`.
+    Editor { path: String, line: usize },
+    /// A link vscode-uri cannot read (`file:////x`): Monaco opens nothing.
+    Unreadable,
+}
+
+/// Where Monaco's opener service takes `url`, a link [`links`] found: `http:` and `https:`
+/// to the browser (in any case, as the URL was written); anything else (`file:`) to its
+/// `EditorOpener`, which reads the URI, takes the line from its fragment
+/// (`extractSelection`: `^L?(\d+)`, else the first) and normalizes a `file` URI's path
+/// (`normalizePath`) before TreeTerm's opener opens an Editor tab on it.
+pub fn opening(url: &str) -> Opening {
+    let Some(uri) = Uri::parse(url) else {
+        return Opening::Unreadable;
+    };
+    let has_scheme = |scheme: &str| {
+        url.len() > scheme.len() && url.as_bytes()[scheme.len()] == b':' && url[..scheme.len()].eq_ignore_ascii_case(scheme)
+    };
+    if has_scheme("http") || has_scheme("https") {
+        return Opening::Browser;
+    }
+    let fragment = uri.fragment.strip_prefix('L').unwrap_or(&uri.fragment);
+    let digits = &fragment[..fragment.find(|c: char| !c.is_ascii_digit()).unwrap_or(fragment.len())];
+    let line = match digits {
+        "" => 1,
+        digits => digits.bytes().fold(0usize, |line, digit| line.saturating_mul(10).saturating_add(usize::from(digit - b'0'))),
+    };
+    let path = match uri.scheme.as_str() {
+        "file" => uri.normalize_path().path,
+        _ => uri.path,
+    };
+    Opening::Editor { path, line }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -268,5 +311,43 @@ mod tests {
         assert!(link_at(text, link.range.end).is_some());
         assert_eq!(link_at(text, 2), None);
         assert_eq!(links(text).len(), 1);
+    }
+
+    fn editor(path: &str, line: usize) -> Opening {
+        Opening::Editor { path: path.to_owned(), line }
+    }
+
+    /// Where Electron opens each (checked with Monaco's `URI`, `extractSelection` and
+    /// `normalizePath`, and TreeTerm's `registerEditorOpener`).
+    #[test]
+    fn web_links_open_in_the_browser_and_file_links_in_an_editor_tab_at_their_line() {
+        assert_eq!(opening("https://example.com/docs#L3"), Opening::Browser);
+        assert_eq!(opening("HTTP://Example.com"), Opening::Browser);
+        assert_eq!(opening("file:///Users/me/src/x.ts"), editor("/Users/me/src/x.ts", 1));
+        // The line: `#L<n>` or `#<n>`, before a column or a range.
+        assert_eq!(opening("file:///Users/me/src/x.ts#L10"), editor("/Users/me/src/x.ts", 10));
+        assert_eq!(opening("file:///Users/me/src/x.ts#10,5"), editor("/Users/me/src/x.ts", 10));
+        assert_eq!(opening("file:///Users/me/src/x.ts#L7,3-L9,1"), editor("/Users/me/src/x.ts", 7));
+        assert_eq!(opening("file:///Users/me/src/x.ts#Lx"), editor("/Users/me/src/x.ts", 1));
+        assert_eq!(opening("file:///Users/me/src/x.ts#section"), editor("/Users/me/src/x.ts", 1));
+        assert_eq!(opening("file:///x.ts?query=1#L0"), editor("/x.ts", 0));
+        assert_eq!(opening("file:///x.ts#L99999999999999999999"), editor("/x.ts", usize::MAX));
+        // The path: decoded (an escape that spells no text left as it is) and normalized.
+        assert_eq!(opening("file:///Users/me/My%20Files/a%2Bb.ts#L2"), editor("/Users/me/My Files/a+b.ts", 2));
+        assert_eq!(opening("file:///Users/me/caf%C3%A9.ts"), editor("/Users/me/café.ts", 1));
+        assert_eq!(opening("file:///Users/me/文件.ts#L3"), editor("/Users/me/文件.ts", 3));
+        assert_eq!(opening("file:///Users/me/bad%FF.ts"), editor("/Users/me/bad%FF.ts", 1));
+        assert_eq!(opening("file:///Users/me/a/../b/./c//d.ts"), editor("/Users/me/b/c/d.ts", 1));
+        assert_eq!(opening("file:///Users/me/%2e%2e/x"), editor("/Users/x", 1));
+        assert_eq!(opening("file:///Users/me/dir/"), editor("/Users/me/dir/", 1));
+        assert_eq!(opening("file:///c:/x/y.ts"), editor("/c:/x/y.ts", 1));
+        // A host joins the path; a scheme not in lower case is not normalized.
+        assert_eq!(opening("file://shares/foo.bar"), editor("/shares/foo.bar", 1));
+        assert_eq!(opening("file://host"), editor("/", 1));
+        assert_eq!(opening("FILE:///Users/me/a/../b.ts#L4"), editor("/Users/me/a/../b.ts", 4));
+        assert_eq!(opening("File://host/x/y"), editor("/x/y", 1));
+        // vscode-uri cannot read these: nothing opens.
+        assert_eq!(opening("file:////x/y.ts"), Opening::Unreadable);
+        assert_eq!(opening("https:////x"), Opening::Unreadable);
     }
 }

@@ -561,6 +561,46 @@ fn go_to_definition_in_an_editor_tab_opens_other_files_and_moves_within_its_own(
     assert_eq!(notes.read_with(cx, |e, _| e.definition().clone()), DefinitionLookup::Unavailable { language: "plaintext" });
 }
 
+#[gpui_kit::test]
+fn links_open_in_the_browser_or_in_an_editor_tab_at_their_line(cx: &mut TestAppContext) {
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let repo = TempRepo::new(&h);
+    repo.write("src/a.rs", "one\ntwo\nthree\n");
+    repo.write("notes.md", "links\n");
+    repo.commit_all("files");
+    let (_store, workspace, browser) = open_browser(cx, &h, &repo, "notes.md");
+    let a = format!("{}/src/a.rs", repo.root());
+    let opened = |cx: &mut TestAppContext| -> Vec<(String, serde_json::Value)> {
+        let mut opened: Vec<(String, serde_json::Value)> = editor_states(cx, &workspace)
+            .into_iter()
+            .map(|state| (state["filePath"].as_str().unwrap().to_owned(), state["scrollToLine"].clone()))
+            .collect();
+        opened.sort_by_key(|(_, line)| line.as_u64());
+        opened
+    };
+
+    // From the Files viewer, a `file:` link: an Editor tab on its path (decoded and
+    // normalized) at the line its `#L<n>` names.
+    let link = format!("file://{}/src/../src/%61.rs#L3", repo.root());
+    browser.update(cx, |b, cx| b.open_link(&link, cx));
+    assert_eq!(opened(cx), [(a.clone(), serde_json::json!(3))]);
+    // A web link: the browser, and no tab.
+    browser.update(cx, |b, cx| b.open_link("https://example.com/docs#L3", cx));
+    assert_eq!(cx.opened_url().as_deref(), Some("https://example.com/docs#L3"));
+    assert_eq!(opened(cx).len(), 1);
+
+    // From an Editor tab, one without a line: at the first.
+    let notes = open_editor(cx, &workspace, &format!("{}/notes.md", repo.root()));
+    notes.update(cx, |e, cx| e.open_link(&format!("file://{a}"), cx));
+    let lines: Vec<serde_json::Value> = opened(cx).into_iter().filter(|(path, _)| *path == a).map(|(_, line)| line).collect();
+    assert_eq!(lines, [serde_json::json!(1), serde_json::json!(3)]);
+    // One vscode-uri cannot read opens nothing.
+    notes.update(cx, |e, cx| e.open_link("file:////x", cx));
+    assert_eq!(opened(cx).len(), 3);
+}
+
 /// Whether the probed word has a definition, once its search ends.
 fn has_definition(cx: &mut TestAppContext, found: treeterm_model::definition::HasDefinition) -> bool {
     let (tx, rx) = futures::channel::oneshot::channel();

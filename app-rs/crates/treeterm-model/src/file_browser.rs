@@ -1164,6 +1164,14 @@ impl FileBrowser {
         self._definition = None;
         cx.notify();
     }
+
+    /// Open a link Cmd/Ctrl+clicked in the shown file ([`WorkspaceStore::open_link`]).
+    pub fn open_link(&mut self, url: &str, cx: &mut Context<Self>) {
+        let Some(workspace) = self.workspace.upgrade() else {
+            return;
+        };
+        workspace.update(cx, |w, cx| w.open_link(url, cx));
+    }
 }
 
 #[cfg(test)]

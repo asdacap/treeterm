@@ -373,6 +373,14 @@ impl TextEditor {
         workspace.update(cx, |w, cx| w.open_in_editor_at(&path, line, cx));
     }
 
+    /// Open a link Cmd/Ctrl+clicked in the file ([`WorkspaceStore::open_link`]).
+    pub fn open_link(&mut self, url: &str, cx: &mut Context<Self>) {
+        let Some(workspace) = self.workspace.upgrade() else {
+            return;
+        };
+        workspace.update(cx, |w, cx| w.open_link(url, cx));
+    }
+
     /// The Cmd/Ctrl+hover underline for this file.
     pub fn definition_probe(&self) -> DefinitionProbe {
         DefinitionProbe::new(self.exec.clone(), self.root.clone(), self.path.clone())

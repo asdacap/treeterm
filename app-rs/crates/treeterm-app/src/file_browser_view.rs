@@ -42,6 +42,7 @@ use treeterm_model::file_browser::{
 use treeterm_model::review::Notice;
 
 use crate::comment_ui::{CommentActions, Placement, comment_display, comment_input};
+use crate::editor_hooks::Follow;
 
 use crate::theme::colors;
 use crate::ui;
@@ -754,9 +755,12 @@ impl FileBrowserView {
         self.comment_lines = Some(editor.update(cx, |editor, cx| editor.create_range_decorations_collection(Vec::new(), cx)));
         if let Some(probe) = self.model.read(cx).definition_probe() {
             let model = self.model.downgrade();
-            let go = move |offset: usize, cx: &mut App| {
+            let go = move |follow: Follow, cx: &mut App| {
                 if let Some(model) = model.upgrade() {
-                    model.update(cx, |m, cx| m.go_to_definition(offset, cx));
+                    model.update(cx, |m, cx| match follow {
+                        Follow::Definition(offset) => m.go_to_definition(offset, cx),
+                        Follow::Link(url) => m.open_link(&url, cx),
+                    });
                 }
             };
             crate::editor_hooks::install_definitions(&editor, probe, self.definition_clicked.clone(), go, cx);
