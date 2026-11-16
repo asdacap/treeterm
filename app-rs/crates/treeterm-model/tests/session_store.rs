@@ -1901,10 +1901,10 @@ fn the_review_tab_stages_and_commits_uncommitted_changes(cx: &mut TestAppContext
         }
         _ => Vec::new(),
     };
-    wait_until(cx, &review, |r| {
-        staged_files(&r.content(), Staging::Unstaged) == vec!["new.txt".to_owned()]
-            && matches!(r.content(), ReviewContent::Uncommitted(u) if u.diffs.is_complete())
-    });
+    wait_until(cx, &review, |r| staged_files(&r.content(), Staging::Unstaged) == vec!["new.txt".to_owned()]);
+    // Its diff is read when asked for (its section near the diff's viewport).
+    review.update(cx, |r, cx| r.request_files(&["new.txt".to_owned()], cx));
+    wait_until(cx, &review, |r| matches!(r.content(), ReviewContent::Uncommitted(u) if u.diffs.is_complete()));
     let ReviewContent::Uncommitted(uncommitted) = review.read_with(cx, |r, _| r.content().clone()) else {
         unreachable!()
     };
@@ -2851,8 +2851,7 @@ fn review_shows_both_sides_of_a_changed_image(cx: &mut TestAppContext) {
     assert_eq!(before, None);
     assert_eq!(after.as_deref(), Some(&avif));
 
-    // An image's header refresh reads its sides again (once its diff is read).
-    wait_until(cx, &review, |r| matches!(r.content(), ReviewContent::Uncommitted(u) if u.diffs.is_complete()));
+    // An image's header refresh reads its sides again (and its diff, not asked for before).
     std::fs::write(repo.path.join("logo.png"), b"\x89PNG-again!").unwrap();
     review.update(cx, |r, cx| r.refresh_file("logo.png", cx));
     assert!(matches!(review.read_with(cx, |r, _| r.image("logo.png").cloned()), Some(ImageSides::Loading)));

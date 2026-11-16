@@ -6,13 +6,14 @@
 //! Views (Electron's `viewMode`): `committed` — the branch against its parent's branch
 //! (merge-base, `parent...HEAD`); `uncommitted` — the working tree against `HEAD`,
 //! including untracked files; `commits` — the branch's commits since the parent.
-//! Each listed file's part of the patch (plain unified diff text, rendered by the view) loads,
+//! Each listed file's part of the patch (plain unified diff text, rendered by the view) is read
+//! when it is first wanted (its section nears the diff's viewport, or find searches it), and
 //! fails and is refreshed on its own ([`FileDiffs`]).
 //!
 //! Comments and viewed marks live in workspace metadata (`reviewComments`,
 //! `reviewViewedFiles`), in Electron's format, so both apps share them.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use gpui_kit::{App, BackgroundExecutor, Context, Entity, EventEmitter, Subscription, Task, WeakEntity};
@@ -20,8 +21,8 @@ use indexmap::{IndexMap, IndexSet};
 use serde_json::{Value, json};
 use treeterm_core::exec::{ExecClient, ExecRequest, ExecTimeout};
 use treeterm_core::git::{
-    ConflictInfo, DiffFile, DiffResult, FileChangeStats, FileChangeStatus, GitApi, GitLogCommit, LogScope, Staging,
-    UncommittedChanges,
+    ConflictInfo, DiffFile, DiffResult, FileChangeStats, FileChangeStatus, GitApi, GitLogCommit, LogScope, PathOrigin,
+    Staging, UncommittedChanges, UncommittedFile,
 };
 use treeterm_core::review::{
     CommitAnchor, MetadataError, NewReviewComment, REVIEW_COMMENTS_KEY, REVIEW_VIEWED_FILES_KEY, Resolution,
@@ -34,7 +35,7 @@ use treeterm_core::search::{Whitespace, ignore_whitespace_in_patch};
 
 use crate::file_browser::FileBrowser;
 use crate::review_find::{DiffLayout, DiffMatch, find_in_patch, in_file_first};
-use crate::review_patch::{FileDiff, FileDiffs, rename_from};
+use crate::review_patch::{FileDiff, FileDiffs};
 use crate::search_panel::{RepoResults, SearchRow, count_label, push_repo_section, spawn_repo_search};
 use crate::review_metadata::{Blame, Later, Now};
 use crate::session_store::AfterMerge;
@@ -67,7 +68,8 @@ impl ReviewMode {
 
 /// What the current view shows ([`ReviewModel::content`]). Each view keeps what it loaded
 /// while another is shown, and a reload keeps it on screen until the new answer is complete,
-/// so `Loading` shows only before a view's first list of files (its files' diffs then load).
+/// so `Loading` shows only before a view's first list of files (each file's diff is then read
+/// when wanted).
 #[derive(Debug, Clone)]
 pub enum ReviewContent {
     Loading,
@@ -457,8 +459,9 @@ pub struct ReviewModel {
     committed_load: Option<Task<()>>,
     uncommitted_load: Option<Task<()>>,
     commits_load: Option<Task<()>>,
-    /// Files read again on their own (a header's refresh), by list. A load of the whole list
-    /// drops those started before it, and keeps those started since loading.
+    /// Files read on their own (near the viewport, searched, or a header's refresh), by list.
+    /// A load of the whole list drops those started before it (it reads them again), and keeps
+    /// those started since.
     file_loads: HashMap<(DiffList, String), Task<()>>,
     staging: GitOp,
     commit: GitOp,
@@ -948,14 +951,14 @@ impl ReviewModel {
     }
 
     /// Read the selected commit's changes (none selected: nothing to read): its files, which
-    /// show at once the first time, then their diffs.
+    /// show at once the first time (each file's diff read when wanted); read again, what is
+    /// shown stays until the diffs asked for in it are read again.
     fn load_commit_diff(&mut self, cx: &mut Context<Self>) {
         self.drop_file_loads(|list| matches!(list, DiffList::Commit(_)));
         let Some(selected) = &self.selected_commit else {
             return;
         };
         let (git, path, hash) = (self.git.clone(), self.path.clone(), selected.commit.hash.clone());
-        let request = self.show_request(&hash, &[]);
         let patches = self.patch_reader(cx);
         self._commit = Some(cx.spawn(async move |this, cx| {
             let files = match git.get_commit_diff(&path, &hash).await {
@@ -968,22 +971,24 @@ impl ReviewModel {
                     return;
                 }
             };
-            let paths = || files.iter().map(|file| file.path.as_str());
-            let listed = Loaded::Ready(CommitDiff { files: files.clone(), diffs: FileDiffs::loading(paths()) });
-            let shown = match this.update(cx, |model, cx| {
-                let first = model.selected_commit.as_ref().is_some_and(|s| !matches!(s.diff, Loaded::Ready(_)));
-                if first {
-                    model.commit_diff_read(&hash, listed, true, cx);
+            let list = DiffList::Commit(hash.clone());
+            let listed = FileDiffs::not_loaded(files.iter().map(|file| file.path.as_str()));
+            let reads = match this.update(cx, |model, cx| {
+                if model.selected_commit.as_ref().is_some_and(|s| !matches!(s.diff, Loaded::Ready(_))) {
+                    let diff = Loaded::Ready(CommitDiff { files: files.clone(), diffs: listed.clone() });
+                    model.commit_diff_read(&hash, diff, true, cx);
+                    return None;
                 }
-                first
+                let again = model.asked_again(&list, &listed);
+                Some(model.commit_reads(&hash, &files, &again))
             }) {
-                Ok(shown) => shown,
-                Err(_) => return, // tab closed
+                Ok(Some(reads)) => reads,
+                Ok(None) | Err(_) => return, // None: shown at once; Err: tab closed
             };
-            let diffs = FileDiffs::read(paths(), &patches.read(request, patch_of).await);
+            let diffs = read_files(&patches, listed, reads).await;
             match this.update(cx, |model, cx| {
-                let diffs = model.with_file_loads(&DiffList::Commit(hash.clone()), diffs);
-                model.commit_diff_read(&hash, Loaded::Ready(CommitDiff { files, diffs }), !shown, cx);
+                let diffs = model.with_file_loads(&list, diffs);
+                model.commit_diff_read(&hash, Loaded::Ready(CommitDiff { files, diffs }), true, cx);
             }) {
                 Ok(()) | Err(_) => {} // Err: tab closed
             }
@@ -1000,6 +1005,7 @@ impl ReviewModel {
             if listed {
                 self.load_images(cx);
             }
+            self.load_for_find(cx);
             cx.notify();
         }
     }
@@ -1367,24 +1373,55 @@ impl ReviewModel {
     }
 
     /// A file header's refresh (`onRefresh`): that file's diff alone (and an image's sides) is
-    /// read again in the list shown, its section "Loading diff..." meanwhile. Not while it is
-    /// being read (the button is disabled).
+    /// read again in the list shown, or for the first time, its section "Loading diff..."
+    /// meanwhile. Not while it is being read (the button is disabled).
     pub fn refresh_file(&mut self, path: &str, cx: &mut Context<Self>) {
         let Some(list) = self.diff_list() else {
             return;
         };
-        let Some((request, read)) = self.file_request(&list, path) else {
+        if self.diffs(&list).is_none_or(|diffs| diffs.is_loading(path)) || !self.read_file(list, path, cx) {
             return;
-        };
-        if let Some(diffs) = self.diffs_mut(&list) {
-            diffs.set(path, FileDiff::Loading);
         }
         // An image's sides are read again too.
         if self.images.contains_key(path) {
             self.load_image(path.to_owned(), cx);
         }
-        let (patches, key) = (self.patch_reader(cx), (list.clone(), path.to_owned()));
-        let path = path.to_owned();
+        cx.notify();
+    }
+
+    /// The files whose sections came near the diff's viewport (`FileDiffSection`'s
+    /// `IntersectionObserver`, 1500px around it): those of the list shown not asked for yet are
+    /// read, each on its own (`onRequestLoad`); a file being read, read or failed stays so.
+    pub fn request_files(&mut self, paths: &[String], cx: &mut Context<Self>) {
+        let Some(list) = self.diff_list() else {
+            return;
+        };
+        let Some(diffs) = self.diffs(&list) else {
+            return;
+        };
+        let wanted: Vec<String> =
+            paths.iter().filter(|path| matches!(diffs.get(path), Some(FileDiff::NotLoaded))).cloned().collect();
+        for path in &wanted {
+            self.read_file(list.clone(), path, cx);
+        }
+        if !wanted.is_empty() {
+            cx.notify();
+        }
+    }
+
+    /// Read `path` of `list` on its own (`handleRequestLoad`), its section "Loading diff..."
+    /// meanwhile. Whether it is read (not listed: it is not). A whole load of the list started
+    /// later drops it and reads the file itself.
+    fn read_file(&mut self, list: DiffList, path: &str, cx: &mut Context<Self>) -> bool {
+        let Some(FileRead { request, read, .. }) = self.file_reads(&list, &[path.to_owned()]).pop() else {
+            return false;
+        };
+        if let Some(diffs) = self.diffs_mut(&list) {
+            diffs.set(path, FileDiff::Loading);
+        }
+        let patches = self.patch_reader(cx);
+        let key = (list, path.to_owned());
+        let (list, path) = key.clone();
         let load = cx.spawn(async move |this, cx| {
             let diff = FileDiff::of(&path, &patches.read(request, read).await);
             match this.update(cx, |model, cx| {
@@ -1392,49 +1429,96 @@ impl ReviewModel {
                 if let Some(diffs) = model.diffs_mut(&list) {
                     diffs.set(&path, diff);
                 }
+                model.load_for_find(cx);
                 cx.notify();
             }) {
                 Ok(()) | Err(_) => {} // Err: tab closed
             }
         });
         self.file_loads.insert(key, load);
-        cx.notify();
+        true
     }
 
-    /// The command reading `path`'s diff alone in `list` (it was renamed: with the path it
-    /// came from, or it would read as added), and how its output is read. `None`: not listed,
-    /// or being read.
-    fn file_request(&self, list: &DiffList, path: &str) -> Option<(ExecRequest, ReadPatch)> {
-        let renamed = match self.diffs(list)?.get(path)? {
-            FileDiff::Loading => return None,
-            FileDiff::Loaded(section) => rename_from(section),
-            FileDiff::Failed(_) => None,
-        };
-        let paths: Vec<&str> = ["--", path].into_iter().chain(renamed.as_deref()).collect();
-        let read: ReadPatch = patch_of;
+    /// The commands reading `paths` of `list` as shown (a path it does not list is not read).
+    fn file_reads(&self, list: &DiffList, paths: &[String]) -> Vec<FileRead> {
         match list {
-            DiffList::Committed => {
-                let ReviewBase::Branch(branch) = &self.base else {
-                    return None;
-                };
-                let range = format!("{branch}...HEAD");
-                Some((self.diff_request(&[&[range.as_str()][..], &paths].concat()), read))
-            }
-            DiffList::Uncommitted => {
-                let uncommitted = self.uncommitted.ready()?;
-                // Its first listing's diff: staged, else unstaged.
-                let listed = |staging| uncommitted.changes.files.iter().find(|f| f.entry.path == path && f.entry.staged == staging);
-                match (listed(Staging::Staged), listed(Staging::Unstaged)) {
-                    (Some(_), _) => Some((self.diff_request(&[&["--cached"][..], &paths].concat()), read)),
-                    (None, Some(file)) if file.entry.status == FileChangeStatus::Untracked => {
-                        Some((untracked_request(&self.path, path), untracked_patch))
-                    }
-                    (None, Some(_)) => Some((self.diff_request(&paths), read)),
-                    (None, None) => None,
+            DiffList::Committed => match (&self.base, self.committed.ready()) {
+                (ReviewBase::Branch(branch), Some(committed)) => self.range_reads(branch, &committed.files, paths),
+                (ReviewBase::Branch(_), None) | (ReviewBase::None, _) => Vec::new(),
+            },
+            DiffList::Uncommitted => match self.uncommitted.ready() {
+                Some(uncommitted) => self.uncommitted_reads(&uncommitted.changes, paths),
+                None => Vec::new(),
+            },
+            DiffList::Commit(hash) => match &self.selected_commit {
+                Some(SelectedCommit { commit, diff: Loaded::Ready(diff) }) if commit.hash == *hash => {
+                    self.commit_reads(hash, &diff.files, paths)
                 }
-            }
-            DiffList::Commit(hash) => Some((self.show_request(hash, &paths), read)),
+                Some(_) | None => Vec::new(),
+            },
         }
+    }
+
+    /// The `git diff` of the branch against `branch` reading `paths` of its `files`.
+    fn range_reads(&self, branch: &str, files: &[DiffFile], paths: &[String]) -> Vec<FileRead> {
+        let range = format!("{branch}...HEAD");
+        listed_reads(files, paths, |spec| self.diff_request(&[&[range.as_str()][..], spec].concat()))
+    }
+
+    /// The `git show` of commit `hash` reading `paths` of its `files`.
+    fn commit_reads(&self, hash: &str, files: &[DiffFile], paths: &[String]) -> Vec<FileRead> {
+        listed_reads(files, paths, |spec| self.show_request(hash, spec))
+    }
+
+    /// The commands reading `paths` of the working tree's `changes`, each file's first
+    /// listing's diff (staged, else unstaged): one `git diff --cached` for the staged files,
+    /// one `git diff` for the unstaged ones, and one per untracked file (as added).
+    fn uncommitted_reads(&self, changes: &UncommittedChanges, paths: &[String]) -> Vec<FileRead> {
+        let mut listed: HashMap<(&str, Staging), &UncommittedFile> = HashMap::new();
+        for file in &changes.files {
+            listed.entry((file.entry.path.as_str(), file.entry.staged)).or_insert(file);
+        }
+        let (mut staged, mut unstaged, mut reads) = (Vec::new(), Vec::new(), Vec::new());
+        for path in paths {
+            match (listed.get(&(path.as_str(), Staging::Staged)), listed.get(&(path.as_str(), Staging::Unstaged))) {
+                (Some(file), _) => staged.push(*file),
+                (None, Some(file)) if file.entry.status == FileChangeStatus::Untracked => reads.push(FileRead {
+                    paths: vec![path.clone()],
+                    request: untracked_request(&self.path, path),
+                    read: untracked_patch,
+                }),
+                (None, Some(file)) => unstaged.push(*file),
+                (None, None) => {}
+            }
+        }
+        for (files, options) in [(staged, &["--cached"][..]), (unstaged, &[][..])] {
+            if files.is_empty() {
+                continue;
+            }
+            let spec = pathspec(files.iter().map(|file| (file.entry.path.as_str(), &file.entry.origin)));
+            reads.push(FileRead {
+                paths: files.iter().map(|file| file.entry.path.clone()).collect(),
+                request: self.diff_request(&[options, &spec].concat()),
+                read: patch_of,
+            });
+        }
+        reads
+    }
+
+    /// The files of `list` a reload listing `listed` reads again: those asked for in what is
+    /// shown (being read, read or failed), but not those being read on their own since the
+    /// reload started (that read is the later one).
+    fn asked_again(&self, list: &DiffList, listed: &FileDiffs) -> Vec<String> {
+        let Some(diffs) = self.diffs(list) else {
+            return Vec::new();
+        };
+        let asked: HashSet<&str> = diffs.asked().collect();
+        listed
+            .iter()
+            .map(|(path, _)| path)
+            .filter(|path| asked.contains(path) && !self.file_loads.contains_key(&(list.clone(), (*path).to_owned())))
+            .map(str::to_owned)
+            .collect()
     }
 
     /// The diffs of `list`'s files, as loaded.
@@ -1530,8 +1614,10 @@ impl ReviewModel {
         cx.notify();
     }
 
-    /// `loadDiff`: the branch against its base (none without a base), its files then their
-    /// diffs. Its viewed marks are reconciled with it, whatever view is shown.
+    /// `loadDiff`: the branch against its base (none without a base). Its files show at once
+    /// the first time (each file's diff read when wanted); reloaded, what is shown stays until
+    /// the diffs asked for in it are read again. Its viewed marks are reconciled with it,
+    /// whatever view is shown.
     fn load_committed(&mut self, cx: &mut Context<Self>) {
         self.drop_file_loads(|list| *list == DiffList::Committed);
         let ReviewBase::Branch(branch) = self.base.clone() else {
@@ -1541,7 +1627,6 @@ impl ReviewModel {
         };
         self.committed.start();
         let (patches, git, path) = (self.patch_reader(cx), self.git.clone(), self.path.clone());
-        let request = self.diff_request(&[&format!("{branch}...HEAD")]);
         self.committed_load = Some(cx.spawn(async move |this, cx| {
             let diff = match git.get_diff(&path, &branch).await {
                 Ok(diff) => diff,
@@ -1556,39 +1641,40 @@ impl ReviewModel {
                     return;
                 }
             };
-            let paths = || diff.files.iter().map(|file| file.path.as_str());
             let files = viewed_entries(diff.files.iter().map(ViewedFile::from));
-            let shown = match this.update(cx, |model, cx| {
-                let shown = model.committed.show_listed(|| committed(&diff, FileDiffs::loading(paths())));
-                if shown {
+            let listed = FileDiffs::not_loaded(diff.files.iter().map(|file| file.path.as_str()));
+            let reads = match this.update(cx, |model, cx| {
+                if model.committed.show_listed(|| committed(&diff, listed.clone())) {
+                    model.committed_load = None;
                     model.listed(ReviewMode::Committed, &files, cx);
+                    return None;
                 }
-                shown
+                let again = model.asked_again(&DiffList::Committed, &listed);
+                Some(model.range_reads(&branch, &diff.files, &again))
             }) {
-                Ok(shown) => shown,
-                Err(_) => return, // tab closed
+                Ok(Some(reads)) => reads,
+                Ok(None) | Err(_) => return, // None: shown at once; Err: tab closed
             };
-            let diffs = FileDiffs::read(paths(), &patches.read(request, patch_of).await);
+            let diffs = read_files(&patches, listed, reads).await;
             match this.update(cx, |model, cx| {
                 model.committed_load = None;
                 let diffs = model.with_file_loads(&DiffList::Committed, diffs);
                 model.committed = Slot::Ready(committed(&diff, diffs));
-                model.diffs_read(ReviewMode::Committed, (!shown).then_some(&files), cx);
+                model.listed(ReviewMode::Committed, &files, cx);
             }) {
                 Ok(()) | Err(_) => {} // Err: tab closed
             }
         }));
     }
 
-    /// `loadUncommittedChanges`: the working tree against `HEAD`, its files then their diffs
-    /// (staged, unstaged, untracked as added). Its viewed marks are reconciled with it,
-    /// whatever view is shown.
+    /// `loadUncommittedChanges`: the working tree against `HEAD` (staged, unstaged, untracked
+    /// as added). Its files show at once the first time (each file's diff read when wanted);
+    /// reloaded, what is shown stays until the diffs asked for in it are read again. Its
+    /// viewed marks are reconciled with it, whatever view is shown.
     fn load_uncommitted(&mut self, cx: &mut Context<Self>) {
         self.drop_file_loads(|list| *list == DiffList::Uncommitted);
         self.uncommitted.start();
         let (patches, git, path) = (self.patch_reader(cx), self.git.clone(), self.path.clone());
-        let staged = self.diff_request(&["--cached"]);
-        let unstaged = self.diff_request(&[]);
         self.uncommitted_load = Some(cx.spawn(async move |this, cx| {
             let changes = match git.get_uncommitted_changes(&path).await {
                 Ok(changes) => changes,
@@ -1604,23 +1690,25 @@ impl ReviewModel {
                 }
             };
             let files = viewed_entries(changes.files.iter().map(ViewedFile::from));
-            let shown = match this.update(cx, |model, cx| {
-                let loading = FileDiffs::loading(changes.files.iter().map(|file| file.entry.path.as_str()));
-                let shown = model.uncommitted.show_listed(|| Uncommitted { changes: changes.clone(), diffs: loading });
-                if shown {
+            let listed = FileDiffs::not_loaded(changes.files.iter().map(|file| file.entry.path.as_str()));
+            let reads = match this.update(cx, |model, cx| {
+                if model.uncommitted.show_listed(|| Uncommitted { changes: changes.clone(), diffs: listed.clone() }) {
+                    model.uncommitted_load = None;
                     model.listed(ReviewMode::Uncommitted, &files, cx);
+                    return None;
                 }
-                shown
+                let again = model.asked_again(&DiffList::Uncommitted, &listed);
+                Some(model.uncommitted_reads(&changes, &again))
             }) {
-                Ok(shown) => shown,
-                Err(_) => return, // tab closed
+                Ok(Some(reads)) => reads,
+                Ok(None) | Err(_) => return, // None: shown at once; Err: tab closed
             };
-            let diffs = uncommitted_diffs(&patches, &path, &changes, staged, unstaged).await;
+            let diffs = read_files(&patches, listed, reads).await;
             match this.update(cx, |model, cx| {
                 model.uncommitted_load = None;
                 let diffs = model.with_file_loads(&DiffList::Uncommitted, diffs);
                 model.uncommitted = Slot::Ready(Uncommitted { changes, diffs });
-                model.diffs_read(ReviewMode::Uncommitted, (!shown).then_some(&files), cx);
+                model.listed(ReviewMode::Uncommitted, &files, cx);
             }) {
                 Ok(()) | Err(_) => {} // Err: tab closed
             }
@@ -1632,18 +1720,6 @@ impl ReviewModel {
     fn listed(&mut self, mode: ReviewMode, files: &[(String, FileChangeStats)], cx: &mut Context<Self>) {
         self.reconcile_viewed(files, cx);
         self.view_loaded(mode, cx);
-    }
-
-    /// `mode`'s diffs were read. With `files`, its list was too, and shows with them;
-    /// without, it already shows.
-    fn diffs_read(&mut self, mode: ReviewMode, files: Option<&Vec<(String, FileChangeStats)>>, cx: &mut Context<Self>) {
-        match files {
-            Some(files) => self.listed(mode, files, cx),
-            None => {
-                self.settle_refresh();
-                cx.notify();
-            }
-        }
     }
 
     /// `loadCommits`: the first `count` commits since the base. A picked commit stays while
@@ -1679,11 +1755,12 @@ impl ReviewModel {
         }));
     }
 
-    /// `mode`'s data arrived: shown, its image files load.
+    /// `mode`'s data arrived: shown, its image files load (and find reads its files).
     fn view_loaded(&mut self, mode: ReviewMode, cx: &mut Context<Self>) {
         if self.mode == mode {
             self.load_images(cx);
         }
+        self.load_for_find(cx);
         self.settle_refresh();
         cx.notify();
     }
@@ -2159,6 +2236,7 @@ impl ReviewModel {
                     focus: self.find_seq,
                 });
                 self.start_find_repo_search(cx);
+                self.load_for_find(cx);
             }
         }
         cx.notify();
@@ -2175,6 +2253,7 @@ impl ReviewModel {
             focus: self.find_seq,
         });
         self.start_find_repo_search(cx);
+        self.load_for_find(cx);
         cx.notify();
     }
 
@@ -2198,7 +2277,47 @@ impl ReviewModel {
         state.query = query.to_owned();
         state.active = None;
         self.start_find_repo_search(cx);
+        self.load_for_find(cx);
         cx.notify();
+    }
+
+    /// Find has a query (`searching`): its matches are looked for in every file of the diff.
+    fn searching(&self) -> bool {
+        matches!(&self.find, DiffFind::Open(state) if !state.query.is_empty())
+    }
+
+    /// While find has a query, the files of the list shown not asked for yet are read, so that
+    /// their matches are found (`StackedDiffList`'s search loads): in list order, until
+    /// [`MAX_SEARCH_LOADS`] are being read (counting those read for another reason). Each
+    /// file read reads the next.
+    fn load_for_find(&mut self, cx: &mut Context<Self>) {
+        if !self.searching() {
+            return;
+        }
+        let Some(list) = self.diff_list() else {
+            return;
+        };
+        let Some(diffs) = self.diffs(&list) else {
+            return;
+        };
+        let reading = diffs.iter().filter(|(_, diff)| matches!(diff, FileDiff::Loading)).count();
+        let next: Vec<String> = diffs
+            .iter()
+            .filter(|(_, diff)| matches!(diff, FileDiff::NotLoaded))
+            .map(|(path, _)| path.to_owned())
+            .take(MAX_SEARCH_LOADS.saturating_sub(reading))
+            .collect();
+        for path in &next {
+            self.read_file(list.clone(), path, cx);
+        }
+        if !next.is_empty() {
+            cx.notify();
+        }
+    }
+
+    /// Find still reads files of the diff (`pendingSearch`): more matches may come.
+    pub fn find_pending(&self) -> bool {
+        self.searching() && self.diff_list().and_then(|list| self.diffs(&list)).is_some_and(|diffs| !diffs.is_complete())
     }
 
     fn start_find_repo_search(&mut self, cx: &mut Context<Self>) {
@@ -2239,16 +2358,20 @@ impl ReviewModel {
         matches.iter().position(|found| target.is(found))
     }
 
-    /// The bar's counter for `matches` (`3/12`, `12 found`).
+    /// The bar's counter for `matches` (`3/12`, `12 found`; while files are still read,
+    /// `Searching…` until a match is found, then `12 found…`).
     pub fn find_count_label(&self, matches: &[DiffMatch]) -> String {
         match &self.find {
-            DiffFind::Open(state) => count_label(&state.query, self.active_index(matches), matches.len(), false),
+            DiffFind::Open(state) => {
+                count_label(&state.query, self.active_index(matches), matches.len(), self.find_pending())
+            }
             DiffFind::Closed { .. } => String::new(),
         }
     }
 
-    /// The bar's results: "In this file", "In diff", then the rest of the repo (the diff's
-    /// own `files` left out).
+    /// The bar's results: "In this file", "In diff" (each saying "No matches" when none was
+    /// found once every file is read), then the rest of the repo (the diff's own `files` left
+    /// out).
     pub fn find_rows(&self, matches: &[DiffMatch], files: &[String]) -> Vec<SearchRow> {
         let DiffFind::Open(state) = &self.find else {
             return Vec::new();
@@ -2256,13 +2379,13 @@ impl ReviewModel {
         if state.query.is_empty() {
             return Vec::new();
         }
-        let active = self.active_index(matches);
+        let (active, pending) = (self.active_index(matches), self.find_pending());
         let mut rows = Vec::new();
         for (title, in_file) in [("In this file", true), ("In diff", false)] {
             rows.push(SearchRow::Section(title));
             let section: Vec<(usize, &DiffMatch)> =
                 matches.iter().enumerate().filter(|(_, found)| (found.path == state.file) == in_file).collect();
-            if section.is_empty() {
+            if section.is_empty() && !pending {
                 rows.push(SearchRow::Note("No matches".to_owned()));
             }
             let mut last: Option<&str> = None;
@@ -2576,29 +2699,49 @@ fn untracked_request(cwd: &str, file: &str) -> ExecRequest {
     }
 }
 
-/// Each listed file's diff in the working tree: its staged part, else its unstaged part,
-/// else (untracked) the file as added, read one file at a time. A command that fails fails
-/// the files it reads, each showing its message.
-async fn uncommitted_diffs(
-    patches: &PatchReader,
-    cwd: &str,
-    changes: &UncommittedChanges,
-    staged: ExecRequest,
-    unstaged: ExecRequest,
-) -> FileDiffs {
-    let untracked = |file: &&treeterm_core::git::UncommittedFile| file.entry.status == FileChangeStatus::Untracked;
-    let tracked = |staging: Staging| {
-        changes.files.iter().filter(move |file| file.entry.staged == staging && !untracked(file)).map(|file| file.entry.path.as_str())
-    };
-    let mut diffs = FileDiffs::default();
-    diffs.add_read(tracked(Staging::Staged), &patches.read(staged, patch_of).await);
-    diffs.add_read(tracked(Staging::Unstaged), &patches.read(unstaged, patch_of).await);
-    for file in changes.files.iter().filter(untracked) {
-        let path = file.entry.path.as_str();
-        if diffs.get(path).is_none() {
-            let patch = patches.read(untracked_request(cwd, path), untracked_patch).await;
-            diffs.add(path, FileDiff::of(path, &patch));
+/// Files searched at once while find reads every file's diff (`MAX_SEARCH_LOADS`).
+pub const MAX_SEARCH_LOADS: usize = 4;
+
+/// A command reading some of a list's files (`paths`), and how its output is read.
+struct FileRead {
+    paths: Vec<String>,
+    request: ExecRequest,
+    read: ReadPatch,
+}
+
+/// The command (`request`, given the pathspec) reading those of `paths` listed in `files`.
+fn listed_reads(files: &[DiffFile], paths: &[String], request: impl FnOnce(&[&str]) -> ExecRequest) -> Vec<FileRead> {
+    let by_path: HashMap<&str, &DiffFile> = files.iter().map(|file| (file.path.as_str(), file)).collect();
+    let listed: Vec<&DiffFile> = paths.iter().filter_map(|path| by_path.get(path.as_str()).copied()).collect();
+    if listed.is_empty() {
+        return Vec::new();
+    }
+    let spec = pathspec(listed.iter().map(|file| (file.path.as_str(), &file.origin)));
+    vec![FileRead {
+        paths: listed.iter().map(|file| file.path.clone()).collect(),
+        request: request(&spec),
+        read: patch_of,
+    }]
+}
+
+/// `--` and each path, with the path a renamed file came from (without it, the file would read
+/// as added).
+fn pathspec<'a>(files: impl IntoIterator<Item = (&'a str, &'a PathOrigin)>) -> Vec<&'a str> {
+    let mut spec = vec!["--"];
+    for (path, origin) in files {
+        spec.push(path);
+        match origin {
+            PathOrigin::RenamedFrom(from) => spec.push(from),
+            PathOrigin::Same => {}
         }
+    }
+    spec
+}
+
+/// `diffs` with the files of each of `reads` set to what it read (one command after another).
+async fn read_files(patches: &PatchReader, mut diffs: FileDiffs, reads: Vec<FileRead>) -> FileDiffs {
+    for FileRead { paths, request, read } in reads {
+        diffs.set_read(paths.iter().map(String::as_str), &patches.read(request, read).await);
     }
     diffs
 }

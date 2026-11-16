@@ -72,6 +72,9 @@ pub struct DiffFile {
     pub path: String,
     pub status: FileChangeStatus,
     pub stats: FileChangeStats,
+    /// The path a rename came from (`--name-status`), so the file's own diff is read as a
+    /// rename.
+    pub origin: PathOrigin,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

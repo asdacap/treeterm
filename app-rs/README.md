@@ -123,9 +123,10 @@ Done (tested against a real in-process daemon unless noted):
   `#L<n>` names.
 - **Review (M7):** committed / uncommitted / commits views, stage/unstage/commit, inline
   comments (Electron's metadata format), viewed files, image diffs (before / after, SVG
-  included), each file's diff loading, failing (also when its part of the patch does not
-  parse) and refreshed (its header's refresh button) on its own, a diff over 20,000 lines or
-  2 MiB drawn only after "Load anyway",
+  included), each file's diff read once its section comes within 1500px of the viewport
+  ("Scroll to load diff" until then; find reads every file, four at a time), loading,
+  failing (also when its part of the patch does not parse) and refreshed (its header's
+  refresh button) on its own, a diff over 20,000 lines or 2 MiB drawn only after "Load anyway",
   favourites outside the diff shown in the Files viewer (with its comments) in the diff's place,
   find in the diff (Cmd/Ctrl+F: matches in the file at the top of the diff, then the rest of
   the diff, then the repo; the diff's menu searches or copies the selected text or the word
@@ -208,11 +209,18 @@ are not ours). Its changes are marked `TreeTerm patch` (`grep -rn "TreeTerm patc
   header, as far scrolled past), files still listed stay collapsed, and files whose content
   did not change keep their opened folds and highlighting (after `expand_unchanged`, new and
   changed files show every line too), as Electron's `StackedDiffList` keys its sections by
-  path; `set_files` resets all of that and scrolls to the top.
+  path; `set_files` resets all of that and scrolls to the top. Files it is told to open
+  (whose rows just arrived) open in the same step: `set_file_collapsed` afterwards would put
+  the first line of the file at the top in place of its header.
 - `src/diff/state.rs`, `src/diff/mod.rs`: `DiffEvent::TopBandChanged` reports, after each
   layout, the files with a row in the top tenth of the viewport (`DiffState::top_band`), the
   band Electron's `IntersectionObserver` watches to make a file the active one (the file
   tree's highlight, where Previous / Next unviewed start).
+- `src/diff/state.rs`, `src/diff/mod.rs`: `DiffEvent::NearFilesChanged` reports, after each
+  layout whose rows are measured, the files with a row within `NEAR_MARGIN` (1500px) above or
+  below the viewport (`DiffState::near_files`; rows not laid out count as tall as a code row,
+  or a header as the last header laid out), the margin within which Electron's
+  `FileDiffSection` loads a file's diff.
 - `src/diff/state.rs`, `src/diff/selection.rs`: `DiffState::text_at` (the line and character
   painted under a point) and `DiffState::file_at` (the file whose row is under it), so the
   diff's right-click menu searches or copies the word under the pointer and searches the
@@ -370,6 +378,14 @@ The chrome was matched to Electron's computed styles, measured side by side on o
 - Review's find in the diff searches only files whose rows are drawn: a diff too large to draw
   is searched once "Load anyway" draws it. Electron listed its matches but could not show
   them (choosing one opened the file on the size notice).
+- Review reads the diffs of the files it has read again with each reload (Refresh, the tab
+  shown again, staging), keeping what they show until then; Electron kept a file's contents
+  once loaded until its own refresh button was pressed.
+- Review's find reads every file of the view's list, in list order, also the files the file
+  filter or a folder filter hides; Electron read only the files shown, in the tree's order. Its
+  count can read "…" a little longer while hidden files are read.
+- Review shows a renamed file of the branch or of the index as a rename (its changes since
+  its old path); Electron read both sides at the new path, so the whole file showed as added.
 - Review measures a diff's size from git's whole-file patch (`git diff -U1000000`); Electron
   read both files. With "Ignore whitespace changes" on, unchanged lines count as the new side
   has them. A file whose patch has no hunks is never too large: a pure rename or a mode-only

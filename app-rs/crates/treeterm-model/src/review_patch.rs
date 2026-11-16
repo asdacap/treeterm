@@ -1,5 +1,6 @@
 //! Review's diff file by file (`StackedDiffList`'s `FileLoadState`): each listed file's part
-//! of the patch loads, fails and is refreshed on its own.
+//! of the patch is read when it is first wanted (its section nears the viewport, or find
+//! searches it), and fails and is refreshed on its own.
 //!
 //! Git's patches are split where a file starts (`diff --git`), each section keyed by the path
 //! GPUI Kit's `Diff` shows it under (its new path; the old one for a deleted file), read the
@@ -17,6 +18,8 @@ use treeterm_core::files::is_image_path;
 /// One listed file's diff (`FileLoadState`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FileDiff {
+    /// Not asked for yet: its section shows "Scroll to load diff" until it nears the viewport.
+    NotLoaded,
     /// Being read: its section shows "Loading diff..." and its refresh button spins.
     Loading,
     /// Its section of the patch (empty: git printed none for it).
@@ -48,27 +51,20 @@ impl FileDiff {
 pub struct FileDiffs(IndexMap<String, FileDiff>);
 
 impl FileDiffs {
-    /// `paths`, each loading.
-    pub fn loading<'a>(paths: impl IntoIterator<Item = &'a str>) -> Self {
+    /// `paths`, none asked for yet.
+    pub fn not_loaded<'a>(paths: impl IntoIterator<Item = &'a str>) -> Self {
         let mut diffs = Self::default();
         for path in paths {
-            diffs.add(path, FileDiff::Loading);
+            diffs
+                .0
+                .entry(path.to_owned())
+                .or_insert(FileDiff::NotLoaded);
         }
         diffs
     }
 
-    /// `paths` with their sections of one command's patch, or its failure each.
-    pub fn read<'a>(
-        paths: impl IntoIterator<Item = &'a str>,
-        patch: &Result<String, String>,
-    ) -> Self {
-        let mut diffs = Self::default();
-        diffs.add_read(paths, patch);
-        diffs
-    }
-
-    /// Adds `paths` not listed yet with their sections of one command's patch, or its failure.
-    pub fn add_read<'a>(
+    /// Sets listed `paths` to their sections of one command's patch, or to its failure.
+    pub fn set_read<'a>(
         &mut self,
         paths: impl IntoIterator<Item = &'a str>,
         patch: &Result<String, String>,
@@ -82,14 +78,7 @@ impl FileDiffs {
                 Ok(sections) => FileDiff::Loaded(sections.swap_remove(path).unwrap_or_default()),
                 Err(failed) => failed.clone(),
             };
-            self.add(path, diff);
-        }
-    }
-
-    /// Adds `path` unless it is listed already.
-    pub fn add(&mut self, path: &str, diff: FileDiff) {
-        if !self.0.contains_key(path) {
-            self.0.insert(path.to_owned(), diff);
+            self.set(path, diff);
         }
     }
 
@@ -109,12 +98,19 @@ impl FileDiffs {
         matches!(self.0.get(path), Some(FileDiff::Loading))
     }
 
-    /// Every file has been read (loaded or failed).
+    /// Every file has been read (loaded or failed): none is still to ask for or being read.
     pub fn is_complete(&self) -> bool {
         !self
             .0
             .values()
-            .any(|diff| matches!(diff, FileDiff::Loading))
+            .any(|diff| matches!(diff, FileDiff::NotLoaded | FileDiff::Loading))
+    }
+
+    /// The files whose diff has been asked for (being read, read or failed), in list order.
+    pub fn asked(&self) -> impl Iterator<Item = &str> {
+        self.iter()
+            .filter(|(_, diff)| !matches!(diff, FileDiff::NotLoaded))
+            .map(|(path, _)| path)
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (&str, &FileDiff)> {
@@ -122,14 +118,17 @@ impl FileDiffs {
     }
 
     /// The diff as the view parses it, in list order: each loaded file's section, and a bare
-    /// `diff --git` header for a file loading or failed, so that it has a section (whose
-    /// body the view draws: "Loading diff...", or the error). Bare headers have no lines.
+    /// `diff --git` header for any other file, so that it has a section (whose body the view
+    /// draws: "Scroll to load diff", "Loading diff...", or the error). Bare headers have no
+    /// lines.
     pub fn patch(&self) -> String {
         let mut patch = String::new();
         for (path, diff) in &self.0 {
             match diff {
                 FileDiff::Loaded(section) => patch.push_str(section),
-                FileDiff::Loading | FileDiff::Failed(_) => patch.push_str(&bare_header(path)),
+                FileDiff::NotLoaded | FileDiff::Loading | FileDiff::Failed(_) => {
+                    patch.push_str(&bare_header(path))
+                }
             }
         }
         patch
@@ -243,6 +242,8 @@ pub fn measure_diff(section: &str) -> DiffSize {
 /// What a listed file shows under its header in place of rows (`FileDiffSection`'s body).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Placeholder {
+    /// `.file-diff-placeholder`: "Scroll to load diff".
+    NotLoaded,
     /// `.file-diff-loading`.
     Loading,
     /// `.file-diff-error`: why its diff could not be read, or shown.
@@ -269,6 +270,7 @@ pub enum ShownDiff<'a> {
 /// How `path`, whose diff is `diff`, shows. `forced`: "Load anyway" was clicked for it.
 pub fn shown_diff<'a>(path: &str, diff: &'a FileDiff, forced: bool) -> ShownDiff<'a> {
     let section = match diff {
+        FileDiff::NotLoaded => return ShownDiff::Placeholder(Placeholder::NotLoaded),
         FileDiff::Loading => return ShownDiff::Placeholder(Placeholder::Loading),
         FileDiff::Failed(error) => {
             return ShownDiff::Placeholder(Placeholder::Failed(error.clone()));
@@ -333,15 +335,6 @@ pub fn split_patch(patch: &str) -> IndexMap<String, String> {
         }
     }
     sections
-}
-
-/// The path a section was renamed from (`rename from`), if it was.
-pub fn rename_from(section: &str) -> Option<String> {
-    section
-        .lines()
-        .take_while(|line| !line.starts_with("@@ "))
-        .find_map(|line| line.strip_prefix("rename from "))
-        .and_then(unquote)
 }
 
 /// Prefix pairs git may give a diff's sides (`diff.mnemonicPrefix`, `diff.noprefix`), as
@@ -554,16 +547,6 @@ mod tests {
     }
 
     #[test]
-    fn a_rename_names_the_path_it_came_from() {
-        assert_eq!(rename_from(RENAMED).as_deref(), Some("from.txt"));
-        assert_eq!(rename_from(MODIFIED), None);
-        assert_eq!(
-            rename_from("diff --git a/x b/y\nrename from \"q\\\"\"\nrename to y\n").as_deref(),
-            Some("q\"")
-        );
-    }
-
-    #[test]
     fn bare_headers_name_any_path_exactly() {
         for path in [
             "plain.txt",
@@ -586,37 +569,50 @@ mod tests {
     }
 
     #[test]
-    fn each_file_is_loading_loaded_or_failed_on_its_own() {
-        let mut diffs = FileDiffs::loading(["a.txt", "b.txt"]);
-        assert!(diffs.is_loading("a.txt") && !diffs.is_complete());
+    fn each_file_is_asked_for_read_or_failed_on_its_own() {
+        let mut diffs = FileDiffs::not_loaded(["a.txt", "b.txt", "a.txt"]);
+        assert_eq!(
+            diffs.iter().collect::<Vec<_>>(),
+            [
+                ("a.txt", &FileDiff::NotLoaded),
+                ("b.txt", &FileDiff::NotLoaded)
+            ]
+        );
+        assert!(!diffs.is_loading("a.txt") && !diffs.is_complete());
+        assert_eq!(diffs.asked().count(), 0);
         assert_eq!(
             diffs.patch(),
             [bare_header("a.txt"), bare_header("b.txt")].concat()
         );
 
-        // A command's sections, a file it printed nothing for, and its failure.
-        diffs = FileDiffs::read(["a.txt", "b.txt"], &Ok(MODIFIED.to_owned()));
+        // Asked for: being read.
+        diffs.set("b.txt", FileDiff::Loading);
+        assert!(diffs.is_loading("b.txt") && !diffs.is_complete());
+        assert_eq!(diffs.asked().collect::<Vec<_>>(), ["b.txt"]);
+        assert_eq!(
+            diffs.patch(),
+            [bare_header("a.txt"), bare_header("b.txt")].concat()
+        );
+
+        // A command's sections, and a file it printed nothing for.
+        diffs.set_read(["a.txt", "b.txt"], &Ok(MODIFIED.to_owned()));
         assert_eq!(
             diffs.get("a.txt"),
             Some(&FileDiff::Loaded(MODIFIED.to_owned()))
         );
         assert_eq!(diffs.get("b.txt"), Some(&FileDiff::Loaded(String::new())));
         assert!(diffs.is_complete());
-        diffs.add_read(["a.txt", "new.txt"], &Err("fatal: bad revision".to_owned()));
+        assert_eq!(diffs.patch(), MODIFIED);
+        // Its failure fails each file it reads; a path not listed is left out.
+        diffs.set_read(["b.txt", "new.txt"], &Err("fatal: bad revision".to_owned()));
         assert_eq!(
-            diffs.get("a.txt"),
-            Some(&FileDiff::Loaded(MODIFIED.to_owned())),
-            "listed already"
-        );
-        assert_eq!(
-            diffs.get("new.txt"),
+            diffs.get("b.txt"),
             Some(&FileDiff::Failed("fatal: bad revision".to_owned()))
         );
-        assert_eq!(diffs.patch(), [MODIFIED, &bare_header("new.txt")].concat());
-        assert_eq!(
-            diffs.iter().map(|(path, _)| path).collect::<Vec<_>>(),
-            ["a.txt", "b.txt", "new.txt"]
-        );
+        assert_eq!(diffs.get("new.txt"), None);
+        assert!(diffs.is_complete());
+        assert_eq!(diffs.asked().collect::<Vec<_>>(), ["a.txt", "b.txt"]);
+        assert_eq!(diffs.patch(), [MODIFIED, &bare_header("b.txt")].concat());
 
         // One file read again; a path no longer listed is left out.
         diffs.set(
@@ -757,7 +753,11 @@ mod tests {
         );
         // Git printed nothing for it.
         assert_eq!(shown_diff("a.txt", &loaded(""), false), ShownDiff::Absent);
-        // Loading, or failed to read.
+        // Not asked for, loading, or failed to read (an image too).
+        assert_eq!(
+            shown_diff("logo.png", &FileDiff::NotLoaded, false),
+            ShownDiff::Placeholder(Placeholder::NotLoaded)
+        );
         assert_eq!(
             shown_diff("a.txt", &FileDiff::Loading, false),
             ShownDiff::Placeholder(Placeholder::Loading)

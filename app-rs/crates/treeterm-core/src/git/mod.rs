@@ -466,6 +466,7 @@ impl Runner {
                 path,
                 status,
                 stats,
+                origin,
             });
         }
         Ok(files)

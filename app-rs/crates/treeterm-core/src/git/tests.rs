@@ -85,6 +85,7 @@ fn diff_file(path: &str, status: FileChangeStatus, stats: FileChangeStats) -> Di
         path: path.to_owned(),
         status,
         stats,
+        origin: PathOrigin::Same,
     }
 }
 
@@ -462,11 +463,10 @@ mod binary_branch_comparison {
         let diff = run(api(&exec, FakeFs::missing()).get_diff("/repo", "main")).unwrap();
         assert_eq!(
             diff.files,
-            vec![diff_file(
-                "dir/new.png",
-                FileChangeStatus::Renamed,
-                binary(10)
-            )]
+            vec![DiffFile {
+                origin: PathOrigin::RenamedFrom("dir/old.png".to_owned()),
+                ..diff_file("dir/new.png", FileChangeStatus::Renamed, binary(10))
+            }]
         );
         assert_nth_call(
             &exec,

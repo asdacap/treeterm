@@ -1273,7 +1273,8 @@ fn review_find_lists_the_diffs_matches_this_file_first_and_steps_through_them(cx
     let store = open_store(cx, &h);
     let workspace = open_repo_workspace(cx, &h, &store, &repo);
     let review = open_review(cx, &workspace);
-    wait_review(cx, &review, "loaded", |r, _| matches!(r.content(), ReviewContent::Uncommitted(u) if u.diffs.is_complete()));
+    wait_review(cx, &review, "listed", |r, _| matches!(r.content(), ReviewContent::Uncommitted(u) if u.changes.files.len() == 2));
+    read_all(cx, &review);
     let ReviewContent::Uncommitted(uncommitted) = review.read_with(cx, |r, _| r.content().clone()) else { unreachable!() };
     let patch = uncommitted.diffs.patch();
     let files = vec!["a.txt".to_owned(), "b.txt".to_owned()];
@@ -1465,7 +1466,8 @@ fn review_counts_views_lists_commits_and_shows_a_commits_changes(cx: &mut TestAp
 
     // Every view's count arrives whatever is shown; the summary names both branches.
     wait_review(cx, &review, "counts", |r, _| r.overview().committed == 2 && r.overview().uncommitted == 1);
-    wait_review(cx, &review, "committed", |r, _| matches!(r.content(), ReviewContent::Committed(c) if c.diffs.is_complete()));
+    wait_review(cx, &review, "committed", |r, _| matches!(r.content(), ReviewContent::Committed(_)));
+    read_all(cx, &review);
     let ReviewContent::Committed(committed) = review.read_with(cx, |r, _| r.content().clone()) else { unreachable!() };
     assert_eq!((committed.base_branch.as_str(), committed.head_branch.as_str()), ("main", "feature"));
     assert_eq!((committed.total_additions, committed.total_deletions), (3, 2));
@@ -1490,9 +1492,8 @@ fn review_counts_views_lists_commits_and_shows_a_commits_changes(cx: &mut TestAp
     let ReviewContent::Commits(commits) = review.read_with(cx, |r, _| r.content().clone()) else { unreachable!() };
     assert_eq!(commits[0].message, "second");
     review.update(cx, |r, cx| r.select_commit(&commits[1].hash, cx));
-    wait_review(cx, &review, "commit diff", |r, _| {
-        matches!(r.selected_commit().map(|s| &s.diff), Some(Loaded::Ready(d)) if d.diffs.is_complete())
-    });
+    wait_review(cx, &review, "commit diff", |r, _| matches!(r.selected_commit().map(|s| &s.diff), Some(Loaded::Ready(_))));
+    read_all(cx, &review);
     let Some(Loaded::Ready(CommitDiff { files, diffs })) = review.read_with(cx, |r, _| r.selected_commit().map(|s| s.diff.clone())) else {
         unreachable!()
     };
@@ -1513,7 +1514,9 @@ fn review_counts_views_lists_commits_and_shows_a_commits_changes(cx: &mut TestAp
         matches!(r.selected_commit().map(|s| &s.diff), Some(Loaded::Ready(d)) if d.diffs.is_complete() && d.diffs.patch().contains("+one  ") == whitespace)
     };
     review.update(cx, |r, cx| r.select_commit(&commits[0].hash, cx));
-    wait_review(cx, &review, "the second commit", |r, _| shown(r, true));
+    wait_review(cx, &review, "the second commit", |r, _| matches!(r.selected_commit().map(|s| &s.diff), Some(Loaded::Ready(_))));
+    read_all(cx, &review);
+    assert!(review.read_with(cx, |r, _| shown(r, true)));
     review.update(cx, |r, cx| r.set_ignore_whitespace(true, cx));
     assert!(review.read_with(cx, |r, _| shown(r, true)));
     wait_review(cx, &review, "the second commit ignoring whitespace", |r, _| shown(r, false));
@@ -2267,6 +2270,15 @@ fn shown_diffs(review: &ReviewModel) -> treeterm_model::review_patch::FileDiffs 
     }
 }
 
+/// Asks for the diff of every file of the list shown, as the view does for the files near its
+/// viewport, and waits until each is read.
+fn read_all(cx: &mut TestAppContext, review: &Entity<ReviewModel>) {
+    let paths: Vec<String> = review.read_with(cx, |r, _| shown_diffs(r).iter().map(|(path, _)| path.to_owned()).collect());
+    assert!(!paths.is_empty(), "no list shown");
+    review.update(cx, |r, cx| r.request_files(&paths, cx));
+    wait_review(cx, review, "every file read", |r, _| shown_diffs(r).is_complete());
+}
+
 /// `path`'s diff in the list shown.
 fn file_diff(cx: &mut TestAppContext, review: &Entity<ReviewModel>, path: &str) -> Option<treeterm_model::review_patch::FileDiff> {
     review.read_with(cx, |r, _| shown_diffs(r).get(path).cloned())
@@ -2301,18 +2313,15 @@ fn a_file_git_cannot_read_fails_in_its_own_section_while_the_others_show(cx: &mu
     let store = open_store(cx, &h);
     let workspace = open_repo_workspace(cx, &h, &store, &repo);
     let review = open_review(cx, &workspace);
-    let seen = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
-    let record = seen.clone();
-    let _observe = cx.update(|cx| cx.observe(&review, move |review, cx| record.borrow_mut().push(shown_diffs(review.read(cx)))));
-    wait_review(cx, &review, "read", |r, _| matches!(r.content(), ReviewContent::Uncommitted(u) if u.diffs.is_complete()));
-    set_mode(&locked, 0o644);
+    wait_review(cx, &review, "listed", |r, _| matches!(r.content(), ReviewContent::Uncommitted(_)));
 
-    // The list shows first, each file loading; then each file shows its diff or its error.
-    let listed = |diffs: &treeterm_model::review_patch::FileDiffs| diffs.iter().count() == 202;
-    assert!(
-        seen.borrow().iter().any(|diffs| listed(diffs) && diffs.iter().all(|(_, diff)| *diff == FileDiff::Loading)),
-        "the list never showed loading"
-    );
+    // The list shows first, no file's diff asked for; then each file asked for shows its diff
+    // or its error.
+    let listed = review.read_with(cx, |r, _| shown_diffs(r));
+    assert_eq!(listed.iter().count(), 202);
+    assert!(listed.iter().all(|(_, diff)| *diff == FileDiff::NotLoaded));
+    read_all(cx, &review);
+    set_mode(&locked, 0o644);
     let failed = file_diff(cx, &review, "new/000.txt");
     assert!(matches!(&failed, Some(FileDiff::Failed(error)) if error.contains("Permission denied")), "{failed:?}");
     assert!(matches!(file_diff(cx, &review, "new/001.txt"), Some(FileDiff::Loaded(section)) if section.contains("+line 1\n")));
@@ -2339,7 +2348,8 @@ fn a_files_refresh_reads_that_file_alone(cx: &mut TestAppContext) {
     let workspace = open_repo_workspace(cx, &h, &store, &repo);
     let (_, review) =
         open_review_with(cx, &workspace, serde_json::json!({ "viewMode": "committed", "baseBranchOverride": "main" }));
-    wait_review(cx, &review, "read", |r, _| matches!(r.content(), ReviewContent::Committed(c) if c.diffs.is_complete()));
+    wait_review(cx, &review, "listed", |r, _| matches!(r.content(), ReviewContent::Committed(_)));
+    read_all(cx, &review);
     let before = review.read_with(cx, |r, _| shown_diffs(r));
     let listed = |cx: &mut TestAppContext| match review.read_with(cx, |r, _| r.content()) {
         ReviewContent::Committed(committed) => committed.files,
@@ -2403,7 +2413,7 @@ fn a_files_refresh_reads_its_staged_unstaged_untracked_or_commit_diff(cx: &mut T
     let store = open_store(cx, &h);
     let workspace = open_repo_workspace(cx, &h, &store, &repo);
     let review = open_review(cx, &workspace);
-    wait_review(cx, &review, "read", |r, _| matches!(r.content(), ReviewContent::Uncommitted(u) if u.diffs.is_complete()));
+    wait_review(cx, &review, "listed", |r, _| matches!(r.content(), ReviewContent::Uncommitted(_)));
     let refreshed = |cx: &mut TestAppContext, path: &str| {
         review.update(cx, |r, cx| r.refresh_file(path, cx));
         assert!(review.read_with(cx, |r, _| r.is_file_loading(path)));
@@ -2443,10 +2453,223 @@ fn a_files_refresh_reads_its_staged_unstaged_untracked_or_commit_diff(cx: &mut T
         other => panic!("{other:?}"),
     });
     review.update(cx, |r, cx| r.select_commit(&hash, cx));
-    wait_review(cx, &review, "commit read", |r, _| {
-        matches!(r.selected_commit().map(|s| &s.diff), Some(Loaded::Ready(d)) if d.diffs.is_complete())
-    });
+    wait_review(cx, &review, "commit listed", |r, _| matches!(r.selected_commit().map(|s| &s.diff), Some(Loaded::Ready(_))));
+    read_all(cx, &review);
     let shown = file_diff(cx, &review, "b.txt");
     assert!(loaded(shown.clone(), "+B2"), "{shown:?}");
     assert_eq!(refreshed(cx, "b.txt"), shown);
+}
+
+#[gpui_kit::test]
+fn a_files_diff_is_read_when_asked_for_and_a_reload_reads_again_those_asked_for(cx: &mut TestAppContext) {
+    use treeterm_model::review_patch::FileDiff;
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let repo = TempRepo::new(&h);
+    repo.write("a.txt", "a\n");
+    repo.write("b.txt", "b\n");
+    repo.write("c.txt", "a file moved\nwith its lines\n");
+    repo.commit_all("base");
+    repo.git(&["checkout", "-q", "-b", "feature"]);
+    repo.write("a.txt", "A\n");
+    repo.write("b.txt", "B\n");
+    repo.git(&["mv", "c.txt", "d.txt"]);
+    repo.commit_all("feature");
+    let store = open_store(cx, &h);
+    let workspace = open_repo_workspace(cx, &h, &store, &repo);
+    let (_, review) =
+        open_review_with(cx, &workspace, serde_json::json!({ "viewMode": "committed", "baseBranchOverride": "main" }));
+    wait_review(cx, &review, "listed", |r, _| matches!(r.content(), ReviewContent::Committed(_)));
+    wait_review(cx, &review, "loaded", |r, _| !r.is_loading());
+    let loaded = |diff: Option<FileDiff>, text: &str| matches!(&diff, Some(FileDiff::Loaded(section)) if section.contains(text));
+
+    // Listed, no file's diff is read yet ("Scroll to load diff").
+    let listed = review.read_with(cx, |r, _| shown_diffs(r));
+    assert_eq!(
+        listed.iter().collect::<Vec<_>>(),
+        [("a.txt", &FileDiff::NotLoaded), ("b.txt", &FileDiff::NotLoaded), ("d.txt", &FileDiff::NotLoaded)]
+    );
+
+    // Near the viewport: read on its own, "Loading diff..." meanwhile; the others stay as
+    // they are, and a path not listed is not read.
+    review.update(cx, |r, cx| r.request_files(&["b.txt".to_owned(), "nope.txt".to_owned()], cx));
+    assert_eq!(file_diff(cx, &review, "b.txt"), Some(FileDiff::Loading));
+    assert!(review.read_with(cx, |r, _| r.is_file_loading("b.txt") && !r.is_file_loading("nope.txt")));
+    wait_review(cx, &review, "b.txt read", |r, _| !r.is_file_loading("b.txt"));
+    let b = file_diff(cx, &review, "b.txt");
+    assert!(loaded(b.clone(), "+B"), "{b:?}");
+    assert_eq!(file_diff(cx, &review, "a.txt"), Some(FileDiff::NotLoaded));
+    // Asked for again once read: it is not read again.
+    review.update(cx, |r, cx| r.request_files(&["b.txt".to_owned()], cx));
+    assert_eq!(file_diff(cx, &review, "b.txt"), b);
+    // A renamed file is read with the path it came from: a rename, not an added file.
+    review.update(cx, |r, cx| r.request_files(&["d.txt".to_owned()], cx));
+    wait_review(cx, &review, "d.txt read", |r, _| !r.is_file_loading("d.txt"));
+    let d = file_diff(cx, &review, "d.txt");
+    assert!(loaded(d.clone(), "rename from c.txt"), "{d:?}");
+
+    // A reload reads again the files asked for, which show what they showed until it has; the
+    // others are still not read.
+    repo.write("a.txt", "A2\n");
+    repo.write("b.txt", "B2\n");
+    repo.commit_all("more");
+    review.update(cx, |r, cx| r.refresh(cx));
+    assert_eq!(file_diff(cx, &review, "b.txt"), b);
+    assert!(!review.read_with(cx, |r, _| r.is_file_loading("b.txt")));
+    wait_review(cx, &review, "reloaded", |r, _| !r.is_refreshing());
+    assert!(loaded(file_diff(cx, &review, "b.txt"), "+B2"));
+    assert_eq!(file_diff(cx, &review, "d.txt"), d);
+    assert_eq!(file_diff(cx, &review, "a.txt"), Some(FileDiff::NotLoaded));
+
+    // A file asked for while a reload runs is read on its own, and the reload keeps that read.
+    repo.write("a.txt", "A3\n");
+    repo.commit_all("third");
+    review.update(cx, |r, cx| {
+        r.refresh(cx);
+        r.request_files(&["a.txt".to_owned()], cx);
+    });
+    assert!(review.read_with(cx, |r, _| r.is_file_loading("a.txt")));
+    wait_review(cx, &review, "reloaded", |r, _| !r.is_refreshing() && !r.is_file_loading("a.txt"));
+    assert!(loaded(file_diff(cx, &review, "a.txt"), "+A3"));
+
+    // A file the reload lists for the first time is not read.
+    repo.write("e.txt", "new\n");
+    repo.commit_all("e");
+    review.update(cx, |r, cx| r.refresh(cx));
+    wait_review(cx, &review, "e.txt listed", |r, _| !r.is_refreshing() && shown_diffs(r).get("e.txt").is_some());
+    assert_eq!(file_diff(cx, &review, "e.txt"), Some(FileDiff::NotLoaded));
+    assert!(loaded(file_diff(cx, &review, "b.txt"), "+B2"));
+}
+
+#[gpui_kit::test]
+fn an_uncommitted_reload_reads_again_the_staged_unstaged_and_untracked_files_asked_for(cx: &mut TestAppContext) {
+    use treeterm_model::review_patch::FileDiff;
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let repo = TempRepo::new(&h);
+    for name in ["a.txt", "b.txt", "c.txt"] {
+        repo.write(name, "x\n");
+    }
+    repo.write("r.txt", "a file moved\nwith its lines\n");
+    repo.commit_all("base");
+    repo.write("a.txt", "A\n");
+    repo.git(&["add", "a.txt"]);
+    repo.git(&["mv", "r.txt", "s.txt"]);
+    repo.write("b.txt", "B\n");
+    repo.write("c.txt", "C\n");
+    repo.write("u.txt", "u\n");
+    let store = open_store(cx, &h);
+    let workspace = open_repo_workspace(cx, &h, &store, &repo);
+    let review = open_review(cx, &workspace);
+    wait_review(cx, &review, "listed", |r, _| matches!(r.content(), ReviewContent::Uncommitted(u) if u.changes.files.len() == 5));
+    let loaded = |diff: Option<FileDiff>, text: &str| matches!(&diff, Some(FileDiff::Loaded(section)) if section.contains(text));
+    let asked: Vec<String> = ["a.txt", "s.txt", "b.txt", "u.txt"].map(str::to_owned).to_vec();
+    review.update(cx, |r, cx| r.request_files(&asked, cx));
+    wait_review(cx, &review, "read", |r, _| asked.iter().all(|path| !r.is_file_loading(path)));
+    // A staged rename is read with the path it came from.
+    let s = file_diff(cx, &review, "s.txt");
+    assert!(loaded(s.clone(), "rename from r.txt"), "{s:?}");
+
+    // Each changes; a reload reads again those asked for, each its own way: staged (the
+    // index's change), unstaged, untracked. c.txt is still not read.
+    repo.write("a.txt", "A2\n");
+    repo.git(&["add", "a.txt"]);
+    repo.write("a.txt", "A3\n");
+    repo.write("b.txt", "B2\n");
+    repo.write("c.txt", "C2\n");
+    repo.write("u.txt", "u2\n");
+    review.update(cx, |r, cx| r.refresh(cx));
+    wait_review(cx, &review, "reloaded", |r, _| !r.is_refreshing());
+    assert!(loaded(file_diff(cx, &review, "a.txt"), "+A2"));
+    assert!(loaded(file_diff(cx, &review, "b.txt"), "+B2"));
+    assert!(loaded(file_diff(cx, &review, "u.txt"), "+u2"));
+    assert_eq!(file_diff(cx, &review, "s.txt"), s);
+    assert_eq!(file_diff(cx, &review, "c.txt"), Some(FileDiff::NotLoaded));
+}
+
+#[gpui_kit::test]
+fn find_reads_every_file_a_few_at_a_time_and_counts_once_all_are_read(cx: &mut TestAppContext) {
+    use treeterm_core::search::{DiffStyle, UnchangedRegions};
+    use treeterm_model::review::MAX_SEARCH_LOADS;
+    use treeterm_model::review_patch::FileDiff;
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let repo = TempRepo::new(&h);
+    let names: Vec<String> = (0..6).map(|index| format!("f{index}.txt")).collect();
+    for name in &names {
+        repo.write(name, &format!("{name} line\n"));
+    }
+    repo.commit_all("base");
+    // Three files change a line with the needle, the other three another line.
+    for (index, name) in names.iter().enumerate() {
+        let line = if index % 2 == 0 { format!("needle {index}") } else { format!("other {index}") };
+        repo.write(name, &format!("{line}\n"));
+    }
+    let store = open_store(cx, &h);
+    let workspace = open_repo_workspace(cx, &h, &store, &repo);
+    let review = open_review(cx, &workspace);
+    wait_review(cx, &review, "listed", |r, _| matches!(r.content(), ReviewContent::Uncommitted(u) if u.changes.files.len() == 6));
+    wait_review(cx, &review, "loaded", |r, _| !r.is_loading());
+    let layout = DiffLayout { style: DiffStyle::Split, unchanged: UnchangedRegions::Collapsed };
+    let (files, layout_files) = (names.clone(), names.clone());
+    // The count and the most files being read, at each change.
+    let label = move |r: &ReviewModel| {
+        let matches = r.find_matches(&shown_diffs(r).patch(), &layout_files, layout);
+        (r.find_count_label(&matches), r.find_rows(&matches, &layout_files))
+    };
+    let seen = std::rc::Rc::new(std::cell::RefCell::new((Vec::new(), 0)));
+    let record = seen.clone();
+    let observe_label = label.clone();
+    let _observe = cx.update(|cx| {
+        cx.observe(&review, move |review, cx| {
+            let review = review.read(cx);
+            let reading = shown_diffs(review).iter().filter(|(_, diff)| **diff == FileDiff::Loading).count();
+            let mut seen = record.borrow_mut();
+            seen.0.push(observe_label(review).0);
+            seen.1 = seen.1.max(reading);
+        })
+    });
+
+    // A query: every file is read, a few at a time; until they are, the count says more may
+    // come and an empty section does not say "No matches".
+    review.update(cx, |r, cx| {
+        r.open_find("f1.txt", cx);
+        r.set_find_query("needle", cx);
+    });
+    let (count, rows) = review.read_with(cx, |r, _| label(r));
+    assert_eq!(count, "Searching…");
+    assert!(review.read_with(cx, |r, _| r.find_pending()));
+    assert!(!rows.contains(&SearchRow::Note("No matches".to_owned())), "{rows:?}");
+    wait_review(cx, &review, "every file read", |r, _| shown_diffs(r).is_complete());
+    let (labels, most) = seen.borrow().clone();
+    assert!((1..=MAX_SEARCH_LOADS).contains(&most), "{most} read at once");
+    assert!(labels.iter().any(|label| label.ends_with(" found…")), "{labels:?}");
+    assert!(!review.read_with(cx, |r, _| r.find_pending()));
+    assert_eq!(review.read_with(cx, |r, _| label(r).0), "3 found");
+
+    // Once every file is read, a section with none says so.
+    review.update(cx, |r, cx| r.set_find_query("nowhere", cx));
+    let (count, rows) = review.read_with(cx, |r, _| label(r));
+    assert_eq!(count, "0 found");
+    assert_eq!(rows.iter().filter(|row| **row == SearchRow::Note("No matches".to_owned())).count(), 2, "{rows:?}");
+
+    // Closed, or without a query, find reads nothing more.
+    let (_, review) = open_review_with(cx, &workspace, serde_json::json!({ "viewMode": "uncommitted" }));
+    wait_review(cx, &review, "listed", |r, _| matches!(r.content(), ReviewContent::Uncommitted(u) if u.changes.files.len() == 6));
+    review.update(cx, |r, cx| {
+        r.open_find("f0.txt", cx);
+        r.set_find_query("needle", cx);
+        r.set_find_query("", cx);
+    });
+    let reading = review.read_with(cx, |r, _| shown_diffs(r).iter().filter(|(_, diff)| **diff == FileDiff::Loading).count());
+    assert_eq!(reading, MAX_SEARCH_LOADS);
+    wait_review(cx, &review, "those read", |r, _| files.iter().all(|path| !r.is_file_loading(path)));
+    assert_eq!(
+        review.read_with(cx, |r, _| shown_diffs(r).iter().filter(|(_, diff)| **diff == FileDiff::NotLoaded).count()),
+        files.len() - MAX_SEARCH_LOADS
+    );
+    assert!(!review.read_with(cx, |r, _| r.find_pending()));
 }

@@ -18,7 +18,8 @@ pub use decoration::{DiffDecoration, DiffGutterMarker};
 pub use document::{DiffFile, DiffFileStatus, DiffLinePosition, DiffLineRange, DiffSide};
 pub use parser::{DiffParseError, DiffParseOptions};
 pub use presentation::DiffInlineUnit;
-pub use state::{DiffEvent, DiffState};
+// TreeTerm patch: NEAR_MARGIN.
+pub use state::{DiffEvent, DiffState, NEAR_MARGIN};
 
 use std::{collections::HashMap, rc::Rc, sync::Arc};
 
@@ -800,6 +801,11 @@ fn render_diff(
                             }
                             // TreeTerm patch: the rows are laid out for this frame.
                             state.report_top_band(cx);
+                            // Their heights are dropped when rehinted: the near files are
+                            // reported once they are measured again, in the next frame.
+                            if !rehinted {
+                                state.report_near_files(cx);
+                            }
                         });
                     }
                 },

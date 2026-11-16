@@ -23,6 +23,13 @@ use super::{
     selection::SelectionGeometry,
 };
 
+/// TreeTerm patch: adds `path` to `files` unless it is the last one there.
+fn push_file(files: &mut Vec<SharedString>, path: &SharedString) {
+    if files.last() != Some(path) {
+        files.push(path.clone());
+    }
+}
+
 /// One virtualized row. Every row belongs to exactly one file.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum DisplayRow {
@@ -95,7 +102,14 @@ pub enum DiffEvent {
     /// TreeTerm patch: the files with a row in the top tenth of the viewport changed, after
     /// a layout (see [`DiffState::top_band`]).
     TopBandChanged(Vec<SharedString>),
+    /// TreeTerm patch: the files with a row within [`NEAR_MARGIN`] of the viewport changed,
+    /// after a layout (see [`DiffState::near_files`]).
+    NearFilesChanged(Vec<SharedString>),
 }
+
+/// TreeTerm patch: how far above and below the viewport a file's rows count as near it
+/// ([`DiffState::near_files`]), as an `IntersectionObserver`'s `rootMargin: '1500px'`.
+pub const NEAR_MARGIN: Pixels = px(1500.);
 
 /// TreeTerm patch: the row at the top of the viewport, found again after the files change.
 enum TopAnchor {
@@ -257,6 +271,8 @@ pub struct DiffState {
     preparing: Option<usize>,
     /// TreeTerm patch: the files last reported by [`DiffEvent::TopBandChanged`].
     top_band: Vec<SharedString>,
+    /// TreeTerm patch: the files last reported by [`DiffEvent::NearFilesChanged`].
+    near_files: Vec<SharedString>,
     /// TreeTerm patch: [`Self::expand_unchanged`] revealed every file's unchanged lines
     /// (files [`Self::update_files`] brings in show them too).
     unchanged_expanded: bool,
@@ -392,6 +408,7 @@ impl DiffState {
             presentation_generation: 0,
             preparing: None,
             top_band: Vec::new(),
+            near_files: Vec::new(),
             unchanged_expanded: false,
             _presentation: Task::ready(()),
             _selection_subscription,
@@ -653,8 +670,9 @@ impl DiffState {
         self.selection_cursor = None;
         self.selecting = false;
         self.geometry.borrow_mut().clear();
-        // TreeTerm patch: other files report their top band afresh.
+        // TreeTerm patch: other files report their top band and near files afresh.
         self.top_band.clear();
+        self.near_files.clear();
         self.rebuild(true);
         self.horizontal_scroll.set_offset(point(px(0.), px(0.)));
         self.ensure_presentation(cx);
@@ -669,11 +687,14 @@ impl DiffState {
     /// gone, the next file still present comes to the top (else the last one before it).
     /// After [`Self::expand_unchanged`], other files show all their lines too. `collapsed`
     /// are more files to show collapsed (say, files listed for the first time that start
-    /// so). The top band is reported afresh after the next layout.
+    /// so), and `opened` files to show expanded (say, files whose body the owner drew under
+    /// their collapsed header until now); the place is kept as they change. The top band and
+    /// the near files are reported afresh after the next layout.
     pub fn update_files(
         &mut self,
         files: impl IntoIterator<Item = DiffFile>,
         collapsed: impl IntoIterator<Item = SharedString>,
+        opened: impl IntoIterator<Item = SharedString>,
         cx: &mut Context<Self>,
     ) {
         let anchor = self.top_anchor();
@@ -729,6 +750,9 @@ impl DiffState {
                 .into_iter()
                 .filter(|path| self.file_ixs.contains_key(path)),
         );
+        for path in opened {
+            self.collapsed.remove(&path);
+        }
         self.resolutions
             .retain(|(path, _), _| unchanged.contains(path));
         self.expanded = expanded;
@@ -738,6 +762,7 @@ impl DiffState {
         self.annotations.clear();
         self.geometry.borrow_mut().clear();
         self.top_band.clear();
+        self.near_files.clear();
         self.rebuild(true);
         match anchor {
             Some(anchor) => self.restore_anchor(anchor, &old_order),
@@ -775,6 +800,72 @@ impl DiffState {
         if band != self.top_band {
             self.top_band = band.clone();
             cx.emit(DiffEvent::TopBandChanged(band));
+        }
+    }
+
+    /// TreeTerm patch: the files with a row within [`NEAR_MARGIN`] above or below the
+    /// viewport, in list order, as of the last layout: those an `IntersectionObserver` with
+    /// `rootMargin: '1500px'` sees over a list of file sections. A collapsed file counts by its
+    /// header. A row not laid out yet is taken to be as tall as a code row, or a header as the
+    /// last header laid out.
+    pub fn near_files(&self) -> &[SharedString] {
+        &self.near_files
+    }
+
+    /// TreeTerm patch: after the list has laid out, reports [`DiffEvent::NearFilesChanged`]
+    /// when the near files differ from those last reported.
+    pub(crate) fn report_near_files(&mut self, cx: &mut Context<Self>) {
+        let Some(row_height) = self.row_height else {
+            return;
+        };
+        let viewport = self.list.viewport_bounds();
+        let (top, bottom) = (
+            viewport.top() - NEAR_MARGIN,
+            viewport.bottom() + NEAR_MARGIN,
+        );
+        let scroll_top = self.list.logical_scroll_top();
+        let first = scroll_top.item_ix.min(self.rows.len());
+        let start = viewport.top() - scroll_top.offset_in_item;
+        let mut header_height = row_height;
+        let mut below: Vec<SharedString> = Vec::new();
+        // The top row and those below it, while they start above the bottom margin.
+        let mut y = start;
+        for (ix, row) in self.rows.iter().enumerate().skip(first) {
+            if y >= bottom {
+                break;
+            }
+            let height = match (self.list.bounds_for_item(ix), row) {
+                (Some(bounds), DisplayRow::File(_)) => {
+                    header_height = bounds.size.height;
+                    header_height
+                }
+                (Some(bounds), _) => bounds.size.height,
+                (None, DisplayRow::File(_)) => header_height,
+                (None, _) => row_height,
+            };
+            push_file(&mut below, self.files[row.file()].path());
+            y += height;
+        }
+        // The rows above it, while they end below the top margin (their heights unknown).
+        let mut above: Vec<SharedString> = Vec::new();
+        let mut y = start;
+        for row in self.rows[..first].iter().rev() {
+            if y <= top {
+                break;
+            }
+            y -= match row {
+                DisplayRow::File(_) => header_height,
+                _ => row_height,
+            };
+            push_file(&mut above, self.files[row.file()].path());
+        }
+        let mut near: Vec<SharedString> = Vec::new();
+        for path in above.iter().rev().chain(&below) {
+            push_file(&mut near, path);
+        }
+        if near != self.near_files {
+            self.near_files = near.clone();
+            cx.emit(DiffEvent::NearFilesChanged(near));
         }
     }
 

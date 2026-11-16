@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use super::*;
 use crate::fakes::block_on;
-use crate::git::{DiffFile, FileChangeStats, FileChangeStatus};
+use crate::git::{DiffFile, FileChangeStats, FileChangeStatus, PathOrigin};
 use crate::github::{PrDetails, PrListItem, PrState, PrStatus};
 use crate::review::{CommitAnchor, Freshness, LineAnchor, Resolution, Side};
 
@@ -85,6 +85,7 @@ impl StatusGitApi for FakeGit {
                         additions: 1,
                         deletions: 0,
                     },
+                    origin: PathOrigin::Same,
                 })
                 .collect(),
             total_additions: count as u64,
