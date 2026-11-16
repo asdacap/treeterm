@@ -13,9 +13,9 @@
 //! - `click`/`rclick`/`dblclick <x> <y> [modifiers]` and `move <x> <y> [modifiers]` — the
 //!   pointer in window points, with keys held (e.g. `cmd`, `ctrl-shift`); `modifiers
 //!   [modifiers]` — the keys held change (none: released)
-//! - `drag <x1> <y1> <x2> <y2> [hold]` — press, move with the button held, release (with
-//!   `hold`, the button stays held, for a screenshot mid-drag); `release <x> <y>` — the
-//!   held button comes up there
+//! - `drag <x1> <y1> <x2> <y2> [modifiers] [hold]` — press, move with the button held,
+//!   release (with `hold`, the button stays held, for a screenshot mid-drag); `release <x>
+//!   <y>` — the held button comes up there
 //! - `scroll <x> <y> <dy>` — a wheel scroll of `dy` points over (x, y), in window points
 //! - `screenshot <path.png>` — render the last frame offscreen (no screen-capture permission)
 
@@ -96,6 +96,14 @@ fn modifiers(keys: Option<&str>) -> Result<gpui_kit::Modifiers, String> {
         }
     }
     Ok(modifiers)
+}
+
+/// `args` without a last word that names keys held (anything but a number), and that word.
+fn trailing_modifiers(args: &str) -> (&str, Option<&str>) {
+    match args.trim_end().rsplit_once(' ') {
+        Some((rest, last)) if last.parse::<f32>().is_err() => (rest, Some(last)),
+        Some(_) | None => (args, None),
+    }
 }
 
 /// `<x> <y> [modifiers]`: a point in window points and the keys held ([`modifiers`]).
@@ -184,17 +192,18 @@ fn handle(line: &str, window: AnyWindowHandle, view: &Entity<AppView>, cx: &mut 
                 Ok(json!({ "ok": true }))
             }
             "drag" => {
-                // `drag x1 y1 x2 y2 [hold]`: press, move in steps with the button held, release
-                // unless held.
+                // `drag x1 y1 x2 y2 [modifiers] [hold]`: press, move in steps with the button
+                // held, release unless held.
                 let (rest, hold) = match rest.strip_suffix(" hold") {
                     Some(rest) => (rest, true),
                     None => (rest, false),
                 };
+                let (rest, keys) = trailing_modifiers(rest);
                 let coords: Vec<f32> = rest.split_whitespace().filter_map(|v| v.parse().ok()).collect();
                 let [x1, y1, x2, y2] = coords[..] else {
-                    return Err("usage: drag <x1> <y1> <x2> <y2> [hold]".to_owned());
+                    return Err("usage: drag <x1> <y1> <x2> <y2> [modifiers] [hold]".to_owned());
                 };
-                let modifiers = gpui_kit::Modifiers::default();
+                let modifiers = modifiers(keys)?;
                 let button = gpui_kit::MouseButton::Left;
                 let at = |x: f32, y: f32| gpui_kit::point(gpui_kit::px(x), gpui_kit::px(y));
                 window.dispatch_event(

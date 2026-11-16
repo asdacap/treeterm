@@ -100,6 +100,25 @@ pub fn encode_mouse(input: MouseInput, mode: TermMode) -> Option<Vec<u8>> {
     Some(out)
 }
 
+/// How far past the grid, in pixels, a selection drag scrolls at full speed (xterm.js's
+/// `DRAG_SCROLL_MAX_THRESHOLD`).
+const DRAG_SCROLL_MAX_THRESHOLD: f32 = 50.;
+/// The most lines a selection drag scrolls per tick (`DRAG_SCROLL_MAX_SPEED`).
+const DRAG_SCROLL_MAX_SPEED: f32 = 15.;
+
+/// The lines a selection drag scrolls the scrollback every tick with the pointer `overshoot`
+/// pixels above (negative) or below (positive) the grid, negative toward older output:
+/// xterm.js's `_getMouseEventScrollAmount`, from one line just past the edge to 15 at 50
+/// pixels.
+pub fn drag_scroll_lines(overshoot: f32) -> i32 {
+    if overshoot == 0. {
+        return 0;
+    }
+    let offset = overshoot.clamp(-DRAG_SCROLL_MAX_THRESHOLD, DRAG_SCROLL_MAX_THRESHOLD) / DRAG_SCROLL_MAX_THRESHOLD;
+    // JavaScript's `Math.round` rounds halves up.
+    (offset.signum() + (offset * (DRAG_SCROLL_MAX_SPEED - 1.) + 0.5).floor()) as i32
+}
+
 /// On the alternate screen with alternate scroll on and no mouse tracking, the wheel sends
 /// cursor keys so pagers and editors scroll. `lines` > 0 scrolls up (toward older text).
 pub fn alternate_scroll(lines: i32, mode: TermMode) -> Option<Vec<u8>> {
@@ -220,5 +239,16 @@ mod tests {
             alternate_scroll(1, mode | TermMode::MOUSE_REPORT_CLICK),
             None
         );
+    }
+
+    #[test]
+    fn a_selection_drag_scrolls_faster_the_further_past_the_grid() {
+        assert_eq!(drag_scroll_lines(0.), 0, "over the grid");
+        assert_eq!(drag_scroll_lines(-1.), -1);
+        assert_eq!(drag_scroll_lines(1.), 1);
+        assert_eq!(drag_scroll_lines(-10.), -4);
+        assert_eq!(drag_scroll_lines(25.), 8);
+        assert_eq!(drag_scroll_lines(-50.), -15);
+        assert_eq!(drag_scroll_lines(400.), 15, "capped at 50 pixels");
     }
 }

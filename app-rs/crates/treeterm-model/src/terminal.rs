@@ -19,9 +19,11 @@ use treeterm_core::pty::{AttachKind, PtyEvent, PtyInputHandle};
 use treeterm_core::rt::Sub;
 use treeterm_core::settings::{CursorStyle, TerminalSettings};
 use treeterm_core::traffic::ByteCounter;
-use treeterm_term::alacritty_terminal::grid::Scroll;
+use treeterm_term::alacritty_terminal::grid::{Dimensions, Scroll};
 use treeterm_term::alacritty_terminal::index::{Column, Line, Point, Side};
 use treeterm_term::alacritty_terminal::selection::{Selection, SelectionType};
+use treeterm_term::alacritty_terminal::term::Term;
+use treeterm_term::alacritty_terminal::term::cell::Flags;
 use treeterm_term::alacritty_terminal::vte::ansi::Rgb;
 use treeterm_term::core::{
     CursorShapeSetting, EmulatorSettings, Gate, GridSize, Notice, Responder, SCROLLBACK_LINES,
@@ -29,8 +31,10 @@ use treeterm_term::core::{
 };
 use treeterm_term::fit::{FitState, WidthLimit};
 use treeterm_term::idle::{IdleDetector, IdleEdge, IdleOutput};
-use treeterm_term::keys::paste_bytes;
+use treeterm_term::keys::{Modifiers, paste_bytes};
 use treeterm_term::links::{self, Link, LinkKind};
+use treeterm_term::mouse;
+use treeterm_term::move_to_cell::move_to_cell;
 use treeterm_term::palette::Palette;
 use treeterm_term::view::{self, ScrollPosition};
 
@@ -45,6 +49,14 @@ const MAX_EVENTS_PER_BATCH: usize = 512;
 /// How long a click on the scroll badge waits for a second click (a double-click pins)
 /// before it scrolls. Electron's `badgeClickTimer`.
 pub const BADGE_DOUBLE_CLICK: Duration = Duration::from_millis(250);
+
+/// How often a selection dragged past the grid's top or bottom scrolls the scrollback
+/// (xterm.js's `DRAG_SCROLL_INTERVAL`).
+pub const DRAG_SCROLL_INTERVAL: Duration = Duration::from_millis(50);
+
+/// An Alt/Option+click moves the program's cursor only when released this soon after the
+/// press (xterm.js's `ALT_CLICK_MOVE_CURSOR_TIME`).
+pub const ALT_CLICK_MOVE_CURSOR_TIME: Duration = Duration::from_millis(500);
 
 #[derive(Debug, Clone)]
 pub struct TerminalOptions {
@@ -137,6 +149,8 @@ pub enum SelectionKind {
     Semantic,
     /// Line-wise (triple click).
     Lines,
+    /// A rectangle of columns (Alt/Option+drag).
+    Block,
 }
 
 /// A grid cell under the pointer: `line` counts from the top of the viewport.
@@ -164,6 +178,23 @@ pub enum LinkPress {
     Shared,
     /// It is the press of a URL in the text under Cmd/Ctrl, which selects nothing.
     Taken,
+}
+
+/// A left press that selects, until its release.
+struct SelectionGesture {
+    pressed_at: Instant,
+    /// The pointer is past the grid's top or bottom edge.
+    drag_scroll: Option<DragScroll>,
+}
+
+/// A selection dragged past the grid's top or bottom: the scrollback scrolls every
+/// [`DRAG_SCROLL_INTERVAL`], and the selection with it.
+struct DragScroll {
+    /// Lines per tick, negative toward older output, as xterm.js counts them.
+    lines: i32,
+    /// The pointer, clamped to the grid; a block selection keeps its column.
+    at: CellPoint,
+    _ticks: Task<()>,
 }
 
 /// Everything the parser thread has to tell the UI thread, merged until the UI takes it.
@@ -215,6 +246,7 @@ pub struct TerminalModel {
     pointer: Option<Pointer>,
     /// The link a left press went down on, opened if the release comes on it too.
     pressed_link: Option<Link>,
+    selection_gesture: Option<SelectionGesture>,
 }
 
 /// Where a single click on the scroll badge goes, decided when it is clicked.
@@ -262,6 +294,7 @@ impl TerminalModel {
             badge_click: None,
             pointer: None,
             pressed_link: None,
+            selection_gesture: None,
         }
     }
 
@@ -360,7 +393,6 @@ impl TerminalModel {
 
     pub fn grid_size(&self) -> GridSize {
         let term = self.attachment.term.lock();
-        use treeterm_term::alacritty_terminal::grid::Dimensions;
         GridSize {
             cols: u16::try_from(term.columns()).unwrap_or(u16::MAX),
             rows: u16::try_from(term.screen_lines()).unwrap_or(u16::MAX),
@@ -650,9 +682,7 @@ impl TerminalModel {
     // ---- selection ---------------------------------------------------------------------
 
     fn grid_point(&self, at: CellPoint) -> (Point, Side) {
-        let offset = self.attachment.term.lock().grid().display_offset();
-        let point = Point::new(Line(at.line as i32 - offset as i32), Column(at.column));
-        (point, if at.right_half { Side::Right } else { Side::Left })
+        grid_point(&self.attachment.term.lock(), at)
     }
 
     pub fn start_selection(&mut self, at: CellPoint, kind: SelectionKind, cx: &mut Context<Self>) {
@@ -661,17 +691,162 @@ impl TerminalModel {
             SelectionKind::Simple => SelectionType::Simple,
             SelectionKind::Semantic => SelectionType::Semantic,
             SelectionKind::Lines => SelectionType::Lines,
+            SelectionKind::Block => SelectionType::Block,
         };
         self.attachment.term.lock().selection = Some(Selection::new(ty, point, side));
         cx.notify();
     }
 
-    pub fn extend_selection(&mut self, to: CellPoint, cx: &mut Context<Self>) {
+    /// A left press that selects: not one a link takes, nor one reported to a program. With
+    /// Shift, and no program tracking the mouse, it extends the selection to the press
+    /// (xterm.js's incremental click; a plain click leaves an empty selection to extend).
+    /// Otherwise it starts one: by character, by column with Alt/Option (on every platform,
+    /// as xterm.js's `shouldColumnSelect`), by word on a double click, by line on a triple.
+    pub fn press_selection(&mut self, at: CellPoint, click_count: usize, modifiers: Modifiers, cx: &mut Context<Self>) {
+        self.selection_gesture = Some(SelectionGesture {
+            pressed_at: cx.background_executor().now(),
+            drag_scroll: None,
+        });
+        let mode = *self.attachment.term.lock().mode();
+        if modifiers.shift && !mouse::mouse_mode_active(mode) {
+            self.extend_selection(at, cx);
+            return;
+        }
+        let kind = match click_count {
+            0 | 1 if modifiers.alt => SelectionKind::Block,
+            0 | 1 => SelectionKind::Simple,
+            2 => SelectionKind::Semantic,
+            _ => SelectionKind::Lines,
+        };
+        self.start_selection(at, kind, cx);
+    }
+
+    /// Whether a left press is selecting, until its release.
+    pub fn is_selecting(&self) -> bool {
+        self.selection_gesture.is_some()
+    }
+
+    fn extend_selection(&mut self, to: CellPoint, cx: &mut Context<Self>) {
         let (point, side) = self.grid_point(to);
         if let Some(selection) = self.attachment.term.lock().selection.as_mut() {
             selection.update(point, side);
+            cx.notify();
         }
-        cx.notify();
+    }
+
+    /// The pointer moved with the left button held after [`Self::press_selection`], to `to`
+    /// (clamped to the grid) and `overshoot` pixels above (negative) or below (positive) the
+    /// grid, 0 over it. The selection follows it. Past the top or bottom it ends at the
+    /// edge row's start or end (a block selection keeps its column), and the scrollback
+    /// scrolls every [`DRAG_SCROLL_INTERVAL`], faster the further out, until the pointer
+    /// comes back or the button comes up: xterm.js's drag scroll.
+    pub fn drag_selection(&mut self, to: CellPoint, overshoot: f32, cx: &mut Context<Self>) {
+        let Some(gesture) = self.selection_gesture.as_mut() else {
+            return;
+        };
+        let lines = mouse::drag_scroll_lines(overshoot);
+        gesture.drag_scroll = match (lines, gesture.drag_scroll.take()) {
+            (0, _) => None,
+            (lines, Some(scroll)) => Some(DragScroll { lines, at: to, ..scroll }),
+            (lines, None) => Some(DragScroll {
+                lines,
+                at: to,
+                _ticks: Self::drag_scroll_ticks(cx),
+            }),
+        };
+        if drag_end(&mut *self.attachment.term.lock(), to, lines) {
+            cx.notify();
+        }
+    }
+
+    fn drag_scroll_ticks(cx: &mut Context<Self>) -> Task<()> {
+        let executor = cx.background_executor().clone();
+        cx.spawn(async move |this, cx| {
+            loop {
+                executor.timer(DRAG_SCROLL_INTERVAL).await;
+                if this.update(cx, |model, cx| model.drag_scroll_tick(cx)).is_err() {
+                    return; // model dropped
+                }
+            }
+        })
+    }
+
+    /// Scroll a selection dragged past the grid's edge, and take it to the row that came
+    /// into view there. A selection that went meanwhile (cleared by output) stays gone.
+    fn drag_scroll_tick(&mut self, cx: &mut Context<Self>) {
+        let Some(scroll) = self.selection_gesture.as_ref().and_then(|gesture| gesture.drag_scroll.as_ref()) else {
+            return;
+        };
+        let (lines, at) = (scroll.lines, scroll.at);
+        if self.attachment.term.lock().selection.is_none() {
+            return;
+        }
+        self.scroll_lines(-lines, cx);
+        let mut term = self.attachment.term.lock();
+        let edge = if lines > 0 { term.screen_lines() - 1 } else { 0 };
+        drag_end(&mut *term, CellPoint { line: edge, ..at }, lines);
+    }
+
+    /// The left button came up at `at` after [`Self::press_selection`]. An Alt/Option+click
+    /// released within [`ALT_CLICK_MOVE_CURSOR_TIME`] that selected at most one character
+    /// moves the program's cursor there with arrow keys, when the newest output is in view
+    /// (xterm.js's `altClickMovesCursor`).
+    pub fn release_selection(&mut self, at: CellPoint, modifiers: Modifiers, cx: &mut Context<Self>) {
+        let Some(gesture) = self.selection_gesture.take() else {
+            return;
+        };
+        let held = cx.background_executor().now().saturating_duration_since(gesture.pressed_at);
+        // xterm.js counts the selected text in UTF-16 code units.
+        let selected = self.selection_text().map_or(0, |text| text.encode_utf16().count());
+        if modifiers.alt && held < ALT_CLICK_MOVE_CURSOR_TIME && selected <= 1 {
+            self.move_cursor_to(at, cx);
+        }
+    }
+
+    /// Send the arrow keys that take the program's cursor to `at`, as typed input (it clears
+    /// a selection, as xterm.js's user input does).
+    fn move_cursor_to(&mut self, at: CellPoint, cx: &mut Context<Self>) {
+        let keys = {
+            let term = self.attachment.term.lock();
+            if term.grid().display_offset() != 0 {
+                return;
+            }
+            move_to_cell(&term, at.column, at.line)
+        };
+        if self.selection_text().is_some() {
+            self.clear_selection(cx);
+        }
+        if !keys.is_empty() {
+            self.write_input(&keys, cx);
+        }
+    }
+
+    /// A right-click on macOS, before its menu opens: selects the word under the pointer
+    /// unless the pointer is in the selection, so the menu's Copy copies it (xterm.js's
+    /// `rightClickSelectsWord`). On blank space it selects nothing, and a selection by
+    /// character or column that it is outside of goes, as in xterm.js; one by word or line
+    /// stays.
+    pub fn select_word_unless_selected(&mut self, at: CellPoint, cx: &mut Context<Self>) {
+        let mut term = self.attachment.term.lock();
+        let (point, side) = grid_point(&*term, at);
+        let selection = term.selection.as_ref();
+        if selection.and_then(|selection| selection.to_range(&*term)).is_some_and(|range| range.contains(point)) {
+            return;
+        }
+        let cell = &term.grid()[point];
+        let blank = !cell.flags.contains(Flags::WIDE_CHAR_SPACER) && (cell.c.is_whitespace() || cell.c == '\0');
+        if !blank {
+            term.selection = Some(Selection::new(SelectionType::Semantic, point, side));
+            cx.notify();
+            return;
+        }
+        match term.selection.as_ref().map(|selection| selection.ty) {
+            Some(SelectionType::Simple | SelectionType::Block) => {
+                term.selection = None;
+                cx.notify();
+            }
+            Some(SelectionType::Semantic | SelectionType::Lines) | None => {}
+        }
     }
 
     pub fn clear_selection(&mut self, cx: &mut Context<Self>) {
@@ -937,6 +1112,31 @@ impl TerminalModel {
             }
         }
     }
+}
+
+/// The grid point of a viewport cell, and the side of it the pointer is on.
+fn grid_point<T>(term: &Term<T>, at: CellPoint) -> (Point, Side) {
+    let offset = term.grid().display_offset();
+    let point = Point::new(Line(at.line as i32 - offset as i32), Column(at.column));
+    (point, if at.right_half { Side::Right } else { Side::Left })
+}
+
+/// End the selection at `at`, dragged there with the scrollback scrolling `lines` per tick
+/// (0: not scrolling). While it scrolls, the end goes to the row's start going up and its
+/// end going down, unless the selection is a block. Whether there was a selection to end.
+fn drag_end<T>(term: &mut Term<T>, at: CellPoint, lines: i32) -> bool {
+    let (point, side) = grid_point(term, at);
+    let last_column = term.last_column();
+    let Some(selection) = term.selection.as_mut() else {
+        return false;
+    };
+    let (point, side) = match (lines.signum(), selection.ty) {
+        (0, _) | (_, SelectionType::Block) => (point, side),
+        (1, _) => (Point::new(point.line, last_column), Side::Right),
+        (_, _) => (Point::new(point.line, Column(0)), Side::Left),
+    };
+    selection.update(point, side);
+    true
 }
 
 /// The parser thread: applies the PTY's events to the emulator in stream order and merges

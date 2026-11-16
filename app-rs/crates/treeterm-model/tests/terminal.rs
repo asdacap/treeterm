@@ -9,9 +9,10 @@ use gpui_kit::{AppContext as _, Entity, Subscription, TestAppContext};
 use treeterm_core::pty::CreatePty;
 use treeterm_core::settings::TerminalSettings;
 use treeterm_model::terminal::{
-    BADGE_DOUBLE_CLICK, LinkPress, Overlay, Pointer, ScrollbarVisibility, TerminalEvent, TerminalModel,
-    TerminalOptions,
+    ALT_CLICK_MOVE_CURSOR_TIME, BADGE_DOUBLE_CLICK, CellPoint, DRAG_SCROLL_INTERVAL, LinkPress, Overlay, Pointer,
+    ScrollbarVisibility, SelectionKind, TerminalEvent, TerminalModel, TerminalOptions,
 };
+use treeterm_term::keys::Modifiers;
 use treeterm_term::core::GridSize;
 use treeterm_term::fit::WidthLimit;
 use treeterm_term::links::{Link, LinkKind};
@@ -340,7 +341,6 @@ fn an_unknown_pty_shows_disconnected(cx: &mut TestAppContext) {
 
 #[gpui_kit::test]
 fn selection_copies_the_selected_text(cx: &mut TestAppContext) {
-    use treeterm_model::terminal::{CellPoint, SelectionKind};
     cx.executor().allow_parking();
     let h = harness();
     let pty = spawn_shell(&h);
@@ -356,6 +356,197 @@ fn selection_copies_the_selected_text(cx: &mut TestAppContext) {
         m.clear_selection(cx);
         assert_eq!(m.selection_text(), None);
     });
+}
+
+/// A focused shell whose cleared screen shows `printf`'s output, and the row of `first`,
+/// the first line it prints.
+fn printed(cx: &mut TestAppContext, h: &Harness, options: TerminalOptions, printf: &str, first: &str) -> (Entity<TerminalModel>, usize) {
+    let model = open(cx, h, options);
+    model.update(cx, |m, cx| m.set_focused(true, cx));
+    type_line(cx, &model, &format!("clear; printf '{printf}'"));
+    let row = |m: &TerminalModel| m.screen_text().lines().position(|l| l == first);
+    wait_until(cx, &model, |m| row(m).is_some());
+    let row = model.read_with(cx, |m, _| row(m)).unwrap();
+    (model, row)
+}
+
+fn keys(edit: impl FnOnce(&mut Modifiers)) -> Modifiers {
+    let mut modifiers = Modifiers::default();
+    edit(&mut modifiers);
+    modifiers
+}
+
+fn right_half(line: usize, column: usize) -> CellPoint {
+    CellPoint { line, column, right_half: true }
+}
+
+/// A press at `from`, dragged over the grid to `to` and released there.
+fn drag(m: &mut TerminalModel, from: CellPoint, to: CellPoint, modifiers: Modifiers, cx: &mut gpui_kit::Context<TerminalModel>) {
+    m.press_selection(from, 1, modifiers, cx);
+    m.drag_selection(to, 0., cx);
+    m.release_selection(to, modifiers, cx);
+}
+
+#[gpui_kit::test]
+fn an_alt_drag_selects_a_block_of_columns(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    let pty = spawn_shell(&h);
+    let (model, row) = printed(cx, &h, options(pty), r"abcdef\nghijkl\n", "abcdef");
+    let (events, _subscription) = record(cx, &model);
+    model.update(cx, |m, cx| {
+        drag(m, cell(row, 1), right_half(row + 1, 3), keys(|k| k.alt = true), cx);
+        assert_eq!(m.selection_text().as_deref(), Some("bcd\nhij"));
+        drag(m, cell(row, 1), right_half(row + 1, 3), Modifiers::default(), cx);
+        assert_eq!(m.selection_text().as_deref(), Some("bcdef\nghij"));
+    });
+    // Released with more than a character selected, the Alt drag moved no cursor.
+    assert!(!events.borrow().iter().any(|e| matches!(e, TerminalEvent::Input(_))));
+}
+
+#[gpui_kit::test]
+fn shift_click_extends_the_selection_unless_a_program_tracks_the_mouse(cx: &mut TestAppContext) {
+    use treeterm_term::alacritty_terminal::term::TermMode;
+    cx.executor().allow_parking();
+    let h = harness();
+    let pty = spawn_shell(&h);
+    let (model, row) = printed(cx, &h, options(pty), r"abcdef\nghijkl\n", "abcdef");
+    let shift = keys(|k| k.shift = true);
+    let click = |m: &mut TerminalModel, at: CellPoint, modifiers: Modifiers, cx: &mut gpui_kit::Context<TerminalModel>| {
+        m.press_selection(at, 1, modifiers, cx);
+        m.release_selection(at, modifiers, cx);
+    };
+    model.update(cx, |m, cx| {
+        // A plain click selects nothing, but a Shift+click extends from it.
+        click(m, cell(row, 1), Modifiers::default(), cx);
+        assert_eq!(m.selection_text(), None);
+        click(m, right_half(row + 1, 2), shift, cx);
+        assert_eq!(m.selection_text().as_deref(), Some("bcdef\nghi"));
+        click(m, right_half(row, 3), shift, cx);
+        assert_eq!(m.selection_text().as_deref(), Some("bcd"));
+        // Dragged on from a Shift+press, it keeps extending.
+        m.press_selection(right_half(row, 2), 1, shift, cx);
+        m.drag_selection(right_half(row, 4), 0., cx);
+        assert_eq!(m.selection_text().as_deref(), Some("bcde"));
+        m.release_selection(right_half(row, 4), shift, cx);
+        // With nothing to extend, a Shift+click selects nothing.
+        m.clear_selection(cx);
+        click(m, right_half(row + 1, 4), shift, cx);
+        assert_eq!(m.selection_text(), None);
+    });
+
+    // A program tracking the mouse gets plain clicks; a Shift+click starts a new selection.
+    type_line(cx, &model, r"printf '\033[?1000h'");
+    wait_until(cx, &model, |m| m.term().lock().mode().contains(TermMode::MOUSE_REPORT_CLICK));
+    model.update(cx, |m, cx| {
+        drag(m, cell(row, 1), right_half(row, 3), Modifiers::default(), cx);
+        assert_eq!(m.selection_text().as_deref(), Some("bcd"));
+        click(m, right_half(row + 1, 2), shift, cx);
+        assert_eq!(m.selection_text(), None);
+    });
+}
+
+#[gpui_kit::test]
+fn a_right_click_selects_the_word_unless_inside_the_selection(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    let pty = spawn_shell(&h);
+    let (model, row) = printed(cx, &h, options(pty), r"one two three\n", "one two three");
+    model.update(cx, |m, cx| {
+        m.select_word_unless_selected(cell(row, 5), cx);
+        assert_eq!(m.selection_text().as_deref(), Some("two"));
+
+        // Inside the selection it stays.
+        drag(m, cell(row, 0), right_half(row, 9), Modifiers::default(), cx);
+        assert_eq!(m.selection_text().as_deref(), Some("one two th"));
+        m.select_word_unless_selected(cell(row, 5), cx);
+        assert_eq!(m.selection_text().as_deref(), Some("one two th"));
+
+        // Blank space selects nothing: a dragged selection outside it goes, a word stays.
+        m.select_word_unless_selected(cell(row, 20), cx);
+        assert_eq!(m.selection_text(), None);
+        m.select_word_unless_selected(cell(row, 10), cx);
+        assert_eq!(m.selection_text().as_deref(), Some("three"));
+        m.select_word_unless_selected(cell(row, 20), cx);
+        assert_eq!(m.selection_text().as_deref(), Some("three"));
+    });
+}
+
+#[gpui_kit::test]
+fn an_alt_click_moves_the_shells_cursor_when_quick_and_at_the_bottom(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    let model = with_scrollback(cx, &h);
+    let (events, _subscription) = record(cx, &model);
+    model.update(cx, |m, cx| m.write_input(b"echo 12345", cx));
+    let at = |m: &TerminalModel| {
+        let lines: Vec<String> = m.screen_text().lines().map(str::to_owned).collect();
+        let row = lines.iter().position(|l| l.ends_with("echo 12345"))?;
+        Some(cell(row, lines[row].find("12345")? + 2))
+    };
+    wait_until(cx, &model, |m| at(m).is_some());
+    let three = model.read_with(cx, |m, _| at(m)).unwrap();
+    let alt = keys(|k| k.alt = true);
+    let typed = |events: &RefCell<Vec<TerminalEvent>>| events.borrow().iter().filter(|e| matches!(e, TerminalEvent::Input(_))).count();
+    let before = typed(&events);
+
+    // Scrolled up, or released too late, it sends nothing.
+    model.update(cx, |m, cx| {
+        m.scroll_lines(1, cx);
+        m.press_selection(three, 1, alt, cx);
+        m.release_selection(three, alt, cx);
+        m.scroll_to_bottom(cx);
+        m.press_selection(three, 1, alt, cx);
+    });
+    advance(cx, ALT_CLICK_MOVE_CURSOR_TIME);
+    model.update(cx, |m, cx| m.release_selection(three, alt, cx));
+    assert_eq!(typed(&events), before);
+
+    model.update(cx, |m, cx| {
+        m.press_selection(three, 1, alt, cx);
+        m.release_selection(three, alt, cx);
+    });
+    assert_eq!(typed(&events), before + 1);
+    type_line(cx, &model, "X");
+    wait_until(cx, &model, |m| m.screen_text().lines().any(|l| l == "12X345"));
+}
+
+#[gpui_kit::test]
+fn a_selection_dragged_past_the_edge_scrolls_the_scrollback(cx: &mut TestAppContext) {
+    use treeterm_term::alacritty_terminal::index::Line;
+    cx.executor().allow_parking();
+    let h = harness();
+    let model = with_scrollback(cx, &h);
+    let row = model.read_with(cx, |m, _| m.screen_text().lines().position(|l| l == "300")).unwrap();
+    model.update(cx, |m, cx| {
+        m.press_selection(right_half(row, 2), 1, Modifiers::default(), cx);
+        // 10 pixels above the grid: 4 lines a tick.
+        m.drag_selection(cell(0, 5), -10., cx);
+    });
+    assert_eq!(offset(cx, &model), 0, "nothing before the first tick");
+    advance(cx, DRAG_SCROLL_INTERVAL);
+    assert_eq!(offset(cx, &model), 4);
+    advance(cx, DRAG_SCROLL_INTERVAL);
+    assert_eq!(offset(cx, &model), 8);
+    let (text, top) = model.read_with(cx, |m, _| {
+        let top = treeterm_term::view::line_text(&*m.term().lock(), Line(-8));
+        (m.selection_text().unwrap(), top)
+    });
+    assert!(text.starts_with(&format!("{top}\n")) && text.ends_with("\n300"), "{text:?}");
+
+    // Back over the grid it stops; just past the bottom it goes down a line a tick.
+    model.update(cx, |m, cx| m.drag_selection(cell(3, 0), 0., cx));
+    advance(cx, DRAG_SCROLL_INTERVAL * 3);
+    assert_eq!(offset(cx, &model), 8);
+    model.update(cx, |m, cx| m.drag_selection(cell(23, 0), 1., cx));
+    advance(cx, DRAG_SCROLL_INTERVAL);
+    assert_eq!(offset(cx, &model), 7);
+
+    // The release ends it.
+    model.update(cx, |m, cx| m.release_selection(cell(23, 0), Modifiers::default(), cx));
+    advance(cx, DRAG_SCROLL_INTERVAL * 3);
+    assert_eq!(offset(cx, &model), 7);
+    assert!(!model.read_with(cx, |m, _| m.is_selecting()));
 }
 
 const HYPERLINK: &str = "https://example.com/osc";

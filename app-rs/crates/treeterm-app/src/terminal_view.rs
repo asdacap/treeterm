@@ -19,7 +19,7 @@ use gpui_kit::{
     Window, actions, div, px, rgba,
 };
 use treeterm_model::terminal::{
-    CellPoint, LinkPress, Overlay, Pointer, SelectionKind, TerminalEvent, TerminalModel,
+    CellPoint, LinkPress, Overlay, Pointer, TerminalEvent, TerminalModel,
 };
 use treeterm_model::zoom::ZoomStore;
 use treeterm_term::alacritty_terminal::vte::ansi::Rgb;
@@ -100,15 +100,9 @@ fn terminal_shadowed(accelerators: impl IntoIterator<Item = &'static str>, optio
             };
             let m = keystroke.modifiers;
             let ctrl_shift_letter = m.control && m.shift && keystroke.key.chars().all(|c| c.is_ascii_alphabetic());
-            let modifiers = Modifiers {
-                control: m.control,
-                alt: m.alt,
-                shift: m.shift,
-                platform: m.platform,
-            };
             let input = KeyInput {
                 key: &keystroke.key,
-                modifiers,
+                modifiers: term_modifiers(m),
             };
             !ctrl_shift_letter && encode_key(input, Default::default(), options).is_some()
         })
@@ -135,7 +129,6 @@ pub struct TerminalView {
     scroll_remainder: f32,
     /// The button a mouse-reporting program saw go down, so the release can be reported.
     reported_button: Option<mouse::MouseButton>,
-    selecting: bool,
     /// Dragging the scrollbar thumb, grabbed this far below its top.
     scrollbar_grab: Option<Pixels>,
     _subscriptions: Vec<Subscription>,
@@ -188,7 +181,6 @@ impl TerminalView {
             _blink: blink,
             scroll_remainder: 0.,
             reported_button: None,
-            selecting: false,
             scrollbar_grab: None,
             _subscriptions: subscriptions,
         }
@@ -252,12 +244,7 @@ impl TerminalView {
         }
         let keystroke = &event.keystroke;
         let m = keystroke.modifiers;
-        let modifiers = Modifiers {
-            control: m.control,
-            alt: m.alt,
-            shift: m.shift,
-            platform: m.platform,
-        };
+        let modifiers = term_modifiers(m);
         // Shift+PageUp/PageDown scroll the viewport, as in xterm.js.
         if m.shift && !m.control && !m.alt && !m.platform {
             match keystroke.key.as_str() {
@@ -327,12 +314,7 @@ impl TerminalView {
             action,
             column: at.column,
             line: at.line,
-            modifiers: Modifiers {
-                control: m.control,
-                alt: m.alt,
-                shift: m.shift,
-                platform: m.platform,
-            },
+            modifiers: term_modifiers(m),
         };
         if let Some(bytes) = mouse::encode_mouse(input, mode) {
             self.model.update(cx, |model, cx| model.write_input(&bytes, cx));
@@ -386,18 +368,58 @@ impl TerminalView {
         let Some(at) = self.cell_at(event.position) else {
             return;
         };
-        let kind = match event.click_count {
-            0 | 1 => SelectionKind::Simple,
-            2 => SelectionKind::Semantic,
-            _ => SelectionKind::Lines,
+        let modifiers = term_modifiers(event.modifiers);
+        self.model
+            .update(cx, |model, cx| model.press_selection(at, event.click_count, modifiers, cx));
+    }
+
+    /// A right press, before the context menu opens: on macOS it selects the word under the
+    /// pointer, as xterm.js's `rightClickSelectsWord` does there, so the menu's Copy copies it.
+    fn on_right_mouse_down(&mut self, event: &MouseDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
+        if !cfg!(target_os = "macos") {
+            return;
+        }
+        let Some(at) = self.cell_at(event.position) else {
+            return;
         };
-        self.selecting = true;
-        self.model.update(cx, |model, cx| {
-            if kind == SelectionKind::Simple {
-                model.clear_selection(cx);
-            }
-            model.start_selection(at, kind, cx);
-        });
+        self.model.update(cx, |model, cx| model.select_word_unless_selected(at, cx));
+    }
+
+    /// The pointer moved anywhere in the window (the terminal element listens on the whole
+    /// window, as xterm.js listens on the document while selecting). A selection follows it
+    /// past the grid, which scrolls when it is above or below.
+    pub(crate) fn on_window_mouse_move(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
+        if !self.model.read(cx).is_selecting() {
+            return;
+        }
+        if event.pressed_button != Some(MouseButton::Left) {
+            // The release went where this terminal did not hear it (it was not drawn then).
+            self.release_selection(event.position, event.modifiers, cx);
+            return;
+        }
+        let Some(geometry) = self.geometry.get() else {
+            return;
+        };
+        let Some(at) = self.cell_at(event.position) else {
+            return;
+        };
+        let overshoot = geometry.overshoot(event.position.y);
+        self.model.update(cx, |model, cx| model.drag_selection(at, overshoot, cx));
+    }
+
+    /// The left button came up anywhere in the window: a selection ends there.
+    pub(crate) fn on_window_mouse_up(&mut self, event: &MouseUpEvent, cx: &mut Context<Self>) {
+        if event.button == MouseButton::Left && self.model.read(cx).is_selecting() {
+            self.release_selection(event.position, event.modifiers, cx);
+        }
+    }
+
+    fn release_selection(&mut self, position: Point<Pixels>, modifiers: gpui_kit::Modifiers, cx: &mut Context<Self>) {
+        let Some(at) = self.cell_at(position) else {
+            return;
+        };
+        let modifiers = term_modifiers(modifiers);
+        self.model.update(cx, |model, cx| model.release_selection(at, modifiers, cx));
     }
 
     fn on_mouse_move(&mut self, event: &MouseMoveEvent, _window: &mut Window, cx: &mut Context<Self>) {
@@ -416,15 +438,9 @@ impl TerminalView {
             MouseButton::Right => Some(mouse::MouseButton::Right),
             MouseButton::Navigate(_) => None,
         });
-        if (self.reported_button.is_some() || held.is_none())
-            && self.report_mouse(MouseAction::Move(held), event.position, event.modifiers, cx)
-        {
-            return;
-        }
-        if self.selecting && held == Some(mouse::MouseButton::Left)
-            && let Some(at) = self.cell_at(event.position)
-        {
-            self.model.update(cx, |model, cx| model.extend_selection(at, cx));
+        // A selection drag is the window's listener's (`on_window_mouse_move`).
+        if self.reported_button.is_some() || held.is_none() {
+            self.report_mouse(MouseAction::Move(held), event.position, event.modifiers, cx);
         }
     }
 
@@ -436,16 +452,9 @@ impl TerminalView {
             let at = self.grid_cell_at(event.position);
             self.model.update(cx, |model, cx| model.release_link(at, cx));
         }
+        // A selection ends in the window's listener (`on_window_mouse_up`).
         if let Some(button) = self.reported_button.take() {
             self.report_mouse(MouseAction::Release(button), event.position, event.modifiers, cx);
-            return;
-        }
-        if self.selecting {
-            self.selecting = false;
-            // A plain click leaves no selection behind.
-            if self.model.read(cx).selection_text().is_none() {
-                self.model.update(cx, |model, cx| model.clear_selection(cx));
-            }
         }
     }
 
@@ -635,6 +644,15 @@ fn circle_button(id: &'static str, label: &'static str, size: f32, cx: &App) -> 
         .child(label)
 }
 
+fn term_modifiers(m: gpui_kit::Modifiers) -> Modifiers {
+    Modifiers {
+        control: m.control,
+        alt: m.alt,
+        shift: m.shift,
+        platform: m.platform,
+    }
+}
+
 fn default_mono_family() -> &'static str {
     if cfg!(target_os = "macos") { "Menlo" } else { "DejaVu Sans Mono" }
 }
@@ -692,6 +710,9 @@ impl Render for TerminalView {
             .capture_any_mouse_down(cx.listener(Self::claim_on_press))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
             .on_mouse_down(MouseButton::Middle, cx.listener(Self::on_mouse_down))
+            // Before the context menu's listener, which wraps this element: the menu's Copy
+            // then copies what the press selected.
+            .on_mouse_down(MouseButton::Right, cx.listener(Self::on_right_mouse_down))
             .on_mouse_move(cx.listener(Self::on_mouse_move))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
             .on_mouse_up(MouseButton::Middle, cx.listener(Self::on_mouse_up))

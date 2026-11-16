@@ -12,8 +12,9 @@ use std::rc::Rc;
 use gpui_kit::{
     App, Bounds, Element, ElementId, ElementInputHandler, Entity, FocusHandle, Font, FontFallbacks,
     FontFeatures, FontStyle, FontWeight, GlobalElementId, Hsla, InspectorElementId, IntoElement,
-    LayoutId, Pixels, Point, Rgba, ShapedLine, SharedString, Size, StrikethroughStyle, Style,
-    TextAlign, TextRun, UnderlineStyle, Window, fill, point, px, relative, size,
+    LayoutId, MouseMoveEvent, MouseUpEvent, Pixels, Point, Rgba, ShapedLine, SharedString, Size,
+    StrikethroughStyle, Style, TextAlign, TextRun, UnderlineStyle, Window, fill, point, px,
+    relative, size,
 };
 use treeterm_model::terminal::{ScrollbarVisibility, TerminalModel};
 use treeterm_term::alacritty_terminal::grid::Dimensions;
@@ -86,13 +87,33 @@ impl Scrollbar {
 }
 
 impl Geometry {
-    /// The cell under `position`, clamped to the grid, and whether it is the cell's right half.
+    /// The cell under `position`, clamped to the grid, and whether it is the cell's right half
+    /// (left of the grid: the first cell's left half; right of it, the last cell's right).
     pub fn cell_at(&self, position: Point<Pixels>) -> (usize, usize, bool) {
         let x = (position.x - self.origin.x) / self.cell.width;
         let y = (position.y - self.origin.y) / self.cell.height;
-        let column = (x.max(0.) as usize).min(self.cols.saturating_sub(1));
         let line = (y.max(0.) as usize).min(self.rows.saturating_sub(1));
-        (line, column, x.fract() >= 0.5)
+        let last_column = self.cols.saturating_sub(1);
+        let (column, right_half) = if x < 0. {
+            (0, false)
+        } else if x as usize > last_column {
+            (last_column, true)
+        } else {
+            (x as usize, x.fract() >= 0.5)
+        };
+        (line, column, right_half)
+    }
+
+    /// How far `y` is above (negative) or below (positive) the rows, in pixels; 0 over them.
+    pub fn overshoot(&self, y: Pixels) -> f32 {
+        let bottom = self.origin.y + self.cell.height * self.rows as f32;
+        if y < self.origin.y {
+            f32::from(y - self.origin.y)
+        } else if y > bottom {
+            f32::from(y - bottom)
+        } else {
+            0.
+        }
     }
 
     /// Whether `position` is over a cell: not the padding, the scrollbar or the strip the
@@ -628,6 +649,21 @@ impl Element for TerminalElement {
             ElementInputHandler::new(bounds, self.view.clone()),
             cx,
         );
+        // A selection drag goes on wherever the pointer goes while the button is held, as
+        // xterm.js listens on the document; the terminal's own listeners hear it only over
+        // the terminal. Capture phase, so nothing in front can stop it.
+        let view = self.view.clone();
+        window.on_mouse_event(move |event: &MouseMoveEvent, phase, _window, cx| {
+            if phase.capture() {
+                view.update(cx, |view, cx| view.on_window_mouse_move(event, cx));
+            }
+        });
+        let view = self.view.clone();
+        window.on_mouse_event(move |event: &MouseUpEvent, phase, _window, cx| {
+            if phase.capture() {
+                view.update(cx, |view, cx| view.on_window_mouse_up(event, cx));
+            }
+        });
         window.with_content_mask(Some(gpui_kit::ContentMask { bounds }), |window| {
             window.paint_quad(fill(bounds, frame.background));
             for (rect, color) in &frame.rects {
@@ -697,5 +733,36 @@ fn paint_cursor(cursor: &CursorPaint, line_height: Pixels, window: &mut Window, 
             window.paint_quad(gpui_kit::outline(b, cursor.color, gpui_kit::BorderStyle::Solid));
         }
         CursorShape::Hidden => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 10 columns by 5 rows of 8x16 cells from (100, 50).
+    const GEOMETRY: Geometry = Geometry {
+        origin: Point { x: px(100.), y: px(50.) },
+        cell: Size { width: px(8.), height: px(16.) },
+        cols: 10,
+        rows: 5,
+        scrollbar: None,
+    };
+
+    #[test]
+    fn a_point_off_the_grid_is_its_nearest_cell_edge() {
+        let at = |x: f32, y: f32| GEOMETRY.cell_at(point(px(x), px(y)));
+        assert_eq!(at(117., 70.), (1, 2, false));
+        assert_eq!(at(130., 70.), (1, 3, true));
+        assert_eq!(at(60., 20.), (0, 0, false), "left of and above the grid");
+        assert_eq!(at(400., 300.), (4, 9, true), "right of and below it: the last cell whole");
+    }
+
+    #[test]
+    fn overshoot_is_the_distance_above_or_below_the_rows() {
+        assert_eq!(GEOMETRY.overshoot(px(40.)), -10.);
+        assert_eq!(GEOMETRY.overshoot(px(50.)), 0.);
+        assert_eq!(GEOMETRY.overshoot(px(130.)), 0., "the bottom edge is over the rows");
+        assert_eq!(GEOMETRY.overshoot(px(133.)), 3.);
     }
 }

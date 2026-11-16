@@ -11,6 +11,7 @@ pub mod idle;
 pub mod keys;
 pub mod links;
 pub mod mouse;
+pub mod move_to_cell;
 pub mod palette;
 pub mod view;
 
