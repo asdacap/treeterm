@@ -1,8 +1,9 @@
-//! Favourite files and directories (port of `utils/favouriteFiles.ts`, with the path helpers
-//! of `shared/workspaceFavourites.ts` it needs).
+//! Favourite files and directories (port of `utils/favouriteFiles.ts` and
+//! `shared/workspaceFavourites.ts`).
 //!
 //! Favourites are stored as workspace-relative paths with `/` separators, so they stay
-//! portable between local and remote hosts.
+//! portable between local and remote hosts. A workspace's favourites are its own and then
+//! every ancestor's: child worktrees inherit them.
 
 use std::collections::{HashSet, VecDeque};
 
@@ -12,6 +13,7 @@ use treeterm_proto::treeterm::FileEntry;
 use crate::fs::FsError;
 use crate::fs_ext::DirectoryApi;
 use crate::locale;
+use crate::wire::workspace_file::WorkspaceFile;
 
 /// A favourite file, expanded from a favourite path (a directory favourite expands to every
 /// file under it).
@@ -46,6 +48,45 @@ pub fn normalize_file_entry_relative_path(path: &str, workspace_path: &str) -> S
     } else {
         normalize_favourite_path(path)
     }
+}
+
+/// Favourite path lists joined in order (`getWorkspaceFavouritePaths` over a workspace's own
+/// list, then its parent's, its grandparent's, …): each path normalized, empty ones dropped,
+/// and each kept where it first appears.
+pub fn combine_favourite_paths<'a>(lists: impl IntoIterator<Item = &'a [String]>) -> Vec<String> {
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut paths = Vec::new();
+    for raw_path in lists.into_iter().flatten() {
+        let path = normalize_favourite_path(raw_path);
+        if !path.is_empty() && seen.insert(path.clone()) {
+            paths.push(path);
+        }
+    }
+    paths
+}
+
+/// The favourite paths workspace `id` inherits: its parent's, then its grandparent's, and so
+/// on, combined as [`combine_favourite_paths`] does (`getWorkspaceFavouritePaths` past the
+/// workspace's own list). `lookup` finds a loaded workspace's body; the walk ends at a
+/// workspace it cannot find and at one it has already passed (a `parentId` cycle).
+pub fn inherited_favourite_paths<'a>(
+    id: &str,
+    lookup: impl Fn(&str) -> Option<&'a WorkspaceFile>,
+) -> Vec<String> {
+    let mut seen: HashSet<String> = HashSet::from([id.to_owned()]);
+    let mut lists: Vec<&'a [String]> = Vec::new();
+    let mut parent = lookup(id).and_then(|file| file.parent_id.as_deref());
+    while let Some(parent_id) = parent {
+        if !seen.insert(parent_id.to_owned()) {
+            break;
+        }
+        let Some(file) = lookup(parent_id) else {
+            break;
+        };
+        lists.push(&file.favourite_paths);
+        parent = file.parent_id.as_deref();
+    }
+    combine_favourite_paths(lists)
 }
 
 /// The label for a favourite in lists: its basename (the full relative path is the tooltip).
@@ -343,6 +384,85 @@ mod tests {
         #[test]
         fn keeps_a_root_level_path_unchanged() {
             assert_eq!(favourite_file_name(&favourite("README.md")), "README.md");
+        }
+    }
+
+    /// `getWorkspaceFavouritePaths` (`shared/workspaceFavourites.test.ts`), split into
+    /// joining the lists and walking up to the ancestors.
+    mod workspace_favourite_paths {
+        use std::collections::HashMap;
+
+        use super::*;
+        use crate::wire::workspace_file::parse_workspace_file;
+
+        fn file(parent: Option<&str>, favourites: &[&str]) -> WorkspaceFile {
+            let mut json = serde_json::json!({
+                "name": "w", "status": "active", "isGitRepo": true, "isWorktree": false,
+                "appStates": {}, "metadata": {}, "createdAt": 1, "lastActivity": 1,
+                "parentHash": "", "favouritePaths": favourites
+            });
+            if let Some(parent) = parent {
+                json["parentId"] = parent.into();
+            }
+            parse_workspace_file(json.to_string().as_bytes()).unwrap()
+        }
+
+        fn inherited(id: &str, workspaces: &HashMap<&str, WorkspaceFile>) -> Vec<String> {
+            inherited_favourite_paths(id, |id| workspaces.get(id))
+        }
+
+        #[test]
+        fn combines_lists_in_order_normalized_without_empties_or_repeats() {
+            let own = paths(&["./src/", "", "README.md"]);
+            let parent = paths(&["/docs", "src", "/", "README.md/"]);
+            assert_eq!(
+                combine_favourite_paths([own.as_slice(), parent.as_slice()]),
+                paths(&["src", "README.md", "docs"])
+            );
+            assert!(combine_favourite_paths([paths(&["", "./", "//"]).as_slice()]).is_empty());
+        }
+
+        #[test]
+        fn inherits_the_parents_then_the_grandparents_favourites() {
+            let workspaces = HashMap::from([
+                ("root", file(None, &["docs", "shared.md"])),
+                ("parent", file(Some("root"), &["src", "./shared.md"])),
+                ("child", file(Some("parent"), &["mine.md"])),
+            ]);
+            assert_eq!(
+                inherited("child", &workspaces),
+                paths(&["src", "shared.md", "docs"])
+            );
+            assert_eq!(
+                inherited("parent", &workspaces),
+                paths(&["docs", "shared.md"])
+            );
+            assert!(inherited("root", &workspaces).is_empty());
+        }
+
+        #[test]
+        fn a_missing_parent_ends_the_walk() {
+            let workspaces = HashMap::from([
+                ("root", file(None, &["docs"])),
+                ("parent", file(Some("gone"), &["src"])),
+                ("child", file(Some("parent"), &[])),
+                ("orphan", file(Some(""), &["a"])),
+            ]);
+            assert_eq!(inherited("child", &workspaces), paths(&["src"]));
+            assert!(inherited("orphan", &workspaces).is_empty());
+            assert!(inherited("unknown", &workspaces).is_empty());
+        }
+
+        #[test]
+        fn a_parent_cycle_ends_the_walk() {
+            let workspaces = HashMap::from([
+                ("a", file(Some("b"), &["a.md"])),
+                ("b", file(Some("c"), &["b.md"])),
+                ("c", file(Some("a"), &["c.md"])),
+                ("self", file(Some("self"), &["self.md"])),
+            ]);
+            assert_eq!(inherited("a", &workspaces), paths(&["b.md", "c.md"]));
+            assert!(inherited("self", &workspaces).is_empty());
         }
     }
 

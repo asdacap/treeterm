@@ -497,6 +497,128 @@ fn favourites_are_starred_in_the_tree_and_listed_above_it(cx: &mut TestAppContex
     assert!(workspace.read_with(cx, |w, _| w.favourite_paths().is_empty()));
 }
 
+/// The relative paths of resolved favourites, sorted; `None` until they are resolved.
+fn favourite_list(favourites: &Favourites) -> Option<Vec<String>> {
+    match favourites {
+        Favourites::Ready(files) => {
+            let mut paths: Vec<String> = files.iter().map(|f| f.relative_path.clone()).collect();
+            paths.sort();
+            Some(paths)
+        }
+        Favourites::Empty | Favourites::Loading | Favourites::Failed(_) => None,
+    }
+}
+
+/// A child worktree inherits the favourites its ancestors list (`getWorkspaceFavouritePaths`):
+/// its Files tab stars and lists them and its Review lists them, resolved in the child, and
+/// both follow the ancestors as they change, join and leave. Only the child's own favourites
+/// can be starred or unstarred there.
+#[gpui_kit::test]
+fn a_child_workspace_inherits_its_ancestors_favourites(cx: &mut TestAppContext) {
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let repo = TempRepo::new(&h);
+    for file in ["docs/a.md", "docs/b.md", "src/lib.rs", "README.md"] {
+        repo.write(file, "text\n");
+    }
+    repo.commit_all("files");
+    repo.git(&["branch", "feature"]);
+    let child_dir = repo.worktree("feature");
+    let store = open_store(cx, &h);
+    let (parent_id, child_id) = (format!("ws-{}", uuid::Uuid::new_v4().simple()), format!("ws-{}", uuid::Uuid::new_v4().simple()));
+    let body = |branch: &str, favourites: &[&str]| {
+        serde_json::json!({
+            "name": branch, "status": "active", "isGitRepo": true, "isWorktree": false, "gitBranch": branch,
+            "appStates": {}, "metadata": {}, "favouritePaths": favourites, "createdAt": 1, "lastActivity": 1,
+            "parentHash": ""
+        })
+    };
+    // The child's own list holds only paths that normalize to nothing.
+    let mut child_body = body("feature", &["", "/"]);
+    child_body["parentId"] = serde_json::json!(parent_id);
+    std::fs::write(h.daemon.workspaces_dir().join(format!("{child_id}.json")), child_body.to_string()).unwrap();
+    std::fs::write(h.daemon.workspaces_dir().join(format!("{parent_id}.json")), body("main", &["docs", "./README.md"]).to_string()).unwrap();
+    let child_ref = WorkspaceRef { id: child_id.clone(), path: child_dir.clone() };
+    let parent_ref = WorkspaceRef { id: parent_id.clone(), path: repo.root() };
+    let loaded = |s: &SessionStore, id: &str| matches!(s.entry(id), Some(WorkspaceEntry::Loaded(_)));
+
+    // The child loads before its parent: no favourites, so no section in Files or Review.
+    futures::executor::block_on(h.conn.update_session(vec![child_ref.clone()], None, "test-writer")).unwrap().unwrap();
+    wait_until(cx, &store, |s| matches!(s.state(), SessionState::Live) && loaded(s, &child_id));
+    let child = store.read_with(cx, |s, _| s.workspace_store(&child_id).unwrap().clone());
+    let state = serde_json::json!({ "selectedPath": format!("{child_dir}/README.md"), "expandedDirs": [] });
+    let tab = child.update(cx, |w, cx| w.add_tab_with("filesystem", state, cx)).unwrap();
+    let Some(TabContent::Files(browser)) = child.read_with(cx, |w, _| w.tab_content(&tab)) else {
+        panic!("not a files tab");
+    };
+    let review = open_review(cx, &child);
+    wait_review(cx, &review, "loaded", |r, _| !r.is_loading());
+    assert_eq!(browser.read_with(cx, |b, _| b.favourites().clone()), Favourites::Empty);
+    assert_eq!(review.read_with(cx, |r, _| r.favourites().clone()), Favourites::Empty);
+
+    // The parent joins: the child's Files and Review list its favourites, found in the child.
+    futures::executor::block_on(h.conn.update_session(vec![child_ref.clone(), parent_ref], None, "test-writer")).unwrap().unwrap();
+    wait_until(cx, &store, |s| loaded(s, &parent_id));
+    let parent = store.read_with(cx, |s, _| s.workspace_store(&parent_id).unwrap().clone());
+    let inherited = vec!["README.md".to_owned(), "docs/a.md".to_owned(), "docs/b.md".to_owned()];
+    wait_until(cx, &browser, |b| favourite_list(b.favourites()).as_ref() == Some(&inherited));
+    wait_review(cx, &review, "inherited", |r, _| favourite_list(r.favourites()).as_ref() == Some(&inherited));
+    assert_eq!(child.read_with(cx, |w, _| w.all_favourite_paths()), vec!["docs".to_owned(), "README.md".to_owned()]);
+    let Favourites::Ready(files) = browser.read_with(cx, |b, _| b.favourites().clone()) else { unreachable!() };
+    assert!(files.iter().all(|file| file.path.starts_with(&format!("{child_dir}/"))), "{files:?}");
+
+    // What the parent lists is starred but cannot be unstarred, or starred again, here.
+    let star = |cx: &mut TestAppContext, relative: &str| browser.read_with(cx, |b, cx| b.star(&format!("{child_dir}/{relative}"), cx));
+    for covered in ["docs", "docs/a.md", "README.md"] {
+        assert_eq!(star(cx, covered), Star::Covered, "{covered}");
+    }
+    assert_eq!(star(cx, "src"), Star::Off);
+    browser.update(cx, |b, cx| b.toggle_favourite(&format!("{child_dir}/docs/a.md"), cx));
+    browser.update(cx, |b, cx| b.toggle_favourite(&format!("{child_dir}/README.md"), cx));
+    child.update(cx, |w, cx| w.add_favourite_path("docs/new.md", cx));
+    assert_eq!(child.read_with(cx, |w, _| w.favourite_paths().to_vec()), vec!["".to_owned(), "/".to_owned()]);
+
+    // The child's own favourites come first and are its to unstar.
+    browser.update(cx, |b, cx| b.toggle_favourite(&format!("{child_dir}/src"), cx));
+    assert_eq!(star(cx, "src"), Star::On);
+    assert_eq!(child.read_with(cx, |w, _| w.all_favourite_paths()), vec!["src".to_owned(), "docs".to_owned(), "README.md".to_owned()]);
+    let with_src = vec!["README.md".to_owned(), "docs/a.md".to_owned(), "docs/b.md".to_owned(), "src/lib.rs".to_owned()];
+    wait_until(cx, &browser, |b| favourite_list(b.favourites()).as_ref() == Some(&with_src));
+    wait_review(cx, &review, "own added", |r, _| favourite_list(r.favourites()).as_ref() == Some(&with_src));
+
+    // The parent listing what the child already has changes nothing here: nothing resolves again.
+    let resolved_again = std::rc::Rc::new(std::cell::Cell::new(false));
+    let (files_flag, review_flag) = (resolved_again.clone(), resolved_again.clone());
+    let _files_observe = cx.update(|cx| {
+        cx.observe(&browser, move |b, cx| files_flag.set(files_flag.get() || matches!(b.read(cx).favourites(), Favourites::Loading)))
+    });
+    let _review_observe = cx.update(|cx| {
+        cx.observe(&review, move |r, cx| review_flag.set(review_flag.get() || matches!(r.read(cx).favourites(), Favourites::Loading)))
+    });
+    parent.update(cx, |w, cx| w.add_favourite_path("src", cx));
+    cx.run_until_parked();
+    assert_eq!(parent.read_with(cx, |w, _| w.favourite_paths().to_vec()), vec!["docs".to_owned(), "./README.md".to_owned(), "src".to_owned()]);
+    assert!(!resolved_again.get());
+    assert_eq!(browser.read_with(cx, |b, _| favourite_list(b.favourites())), Some(with_src));
+
+    // The parent unstars a folder: both lists resolve again without it.
+    parent.update(cx, |w, cx| w.remove_favourite_path("docs", cx));
+    let without_docs = vec!["README.md".to_owned(), "src/lib.rs".to_owned()];
+    wait_until(cx, &browser, |b| favourite_list(b.favourites()).as_ref() == Some(&without_docs));
+    wait_review(cx, &review, "parent's removed", |r, _| favourite_list(r.favourites()).as_ref() == Some(&without_docs));
+    assert!(resolved_again.get());
+    assert_eq!(star(cx, "docs/a.md"), Star::Off);
+
+    // The parent leaves the session: the child keeps only its own.
+    futures::executor::block_on(h.conn.update_session(vec![child_ref], None, "test-writer")).unwrap().unwrap();
+    wait_until(cx, &store, |s| s.entry(&parent_id).is_none());
+    let own = vec!["src/lib.rs".to_owned()];
+    wait_until(cx, &browser, |b| favourite_list(b.favourites()).as_ref() == Some(&own));
+    wait_review(cx, &review, "parent gone", |r, _| favourite_list(r.favourites()).as_ref() == Some(&own));
+    assert_eq!(star(cx, "README.md"), Star::Off);
+}
+
 /// What the Files tab says about its comments, when a wait fails.
 fn comment_state(b: &FileBrowser, cx: &gpui_kit::App) -> String {
     format!(

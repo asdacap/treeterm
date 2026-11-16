@@ -234,6 +234,9 @@ pub struct WorkspaceStore {
     tabs: HashMap<String, TabRef>,
     /// The parent workspace's branch, kept current by the session (Review's base).
     parent_branch: Option<String>,
+    /// The favourite paths the ancestors list, nearest first, normalized and each once; kept
+    /// current by the session (`getWorkspaceFavouritePaths` past the own list).
+    ancestor_favourite_paths: Vec<String>,
     /// Per-tab activity and its transitions; runtime only (`activityState` store).
     activity: ActivityStates,
     /// Bumped whenever a tab's activity changes; attention compares it.
@@ -315,6 +318,7 @@ impl WorkspaceStore {
             settings,
             tabs: HashMap::new(),
             parent_branch: None,
+            ancestor_favourite_paths: Vec::new(),
             activity: ActivityStates::default(),
             activity_version: 0,
             attention: AttentionSyncState::default(),
@@ -555,6 +559,17 @@ impl WorkspaceStore {
     /// The parent workspace's branch, when known (Review's base, the rebase prompt).
     pub fn parent_branch(&self) -> Option<&str> {
         self.parent_branch.as_deref()
+    }
+
+    /// Set by the session whenever the favourite paths the ancestors list change (theirs,
+    /// or which workspaces they are). The Files and Review tabs resolve their favourites
+    /// again when [`Self::all_favourite_paths`] changes (`favouritePathsRevision`).
+    pub(crate) fn set_ancestor_favourite_paths(&mut self, paths: Vec<String>, cx: &mut Context<Self>) {
+        if self.ancestor_favourite_paths == paths {
+            return;
+        }
+        self.ancestor_favourite_paths = paths;
+        cx.notify();
     }
 
     /// `settings.terminal.maxCols`, the width the "col limit" switch caps at.
@@ -1307,7 +1322,7 @@ impl WorkspaceStore {
             self.workspace.path.clone(),
             state,
             workspace,
-            self.workspace.file.favourite_paths.clone(),
+            self.all_favourite_paths(),
             cx,
         )
     }
@@ -1664,15 +1679,25 @@ impl WorkspaceStore {
         }
     }
 
-    /// The workspace's own favourite files and directories (workspace-relative).
+    /// The workspace's own favourite files and directories (workspace-relative), as stored.
     pub fn favourite_paths(&self) -> &[String] {
         &self.workspace.file.favourite_paths
     }
 
-    /// `addFavouritePath`: one already covered by a favourite directory is not added.
+    /// `getFavouritePaths`: the workspace's own favourite paths, then those its ancestors
+    /// list (a child worktree inherits them), normalized and each once.
+    pub fn all_favourite_paths(&self) -> Vec<String> {
+        treeterm_core::files::combine_favourite_paths([
+            self.workspace.file.favourite_paths.as_slice(),
+            self.ancestor_favourite_paths.as_slice(),
+        ])
+    }
+
+    /// `addFavouritePath`: one already covered by a favourite directory, the ancestors'
+    /// included, is not added.
     pub fn add_favourite_path(&mut self, raw_path: &str, cx: &mut Context<Self>) {
         let path = treeterm_core::files::normalize_favourite_path(raw_path);
-        if path.is_empty() || crate::file_browser::is_favourite_path(&path, &self.workspace.file.favourite_paths) {
+        if path.is_empty() || crate::file_browser::is_favourite_path(&path, &self.all_favourite_paths()) {
             return;
         }
         self.workspace.file.favourite_paths.push(path);

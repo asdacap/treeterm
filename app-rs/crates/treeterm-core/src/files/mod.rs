@@ -12,8 +12,9 @@ pub use content_kind::{
     is_raw_bytes_path, model_format, read_language,
 };
 pub use favourites::{
-    FavouriteFile, FavouritesError, favourite_file_name, normalize_favourite_path,
-    normalize_file_entry_relative_path, resolve_favourite_files,
+    FavouriteFile, FavouritesError, combine_favourite_paths, favourite_file_name,
+    inherited_favourite_paths, normalize_favourite_path, normalize_file_entry_relative_path,
+    resolve_favourite_files,
 };
 pub use language::detect_monaco_language;
 pub use limits::{

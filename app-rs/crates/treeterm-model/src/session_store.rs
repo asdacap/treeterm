@@ -717,6 +717,7 @@ impl SessionStore {
             store.update(cx, |store, _| store.dispose());
         }
         self.git_controllers.remove(id);
+        self.refresh_inherited(cx);
         cx.emit(SessionEvent::WorkspaceRemoved(id.to_owned()));
         cx.notify();
     }
@@ -883,6 +884,7 @@ impl SessionStore {
         };
         let store = self.new_workspace_store(workspace, cx);
         self.entries.insert(id.to_owned(), WorkspaceEntry::Loaded(store));
+        self.refresh_inherited(cx);
         cx.notify();
     }
 
@@ -935,7 +937,7 @@ impl SessionStore {
         self.store_events.insert(id, subscription);
         store.update(cx, |w, cx| w.set_viewed(viewed, cx));
         cx.observe(&store, |session, _, cx| {
-            session.refresh_parent_branches(cx);
+            session.refresh_inherited(cx);
             cx.notify();
         })
         .detach();
@@ -1024,20 +1026,27 @@ impl SessionStore {
         }
     }
 
-    /// Tell every child workspace its parent's current branch (its Review base).
-    fn refresh_parent_branches(&mut self, cx: &mut Context<Self>) {
+    /// Tell every workspace what it takes from its loaded ancestors: its parent's current
+    /// branch (its Review base) and the favourite paths they list. Runs whenever a workspace
+    /// changes, joins or leaves (Electron's `subscribeWorkspaceChanges`).
+    fn refresh_inherited(&mut self, cx: &mut Context<Self>) {
         let stores: Vec<Entity<WorkspaceStore>> = self.entries.values().filter_map(|e| e.store().cloned()).collect();
-        let branches: HashMap<String, Option<String>> = stores
-            .iter()
-            .map(|s| {
-                let w = s.read(cx).workspace();
-                (w.id.clone(), w.file.git_branch.clone())
+        let app: &App = cx;
+        let lookup = |id: &str| self.workspace_store(id).map(|store| store.read(app).file());
+        let inherited: Vec<(Entity<WorkspaceStore>, Option<String>, Vec<String>)> = stores
+            .into_iter()
+            .map(|store| {
+                let workspace = store.read(app).workspace();
+                let branch = workspace.file.parent_id.as_deref().and_then(lookup).and_then(|parent| parent.git_branch.clone());
+                let favourites = treeterm_core::files::inherited_favourite_paths(&workspace.id, lookup);
+                (store, branch, favourites)
             })
             .collect();
-        for store in stores {
-            let parent = store.read(cx).file().parent_id.clone();
-            let branch = parent.and_then(|p| branches.get(&p).cloned().flatten());
-            store.update(cx, |w, cx| w.set_parent_branch(branch, cx));
+        for (store, branch, favourites) in inherited {
+            store.update(cx, |w, cx| {
+                w.set_parent_branch(branch, cx);
+                w.set_ancestor_favourite_paths(favourites, cx);
+            });
         }
     }
 
@@ -1594,7 +1603,7 @@ impl SessionStore {
                 store.update(cx, |w, cx| w.set_placement(placement.parent_id, placement.sort_order, cx));
             }
         }
-        self.refresh_parent_branches(cx);
+        self.refresh_inherited(cx);
         cx.notify();
     }
 
@@ -1643,6 +1652,7 @@ impl SessionStore {
         self.ref_sync_attempts = 0;
         let store = self.new_workspace_store(workspace, cx);
         self.entries.insert(id.clone(), WorkspaceEntry::Loaded(store.clone()));
+        self.refresh_inherited(cx);
         self.sync_state(&id);
         self.enqueue_content_sync(&id, cx);
         // The watch opens once the first write lands, so its first event is our echo.

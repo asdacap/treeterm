@@ -12,9 +12,9 @@
 //! [`Reveal`] the view applies once the file's text is shown.
 //!
 //! Favourites are the workspace's `favouritePaths` (workspace-relative files and
-//! directories); the tree stars them and lists the files they name above the tree.
-//! Favourites a parent workspace lists are not inherited here (Electron's
-//! `getWorkspaceFavouritePaths` walks the ancestors, which this tab cannot see).
+//! directories) and those its ancestors list, which a child worktree inherits
+//! ([`WorkspaceStore::all_favourite_paths`]); the tree stars them and lists the files they
+//! name above the tree. Only the workspace's own can be unstarred here.
 //!
 //! Review comments on the shown file: [`comments`].
 
@@ -213,9 +213,10 @@ impl NameSearch {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Star {
     Off,
-    /// A favourite itself: clicking removes it.
+    /// One of the workspace's own favourites: clicking removes it.
     On,
-    /// Inside a favourite directory: shown starred, not removable on its own.
+    /// An ancestor's favourite, or inside a favourite directory: shown starred, not
+    /// removable on its own ("Inherited or included by a favourite folder").
     Covered,
 }
 
@@ -290,7 +291,7 @@ pub struct FileBrowser {
     reveal: Option<Reveal>,
     /// The workspace whose favourite paths the tree stars.
     workspace: WeakEntity<WorkspaceStore>,
-    /// The favourite paths `favourites` was resolved from.
+    /// The favourite paths `favourites` was resolved from, the ancestors' included.
     favourite_paths: Vec<String>,
     favourites: Favourites,
     /// Reveals requested so far (each gets a new `seq`).
@@ -413,7 +414,7 @@ impl FileBrowser {
         let selected = state.get("selectedPath").and_then(Value::as_str).map(str::to_owned);
         let scroll_to_line = state.get("scrollToLine").and_then(Value::as_u64);
         let observe = cx.observe(workspace, |browser, workspace, cx| {
-            let paths = workspace.read(cx).favourite_paths().to_vec();
+            let paths = workspace.read(cx).all_favourite_paths();
             browser.sync_favourites(paths, cx);
         });
         let mut browser = Self {
@@ -746,7 +747,8 @@ impl FileBrowser {
         &self.favourites
     }
 
-    /// The workspace changed: re-resolve the favourites section if its favourite paths did.
+    /// The workspace changed: re-resolve the favourites section if its favourite paths (the
+    /// ancestors' included) did.
     fn sync_favourites(&mut self, paths: Vec<String>, cx: &mut Context<Self>) {
         if paths != self.favourite_paths {
             self.favourite_paths = paths;
@@ -779,16 +781,17 @@ impl FileBrowser {
         cx.notify();
     }
 
-    /// The star of a tree entry (absolute path).
+    /// The star of a tree entry (absolute path): on for a path the workspace itself lists as
+    /// it is stored, covered for one an ancestor lists or a favourite directory holds.
     pub fn star(&self, path: &str, cx: &App) -> Star {
         let Some(workspace) = self.workspace.upgrade() else {
             return Star::Off;
         };
-        let favourites = workspace.read(cx).favourite_paths();
+        let workspace = workspace.read(cx);
         let relative = normalize_favourite_path(search::to_workspace_relative(&self.root, path));
-        if favourites.iter().any(|favourite| normalize_favourite_path(favourite) == relative) {
+        if workspace.favourite_paths().contains(&relative) {
             Star::On
-        } else if is_favourite_path(&relative, favourites) {
+        } else if is_favourite_path(&relative, &workspace.all_favourite_paths()) {
             Star::Covered
         } else {
             Star::Off

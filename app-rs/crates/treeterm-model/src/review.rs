@@ -445,8 +445,8 @@ pub struct ReviewModel {
     focused_file: Option<String>,
     /// Both sides of an image file (`ImageDiffViewer`), when one is selected.
     image_diff: Option<ImageDiff>,
-    /// The workspace's favourite files (`FavouriteFileSection`), and the paths they were
-    /// resolved from.
+    /// The workspace's favourite files (`FavouriteFileSection`), its ancestors' included, and
+    /// the paths they were resolved from.
     favourites: crate::file_browser::Favourites,
     favourite_paths: Vec<String>,
     favourite: FavouriteSelection,
@@ -552,9 +552,10 @@ impl ReviewModel {
             (_, mode) => (mode, ModeFallback::Asked),
         };
         // Comments and viewed marks are read from the metadata whenever shown; favourites
-        // are resolved again when the workspace's favourite paths change.
+        // are resolved again when the workspace's favourite paths (its ancestors' included)
+        // change.
         let observe = cx.observe(workspace, |model: &mut Self, workspace, cx| {
-            let paths = workspace.read(cx).favourite_paths().to_vec();
+            let paths = workspace.read(cx).all_favourite_paths();
             if paths != model.favourite_paths {
                 // Other favourites: the pane goes back to the diff.
                 model.favourite = FavouriteSelection::None;
@@ -1437,7 +1438,7 @@ impl ReviewModel {
                 let workspace = model.workspace.upgrade()?;
                 let (fs, paths) = {
                     let workspace = workspace.read(cx);
-                    (workspace.fs_client(), workspace.favourite_paths().to_vec())
+                    (workspace.fs_client(), workspace.all_favourite_paths())
                 };
                 model.favourite_paths = paths.clone();
                 model.favourites = if paths.is_empty() {

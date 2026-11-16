@@ -399,6 +399,8 @@ fn a_child_workspace_is_a_new_worktree_from_the_parent_branch(cx: &mut TestAppCo
     let path = repo.to_string_lossy().into_owned();
     let root = store.update(cx, |s, cx| s.open_workspace(path, cx));
     wait_until(cx, &store, |s| loaded(s, &root));
+    let root_store = store.read_with(cx, |s, _| s.workspace_store(&root).unwrap().clone());
+    root_store.update(cx, |w, cx| w.add_favourite_path("README.md", cx));
 
     let child = store
         .update(cx, |s, cx| s.add_child_workspace(&root, "feature-x".into(), false, Some("try it".into()), cx))
@@ -415,6 +417,10 @@ fn a_child_workspace_is_a_new_worktree_from_the_parent_branch(cx: &mut TestAppCo
     assert_eq!(disk["parentId"], root.as_str());
     assert_eq!(disk["isWorktree"], true);
     assert_eq!(disk["metadata"]["description"], "try it");
+    // It lists no favourites of its own, and inherits the root's.
+    assert_eq!(disk["favouritePaths"], serde_json::json!([]));
+    let child_store = store.read_with(cx, |s, _| s.workspace_store(&child).unwrap().clone());
+    assert_eq!(child_store.read_with(cx, |w, _| w.all_favourite_paths()), vec!["README.md".to_owned()]);
     let worktrees = git(&["worktree", "list"]);
     assert!(worktrees.lines().count() >= 2, "{worktrees}");
     assert!(worktrees_home.join("feature-x").exists());
