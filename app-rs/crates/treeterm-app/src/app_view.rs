@@ -1326,8 +1326,9 @@ impl AppView {
             HeaderField::Description => {
                 let text = store.read(cx).file().metadata.get("description").cloned().unwrap_or_default();
                 let input = cx.new(|cx| {
+                    // Sized to its content, with no cap (`style.height = scrollHeight`).
                     TextareaState::new(window, cx)
-                        .rows(1)
+                        .auto_grow(1, usize::MAX)
                         .submit_on_enter(true)
                         .placeholder("Add a description...")
                         .default_value(text)
