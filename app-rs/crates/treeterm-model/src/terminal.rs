@@ -459,36 +459,47 @@ impl TerminalModel {
 
     // ---- viewport ----------------------------------------------------------------------
 
-    /// Scroll by `lines` (positive = toward older output). Scrolling up unpins.
-    pub fn scroll_lines(&mut self, lines: i32, cx: &mut Context<Self>) {
-        if lines > 0 && self.is_pinned() {
+    /// The mouse wheel turned toward older output. That unpins, whatever the wheel then does
+    /// (scroll the scrollback, report to a mouse-mode program or send arrow keys).
+    pub fn wheel_up(&mut self, cx: &mut Context<Self>) {
+        if self.is_pinned() {
             self.attachment.gate.set_pinned(false);
+            cx.notify();
         }
-        self.attachment.term.lock().scroll_display(Scroll::Delta(lines));
-        self.refresh_viewport_state();
-        cx.notify();
     }
 
+    /// Scroll by `lines` (positive = toward older output).
+    pub fn scroll_lines(&mut self, lines: i32, cx: &mut Context<Self>) {
+        self.attachment.term.lock().scroll_display(Scroll::Delta(lines));
+        self.after_scroll(cx);
+    }
+
+    /// Shift+PageUp/PageDown.
     pub fn scroll_page(&mut self, up: bool, cx: &mut Context<Self>) {
-        if up && self.is_pinned() {
-            self.attachment.gate.set_pinned(false);
-        }
         self.attachment.term.lock().scroll_display(if up {
             Scroll::PageUp
         } else {
             Scroll::PageDown
         });
-        self.refresh_viewport_state();
-        cx.notify();
+        self.after_scroll(cx);
     }
 
     /// Jump the viewport to `ratio` of the scrollback (0 = oldest, 1 = newest), as the
-    /// scrollbar does. Leaving the bottom unpins.
+    /// scrollbar does.
     pub fn scroll_to_ratio(&mut self, ratio: f64, cx: &mut Context<Self>) {
-        if ratio < 1. && self.is_pinned() {
-            self.attachment.gate.set_pinned(false);
-        }
         view::scroll_to_ratio(&mut *self.attachment.term.lock(), ratio);
+        self.after_scroll(cx);
+    }
+
+    /// A pinned terminal goes back to the bottom whatever scrolled it away (a page key, the
+    /// scrollbar), as Electron's `onScroll` does; unpinning is the wheel's and the badge's.
+    fn after_scroll(&mut self, cx: &mut Context<Self>) {
+        if self.is_pinned() {
+            let mut term = self.attachment.term.lock();
+            if view::scroll_position(&*term) != ScrollPosition::Bottom {
+                term.scroll_display(Scroll::Bottom);
+            }
+        }
         self.refresh_viewport_state();
         cx.notify();
     }

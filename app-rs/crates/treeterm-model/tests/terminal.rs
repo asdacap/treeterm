@@ -241,6 +241,30 @@ fn advance(cx: &mut TestAppContext, by: Duration) {
 }
 
 #[gpui_kit::test]
+fn a_pinned_terminal_snaps_back_until_the_wheel_turns_up(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    let model = with_scrollback(cx, &h);
+    click_badge(cx, &model);
+    click_badge(cx, &model);
+    assert!(pinned(cx, &model));
+
+    // Shift+PageUp, the scrollbar and any other scroll leave it at the bottom, still pinned.
+    model.update(cx, |m, cx| m.scroll_page(true, cx));
+    assert_eq!((offset(cx, &model), pinned(cx, &model)), (0, true));
+    model.update(cx, |m, cx| m.scroll_to_ratio(0., cx));
+    assert_eq!((offset(cx, &model), pinned(cx, &model)), (0, true));
+    model.update(cx, |m, cx| m.scroll_lines(5, cx));
+    assert_eq!((offset(cx, &model), pinned(cx, &model)), (0, true));
+
+    // A wheel turned up unpins, whether or not it then scrolls the scrollback.
+    model.update(cx, |m, cx| m.wheel_up(cx));
+    assert!(!pinned(cx, &model));
+    model.update(cx, |m, cx| m.scroll_lines(5, cx));
+    assert_eq!(position(cx, &model), ScrollPosition::Middle);
+}
+
+#[gpui_kit::test]
 fn one_line_above_the_bottom_reads_bottom(cx: &mut TestAppContext) {
     cx.executor().allow_parking();
     let h = harness();

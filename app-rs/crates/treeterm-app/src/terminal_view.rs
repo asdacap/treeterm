@@ -397,10 +397,15 @@ impl TerminalView {
         let Some(geometry) = self.geometry.get() else {
             return;
         };
-        let lines = match event.delta {
+        let delta = match event.delta {
             ScrollDelta::Lines(delta) => delta.y,
             ScrollDelta::Pixels(delta) => f32::from(delta.y) / f32::from(geometry.cell.height),
-        } + self.scroll_remainder;
+        };
+        // Positive is toward older output.
+        if delta > 0. {
+            self.model.update(cx, |model, cx| model.wheel_up(cx));
+        }
+        let lines = delta + self.scroll_remainder;
         let whole = lines.trunc();
         self.scroll_remainder = lines - whole;
         let whole = whole as i32;
