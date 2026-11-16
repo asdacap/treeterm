@@ -959,6 +959,7 @@ impl AppView {
                         workspace.file().display_name().to_owned(),
                         workspace.file().is_worktree,
                         workspace.has_unread_attention(),
+                        workspace.attention_pending(),
                         flash,
                         workspace.overall_activity(),
                         shown.as_deref() == Some(id.as_str()),
@@ -985,7 +986,7 @@ impl AppView {
                 .child(div().text_size(px(12.)).line_height(px(12.)).text_color(secondary).child("★"))
                 .child(crate::ui::caps_title("Favourites", cx)),
         );
-        for (id, name, is_worktree, unread, flash, activity, is_shown, conn) in rows {
+        for (id, name, is_worktree, unread, pending, flash, activity, is_shown, conn) in rows {
             let icon = if activity == treeterm_model::workspace_store::ActivityState::Idle {
                 crate::ui::icon(if is_worktree { IconName::GitBranch } else { IconName::Folder }, 16., secondary).into_any_element()
             } else {
@@ -1006,6 +1007,7 @@ impl AppView {
                     .child(div().mr(px(8.)).flex_shrink_0().child(icon))
                     .child(div().flex_1().min_w_0().truncate().text_size(px(crate::ui::BODY)).text_color(primary).child(name))
                     .when(unread, |d| d.child(div().mx(px(4.)).text_size(px(10.)).text_color(accent).child("●")))
+                    .when(pending, |d| d.child(crate::ui::attention_saving(primary)))
                     // `WorkspaceAttentionFlash`, over the row's content.
                     .children(flash.map(|flash| crate::ui::attention_flash(flash, 0.)))
                     .on_click(cx.listener(move |view, _, _, cx| view.select_workspace(&conn, id.clone(), cx))),

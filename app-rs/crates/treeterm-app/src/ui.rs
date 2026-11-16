@@ -256,6 +256,17 @@ pub fn attention_flash(
     div().absolute().inset_0().rounded(px(radius)).bg(color.opacity(opacity))
 }
 
+/// The 12px spinner after the unread marker while an unread-marker edit is not yet saved
+/// (`Loader2` "Saving workspace attention"), in the row's text colour.
+pub fn attention_saving(color: impl Into<Hsla>) -> gpui_kit::AnyElement {
+    use gpui_kit::component::Sizable as _;
+    gpui_kit::component::spinner::Spinner::new()
+        .icon(Icon::new(IconName::LoaderCircle))
+        .with_size(px(12.))
+        .color(color.into())
+        .into_any_element()
+}
+
 // --- dialogs ---
 // Electron's modal dialogs (`.dialog-overlay` around `.settings-dialog`,
 // `.create-child-dialog`, …) and their form controls, measured from its computed styles.

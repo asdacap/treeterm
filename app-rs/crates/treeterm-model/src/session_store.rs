@@ -868,7 +868,7 @@ impl SessionStore {
                     // Our write landed: the attention edits it carried are committed. The
                     // rest of the body is ours already and is not re-applied.
                     if let Some(store) = self.entries.get(id).and_then(WorkspaceEntry::store) {
-                        store.update(cx, |w, _| w.commit_attention(&body.metadata, &sha));
+                        store.update(cx, |w, cx| w.commit_attention(&body.metadata, &sha, cx));
                     }
                     // A conflicted write lost to one of our own earlier writes: local
                     // state still holds the losing delta, so rewrite it on the winner.

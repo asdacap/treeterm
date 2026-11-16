@@ -706,6 +706,12 @@ impl WorkspaceStore {
         self.flash.frame(now)
     }
 
+    /// An unread-marker edit is not yet seen saved (`attentionPending`): the rows show
+    /// "Saving workspace attention".
+    pub fn attention_pending(&self) -> bool {
+        self.attention.has_pending()
+    }
+
     /// The workspace carries an unread attention marker.
     pub fn has_unread_attention(&self) -> bool {
         match has_unread_workspace_attention(&self.workspace.file.metadata) {
@@ -734,6 +740,8 @@ impl WorkspaceStore {
         if self.reapply_attention() {
             self.sync_idle_timeouts(cx);
             self.changed(cx);
+        } else {
+            cx.notify(); // attention_pending
         }
     }
 
@@ -753,10 +761,14 @@ impl WorkspaceStore {
     /// (`reconcileAttentionWrite`): pending attention edits it already shows, and those our
     /// write of `sha` carried, are committed and no longer re-applied over later bodies. On
     /// an own echo local metadata already shows them, and keeps any edit made since.
-    pub(crate) fn commit_attention(&mut self, watched: &Metadata, sha: &str) {
+    pub(crate) fn commit_attention(&mut self, watched: &Metadata, sha: &str, cx: &mut Context<Self>) {
+        let pending = self.attention.has_pending();
         // The session rejects bodies with unreadable attention before they get here.
         if let Err(error) = self.attention.reconcile_write(watched, sha) {
             tracing::error!(%error, workspace = %self.workspace.id, "cannot reconcile attention");
+        }
+        if self.attention.has_pending() != pending {
+            cx.notify(); // attention_pending
         }
     }
 
@@ -2039,7 +2051,7 @@ impl WorkspaceStore {
         }
         // Attention edits the incoming body already carries are done; the rest go on top
         // of it and are written again.
-        self.commit_attention(&file.metadata, sha);
+        self.commit_attention(&file.metadata, sha, cx);
         let branch_moved = file.git_branch != self.workspace.file.git_branch;
         self.workspace.file = file;
         // The Review tabs open before it (new ones load as they open).

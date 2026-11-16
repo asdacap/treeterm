@@ -2115,6 +2115,47 @@ fn attention_edits_this_window_committed_are_not_replayed_over_another_writers_b
 }
 
 #[gpui_kit::test]
+fn an_unread_marker_edit_shows_as_saving_until_its_write_is_seen(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    std::fs::write(h.daemon.workspaces_dir().join("a.json"), body("a", None)).unwrap();
+    publish(&h, &["a"]);
+    let store = open_store(cx, &h, "client-a");
+    wait_until(cx, &store, |s| loaded(s, "a"));
+    let wa = store.read_with(cx, |s, _| ws(s, "a"));
+    // What the rows draw after each change they are told of.
+    let drawn = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let sink = drawn.clone();
+    cx.update(|cx| cx.observe(&wa, move |w, cx| sink.borrow_mut().push(w.read(cx).attention_pending())).detach());
+    let last_drawn = || drawn.borrow().last().copied();
+    assert!(!wa.read_with(cx, |w, _| w.attention_pending()));
+
+    // Marked unread: "Saving workspace attention" until the write's own echo commits it.
+    wa.update(cx, |w, cx| w.record_attention(cx));
+    assert_eq!(last_drawn(), Some(true));
+    let r1 = store.read_with(cx, |s, cx| attention_here(s, cx, "a")).revision;
+    wait_until(cx, &wa, |w| !w.attention_pending());
+    assert_eq!(attention_on_disk(&h, "a"), attention(&r1, ""));
+    assert_eq!(last_drawn(), Some(false), "the rows are told the edit is saved");
+
+    // Marked read: the same.
+    wa.update(cx, |w, cx| w.acknowledge_attention(&r1, cx));
+    assert_eq!(last_drawn(), Some(true));
+    wait_until(cx, &wa, |w| !w.attention_pending());
+    assert_eq!(attention_on_disk(&h, "a"), attention(&r1, &r1));
+    assert_eq!(last_drawn(), Some(false));
+
+    // An edit that changes nothing writes nothing: it stays pending until the next write
+    // carries it.
+    wa.update(cx, |w, cx| w.acknowledge_attention("stale", cx));
+    assert_eq!(last_drawn(), Some(true));
+    wa.update(cx, |w, cx| w.update_metadata("displayName", "x", cx));
+    wait_until(cx, &wa, |w| !w.attention_pending());
+    assert_eq!(last_drawn(), Some(false));
+    assert_eq!(attention_on_disk(&h, "a"), attention(&r1, &r1));
+}
+
+#[gpui_kit::test]
 fn another_windows_newer_unread_marker_survives_this_windows_committed_one(cx: &mut TestAppContext) {
     cx.executor().allow_parking();
     let h = harness();

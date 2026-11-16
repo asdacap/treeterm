@@ -147,8 +147,9 @@ Done (tested against a real in-process daemon unless noted):
   and Cancel in place of the tabs.
 - **Tree and sidebar:** sessions (dragged into order in the sidebar or the collapsed rail,
   kept in `ui-state.json`; "No sessions. Click + to browse." once all are disconnected),
-  favourites, drag and drop (reorder / reparent), unread markers, the attention flash on tree,
-  favourite and rail rows, PR badges, collapsible rail,
+  favourites, drag and drop (reorder / reparent), unread markers (with a "Saving workspace
+  attention" spinner until an edit of one is saved), the attention flash on tree, favourite
+  and rail rows, PR badges, collapsible rail,
   title/branch refresh, Auto Open All Recent Worktrees (worktree registry shared with
   Electron), upstream warning before forking,
   force-unlock of a held session lock; session renaming (double-click its name; kept in

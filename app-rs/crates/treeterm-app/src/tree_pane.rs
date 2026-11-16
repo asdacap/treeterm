@@ -421,6 +421,7 @@ impl TreePane {
                     unread: session
                         .workspace_store(&row.id)
                         .is_some_and(|w| w.read(cx).has_unread_attention()),
+                    attention_pending: session.workspace_store(&row.id).is_some_and(|w| w.read(cx).attention_pending()),
                     flash: session.workspace_store(&row.id).and_then(|w| w.read(cx).attention_flash(now)),
                     favourite: session.workspace_store(&row.id).is_some_and(|w| w.read(cx).is_favourite()),
                     has_parent: session
@@ -612,6 +613,7 @@ impl TreePane {
             label,
             is_worktree,
             unread,
+            attention_pending,
             flash,
             favourite,
             has_parent,
@@ -768,6 +770,8 @@ impl TreePane {
             .child(div().flex_1().min_w_0().truncate().text_size(px(ui::BODY)).text_color(primary).child(label.clone()))
             // "New activity — open workspace to mark as read".
             .when(unread, |row| row.child(div().mx(px(4.)).flex_shrink_0().text_size(px(10.)).text_color(c.accent).child("●")))
+            // "Saving workspace attention" while an unread-marker edit is not yet saved.
+            .when(attention_pending, |row| row.child(ui::attention_saving(primary)))
             // `.tree-item-favourite`: a filled star when marked.
             .child(
                 div()
@@ -899,6 +903,8 @@ struct RowData {
     is_worktree: bool,
     /// Background work finished while the workspace was not shown.
     unread: bool,
+    /// An unread-marker edit is not yet saved.
+    attention_pending: bool,
     /// The attention flash's state and opacity now.
     flash: Option<(treeterm_model::workspace_store::ActivityState, f32)>,
     favourite: bool,
