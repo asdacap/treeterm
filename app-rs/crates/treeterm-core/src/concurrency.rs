@@ -7,28 +7,50 @@ use std::future::Future;
 use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex};
 
+use futures::StreamExt;
 use futures::future::{BoxFuture, FutureExt, Shared, WeakShared};
-use futures::{StreamExt, TryStreamExt};
+use futures::stream::FuturesUnordered;
 
 /// Map `items` through `f` with at most `limit` calls in flight, preserving input order in
-/// the result. Fails with the first error; no new item is started after a failure.
+/// the result. A call that finishes frees its slot for the next item at once, whatever
+/// earlier calls still run. Fails with the first error by time, like `Promise.all`: no item
+/// starts after it, and the calls still in flight are dropped (TS lets them finish and
+/// ignores their results).
 ///
 /// The limit is a `NonZeroUsize`, so the invalid limits the TS version rejects at run time
 /// cannot be expressed.
 pub async fn map_with_concurrency<T, R, E, F, Fut>(
     items: impl IntoIterator<Item = T>,
     limit: NonZeroUsize,
-    f: F,
+    mut f: F,
 ) -> Result<Vec<R>, E>
 where
     F: FnMut(T) -> Fut,
     Fut: Future<Output = Result<R, E>>,
 {
-    futures::stream::iter(items)
-        .map(f)
-        .buffered(limit.get())
-        .try_collect()
-        .await
+    let mut waiting = items.into_iter().enumerate();
+    let mut in_flight = FuturesUnordered::new();
+    // One slot per started item, filled in input order as the calls finish.
+    let mut results: Vec<Option<R>> = Vec::new();
+    loop {
+        while in_flight.len() < limit.get() {
+            let Some((index, item)) = waiting.next() else {
+                break;
+            };
+            results.push(None);
+            let call = f(item);
+            in_flight.push(async move { (index, call.await) });
+        }
+        match in_flight.next().await {
+            Some((index, Ok(value))) => results[index] = Some(value),
+            Some((_, Err(error))) => return Err(error),
+            None => break,
+        }
+    }
+    Ok(results
+        .into_iter()
+        .map(|result| result.expect("every started item finished before the run did"))
+        .collect())
 }
 
 /// A run's future, shareable between every caller that coalesced onto it.
@@ -252,6 +274,87 @@ mod tests {
             }));
             assert_eq!(result, Err("boom"));
             assert_eq!(*started.lock().unwrap(), vec![1, 2]);
+        }
+
+        type Outcome = Result<usize, &'static str>;
+
+        /// `count` items, each a call that waits until the test settles it.
+        fn deferred(count: usize) -> (Settle, Vec<(usize, oneshot::Receiver<Outcome>)>) {
+            let (senders, receivers): (Vec<_>, Vec<_>) = (0..count)
+                .map(|_| {
+                    let (tx, rx) = oneshot::channel();
+                    (Some(tx), rx)
+                })
+                .unzip();
+            (Settle(senders), receivers.into_iter().enumerate().collect())
+        }
+
+        struct Settle(Vec<Option<oneshot::Sender<Outcome>>>);
+
+        impl Settle {
+            fn item(&mut self, index: usize, outcome: Outcome) {
+                let sender = self.0[index].take().expect("each item is settled once");
+                sender.send(outcome).expect("the call is still waiting");
+            }
+        }
+
+        /// Runs the deferred items with `limit`, recording each item as its call starts.
+        fn start<'a>(
+            items: Vec<(usize, oneshot::Receiver<Outcome>)>,
+            limit: NonZeroUsize,
+            started: &'a Mutex<Vec<usize>>,
+        ) -> BoxFuture<'a, Result<Vec<usize>, &'static str>> {
+            map_with_concurrency(items, limit, move |(index, settled)| {
+                started.lock().unwrap().push(index);
+                async move { settled.await.expect("the test settles every started item") }
+            })
+            .boxed()
+        }
+
+        #[test]
+        fn rejects_at_once_when_a_later_item_fails_while_an_earlier_one_runs() {
+            let (mut settle, items) = deferred(5);
+            let started = Mutex::new(Vec::new());
+            let mut run = start(items, limit(2), &started);
+            assert!((&mut run).now_or_never().is_none());
+            assert_eq!(*started.lock().unwrap(), vec![0, 1]);
+
+            settle.item(1, Err("item 1"));
+            assert_eq!((&mut run).now_or_never(), Some(Err("item 1")));
+            assert_eq!(*started.lock().unwrap(), vec![0, 1]);
+        }
+
+        #[test]
+        fn rejects_with_the_error_that_came_first_not_the_earliest_item() {
+            let (mut settle, items) = deferred(5);
+            let started = Mutex::new(Vec::new());
+            let mut run = start(items, limit(2), &started);
+            assert!((&mut run).now_or_never().is_none());
+
+            settle.item(1, Err("item 1"));
+            settle.item(0, Err("item 0"));
+            assert_eq!((&mut run).now_or_never(), Some(Err("item 1")));
+            assert_eq!(*started.lock().unwrap(), vec![0, 1]);
+        }
+
+        #[test]
+        fn a_finished_item_frees_its_slot_while_an_earlier_one_still_runs() {
+            let (mut settle, items) = deferred(4);
+            let started = Mutex::new(Vec::new());
+            let mut run = start(items, limit(2), &started);
+            assert!((&mut run).now_or_never().is_none());
+
+            settle.item(1, Ok(10));
+            assert!((&mut run).now_or_never().is_none());
+            assert_eq!(*started.lock().unwrap(), vec![0, 1, 2]);
+
+            settle.item(2, Ok(20));
+            assert!((&mut run).now_or_never().is_none());
+            assert_eq!(*started.lock().unwrap(), vec![0, 1, 2, 3]);
+
+            settle.item(3, Ok(30));
+            settle.item(0, Ok(0));
+            assert_eq!((&mut run).now_or_never(), Some(Ok(vec![0, 10, 20, 30])));
         }
     }
 
