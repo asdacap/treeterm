@@ -3,6 +3,7 @@
 use std::collections::HashSet;
 
 use gpui_kit::{AppContext as _, Entity, TestAppContext};
+use treeterm_core::attention::{WorkspaceAttention, workspace_attention};
 use treeterm_core::wire::workspace_file::{WorkspaceFile, WorkspaceStatus, WorktreeSettings};
 use treeterm_model::review::{Processing, ReviewEvent};
 use treeterm_model::session_store::{AdoptOptions, RemoveMode, SessionState, SessionStore, WorkspaceEntry};
@@ -1538,6 +1539,126 @@ fn finished_work_in_an_unviewed_workspace_is_marked_unread_until_viewed(cx: &mut
         raw.and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
             .is_some_and(|a| a["revision"] == a["acknowledgedRevision"])
     });
+}
+
+fn attention(revision: &str, acknowledged_revision: &str) -> WorkspaceAttention {
+    WorkspaceAttention { revision: revision.to_owned(), acknowledged_revision: acknowledged_revision.to_owned() }
+}
+
+fn attention_here(s: &SessionStore, cx: &gpui_kit::App, id: &str) -> WorkspaceAttention {
+    workspace_attention(&ws(s, id).read(cx).file().metadata).unwrap()
+}
+
+fn attention_on_disk(h: &Harness, id: &str) -> WorkspaceAttention {
+    match file_on_disk(h, id)["metadata"]["workspaceAttention"].as_str() {
+        Some(raw) => serde_json::from_str(raw).unwrap(),
+        None => WorkspaceAttention::default(),
+    }
+}
+
+/// Pump for a while, then the file still holds `body`: nobody wrote again.
+fn assert_disk_settled(cx: &mut TestAppContext, h: &Harness, id: &str, body: &serde_json::Value) {
+    for _ in 0..30 {
+        cx.run_until_parked();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert_eq!(file_on_disk(h, id), *body, "the body was written again");
+}
+
+#[gpui_kit::test]
+fn attention_edits_this_window_committed_are_not_replayed_over_another_writers_body(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    std::fs::write(h.daemon.workspaces_dir().join("a.json"), body("a", None)).unwrap();
+    publish(&h, &["a"]);
+    let first = open_store(cx, &h, "client-a");
+    let second = open_store(cx, &h, "client-b");
+    wait_until(cx, &first, |s| loaded(s, "a"));
+    wait_until(cx, &second, |s| loaded(s, "a"));
+    let wa = first.read_with(cx, |s, _| ws(s, "a"));
+    let wb = second.read_with(cx, |s, _| ws(s, "a"));
+
+    // Unread, read, unread again: each edit is written and its echo commits it.
+    wa.update(cx, |w, cx| w.record_attention(cx));
+    let r1 = first.read_with(cx, |s, cx| attention_here(s, cx, "a")).revision;
+    wait_for_disk(cx, || attention_on_disk(&h, "a") == attention(&r1, ""));
+    wa.update(cx, |w, cx| w.acknowledge_attention(&r1, cx));
+    wait_for_disk(cx, || attention_on_disk(&h, "a") == attention(&r1, &r1));
+    wa.update(cx, |w, cx| w.record_attention(cx));
+    let r2 = first.read_with(cx, |s, cx| attention_here(s, cx, "a")).revision;
+    wait_for_disk(cx, || attention_on_disk(&h, "a") == attention(&r2, &r1));
+    wait_until_app(cx, &second, |s, cx| attention_here(s, cx, "a") == attention(&r2, &r1));
+
+    // Another window's edit on top: the first window adopts it as is. Re-applying its
+    // committed "unread r1" would roll the marker back to r1, which reads as read.
+    wb.update(cx, |w, cx| w.update_metadata("displayName", "x", cx));
+    wait_until_app(cx, &first, |s, cx| {
+        ws(s, "a").read(cx).file().metadata.get("displayName").map(String::as_str) == Some("x")
+    });
+    let disk = file_on_disk(&h, "a");
+    assert_disk_settled(cx, &h, "a", &disk);
+    assert_eq!(attention_on_disk(&h, "a"), attention(&r2, &r1));
+    assert_eq!(first.read_with(cx, |s, cx| attention_here(s, cx, "a")), attention(&r2, &r1));
+    assert!(wa.read_with(cx, |w, _| w.has_unread_attention()));
+}
+
+#[gpui_kit::test]
+fn another_windows_newer_unread_marker_survives_this_windows_committed_one(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    std::fs::write(h.daemon.workspaces_dir().join("a.json"), body("a", None)).unwrap();
+    publish(&h, &["a"]);
+    let first = open_store(cx, &h, "client-a");
+    let second = open_store(cx, &h, "client-b");
+    wait_until(cx, &first, |s| loaded(s, "a"));
+    wait_until(cx, &second, |s| loaded(s, "a"));
+    let wa = first.read_with(cx, |s, _| ws(s, "a"));
+    let wb = second.read_with(cx, |s, _| ws(s, "a"));
+
+    wa.update(cx, |w, cx| w.record_attention(cx));
+    let r1 = first.read_with(cx, |s, cx| attention_here(s, cx, "a")).revision;
+    wait_for_disk(cx, || attention_on_disk(&h, "a") == attention(&r1, ""));
+    wait_until_app(cx, &second, |s, cx| attention_here(s, cx, "a") == attention(&r1, ""));
+
+    wb.update(cx, |w, cx| w.record_attention(cx));
+    let r3 = second.read_with(cx, |s, cx| attention_here(s, cx, "a")).revision;
+    assert_ne!(r3, r1);
+    wait_until_app(cx, &first, |s, cx| attention_here(s, cx, "a") == attention(&r3, ""));
+    let disk = file_on_disk(&h, "a");
+    assert_disk_settled(cx, &h, "a", &disk);
+    assert_eq!(attention_on_disk(&h, "a"), attention(&r3, ""));
+    assert_eq!(first.read_with(cx, |s, cx| attention_here(s, cx, "a")), attention(&r3, ""));
+}
+
+#[gpui_kit::test]
+fn unread_markers_recorded_by_two_windows_at_once_settle_on_one(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    std::fs::write(h.daemon.workspaces_dir().join("a.json"), body("a", None)).unwrap();
+    publish(&h, &["a"]);
+    let first = open_store(cx, &h, "client-a");
+    let second = open_store(cx, &h, "client-b");
+    wait_until(cx, &first, |s| loaded(s, "a"));
+    wait_until(cx, &second, |s| loaded(s, "a"));
+    let wa = first.read_with(cx, |s, _| ws(s, "a"));
+    let wb = second.read_with(cx, |s, _| ws(s, "a"));
+
+    // Same tick: one write loses the CAS race and its marker is written again on the winner.
+    wa.update(cx, |w, cx| w.record_attention(cx));
+    wb.update(cx, |w, cx| w.record_attention(cx));
+    let ra = first.read_with(cx, |s, cx| attention_here(s, cx, "a")).revision;
+    let rb = second.read_with(cx, |s, cx| attention_here(s, cx, "a")).revision;
+    wait_until_app(cx, &first, |s, cx| {
+        let disk = attention_on_disk(&h, "a");
+        attention_here(s, cx, "a") == disk && attention_here(second.read(cx), cx, "a") == disk
+    });
+    let disk = file_on_disk(&h, "a");
+    assert_disk_settled(cx, &h, "a", &disk);
+    let settled = attention_on_disk(&h, "a");
+    assert!(settled == attention(&ra, "") || settled == attention(&rb, ""), "{settled:?}");
+    for window in [&first, &second] {
+        assert_eq!(window.read_with(cx, |s, cx| attention_here(s, cx, "a")), settled);
+    }
 }
 
 #[gpui_kit::test]

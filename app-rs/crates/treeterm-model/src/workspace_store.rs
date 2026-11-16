@@ -13,7 +13,7 @@ use serde_json::Value;
 use treeterm_core::activity::{ActivityStates, TransitionDetail};
 use treeterm_core::analyzer::idle_timeout as analyzer_idle_timeout;
 use treeterm_core::attention::{
-    ActiveView as AttentionView, AttentionAction, AttentionMutation, AttentionSyncState, AttentionTracker,
+    ActiveView as AttentionView, AttentionAction, AttentionMutation, AttentionSyncState, AttentionTracker, Metadata,
     ObservedSession, ObservedWorkspace, SessionStatus, apply_attention_mutations, has_unread_workspace_attention,
 };
 use treeterm_core::daemon::DaemonConnection;
@@ -643,6 +643,29 @@ impl WorkspaceStore {
         if self.reapply_attention() {
             self.sync_idle_timeouts(cx);
             self.changed(cx);
+        }
+    }
+
+    /// A write of body `sha` is about to start. Local metadata already carries every pending
+    /// attention edit, so that body does too: its echo commits them (`attention.writes`).
+    pub(crate) fn register_attention_write(&mut self, sha: &str) {
+        self.attention.register_write(sha);
+    }
+
+    /// The write of body `sha` did not land: its attention edits stay pending and ride the
+    /// next write.
+    pub(crate) fn discard_attention_write(&mut self, sha: &str) {
+        self.attention.discard_write(sha);
+    }
+
+    /// The watch delivered body `sha` with `watched` metadata, our own or another writer's
+    /// (`reconcileAttentionWrite`): pending attention edits it already shows, and those our
+    /// write of `sha` carried, are committed and no longer re-applied over later bodies. On
+    /// an own echo local metadata already shows them, and keeps any edit made since.
+    pub(crate) fn commit_attention(&mut self, watched: &Metadata, sha: &str) {
+        // The session rejects bodies with unreadable attention before they get here.
+        if let Err(error) = self.attention.reconcile_write(watched, sha) {
+            tracing::error!(%error, workspace = %self.workspace.id, "cannot reconcile attention");
         }
     }
 
@@ -1668,10 +1691,10 @@ impl WorkspaceStore {
 
     // ---- sync --------------------------------------------------------------------------
 
-    /// A body written elsewhere replaces ours (`applyWorkspaceFile`): tabs it dropped are
-    /// detached, new tabs initialised, and a terminal whose tab now names another PTY
-    /// re-attaches. Emits no change: the body is already on disk.
-    pub fn apply_external(&mut self, mut file: WorkspaceFile, cx: &mut Context<Self>) {
+    /// A body written elsewhere, with hash `sha`, replaces ours (`applyWorkspaceFile`): tabs
+    /// it dropped are detached, new tabs initialised, and a terminal whose tab now names
+    /// another PTY re-attaches. Emits no change: the body is already on disk.
+    pub fn apply_external(&mut self, mut file: WorkspaceFile, sha: &str, cx: &mut Context<Self>) {
         let removed: Vec<String> = self
             .workspace
             .file
@@ -1703,9 +1726,7 @@ impl WorkspaceStore {
         }
         // Attention edits the incoming body already carries are done; the rest go on top
         // of it and are written again.
-        if let Err(error) = self.attention.reconcile_write(&file.metadata, "") {
-            tracing::warn!(%error, "unreadable attention metadata in an incoming body");
-        }
+        self.commit_attention(&file.metadata, sha);
         let branch_moved = file.git_branch != self.workspace.file.git_branch;
         self.workspace.file = file;
         // The Review tabs open before it (new ones load as they open).

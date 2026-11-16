@@ -173,6 +173,27 @@ fn queues_each_pending_mutation_once_and_forgets_discarded_writes() {
     assert!(empty.writes.is_empty());
 }
 
+#[test]
+fn a_discarded_writes_mutations_are_committed_by_the_next_write() {
+    let mut state = AttentionSyncState::default();
+    assert!(state.queue(record("first")));
+    assert!(state.queue(record("second")));
+    state.register_write("conflicted");
+    state.discard_write("conflicted");
+    // The winner carried another revision: ours are still pending and ride the rewrite.
+    state
+        .reconcile_write(&metadata("theirs", ""), "winner")
+        .unwrap();
+    assert_eq!(pending(&state), vec![record("first"), record("second")]);
+    state.register_write("rewrite");
+    // The rewrite's echo commits both, also the superseded one its body no longer shows.
+    state
+        .reconcile_write(&metadata("second", ""), "rewrite")
+        .unwrap();
+    assert_eq!(pending(&state), vec![]);
+    assert!(state.writes.is_empty());
+}
+
 // === workspaceAttentionCoordinator.test.ts ===
 
 const SESSION: &str = "session-1";

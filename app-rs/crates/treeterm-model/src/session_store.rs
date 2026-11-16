@@ -768,9 +768,14 @@ impl SessionStore {
                 let own_echo = sync.recent_hashes.contains(&sha);
                 sync.last_seen_sha = sha.clone();
                 if own_echo {
+                    // Our write landed: the attention edits it carried are committed. The
+                    // rest of the body is ours already and is not re-applied.
+                    if let Some(store) = self.entries.get(id).and_then(WorkspaceEntry::store) {
+                        store.update(cx, |w, _| w.commit_attention(&body.metadata, &sha));
+                    }
                     // A conflicted write lost to one of our own earlier writes: local
                     // state still holds the losing delta, so rewrite it on the winner.
-                    if std::mem::take(&mut sync.retry_on_next_event) {
+                    if std::mem::take(&mut self.sync_state(id).retry_on_next_event) {
                         self.enqueue_content_sync(id, cx);
                     }
                     return;
@@ -779,8 +784,8 @@ impl SessionStore {
                 sync.retry_on_next_event = false;
                 sync.external_applied = true;
                 sync.conflict_streak = 0;
-                remember_hash(sync, sha);
-                self.apply_workspace_file(id, body, cx);
+                remember_hash(sync, sha.clone());
+                self.apply_workspace_file(id, body, &sha, cx);
             }
             Ok(Some(FileState::Absent(_))) => {
                 self.sync_state(id).watch_retries = 0;
@@ -853,10 +858,10 @@ impl SessionStore {
         }
     }
 
-    /// Apply a body from another writer, building the workspace on first sight.
-    fn apply_workspace_file(&mut self, id: &str, file: WorkspaceFile, cx: &mut Context<Self>) {
+    /// Apply body `sha` from another writer, building the workspace on first sight.
+    fn apply_workspace_file(&mut self, id: &str, file: WorkspaceFile, sha: &str, cx: &mut Context<Self>) {
         if let Some(store) = self.entries.get(id).and_then(WorkspaceEntry::store) {
-            store.update(cx, |store, cx| store.apply_external(file, cx));
+            store.update(cx, |store, cx| store.apply_external(file, sha, cx));
             return;
         }
         let Some(path) = self.known_refs.get(id).cloned() else {
@@ -1118,7 +1123,8 @@ impl SessionStore {
             return None;
         }
         let connected = self.connection == ConnectionStatus::Connected;
-        let body = self.entries.get(id)?.store()?.read(cx).file().clone();
+        let store = self.entries.get(id)?.store()?.clone();
+        let body = store.read(cx).file().clone();
         let sync = self.syncs.get_mut(id)?;
         if !connected {
             // Not droppable: local state may hold changes the disk copy lacks.
@@ -1144,6 +1150,8 @@ impl SessionStore {
         }
         let sha = sha256_hex(&json);
         remember_hash(sync, sha.clone());
+        // Before writing, like the hash: the echo can beat the reply and commits them.
+        store.update(cx, |w, _| w.register_attention_write(&sha));
         let expected = if guard.is_empty() {
             Expected::Absent
         } else {
@@ -1164,13 +1172,19 @@ impl SessionStore {
         result: Result<Result<BodyWrite, ApiError>, treeterm_core::rt::TaskLost>,
         cx: &mut Context<Self>,
     ) {
-        let Some(sync) = self.syncs.get_mut(id) else {
-            return;
-        };
         let outcome = match result {
             Ok(Ok(outcome)) => outcome,
             Ok(Err(error)) => BodyWrite::Failed(error.to_string()),
             Err(lost) => BodyWrite::Failed(lost.to_string()),
+        };
+        // A body that did not land commits nothing: its attention edits stay pending.
+        if !matches!(outcome, BodyWrite::Written)
+            && let Some(store) = self.entries.get(id).and_then(WorkspaceEntry::store)
+        {
+            store.update(cx, |w, _| w.discard_attention_write(&sha));
+        }
+        let Some(sync) = self.syncs.get_mut(id) else {
+            return;
         };
         match outcome {
             BodyWrite::Written => {
