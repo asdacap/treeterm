@@ -73,6 +73,28 @@ fn list_change(cached: Option<(&DiffList, &str, &[String])>, list: &DiffList, ke
     }
 }
 
+/// The files "Load anyway" was clicked for (`forced`) that keep it as `list` shows `order`:
+/// a section keeps its `forceRender` while it is mounted, so the cached list keeps the files
+/// it still lists, and another list (another view or commit), or none cached, forgets them.
+fn keep_forced(cached: Option<&DiffList>, list: &DiffList, order: &[ListedFile], forced: &mut HashSet<String>) {
+    match cached {
+        Some(cached) if cached == list => forced.retain(|path| order.iter().any(|f| f.path == *path)),
+        Some(_) | None => forced.clear(),
+    }
+}
+
+/// The key of `patch` shown as `order` with the files loaded anyway (`forced`), whose change
+/// rebuilds the files ([`list_change`]): a "Load anyway" draws its file's rows.
+fn list_key(patch: &str, order: &[ListedFile], forced: &HashSet<String>) -> String {
+    let mut forced: Vec<&str> = forced.iter().map(String::as_str).collect();
+    forced.sort_unstable();
+    format!(
+        "{patch}\u{0}{}\u{0}\u{0}{}",
+        order.iter().map(|f| f.path.as_str()).collect::<Vec<_>>().join("\u{0}"),
+        forced.join("\u{0}")
+    )
+}
+
 /// The listed files of a patch, in list order (a path listed twice, once).
 struct Parsed {
     files: Vec<DiffFile>,
@@ -358,17 +380,8 @@ impl ReviewView {
             return Err("no list of files to show".to_owned());
         };
         // "Load anyway" lasts while its file is listed (`forceRender`, a section's own state).
-        match &self.diff {
-            Some(diff) if diff.list == list => self.forced.retain(|path| order.iter().any(|f| f.path == *path)),
-            Some(_) | None => self.forced.clear(),
-        }
-        let mut forced: Vec<&str> = self.forced.iter().map(String::as_str).collect();
-        forced.sort_unstable();
-        let key = format!(
-            "{patch}\u{0}{}\u{0}\u{0}{}",
-            order.iter().map(|f| f.path.as_str()).collect::<Vec<_>>().join("\u{0}"),
-            forced.join("\u{0}")
-        );
+        keep_forced(self.diff.as_ref().map(|diff| &diff.list), &list, order, &mut self.forced);
+        let key = list_key(patch, order, &self.forced);
         // Another view's list is dropped as it shows (`ReviewView::body`); another commit's
         // files are a new `DiffState` that keeps "Collapse all" (the list stays mounted).
         let change = list_change(self.diff.as_ref().map(|diff| (&diff.list, diff.key.as_str(), diff.order.as_slice())), &list, &key);
@@ -1916,5 +1929,68 @@ mod tests {
             ListChange::Files(HashSet::from(["a.txt".to_owned(), "b.txt".to_owned()]))
         );
         assert_eq!(list_change(Some((&first, "key", &order[..])), &first, "other"), ListChange::Files(order.into_iter().collect()));
+    }
+
+    fn path_set(paths: &[&str]) -> HashSet<String> {
+        paths.iter().map(|path| (*path).to_owned()).collect()
+    }
+
+    #[test]
+    fn load_anyway_lasts_while_the_same_list_shows_the_file() {
+        let order = [listed("a.txt", None), listed("big.txt", None), listed("huge.txt", None)];
+        // The same list: the files it still lists keep it, one it no longer lists forgets it.
+        for list in [DiffList::Committed, DiffList::Uncommitted, DiffList::Commit("1".to_owned())] {
+            let mut forced = path_set(&["big.txt", "gone.txt"]);
+            keep_forced(Some(&list), &list, &order, &mut forced);
+            assert_eq!(forced, path_set(&["big.txt"]), "{list:?}");
+        }
+        let mut forced = path_set(&["big.txt", "huge.txt"]);
+        keep_forced(Some(&DiffList::Committed), &DiffList::Committed, &order[1..], &mut forced);
+        assert_eq!(forced, path_set(&["big.txt", "huge.txt"]), "a file listed again keeps it");
+        keep_forced(Some(&DiffList::Committed), &DiffList::Committed, &order[..1], &mut forced);
+        assert!(forced.is_empty(), "files no longer listed forget it");
+
+        // Another view, another commit, or no list shown before: every file forgets it.
+        let first = DiffList::Commit("1".to_owned());
+        for (cached, list) in [
+            (Some(&DiffList::Committed), DiffList::Uncommitted),
+            (Some(&DiffList::Uncommitted), DiffList::Committed),
+            (Some(&DiffList::Committed), first.clone()),
+            (Some(&first), DiffList::Commit("2".to_owned())),
+            (None, DiffList::Committed),
+            (None, first.clone()),
+        ] {
+            let mut forced = path_set(&["a.txt", "big.txt"]);
+            keep_forced(cached, &list, &order, &mut forced);
+            assert!(forced.is_empty(), "{cached:?} then {list:?}: {forced:?}");
+        }
+    }
+
+    #[test]
+    fn load_anyway_rebuilds_the_files_once() {
+        let order = [listed("a.txt", None), listed("big.txt", None)];
+        let shown: Vec<String> = order.iter().map(|f| f.path.clone()).collect();
+        let none = HashSet::new();
+        let key = list_key("patch", &order, &none);
+        let cached = Some((&DiffList::Committed, key.as_str(), &shown[..]));
+        assert_eq!(list_change(cached, &DiffList::Committed, &list_key("patch", &order, &none)), ListChange::Same);
+        // A click on "Load anyway": the files are replaced (their rows drawn), not a new list.
+        let forced = path_set(&["big.txt"]);
+        let loaded = list_key("patch", &order, &forced);
+        assert_ne!(loaded, key);
+        assert_eq!(list_change(cached, &DiffList::Committed, &loaded), ListChange::Files(path_set(&["a.txt", "big.txt"])));
+        // Then the list stays as it is.
+        let cached = Some((&DiffList::Committed, loaded.as_str(), &shown[..]));
+        assert_eq!(list_change(cached, &DiffList::Committed, &list_key("patch", &order, &forced)), ListChange::Same);
+        // The choice forgotten (`keep_forced`): the files are replaced again, the notice drawn.
+        assert_eq!(list_change(cached, &DiffList::Committed, &key), ListChange::Files(path_set(&["a.txt", "big.txt"])));
+
+        // Whatever order the files were loaded in (each set iterates in its own order).
+        let one = path_set(&["a.txt", "big.txt", "c.txt", "d.txt", "e.txt", "f.txt"]);
+        let other = path_set(&["f.txt", "e.txt", "d.txt", "c.txt", "big.txt", "a.txt"]);
+        assert_eq!(list_key("patch", &order, &one), list_key("patch", &order, &other));
+        // The patch and the listed files are part of the key too.
+        assert_ne!(list_key("other", &order, &forced), loaded);
+        assert_ne!(list_key("patch", &order[..1], &forced), loaded);
     }
 }
