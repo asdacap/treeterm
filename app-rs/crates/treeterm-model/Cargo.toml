@@ -30,6 +30,8 @@ gpui-kit = { workspace = true, features = ["test-support"] }
 treeterm-testkit.workspace = true
 tokio.workspace = true
 serde_json.workspace = true
+# The status a `RefusingDaemon` fails every call with.
+tonic.workspace = true
 
 [lints]
 workspace = true

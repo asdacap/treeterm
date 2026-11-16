@@ -16,7 +16,7 @@ use super::dialer::Dialer;
 use super::fake::{FakeProcess, FakeResponse, FakeSpawner};
 use super::process::ProcessCommand;
 use super::ssh::{DaemonBinaries, RemotePlatform};
-use super::types::{ConnectionId, DialFailure};
+use super::types::{ConnectionId, DialFailure, WatchFailure};
 use super::{ConnectionInfo, ConnectionManager, OutdatedDaemon, SshEnvironment};
 use crate::rt::Rt;
 use crate::settings::{ConnectionLabel, Extra, IdentityFile, SshConnectionConfig};
@@ -40,7 +40,15 @@ enum DialPlan {
 struct Watch {
     listener_id: String,
     serial: u32,
-    tx: mpsc::UnboundedSender<Result<(), String>>,
+    tx: mpsc::UnboundedSender<Result<(), WatchFailure>>,
+}
+
+/// How a heartbeat watch starts, other than with the current session as the daemon's does.
+pub(crate) enum WatchStart {
+    /// With nothing until the test beats.
+    Silent,
+    /// Failing at once: the session cannot be loaded.
+    Fail(WatchFailure),
 }
 
 #[derive(Default)]
@@ -51,6 +59,8 @@ struct DialerState {
     /// Applied when `plans` is empty.
     always_fail: Option<String>,
     watches: Vec<Watch>,
+    /// How the next watches start; with the current session (a beat) when empty.
+    watch_starts: VecDeque<WatchStart>,
     /// `connection_lost` calls, in order.
     losses: Vec<(FakeDaemon, ConnectionId)>,
 }
@@ -88,6 +98,11 @@ impl FakeDialer {
         let (tx, rx) = oneshot::channel();
         self.state().plans.push_back(DialPlan::Gate(rx));
         tx
+    }
+
+    /// The next heartbeat watch starts this way.
+    pub(crate) fn start_next_watch(&self, start: WatchStart) {
+        self.state().watch_starts.push_back(start);
     }
 
     pub(crate) fn dials(&self) -> Vec<PathBuf> {
@@ -133,10 +148,10 @@ impl FakeDialer {
 
     /// The session watch on `daemon` fails (the gRPC connection dropped).
     pub(crate) fn fail_watch(&self, daemon: &FakeDaemon, message: &str) {
-        self.send(daemon, Err(message.to_owned()));
+        self.send(daemon, Err(WatchFailure::Other(message.to_owned())));
     }
 
-    fn send(&self, daemon: &FakeDaemon, item: Result<(), String>) {
+    fn send(&self, daemon: &FakeDaemon, item: Result<(), WatchFailure>) {
         for watch in self
             .state()
             .watches
@@ -185,9 +200,19 @@ impl Dialer for FakeDialer {
         &self,
         daemon: &FakeDaemon,
         listener_id: &str,
-    ) -> BoxStream<'static, Result<(), String>> {
+    ) -> BoxStream<'static, Result<(), WatchFailure>> {
         let (tx, rx) = mpsc::unbounded();
-        self.state().watches.push(Watch {
+        let mut state = self.state();
+        let first = match state.watch_starts.pop_front() {
+            None => Some(Ok(())),
+            Some(WatchStart::Silent) => None,
+            Some(WatchStart::Fail(failure)) => Some(Err(failure)),
+        };
+        if let Some(first) = first {
+            tx.unbounded_send(first)
+                .expect("the receiver is right here");
+        }
+        state.watches.push(Watch {
             listener_id: listener_id.to_owned(),
             serial: daemon.serial,
             tx,

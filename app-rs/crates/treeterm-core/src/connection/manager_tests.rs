@@ -1748,6 +1748,122 @@ mod force_reconnect {
     }
 }
 
+/// Electron's `ssh:connect` after `connectRemote`: a connect whose session does not load
+/// stops at an error.
+mod session_load {
+    use super::*;
+    use crate::connection::types::WatchFailure;
+
+    #[tokio::test(start_paused = true)]
+    async fn a_remote_daemon_without_the_session_stops_at_the_outdated_error() {
+        let mut harness = Harness::new();
+        harness
+            .dialer
+            .start_next_watch(WatchStart::Fail(WatchFailure::OutdatedDaemon(
+                "12 UNIMPLEMENTED: ".to_owned(),
+            )));
+        let mut changes = harness.manager.status_changes();
+        let info = harness.connect_remote().await;
+        assert_eq!(kind(&info), StatusKind::Connected);
+        flush().await;
+
+        assert_eq!(status_of(&harness, &remote_id()), StatusKind::Error);
+        assert_eq!(
+            error_of(&harness, &remote_id()),
+            "Remote daemon is outdated. Retry with 'Refresh remote daemon' checked. (12 UNIMPLEMENTED: )"
+        );
+        assert!(harness.latest(SpawnKind::Tunnel).is_killed());
+        // No reconnect loop.
+        let dials = harness.dialer.dials().len();
+        advance(Duration::from_secs(120)).await;
+        assert_eq!(harness.dialer.dials().len(), dials);
+        assert_eq!(
+            kinds(&mut changes)
+                .into_iter()
+                .filter(|kind| *kind != StatusKind::Connecting)
+                .collect::<Vec<_>>(),
+            [StatusKind::Connected, StatusKind::Error]
+        );
+
+        // Retried (the sidebar's Reconnect) on a daemon that serves the session: connected.
+        harness.manager.reconnect(&remote_id());
+        advance(Duration::from_secs(1)).await;
+        assert_eq!(status_of(&harness, &remote_id()), StatusKind::Connected);
+        advance(HEARTBEAT_TIMEOUT / 2).await;
+        assert_eq!(status_of(&harness, &remote_id()), StatusKind::Connected);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_connect_again_replaces_the_failed_connection() {
+        let (mut harness, _) = Harness::with_local().await;
+        harness
+            .dialer
+            .start_next_watch(WatchStart::Fail(WatchFailure::Other(
+                "13 INTERNAL: boom".to_owned(),
+            )));
+        harness.connect_remote().await;
+        flush().await;
+        assert_eq!(
+            error_of(&harness, &remote_id()),
+            "Connected but failed to load session: 13 INTERNAL: boom"
+        );
+
+        let info = harness.connect_remote_with(OutdatedDaemon::Refresh).await;
+        assert_eq!(kind(&info), StatusKind::Connected);
+        flush().await;
+        assert_eq!(status_of(&harness, &remote_id()), StatusKind::Connected);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_session_store_failing_first_ends_the_connect() {
+        let (mut harness, _) = Harness::with_local().await;
+        harness.dialer.start_next_watch(WatchStart::Silent);
+        harness.connect_remote().await;
+        flush().await;
+        let daemon = daemon_of(&harness, &remote_id());
+
+        harness
+            .manager
+            .session_load_failed(
+                &remote_id(),
+                WatchFailure::Other("14 UNAVAILABLE: broken pipe".to_owned()),
+            )
+            .unwrap();
+        flush().await;
+
+        assert_eq!(status_of(&harness, &remote_id()), StatusKind::Error);
+        assert_eq!(
+            error_of(&harness, &remote_id()),
+            "Connected but failed to load session: 14 UNAVAILABLE: broken pipe"
+        );
+        assert!(harness.dialer.watch_dropped(&daemon));
+        assert_eq!(harness.dialer.losses(), vec![(daemon, remote_id())]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn once_the_session_loaded_a_store_failure_starts_a_new_generation() {
+        let (harness, local) = Harness::with_local().await;
+        flush().await;
+        harness
+            .manager
+            .session_load_failed(&local, WatchFailure::Other("gone".to_owned()))
+            .unwrap();
+        assert_eq!(status_of(&harness, &local), StatusKind::Reconnecting);
+        assert_eq!(error_of(&harness, &local), "Reconnecting...");
+        assert!(
+            harness
+                .manager
+                .session_load_failed(
+                    &ConnectionId::new("nonexistent"),
+                    WatchFailure::Other("x".to_owned())
+                )
+                .unwrap_err()
+                .to_string()
+                .starts_with("Connection not found")
+        );
+    }
+}
+
 #[tokio::test(start_paused = true)]
 async fn dropping_the_manager_kills_its_ssh_processes() {
     let (mut harness, _) = Harness::with_local().await;

@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
-description = "Test support: a real TreeTerm daemon running in-process on a temporary socket, and a fake ssh host in front of it."
+description = "Test support: a real TreeTerm daemon running in-process on a temporary socket, a daemon that fails every call, and a fake ssh host in front of them."
 
 [dependencies]
 treeterm-daemon.workspace = true
@@ -12,6 +12,9 @@ treeterm-daemon.workspace = true
 treeterm-core.workspace = true
 tokio.workspace = true
 tempfile.workspace = true
+# `RefusingDaemon`: a gRPC server that fails every call.
+tonic.workspace = true
+tokio-stream.workspace = true
 
 [dev-dependencies]
 treeterm-proto.workspace = true

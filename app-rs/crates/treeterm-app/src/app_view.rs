@@ -476,7 +476,10 @@ impl AppView {
                 cx.notify();
             }
             // Where the window lands once restored is the app store's (`AppEvent::ShowSession`).
-            SessionEvent::Restored | SessionEvent::AttentionRecorded(_) | SessionEvent::Failed(_) => {}
+            SessionEvent::Restored
+            | SessionEvent::AttentionRecorded(_)
+            | SessionEvent::Failed(_)
+            | SessionEvent::LoadFailed(_) => {}
         });
         Connected {
             session,

@@ -70,3 +70,74 @@ impl Drop for TestDaemon {
         }
     }
 }
+
+/// A daemon that accepts gRPC connections and fails every call with one status: a daemon too
+/// old for this app (`Status::unimplemented`), or one whose session cannot be loaded. Runs
+/// until dropped.
+pub struct RefusingDaemon {
+    _dir: TempDir,
+    socket_path: PathBuf,
+    _server: tokio::task::JoinHandle<()>,
+}
+
+impl RefusingDaemon {
+    /// Start serving. Must be called on a tokio runtime, which keeps driving it.
+    pub fn start(status: tonic::Status) -> Self {
+        let dir = tempfile::Builder::new()
+            .prefix("tt")
+            .tempdir_in("/tmp")
+            .expect("create temp dir for the refusing daemon");
+        let socket_path = dir.path().join("r.sock");
+        let listener = UnixListener::bind(&socket_path).expect("bind refusing daemon socket");
+        let server = tokio::spawn(async move {
+            let incoming = tokio_stream::wrappers::UnixListenerStream::new(listener);
+            if let Err(error) = tonic::transport::Server::builder()
+                .add_service(Refuse(status))
+                .serve_with_incoming(incoming)
+                .await
+            {
+                panic!("refusing daemon failed: {error}");
+            }
+        });
+        Self {
+            _dir: dir,
+            socket_path,
+            _server: server,
+        }
+    }
+
+    pub fn socket_path(&self) -> &Path {
+        &self.socket_path
+    }
+}
+
+impl Drop for RefusingDaemon {
+    fn drop(&mut self) {
+        self._server.abort();
+    }
+}
+
+/// The daemon's service, answering every method with the status.
+#[derive(Clone)]
+struct Refuse(tonic::Status);
+
+impl tonic::server::NamedService for Refuse {
+    const NAME: &'static str = "treeterm.TreeTermDaemon";
+}
+
+impl tonic::codegen::Service<tonic::codegen::http::Request<tonic::body::Body>> for Refuse {
+    type Response = tonic::codegen::http::Response<tonic::body::Body>;
+    type Error = std::convert::Infallible;
+    type Future = std::future::Ready<Result<Self::Response, Self::Error>>;
+
+    fn poll_ready(
+        &mut self,
+        _: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        std::task::Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, _: tonic::codegen::http::Request<tonic::body::Body>) -> Self::Future {
+        std::future::ready(Ok(self.0.clone().into_http()))
+    }
+}

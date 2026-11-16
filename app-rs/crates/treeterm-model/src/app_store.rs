@@ -22,7 +22,7 @@ use treeterm_core::connection::process::{ProcessSpawner, TokioSpawner};
 use treeterm_core::connection::ssh::DaemonBinaries;
 use treeterm_core::connection::{
     ConnectPhase, ConnectionErrorKind, ConnectionId, ConnectionInfo, ConnectionManager, ConnectionStatus,
-    ConnectionTarget, OutdatedDaemon, SshEnvironment,
+    ConnectionTarget, OutdatedDaemon, SshEnvironment, WatchFailure,
 };
 use treeterm_core::daemon::DaemonConnection;
 use treeterm_core::exec::ExecApi;
@@ -41,8 +41,8 @@ pub enum ConnState {
     Connected(Entity<SessionStore>),
     /// Lost; the manager retries with backoff.
     Reconnecting { attempt: u32, error: String },
-    /// The first connect failed or reconnecting was stopped. `hash_mismatch`: the remote
-    /// daemon is outdated (offer refresh / connect anyway).
+    /// The first connect failed, its session did not load, or reconnecting was stopped.
+    /// `hash_mismatch`: the remote daemon is outdated (offer refresh / connect anyway).
     Failed { error: String, hash_mismatch: bool },
 }
 
@@ -54,8 +54,8 @@ pub struct SessionSlot {
     /// connection was lost with.
     pub state: ConnState,
     previous: Previous,
-    /// The saved port forwards were started (once per connection; the manager restarts
-    /// them after reconnects).
+    /// The saved port forwards were started (once per connection, once its session loaded;
+    /// the manager restarts them after reconnects).
     forwards_started: bool,
     /// Where the window goes once the session is restored.
     landing: Landing,
@@ -405,6 +405,14 @@ impl AppStore {
                 };
                 // The connect ended: the window keeps showing the failure.
                 slot.landing = Landing::Stay;
+                // A store whose session never loaded has nothing to keep: the connect ends
+                // without a session (Electron's `ssh:connect` returns none).
+                if let Previous::Kept(session) = &slot.previous
+                    && !matches!(session.read(cx).state(), SessionState::Live)
+                {
+                    session.update(cx, |session, cx| session.dispose(cx));
+                    slot.previous = Previous::Nothing;
+                }
             }
             ConnectionStatus::Disconnected => {} // handled above
         }
@@ -432,6 +440,7 @@ impl AppStore {
         let owned = id.clone();
         let events = cx.subscribe(&session, move |store, session, event: &SessionEvent, cx| match event {
             SessionEvent::Failed(reason) => store.on_session_failed(&owned, session, reason, cx),
+            SessionEvent::LoadFailed(failure) => store.on_session_load_failed(&owned, session, failure.clone(), cx),
             SessionEvent::Restored => store.on_restored(&owned, &session, cx),
             SessionEvent::WorkspaceRemoved(_) => {}
             SessionEvent::AttentionRecorded(workspace) => {
@@ -443,13 +452,6 @@ impl AppStore {
         };
         slot._events = Some(events);
         slot.state = ConnState::Connected(session);
-        // `autoStartPortForwards`: a remote's saved forwards start on its first connect.
-        if !slot.forwards_started && !slot.is_local() {
-            slot.forwards_started = true;
-            if let Err(error) = self.manager.start_saved_port_forwards(id) {
-                tracing::error!(%error, "cannot start saved port forwards");
-            }
-        }
     }
 
     /// The next generation is up while the last one's store is kept (`handleReconnected`):
@@ -489,11 +491,19 @@ impl AppStore {
     }
 
     /// The connection's session store was restored: the window lands where the connection
-    /// asked.
+    /// asked, and a remote's saved port forwards start.
     fn on_restored(&mut self, id: &ConnectionId, session: &Entity<SessionStore>, cx: &mut Context<Self>) {
-        if self.sessions.get(id).and_then(SessionSlot::session) == Some(session) {
-            self.land(id, session, cx);
+        let Some(slot) = self.sessions.get_mut(id).filter(|slot| slot.session() == Some(session)) else {
+            return;
+        };
+        // `autoStartPortForwards`: once, after the first connect's session loaded.
+        if !slot.forwards_started && !slot.is_local() {
+            slot.forwards_started = true;
+            if let Err(error) = self.manager.start_saved_port_forwards(id) {
+                tracing::error!(%error, "cannot start saved port forwards");
+            }
         }
+        self.land(id, session, cx);
     }
 
     /// Where the window goes, now that `session` (the connection's, restored) can show it
@@ -561,6 +571,27 @@ impl AppStore {
         tracing::warn!(%id, %reason, "session watch lost; reconnecting");
         if let Err(error) = self.manager.force_reconnect(id) {
             tracing::error!(%error, "cannot reconnect");
+        }
+        cx.notify();
+    }
+
+    /// The connection's session store could not load its session: the manager ends the
+    /// connect with Electron's error (or, if its heartbeat saw the session, starts a new
+    /// generation). The status that follows retires the store.
+    fn on_session_load_failed(
+        &mut self,
+        id: &ConnectionId,
+        session: Entity<SessionStore>,
+        failure: WatchFailure,
+        cx: &mut Context<Self>,
+    ) {
+        let current = self.sessions.get(id).and_then(SessionSlot::session);
+        if current != Some(&session) {
+            return; // already replaced
+        }
+        tracing::error!(%id, reason = failure.message(), "session did not load");
+        if let Err(error) = self.manager.session_load_failed(id, failure) {
+            tracing::error!(%error, "cannot end the connect");
         }
         cx.notify();
     }

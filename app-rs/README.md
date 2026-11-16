@@ -98,7 +98,10 @@ Done (tested against a real in-process daemon unless noted):
   saved connections, remote directory browser, session pane with logs and port forwards.
   While a connection is down its session stays in the sidebar, dimmed under the connection's
   banner, and its workspace stays open; workspace changes whose writes were deferred or failed
-  meanwhile are written on the new connection before the session is rebuilt from it.
+  meanwhile are written on the new connection before the session is rebuilt from it. A
+  connect whose session does not load stops at its error ("Remote daemon is outdated. Retry
+  with 'Refresh remote daemon' checked. …" or "Connected but failed to load session: …"),
+  without a session; saved port forwards start once the session has loaded.
   (SSH tested in core with a fake ssh host and contract tests; not yet against a real host.)
 - **AI harness (M5):** per-tab LLM analyzer (classification, auto-approve, titles, branch
   names), activity states with transitions, unread attention markers with the ding.
@@ -300,6 +303,10 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   expired lock); Electron shows it as long as the daemon still reports the lock.
 - A stale local daemon socket is replaced at once (Electron waited up to 5 s for it to
   answer). Connections to use still wait up to 5 s for the daemon, as in Electron.
+- A remote daemon that has no SessionWatch at all (`UNIMPLEMENTED`) is reported as outdated
+  too; Electron only recognised a `NOT_FOUND` error about the session. A Reconnect from the
+  error waits for the session again, so it stops at the error once more instead of
+  reconnecting in a loop.
 - Placeholders for refs another window removed are dropped with the ref.
 - A collapsed workspace stays collapsed until it gains a child or is expanded (Electron
   re-expanded every parent whenever any workspace changed).

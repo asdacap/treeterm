@@ -12,6 +12,11 @@
 //! loss or after attempt `n` failed, with no limit on attempts. "Reconnect now" skips the
 //! wait, "cancel" stops the loop (the connection shows its last error), "force" starts a loop
 //! on a healthy connection. Port forwards are restarted after every successful reconnect.
+//!
+//! A connect the user asked for (the first one, or a retry from the error state) is not done
+//! until the daemon's session loads (Electron's `ssh:connect` awaits it): a session watch that
+//! fails before its first event ends it with an error, without a reconnect loop
+//! ([`ConnectionError::session_load_failed`]).
 
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -27,6 +32,7 @@ use super::ssh::TunnelEnd;
 use super::types::{
     ConnectPhase, ConnectionError, ConnectionId, ConnectionInfo, ConnectionStatus,
     ConnectionTarget, OutdatedDaemon, PortForwardConfig, PortForwardId, PortForwardInfo,
+    WatchFailure,
 };
 
 /// Silence on the session watch after which the connection counts as lost.
@@ -143,6 +149,15 @@ enum State<C> {
     Disconnected,
 }
 
+/// Whether the daemon's session loaded since the user last asked to connect.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SessionLoad {
+    /// Not yet: a session watch failing now ends the connect with an error.
+    Awaited,
+    /// A session watch delivered: later failures are losses, reconnected.
+    Loaded,
+}
+
 #[derive(Debug, Clone, Copy)]
 enum Step {
     /// Backing off until the next attempt.
@@ -159,6 +174,7 @@ pub struct ConnectionMachine<C> {
     /// remote's processes again).
     reconnect_outdated: OutdatedDaemon,
     state: State<C>,
+    session: SessionLoad,
     next_attempt: u64,
     forwards: IndexMap<PortForwardId, PortForward>,
     effects: VecDeque<Effect>,
@@ -181,6 +197,7 @@ impl<C: Clone> ConnectionMachine<C> {
             target,
             reconnect_outdated,
             state: State::Disconnected,
+            session: SessionLoad::Awaited,
             next_attempt: 0,
             forwards: IndexMap::new(),
             effects: VecDeque::new(),
@@ -306,20 +323,44 @@ impl<C: Clone> ConnectionMachine<C> {
 
     // --- liveness ----------------------------------------------------------------------------
 
-    /// The session watch delivered something: the connection is alive.
+    /// The session watch delivered something: the connection is alive, and its session
+    /// loads.
     pub fn heartbeat(&mut self, now: Instant) {
         if let State::Connected {
             heartbeat_deadline, ..
         } = &mut self.state
         {
             *heartbeat_deadline = now + HEARTBEAT_TIMEOUT;
+            self.session = SessionLoad::Loaded;
         }
     }
 
-    /// The session watch failed or ended.
-    pub fn heartbeat_failed(&mut self, reason: String, now: Instant) {
+    /// The session watch failed or ended: before the session loaded, the connect fails;
+    /// after, the connection is lost.
+    pub fn heartbeat_failed(&mut self, failure: WatchFailure, now: Instant) {
         if matches!(self.state, State::Connected { .. }) {
-            self.start_reconnect(ConnectionError::SessionWatchFailed(reason), now);
+            match self.session {
+                SessionLoad::Awaited => self.fail_session_load(failure),
+                SessionLoad::Loaded => self.start_reconnect(
+                    ConnectionError::SessionWatchFailed(failure.message().to_owned()),
+                    now,
+                ),
+            }
+        }
+    }
+
+    /// The session store built on the connected generation could not load its session (its
+    /// own watch failed before the first event). Before the session loaded, the connect
+    /// fails; after (the heartbeat's watch delivered), the generation is replaced, as with
+    /// [`Self::force_reconnect`]. A connection that is down already says why.
+    pub fn session_load_failed(&mut self, failure: WatchFailure, now: Instant) {
+        if matches!(self.state, State::Connected { .. }) {
+            match self.session {
+                SessionLoad::Awaited => self.fail_session_load(failure),
+                SessionLoad::Loaded => {
+                    self.start_reconnect(ConnectionError::ReconnectRequested, now);
+                }
+            }
         }
     }
 
@@ -380,10 +421,12 @@ impl<C: Clone> ConnectionMachine<C> {
 
     // --- user actions ------------------------------------------------------------------------
 
-    /// Retry a failed connection (Electron's `reconnect`: only from the error state).
+    /// Retry a failed connection (Electron's `reconnect`: only from the error state). It is
+    /// a connect the user asked for: it waits for the session to load again.
     pub fn reconnect(&mut self, now: Instant) {
         if let State::Failed { error } = &self.state {
             let error = error.clone();
+            self.session = SessionLoad::Awaited;
             self.start_reconnect(error, now);
         }
     }
@@ -544,6 +587,17 @@ impl<C: Clone> ConnectionMachine<C> {
                 until: now + reconnect_delay(0),
             },
         };
+        self.emit_status();
+    }
+
+    /// The connected generation's session did not load: the connect ends with an error, no
+    /// reconnect loop (Electron's `ssh:connect` returns the error and no session).
+    fn fail_session_load(&mut self, failure: WatchFailure) {
+        let error = ConnectionError::session_load_failed(&self.target, failure);
+        tracing::error!(connection = %self.id, %error, "session did not load");
+        self.effects.push_back(Effect::ConnectionLost);
+        self.effects.push_back(Effect::DropTransport);
+        self.state = State::Failed { error };
         self.emit_status();
     }
 

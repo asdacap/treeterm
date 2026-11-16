@@ -4,16 +4,20 @@ use std::collections::HashSet;
 
 use gpui_kit::{AppContext as _, Entity, TestAppContext};
 use treeterm_core::attention::{WorkspaceAttention, workspace_attention};
+use treeterm_core::connection::WatchFailure;
+use treeterm_core::daemon::DaemonConnection;
 use treeterm_core::wire::workspace_file::{WorkspaceFile, WorkspaceStatus, WorktreeSettings};
 use treeterm_model::review::{Processing, ReviewEvent};
-use treeterm_model::session_store::{AdoptOptions, RemoveMode, SessionState, SessionStore, WorkspaceEntry};
+use treeterm_model::session_store::{
+    AdoptOptions, RemoveMode, SessionEvent, SessionState, SessionStore, WorkspaceEntry,
+};
 use treeterm_model::settings_store::SettingsStore;
 use treeterm_model::tree_view_state::{ChildEdge, TreeViewState};
 use treeterm_model::workspace_store::{MergeState, TabContent, Workspace, WorkspaceStore};
 use treeterm_proto::treeterm::WorkspaceRef;
 
 mod common;
-use common::{Harness, harness, recv, wait_until, wait_until_app};
+use common::{Harness, Proxy, harness, recv, refusing_daemon, wait_until, wait_until_app};
 
 fn body(name: &str, parent: Option<&str>) -> String {
     let mut json = serde_json::json!({
@@ -142,7 +146,6 @@ fn the_debug_json_shows_each_entry_with_its_status(cx: &mut TestAppContext) {
 
 /// How many `Restored` the store emits.
 fn record_restores(cx: &mut TestAppContext, store: &Entity<SessionStore>) -> std::rc::Rc<std::cell::Cell<usize>> {
-    use treeterm_model::session_store::SessionEvent;
     let restored = std::rc::Rc::new(std::cell::Cell::new(0));
     let sink = restored.clone();
     cx.update(|cx| {
@@ -184,6 +187,81 @@ fn a_restored_session_makes_its_first_workspace_active_and_says_so_once(cx: &mut
     wait_until(cx, &store, |s| loaded(s, "c"));
     assert_eq!(active(cx, &store).as_deref(), Some("b"));
     assert_eq!(restored.get(), 1);
+}
+
+/// Every session event the store emits.
+fn record_session_events(
+    cx: &mut TestAppContext,
+    store: &Entity<SessionStore>,
+) -> std::rc::Rc<std::cell::RefCell<Vec<SessionEvent>>> {
+    let events = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let sink = events.clone();
+    cx.update(|cx| {
+        cx.subscribe(store, move |_, event: &SessionEvent, _| sink.borrow_mut().push(event.clone()))
+            .detach()
+    });
+    events
+}
+
+/// A store on `conn`, once its session watch failed, with the events it emitted.
+fn failed_store(cx: &mut TestAppContext, conn: DaemonConnection) -> (Entity<SessionStore>, Vec<SessionEvent>) {
+    let settings = cx.new(|_| SettingsStore::in_memory(Default::default()));
+    let store = cx.new(|cx| SessionStore::new(conn, "client-a".to_owned(), settings, None, cx));
+    let events = record_session_events(cx, &store);
+    wait_until(cx, &store, |s| matches!(s.state(), SessionState::Failed(_)));
+    // The stream's end follows its error.
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    cx.run_until_parked();
+    let events = events.borrow().clone();
+    (store, events)
+}
+
+#[gpui_kit::test]
+fn a_session_that_does_not_load_is_reported_once_as_a_load_failure(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    // A daemon without SessionWatch is outdated.
+    let (_old, conn) = refusing_daemon(tonic::Status::unimplemented("no SessionWatch"));
+    let (store, events) = failed_store(cx, conn);
+    assert_eq!(
+        events,
+        [SessionEvent::LoadFailed(WatchFailure::OutdatedDaemon("12 UNIMPLEMENTED: no SessionWatch".to_owned()))]
+    );
+    store.read_with(cx, |s, _| match s.state() {
+        SessionState::Failed(reason) => assert_eq!(reason, "session watch failed: 12 UNIMPLEMENTED: no SessionWatch"),
+        _ => unreachable!(),
+    });
+
+    // Any other failure.
+    let (_broken, conn) = refusing_daemon(tonic::Status::internal("boom"));
+    let (_, events) = failed_store(cx, conn);
+    assert_eq!(events, [SessionEvent::LoadFailed(WatchFailure::Other("13 INTERNAL: boom".to_owned()))]);
+}
+
+#[gpui_kit::test]
+fn a_loaded_session_whose_watch_fails_reports_a_lost_connection(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    let dir = tempfile::Builder::new().prefix("tt").tempdir_in("/tmp").unwrap();
+    let socket = dir.path().join("p.sock");
+    let proxy = Proxy::start(&socket, h.daemon.socket_path());
+    let conn = futures::executor::block_on(DaemonConnection::open(&h.rt, &socket)).unwrap().unwrap();
+    let settings = cx.new(|_| SettingsStore::in_memory(Default::default()));
+    let store = cx.new(|cx| SessionStore::new(conn, "client-a".to_owned(), settings, None, cx));
+    let events = record_session_events(cx, &store);
+    wait_until(cx, &store, |s| matches!(s.state(), SessionState::Live));
+
+    drop(proxy);
+    let seen = events.clone();
+    wait_until(cx, &store, move |_| seen.borrow().iter().any(|event| matches!(event, SessionEvent::Failed(_))));
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    cx.run_until_parked();
+
+    store.read_with(cx, |s, _| assert!(matches!(s.state(), SessionState::Live), "its rows stay"));
+    let events = events.borrow().clone();
+    assert!(
+        events.iter().all(|event| matches!(event, SessionEvent::Restored | SessionEvent::Failed(_))),
+        "no load failure: {events:?}"
+    );
 }
 
 #[gpui_kit::test]
@@ -1825,7 +1903,6 @@ fn an_ai_harness_tab_is_classified_by_its_analyzer(cx: &mut TestAppContext) {
 
 #[gpui_kit::test]
 fn finished_work_in_an_unviewed_workspace_is_marked_unread_until_viewed(cx: &mut TestAppContext) {
-    use treeterm_model::session_store::SessionEvent;
     use treeterm_model::workspace_store::ActivityState;
     cx.executor().allow_parking();
     let h = harness();
@@ -2273,7 +2350,6 @@ fn a_lock_held_elsewhere_shows_and_can_be_forced_open(cx: &mut TestAppContext) {
 
 /// Every `WorkspaceRemoved` the store emits, in order.
 fn record_removals(cx: &mut TestAppContext, store: &Entity<SessionStore>) -> std::rc::Rc<std::cell::RefCell<Vec<String>>> {
-    use treeterm_model::session_store::SessionEvent;
     let removed = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
     let sink = removed.clone();
     cx.update(|cx| {

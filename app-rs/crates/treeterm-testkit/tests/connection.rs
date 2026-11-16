@@ -10,19 +10,20 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use futures::StreamExt;
-use treeterm_core::connection::dialer::GrpcDialer;
+use treeterm_core::connection::dialer::{Dialer, GrpcDialer};
 use treeterm_core::connection::output::Updates;
 use treeterm_core::connection::process::TokioSpawner;
 use treeterm_core::connection::{
-    ConnectionInfo, ConnectionManager, ConnectionStatus, OutdatedDaemon, OutputKind, StatusKind,
+    ConnectionId, ConnectionInfo, ConnectionManager, ConnectionStatus, OutdatedDaemon, OutputKind,
+    StatusKind,
 };
 use treeterm_core::daemon::DaemonConnection;
 use treeterm_core::exec::{ExecError, ExecRequest, ExecTimeout};
 use treeterm_core::local_daemon::LocalDaemonSpec;
 use treeterm_core::pty::CreatePty;
 use treeterm_core::rt::Rt;
-use treeterm_testkit::TestDaemon;
 use treeterm_testkit::fake_ssh::{Proxy, fake_ssh_host, remote_config, ssh_env};
+use treeterm_testkit::{RefusingDaemon, TestDaemon};
 
 fn rt() -> Rt {
     Rt::new(tokio::runtime::Handle::current())
@@ -360,4 +361,70 @@ async fn remote_connection_reaches_the_daemon_through_its_tunnel_and_rebuilds_it
         !second.socket_path().exists(),
         "the tunnel socket is removed"
     );
+}
+
+/// The error of `id` once it failed: now, or the next failure reported.
+async fn failed<D: Dialer>(manager: &ConnectionManager<D>, id: &ConnectionId) -> String {
+    let mut watch = manager.watch_connection_status(id).unwrap();
+    let info = match watch.initial.status.kind() {
+        StatusKind::Error => watch.initial,
+        _ => {
+            wait_for(&mut watch.updates, |info| {
+                info.status.kind() == StatusKind::Error
+            })
+            .await
+        }
+    };
+    info.status.error().unwrap().to_string()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_daemon_that_cannot_serve_the_session_stops_the_connect_at_its_error() {
+    // A daemon without SessionWatch.
+    let old = RefusingDaemon::start(tonic::Status::unimplemented("no SessionWatch"));
+    let dir = tempfile::Builder::new()
+        .prefix("tt")
+        .tempdir_in("/tmp")
+        .unwrap();
+    let tunnels = Arc::new(Mutex::new(Vec::new()));
+    let spawner = fake_ssh_host(old.socket_path().to_owned(), tunnels.clone());
+    let spec = LocalDaemonSpec {
+        socket_path: old.socket_path().to_owned(),
+        binary: dir.path().join("never-spawned"),
+        log_path: dir.path().join("daemon.log"),
+        pid_file: dir.path().join("daemon.pid"),
+    };
+    let mut manager = ConnectionManager::new(
+        rt(),
+        GrpcDialer::new(rt(), spec),
+        Arc::new(spawner),
+        ssh_env(dir.path()),
+    );
+
+    // On a remote, Electron's hint to refresh it.
+    let remote = manager
+        .connect_remote(remote_config(), OutdatedDaemon::Report)
+        .await
+        .unwrap();
+    assert_eq!(remote.status.kind(), StatusKind::Connected);
+    assert_eq!(
+        failed(&manager, &remote.id).await,
+        "Remote daemon is outdated. Retry with 'Refresh remote daemon' checked. (12 UNIMPLEMENTED: no SessionWatch)"
+    );
+
+    // The local daemon is not refreshed from here.
+    let local = manager.connect_local().await.unwrap();
+    assert_eq!(
+        failed(&manager, &local.id).await,
+        "Connected but failed to load session: 12 UNIMPLEMENTED: no SessionWatch"
+    );
+
+    // Neither retries on its own.
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    for id in [&remote.id, &local.id] {
+        assert_eq!(
+            manager.connection(id).unwrap().status.kind(),
+            StatusKind::Error
+        );
+    }
 }

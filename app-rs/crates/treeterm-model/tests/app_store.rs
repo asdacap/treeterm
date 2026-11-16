@@ -11,8 +11,10 @@ use std::sync::{Arc, LazyLock, Mutex};
 use gpui_kit::{AppContext as _, Entity, Subscription, TestAppContext};
 use tempfile::TempDir;
 use treeterm_core::connection::fake::{FakeResponse, FakeSpawner};
-use treeterm_core::connection::{ConnectionId, OutdatedDaemon};
+use treeterm_core::connection::process::ProcessCommand;
+use treeterm_core::connection::{ConnectionId, OutdatedDaemon, StatusKind};
 use treeterm_core::local_daemon::LocalDaemonSpec;
+use treeterm_core::settings::{Extra, PortForwardSpec, SshConnectionConfig};
 use treeterm_model::app_store::{AppEvent, AppStore, ConnState, SessionSlot};
 use treeterm_model::session_store::{SessionState, SessionStore, WorkspaceEntry};
 use treeterm_model::settings_store::SettingsStore;
@@ -20,7 +22,7 @@ use treeterm_proto::treeterm::WorkspaceRef;
 use treeterm_testkit::fake_ssh::{Proxy, fake_ssh_response, remote_config, ssh_env};
 
 mod common;
-use common::{Harness, harness, wait_until, wait_until_app};
+use common::{Harness, harness, refusing_daemon, wait_until, wait_until_app};
 
 /// The daemon (in this process) runs `echo $HOME` with this process's environment: point
 /// `HOME` at an empty directory, so the remote home workspace and the worktree registry
@@ -46,6 +48,8 @@ struct App {
     _events: Subscription,
     /// Set: the host refuses ssh (the bootstrap fails).
     refuse: Arc<AtomicBool>,
+    /// The ssh host's daemon socket, as its next bootstrap reports it.
+    host_daemon: Arc<Mutex<PathBuf>>,
     _tunnels: Arc<Mutex<Vec<Proxy>>>,
     _dir: TempDir,
 }
@@ -57,12 +61,9 @@ fn app(cx: &mut TestAppContext, h: &Harness, local: Option<&Path>) -> App {
         .unwrap();
     let tunnels = Arc::new(Mutex::new(Vec::new()));
     let refuse = Arc::new(AtomicBool::new(false));
+    let host_daemon = Arc::new(Mutex::new(h.daemon.socket_path().to_owned()));
     let spawner = FakeSpawner::with_responder({
-        let (socket, tunnels, refuse) = (
-            h.daemon.socket_path().to_owned(),
-            tunnels.clone(),
-            refuse.clone(),
-        );
+        let (socket, tunnels, refuse) = (host_daemon.clone(), tunnels.clone(), refuse.clone());
         move |command| {
             if refuse.load(Ordering::SeqCst) {
                 FakeResponse::Exit {
@@ -71,8 +72,10 @@ fn app(cx: &mut TestAppContext, h: &Harness, local: Option<&Path>) -> App {
                         .to_owned(),
                     code: 255,
                 }
+            } else if is_port_forward(command) {
+                FakeResponse::Run
             } else {
-                fake_ssh_response(command, &socket, &tunnels)
+                fake_ssh_response(command, &socket.lock().unwrap(), &tunnels)
             }
         }
     });
@@ -98,9 +101,20 @@ fn app(cx: &mut TestAppContext, h: &Harness, local: Option<&Path>) -> App {
         events,
         _events: subscription,
         refuse,
+        host_daemon,
         _tunnels: tunnels,
         _dir: dir,
     }
+}
+
+/// A forward of a TCP port (`-L <port>:<host>:<port>`), not the daemon socket's tunnel.
+fn is_port_forward(command: &ProcessCommand) -> bool {
+    command
+        .args
+        .iter()
+        .skip_while(|arg| *arg != "-L")
+        .nth(1)
+        .is_some_and(|forward| !forward.contains(".sock"))
 }
 
 impl App {
@@ -432,5 +446,168 @@ fn a_local_session_without_workspaces_lands_nowhere(cx: &mut TestAppContext) {
     assert!(
         workspaces(cx, &session).is_empty(),
         "no home workspace for a local session"
+    );
+}
+
+/// [`remote_config`] with a saved port forward.
+fn config_with_a_forward() -> SshConnectionConfig {
+    SshConnectionConfig {
+        port_forwards: vec![PortForwardSpec {
+            local_port: 18080,
+            remote_host: "localhost".to_owned(),
+            remote_port: 3000,
+            extra: Extra::new(),
+        }],
+        ..remote_config()
+    }
+}
+
+fn remote_error(cx: &mut TestAppContext, app: &App) -> Option<String> {
+    app.app.read_with(cx, |a, _| match &remote(a)?.state {
+        ConnState::Failed { error, .. } => Some(error.clone()),
+        ConnState::Connecting(_) | ConnState::Connected(_) | ConnState::Reconnecting { .. } => None,
+    })
+}
+
+#[gpui_kit::test]
+fn a_remote_whose_session_does_not_load_stops_at_electrons_error_without_a_session(
+    cx: &mut TestAppContext,
+) {
+    cx.executor().allow_parking();
+    isolated_home();
+    let h = harness();
+    publish_a_and_b(&h);
+    let app = app(cx, &h, None);
+    // The host runs a daemon without SessionWatch.
+    let (old, _conn) = refusing_daemon(tonic::Status::unimplemented("no SessionWatch"));
+    *app.host_daemon.lock().unwrap() = old.socket_path().to_owned();
+
+    app.app.update(cx, |a, cx| {
+        a.start_remote_connect(config_with_a_forward(), OutdatedDaemon::Report, cx)
+    });
+    wait_until(cx, &app.app, |a| {
+        matches!(
+            remote(a).map(|slot| &slot.state),
+            Some(ConnState::Failed { .. })
+        )
+    });
+    settle(cx);
+
+    assert_eq!(
+        remote_error(cx, &app).as_deref(),
+        Some(
+            "Remote daemon is outdated. Retry with 'Refresh remote daemon' checked. (12 UNIMPLEMENTED: no SessionWatch)"
+        )
+    );
+    app.app.read_with(cx, |a, _| {
+        let slot = remote(a).unwrap();
+        assert!(
+            matches!(
+                slot.state,
+                ConnState::Failed {
+                    hash_mismatch: false,
+                    ..
+                }
+            ),
+            "no Daemon Mismatch actions"
+        );
+        assert!(slot.shown_session().is_none(), "no session is added");
+        assert!(
+            a.manager().list_port_forwards(&remote_id()).is_empty(),
+            "the saved forwards wait for the session"
+        );
+    });
+    assert_eq!(app.events(), vec![AppEvent::ShowSessionPane(remote_id())]);
+    // It stops there: no reconnect loop.
+    std::thread::sleep(std::time::Duration::from_millis(1500));
+    cx.run_until_parked();
+    assert!(remote_error(cx, &app).is_some());
+
+    // Retried (the session pane's Retry) on a daemon that serves the session: it lands on
+    // its first workspace, and the saved forwards start.
+    *app.host_daemon.lock().unwrap() = h.daemon.socket_path().to_owned();
+    app.app.update(cx, |a, cx| {
+        a.reconnect_outdated(&remote_id(), OutdatedDaemon::Report, cx)
+    });
+    let session = app.restored(cx);
+    app.wait_for_events(cx, 2);
+    assert_eq!(
+        app.events(),
+        vec![
+            AppEvent::ShowSessionPane(remote_id()),
+            AppEvent::ShowSession(remote_id())
+        ]
+    );
+    assert_eq!(active(cx, &session).as_deref(), Some("a"));
+    let forwards = app
+        .app
+        .read_with(cx, |a, _| a.manager().list_port_forwards(&remote_id()));
+    assert_eq!(forwards.len(), 1);
+    assert_eq!(forwards[0].config.spec.local_port, 18080);
+}
+
+#[gpui_kit::test]
+fn the_sidebars_reconnect_after_a_session_that_did_not_load_stops_at_the_error_again(
+    cx: &mut TestAppContext,
+) {
+    cx.executor().allow_parking();
+    isolated_home();
+    let h = harness();
+    let app = app(cx, &h, None);
+    let (broken, _conn) = refusing_daemon(tonic::Status::internal("boom"));
+    *app.host_daemon.lock().unwrap() = broken.socket_path().to_owned();
+    app.connect(cx);
+    wait_until(cx, &app.app, |a| {
+        matches!(
+            remote(a).map(|slot| &slot.state),
+            Some(ConnState::Failed { .. })
+        )
+    });
+    assert_eq!(
+        remote_error(cx, &app).as_deref(),
+        Some("Connected but failed to load session: 13 INTERNAL: boom")
+    );
+
+    let changes = RefCell::new(app.app.read_with(cx, |a, _| a.manager().status_changes()));
+    let kinds = RefCell::new(Vec::new());
+    let record = || {
+        let infos = changes.borrow_mut().drain_ready();
+        kinds
+            .borrow_mut()
+            .extend(infos.iter().map(|info| info.status.kind()));
+        kinds.borrow_mut().dedup();
+    };
+    app.app.read_with(cx, |a, _| {
+        a.reconnect(&remote_id());
+        a.reconnect_now(&remote_id());
+    });
+    wait_until(cx, &app.app, |a| {
+        record();
+        kinds
+            .borrow()
+            .ends_with(&[StatusKind::Connected, StatusKind::Error])
+            && matches!(
+                remote(a).map(|slot| &slot.state),
+                Some(ConnState::Failed { .. })
+            )
+    });
+    assert_eq!(
+        remote_error(cx, &app).as_deref(),
+        Some("Connected but failed to load session: 13 INTERNAL: boom")
+    );
+    app.app.read_with(cx, |a, _| {
+        assert!(remote(a).unwrap().shown_session().is_none());
+    });
+    // And stops there.
+    std::thread::sleep(std::time::Duration::from_millis(1500));
+    cx.run_until_parked();
+    record();
+    assert_eq!(
+        *kinds.borrow(),
+        [
+            StatusKind::Reconnecting,
+            StatusKind::Connected,
+            StatusKind::Error
+        ]
     );
 }

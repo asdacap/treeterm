@@ -11,7 +11,7 @@ use crate::daemon::DaemonConnection;
 use crate::local_daemon::{LocalDaemonSpec, ensure_running};
 use crate::rt::Rt;
 
-use super::types::{ConnectionId, DialFailure};
+use super::types::{ConnectionId, DialFailure, WatchFailure};
 
 /// Opens daemon connections and watches their liveness.
 pub trait Dialer: Send + Sync + 'static {
@@ -25,12 +25,13 @@ pub trait Dialer: Send + Sync + 'static {
     fn dial(&self, socket_path: &Path) -> BoxFuture<'static, Result<Self::Daemon, DialFailure>>;
 
     /// One item per session watch event (the first is the current session; the daemon
-    /// re-broadcasts every 15 s). Errs or ends when the connection is gone.
+    /// re-broadcasts every 15 s). Errs or ends when the connection is gone, or at once when
+    /// the daemon cannot serve the session.
     fn heartbeats(
         &self,
         daemon: &Self::Daemon,
         listener_id: &str,
-    ) -> BoxStream<'static, Result<(), String>>;
+    ) -> BoxStream<'static, Result<(), WatchFailure>>;
 
     /// `connection` lost `daemon` (it went from connected to reconnecting): fail the
     /// commands still running on it.
@@ -79,10 +80,14 @@ impl Dialer for GrpcDialer {
         &self,
         daemon: &DaemonConnection,
         listener_id: &str,
-    ) -> BoxStream<'static, Result<(), String>> {
+    ) -> BoxStream<'static, Result<(), WatchFailure>> {
         daemon
             .watch_session(listener_id)
-            .map(|event| event.map(|_| ()).map_err(|error| error.to_string()))
+            .map(|event| {
+                event
+                    .map(|_| ())
+                    .map_err(|error| WatchFailure::from_api_error(&error))
+            })
             .boxed()
     }
 

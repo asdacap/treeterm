@@ -4,6 +4,7 @@
 use std::fmt;
 use std::sync::Arc;
 
+use crate::daemon::ApiError;
 use crate::settings::{PortForwardSpec, SshConnectionConfig};
 
 use super::port_forward::PortForwardError;
@@ -81,8 +82,8 @@ pub enum ConnectionStatus<C> {
     },
     /// Closed by [`super::ConnectionManager::disconnect`]; the connection is gone.
     Disconnected,
-    /// The first connect failed, or reconnecting was cancelled. Retry with
-    /// [`super::ConnectionManager::reconnect`].
+    /// The first connect failed, its session did not load, or reconnecting was cancelled.
+    /// Retry with [`super::ConnectionManager::reconnect`].
     Error { error: ConnectionError },
 }
 
@@ -178,6 +179,14 @@ pub enum ConnectionError {
     /// The session watch failed or ended: the gRPC connection is gone.
     #[error("gRPC connection lost: {0}")]
     SessionWatchFailed(String),
+    /// A remote daemon too old to serve the session: the session of a connect did not load
+    /// (Electron's `ssh:connect`). See [`ConnectionError::session_load_failed`].
+    #[error("Remote daemon is outdated. Retry with 'Refresh remote daemon' checked. ({0})")]
+    RemoteDaemonOutdated(String),
+    /// The daemon connected but the session of a connect did not load (Electron's
+    /// `ssh:connect`).
+    #[error("Connected but failed to load session: {0}")]
+    SessionLoadFailed(String),
     /// The ssh process carrying the daemon socket ended.
     #[error(transparent)]
     TunnelClosed(TunnelEnd),
@@ -197,9 +206,55 @@ impl ConnectionError {
             | ConnectionError::RemoteDaemon(_)
             | ConnectionError::HeartbeatLost
             | ConnectionError::SessionWatchFailed(_)
+            | ConnectionError::RemoteDaemonOutdated(_)
+            | ConnectionError::SessionLoadFailed(_)
             | ConnectionError::TunnelClosed(_)
             | ConnectionError::ReconnectRequested
             | ConnectionError::ReconnectCancelled => ConnectionErrorKind::Generic,
+        }
+    }
+
+    /// The daemon of `target` connected, but the session did not load (`failure`). Only a
+    /// remote is told to refresh its daemon: the local one is not uploaded.
+    pub fn session_load_failed(target: &ConnectionTarget, failure: WatchFailure) -> Self {
+        match (target, failure) {
+            (ConnectionTarget::Remote(_), WatchFailure::OutdatedDaemon(message)) => {
+                ConnectionError::RemoteDaemonOutdated(message)
+            }
+            (ConnectionTarget::Local, WatchFailure::OutdatedDaemon(message))
+            | (_, WatchFailure::Other(message)) => ConnectionError::SessionLoadFailed(message),
+        }
+    }
+}
+
+/// Why a session watch failed, as a connect tells it (Electron's `ssh:connect`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WatchFailure {
+    /// The daemon is too old to serve the session: a `NOT_FOUND` error about the session
+    /// (Electron's test), or a daemon without `SessionWatch` at all (`UNIMPLEMENTED`).
+    OutdatedDaemon(String),
+    Other(String),
+}
+
+impl WatchFailure {
+    /// How `error`, which ended a session watch, is told.
+    pub fn from_api_error(error: &ApiError) -> Self {
+        let message = error.to_string();
+        let unimplemented = matches!(
+            error,
+            ApiError::Status(status) if status.code() == tonic::Code::Unimplemented
+        );
+        if unimplemented || (message.contains("NOT_FOUND") && message.contains("session")) {
+            WatchFailure::OutdatedDaemon(message)
+        } else {
+            WatchFailure::Other(message)
+        }
+    }
+
+    /// The error's own message (grpc-js's `<code> <NAME>: <details>` for a gRPC status).
+    pub fn message(&self) -> &str {
+        match self {
+            WatchFailure::OutdatedDaemon(message) | WatchFailure::Other(message) => message,
         }
     }
 }
@@ -310,4 +365,77 @@ pub enum OutputKind {
     Tunnel,
     /// The gRPC connection to the daemon.
     Daemon,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::settings::{ConnectionLabel, Extra, IdentityFile};
+
+    fn told(status: tonic::Status) -> WatchFailure {
+        WatchFailure::from_api_error(&ApiError::from(status))
+    }
+
+    fn remote() -> ConnectionTarget {
+        ConnectionTarget::Remote(Arc::new(SshConnectionConfig {
+            id: "remote-1".to_owned(),
+            host: "example.com".to_owned(),
+            user: "test".to_owned(),
+            port: 22,
+            identity_file: IdentityFile::SshDefault,
+            label: ConnectionLabel::UserAtHost,
+            port_forwards: Vec::new(),
+            extra: Extra::new(),
+        }))
+    }
+
+    #[test]
+    fn a_daemon_that_cannot_serve_the_session_is_outdated() {
+        // Electron's test: NOT_FOUND about the session (as written, lower case).
+        assert_eq!(
+            told(tonic::Status::not_found("session s-1 not found")),
+            WatchFailure::OutdatedDaemon("5 NOT_FOUND: session s-1 not found".to_owned())
+        );
+        // A daemon without SessionWatch.
+        assert_eq!(
+            told(tonic::Status::unimplemented("")),
+            WatchFailure::OutdatedDaemon("12 UNIMPLEMENTED: ".to_owned())
+        );
+        assert_eq!(
+            told(tonic::Status::not_found("Session s-1 not found")),
+            WatchFailure::Other("5 NOT_FOUND: Session s-1 not found".to_owned())
+        );
+        assert_eq!(
+            told(tonic::Status::unavailable("broken pipe")),
+            WatchFailure::Other("14 UNAVAILABLE: broken pipe".to_owned())
+        );
+        assert_eq!(
+            WatchFailure::from_api_error(&ApiError::Protocol("no session")).message(),
+            "daemon protocol violation: no session"
+        );
+    }
+
+    #[test]
+    fn a_session_that_did_not_load_reads_as_in_electron() {
+        let outdated = || WatchFailure::OutdatedDaemon("12 UNIMPLEMENTED: ".to_owned());
+        let other = || WatchFailure::Other("14 UNAVAILABLE: broken pipe".to_owned());
+        let text = |target: &ConnectionTarget, failure| {
+            let error = ConnectionError::session_load_failed(target, failure);
+            assert_eq!(error.kind(), ConnectionErrorKind::Generic);
+            error.to_string()
+        };
+        assert_eq!(
+            text(&remote(), outdated()),
+            "Remote daemon is outdated. Retry with 'Refresh remote daemon' checked. (12 UNIMPLEMENTED: )"
+        );
+        assert_eq!(
+            text(&remote(), other()),
+            "Connected but failed to load session: 14 UNAVAILABLE: broken pipe"
+        );
+        // The local daemon is never refreshed from a remote.
+        assert_eq!(
+            text(&ConnectionTarget::Local, outdated()),
+            "Connected but failed to load session: 12 UNIMPLEMENTED: "
+        );
+    }
 }

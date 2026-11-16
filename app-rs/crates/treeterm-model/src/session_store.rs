@@ -28,6 +28,7 @@ use gpui_kit::{App, AppContext as _, Context, Entity, EventEmitter, Subscription
 use indexmap::IndexMap;
 use serde::Serialize;
 use treeterm_core::attention::workspace_attention;
+use treeterm_core::connection::WatchFailure;
 use treeterm_core::daemon::{ApiError, DaemonConnection};
 use crate::settings_store::{SettingsEvent, SettingsStore};
 use treeterm_core::tree::{self, TreeNode, TreeRow};
@@ -59,8 +60,8 @@ pub enum SessionState {
     /// Has the session. It stays live when the session watch fails later: the connection
     /// layer replaces the store after the reconnect, and its rows stay on screen until then.
     Live,
-    /// The session watch failed or ended before the first event; the connection layer must
-    /// rebuild this store.
+    /// The session watch failed or ended before the first event ([`SessionEvent::LoadFailed`]):
+    /// the session did not load.
     Failed(String),
 }
 
@@ -232,8 +233,12 @@ pub enum SessionEvent {
     /// Background work in a workspace that is not being viewed finished: it was marked
     /// unread (ding, if sound is on).
     AttentionRecorded(String),
-    /// The session watch failed or ended: this store's connection is gone.
+    /// The session watch failed or ended after the first snapshot: this store's connection
+    /// is gone.
     Failed(String),
+    /// The session watch failed or ended before the first snapshot: the session did not
+    /// load (Electron's `ssh:connect` awaiting the watch's `initial`). Emitted once per store.
+    LoadFailed(WatchFailure),
     /// The first snapshot arrived (`handleRestore`): the session is live, with its first
     /// workspace (or the one a reconnect kept) active. Emitted once per store.
     Restored,
@@ -442,8 +447,9 @@ impl SessionStore {
                     return; // store dropped
                 }
             }
+            let ended = "session watch ended: connection to the daemon lost";
             match this.update(cx, |store, cx| {
-                store.fail("session watch ended: connection to the daemon lost", cx)
+                store.fail(ended.to_owned(), WatchFailure::Other(ended.to_owned()), cx)
             }) {
                 Ok(()) | Err(_) => {} // Err: store dropped, nothing to report to
             }
@@ -629,25 +635,34 @@ impl SessionStore {
 
     // ---- session watch ------------------------------------------------------------------
 
-    fn fail(&mut self, reason: &str, cx: &mut Context<Self>) {
+    /// The session watch failed (`reason`, as the tree shows it; `failure`, as a connect
+    /// tells it).
+    fn fail(&mut self, reason: String, failure: WatchFailure, cx: &mut Context<Self>) {
         if self.disposed {
             return;
         }
         tracing::error!(reason, "session store failed");
         match self.state {
-            SessionState::Waiting | SessionState::Failed(_) => self.state = SessionState::Failed(reason.to_owned()),
-            SessionState::Live => {}
+            SessionState::Waiting => {
+                self.state = SessionState::Failed(reason);
+                cx.emit(SessionEvent::LoadFailed(failure));
+            }
+            // Reported with the first failure (an error, then the stream's end).
+            SessionState::Failed(_) => {}
+            SessionState::Live => cx.emit(SessionEvent::Failed(reason)),
         }
         self.set_connection_status(ConnectionStatus::Disconnected, cx);
-        cx.emit(SessionEvent::Failed(reason.to_owned()));
         cx.notify();
     }
 
     fn on_session_event(&mut self, event: Result<SessionWatchEvent, ApiError>, cx: &mut Context<Self>) {
         match event.map(|e| e.session) {
             Ok(Some(session)) => self.handle_external_update(session, cx),
-            Ok(None) => self.fail("SessionWatch event without a session", cx),
-            Err(error) => self.fail(&format!("session watch failed: {error}"), cx),
+            Ok(None) => {
+                let reason = "SessionWatch event without a session";
+                self.fail(reason.to_owned(), WatchFailure::Other(reason.to_owned()), cx);
+            }
+            Err(error) => self.fail(format!("session watch failed: {error}"), WatchFailure::from_api_error(&error), cx),
         }
     }
 

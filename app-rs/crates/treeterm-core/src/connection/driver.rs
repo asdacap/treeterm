@@ -30,6 +30,7 @@ use super::socket_path::remote_forward_socket_path;
 use super::ssh::{BootstrapResult, DaemonBinaries, LogSink, SshConnector, Tunnel};
 use super::types::{
     ConnectPhase, ConnectionError, ConnectionInfo, OutputKind, PortForwardId, PortForwardInfo,
+    WatchFailure,
 };
 
 /// Where remote connections get their daemon binaries and tunnel sockets.
@@ -259,7 +260,7 @@ pub(crate) async fn drive<D: Dialer>(shared: Arc<Shared<D::Daemon>>, deps: Arc<D
     let connection = shared.read(|machine| machine.id().clone());
     let mut attempt: Option<(AttemptId, Attempt<D::Daemon>)> = None;
     let mut transport: Option<Transport<D::Daemon>> = None;
-    let mut heartbeat: Option<BoxStream<'static, Result<(), String>>> = None;
+    let mut heartbeat: Option<BoxStream<'static, Result<(), WatchFailure>>> = None;
     let mut forwards: StreamMap<PortForwardId, BoxStream<'static, (u64, ProcessEvent)>> =
         StreamMap::new();
 
@@ -332,13 +333,14 @@ pub(crate) async fn drive<D: Dialer>(shared: Arc<Shared<D::Daemon>>, deps: Arc<D
             }
             beat = next_beat(&mut heartbeat) => match beat {
                 Some(Ok(())) => shared.update(|machine| machine.heartbeat(now())),
-                Some(Err(reason)) => {
+                Some(Err(failure)) => {
                     heartbeat = None;
-                    shared.update(|machine| machine.heartbeat_failed(reason, now()));
+                    shared.update(|machine| machine.heartbeat_failed(failure, now()));
                 }
                 None => {
                     heartbeat = None;
-                    shared.update(|machine| machine.heartbeat_failed("session watch ended".to_owned(), now()));
+                    let ended = WatchFailure::Other("session watch ended".to_owned());
+                    shared.update(|machine| machine.heartbeat_failed(ended, now()));
                 }
             },
             end = tunnel_end(&mut transport) => {
@@ -377,8 +379,8 @@ async fn finished<C>(
 }
 
 async fn next_beat(
-    heartbeat: &mut Option<BoxStream<'static, Result<(), String>>>,
-) -> Option<Result<(), String>> {
+    heartbeat: &mut Option<BoxStream<'static, Result<(), WatchFailure>>>,
+) -> Option<Result<(), WatchFailure>> {
     match heartbeat {
         Some(stream) => stream.next().await,
         None => pending().await,

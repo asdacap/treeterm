@@ -27,7 +27,7 @@ use super::ssh::{UploadError, upload_file};
 use super::types::{
     ConnectionError, ConnectionId, ConnectionInfo, ConnectionStatus, ConnectionTarget,
     OutdatedDaemon, OutputKind, Persistence, PortForwardConfig, PortForwardId, PortForwardInfo,
-    StatusKind,
+    StatusKind, WatchFailure,
 };
 
 /// A connection's status now and its changes.
@@ -273,6 +273,22 @@ impl<D: Dialer> ConnectionManager<D> {
         self.entry(id)?
             .shared
             .update(|machine| machine.force_reconnect(now()));
+        Ok(())
+    }
+
+    /// The session store on the connection's current generation could not load its session
+    /// (its watch failed before the first event). Until the connection's heartbeat saw the
+    /// session, this ends the connect with an error (Electron's `ssh:connect`: "Remote daemon
+    /// is outdated. …" or "Connected but failed to load session: …"); after, a new generation
+    /// is started.
+    pub fn session_load_failed(
+        &self,
+        id: &ConnectionId,
+        failure: WatchFailure,
+    ) -> Result<(), ConnectionNotFound> {
+        self.entry(id)?
+            .shared
+            .update(|machine| machine.session_load_failed(failure, now()));
         Ok(())
     }
 

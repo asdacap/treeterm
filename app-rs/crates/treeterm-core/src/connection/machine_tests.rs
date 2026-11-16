@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::connection::process::ExitStatus;
-use crate::connection::types::{Persistence, PortForwardStatus, StatusKind};
+use crate::connection::types::{ConnectionErrorKind, Persistence, PortForwardStatus, StatusKind};
 use crate::settings::{ConnectionLabel, Extra, IdentityFile, PortForwardSpec};
 
 type Machine = ConnectionMachine<&'static str>;
@@ -69,9 +69,16 @@ fn attempt_of(machine: &Machine) -> u32 {
     }
 }
 
-/// A local connection, connected at `t0`, effects drained.
+/// A local connection, connected at `t0` with its session loaded, effects drained.
 fn connected(t0: Instant) -> Machine {
-    let mut machine = local();
+    let mut machine = connected_awaiting_session(local(), t0);
+    machine.heartbeat(t0);
+    machine
+}
+
+/// `machine`'s first attempt succeeded at `t0`; its session watch delivered nothing yet.
+/// Effects and events drained.
+fn connected_awaiting_session(mut machine: Machine, t0: Instant) -> Machine {
     let plan = started_attempt(&mut machine);
     assert_eq!(
         machine.attempt_finished(plan.id, Ok("daemon-1"), t0),
@@ -80,6 +87,11 @@ fn connected(t0: Instant) -> Machine {
     effects(&mut machine);
     while machine.poll_event().is_some() {}
     machine
+}
+
+/// A session watch failure that is no outdated daemon (a dropped connection, say).
+fn lost(message: &str) -> WatchFailure {
+    WatchFailure::Other(message.to_owned())
 }
 
 fn secs(n: u64) -> Duration {
@@ -224,7 +236,7 @@ fn fifty_seconds_of_silence_starts_reconnecting() {
 fn a_failed_session_watch_starts_reconnecting() {
     let t0 = Instant::now();
     let mut machine = connected(t0);
-    machine.heartbeat_failed("transport error".to_owned(), t0);
+    machine.heartbeat_failed(lost("transport error"), t0);
     assert_eq!(
         machine.status().error().unwrap().to_string(),
         "gRPC connection lost: transport error"
@@ -233,6 +245,150 @@ fn a_failed_session_watch_starts_reconnecting() {
         effects(&mut machine),
         vec![Effect::ConnectionLost, Effect::DropTransport]
     );
+}
+
+/// The error a failed connection shows.
+fn error_of(machine: &Machine) -> ConnectionError {
+    match machine.status() {
+        ConnectionStatus::Error { error } => error,
+        other => panic!("not failed: {:?}", other.kind()),
+    }
+}
+
+#[test]
+fn a_session_that_does_not_load_ends_the_connect_with_electrons_error() {
+    let t0 = Instant::now();
+    let outdated = || WatchFailure::OutdatedDaemon("12 UNIMPLEMENTED: no SessionWatch".to_owned());
+    let mut machine = connected_awaiting_session(remote(OutdatedDaemon::Report), t0);
+
+    machine.heartbeat_failed(outdated(), t0);
+
+    let error = error_of(&machine);
+    assert_eq!(
+        error.to_string(),
+        "Remote daemon is outdated. Retry with 'Refresh remote daemon' checked. (12 UNIMPLEMENTED: no SessionWatch)"
+    );
+    assert_eq!(error.kind(), ConnectionErrorKind::Generic);
+    assert_eq!(statuses(&mut machine), vec![StatusKind::Error]);
+    // The generation goes, with its commands; no reconnect loop is started.
+    assert_eq!(
+        effects(&mut machine),
+        vec![Effect::ConnectionLost, Effect::DropTransport]
+    );
+    assert_eq!(machine.poll_timeout(), None);
+
+    // Any other failure.
+    let mut machine = connected_awaiting_session(remote(OutdatedDaemon::Report), t0);
+    machine.heartbeat_failed(lost("14 UNAVAILABLE: broken pipe"), t0);
+    assert_eq!(
+        error_of(&machine).to_string(),
+        "Connected but failed to load session: 14 UNAVAILABLE: broken pipe"
+    );
+
+    // The local daemon is not refreshed from a remote: it is never told to.
+    let mut machine = connected_awaiting_session(local(), t0);
+    machine.heartbeat_failed(outdated(), t0);
+    assert_eq!(
+        error_of(&machine).to_string(),
+        "Connected but failed to load session: 12 UNIMPLEMENTED: no SessionWatch"
+    );
+}
+
+#[test]
+fn the_session_store_failing_to_load_ends_the_connect_until_the_session_loaded() {
+    let t0 = Instant::now();
+    let mut machine = connected_awaiting_session(remote(OutdatedDaemon::Report), t0);
+    machine.session_load_failed(
+        WatchFailure::OutdatedDaemon("5 NOT_FOUND: session gone".to_owned()),
+        t0,
+    );
+    assert_eq!(
+        error_of(&machine).to_string(),
+        "Remote daemon is outdated. Retry with 'Refresh remote daemon' checked. (5 NOT_FOUND: session gone)"
+    );
+    assert_eq!(
+        effects(&mut machine),
+        vec![Effect::ConnectionLost, Effect::DropTransport]
+    );
+    // Reported again (the heartbeat's watch failing too): nothing more happens.
+    machine.session_load_failed(lost("again"), t0);
+    machine.heartbeat_failed(lost("again"), t0);
+    assert!(effects(&mut machine).is_empty());
+    assert_eq!(statuses(&mut machine), vec![StatusKind::Error]);
+
+    // Once the heartbeat saw the session, the store's failure starts a new generation.
+    let mut machine = connected(t0);
+    machine.session_load_failed(lost("14 UNAVAILABLE: x"), t0);
+    assert_eq!(attempt_of(&machine), 0);
+    assert_eq!(
+        machine.status().error().unwrap().to_string(),
+        "Reconnecting..."
+    );
+    assert_eq!(
+        effects(&mut machine),
+        vec![Effect::ConnectionLost, Effect::DropTransport]
+    );
+    // While reconnecting it is a no-op.
+    machine.session_load_failed(lost("late"), t0);
+    assert!(effects(&mut machine).is_empty());
+    assert_eq!(attempt_of(&machine), 0);
+
+    // Before the first connect finished there is no session to fail.
+    let mut machine = local();
+    effects(&mut machine);
+    machine.session_load_failed(lost("early"), t0);
+    assert_eq!(machine.status().kind(), StatusKind::Connecting);
+    assert!(effects(&mut machine).is_empty());
+}
+
+#[test]
+fn a_retry_from_the_error_awaits_the_session_again_but_reconnects_do_not() {
+    let t0 = Instant::now();
+    let mut machine = connected_awaiting_session(remote(OutdatedDaemon::Report), t0);
+    machine.heartbeat_failed(lost("boom"), t0);
+    effects(&mut machine);
+
+    // Retried: the new generation's session fails to load too, and the retry ends there.
+    machine.reconnect(t0);
+    machine.handle_timeout(t0 + secs(1));
+    let plan = started_attempt(&mut machine);
+    assert_eq!(
+        machine.attempt_finished(plan.id, Ok("daemon-2"), t0 + secs(1)),
+        AttemptVerdict::Applied
+    );
+    machine.heartbeat_failed(lost("boom again"), t0 + secs(1));
+    assert_eq!(
+        error_of(&machine).to_string(),
+        "Connected but failed to load session: boom again"
+    );
+
+    // A session that loaded once: a reconnect's generation failing at once is a loss again.
+    let mut machine = connected(t0);
+    machine.heartbeat_failed(lost("gone"), t0);
+    machine.handle_timeout(t0 + secs(1));
+    let plan = started_attempt(&mut machine);
+    assert_eq!(
+        machine.attempt_finished(plan.id, Ok("daemon-2"), t0 + secs(1)),
+        AttemptVerdict::Applied
+    );
+    machine.heartbeat_failed(lost("gone again"), t0 + secs(1));
+    assert_eq!(attempt_of(&machine), 0);
+}
+
+#[test]
+fn a_silent_or_cut_connection_before_the_session_loads_still_reconnects() {
+    let t0 = Instant::now();
+    let mut machine = connected_awaiting_session(local(), t0);
+    machine.handle_timeout(t0 + HEARTBEAT_TIMEOUT);
+    assert_eq!(
+        machine.status().error().unwrap().to_string(),
+        "Connection lost (no heartbeat from daemon)"
+    );
+    assert_eq!(attempt_of(&machine), 0);
+
+    let mut machine = connected_awaiting_session(remote(OutdatedDaemon::Report), t0);
+    machine.tunnel_closed(TunnelEnd::Failed("gone".to_owned()), t0);
+    assert_eq!(attempt_of(&machine), 0);
 }
 
 #[test]
@@ -278,7 +434,7 @@ fn only_leaving_a_connected_transport_fails_its_commands() {
 
     // While reconnecting the loss is not reported again.
     let mut machine = connected(t0);
-    machine.heartbeat_failed("gone".to_owned(), t0);
+    machine.heartbeat_failed(lost("gone"), t0);
     effects(&mut machine);
     machine.handle_timeout(t0 + HEARTBEAT_TIMEOUT);
     machine.tunnel_closed(TunnelEnd::Failed("late".to_owned()), t0);
@@ -290,7 +446,7 @@ fn only_leaving_a_connected_transport_fails_its_commands() {
 fn losses_while_not_connected_are_ignored() {
     let t0 = Instant::now();
     let mut machine = local();
-    machine.heartbeat_failed("late".to_owned(), t0);
+    machine.heartbeat_failed(lost("late"), t0);
     machine.tunnel_closed(TunnelEnd::Failed("late".to_owned()), t0);
     machine.heartbeat(t0);
     assert_eq!(machine.status().kind(), StatusKind::Connecting);
@@ -300,7 +456,7 @@ fn losses_while_not_connected_are_ignored() {
 fn attempts_back_off_without_limit() {
     let t0 = Instant::now();
     let mut machine = connected(t0);
-    machine.heartbeat_failed("gone".to_owned(), t0);
+    machine.heartbeat_failed(lost("gone"), t0);
     effects(&mut machine);
 
     let mut now = t0;
@@ -358,7 +514,7 @@ fn first_attempt_after_one_second_then_two_four_eight() {
 fn a_successful_reconnect_resets_attempts_and_rearms_the_heartbeat() {
     let t0 = Instant::now();
     let mut machine = connected(t0);
-    machine.heartbeat_failed("gone".to_owned(), t0);
+    machine.heartbeat_failed(lost("gone"), t0);
     machine.handle_timeout(t0 + secs(1));
     let plan = started_attempt(&mut machine);
     statuses(&mut machine);
@@ -380,7 +536,7 @@ fn a_successful_reconnect_resets_attempts_and_rearms_the_heartbeat() {
     );
 
     // The next loss starts counting from zero again.
-    machine.heartbeat_failed("gone again".to_owned(), t0 + secs(3));
+    machine.heartbeat_failed(lost("gone again"), t0 + secs(3));
     assert_eq!(attempt_of(&machine), 0);
     assert_eq!(machine.poll_timeout(), Some(t0 + secs(4)));
 }
@@ -389,7 +545,7 @@ fn a_successful_reconnect_resets_attempts_and_rearms_the_heartbeat() {
 fn reconnect_now_skips_the_backoff() {
     let t0 = Instant::now();
     let mut machine = connected(t0);
-    machine.heartbeat_failed("gone".to_owned(), t0);
+    machine.heartbeat_failed(lost("gone"), t0);
     effects(&mut machine);
 
     machine.reconnect_now();
@@ -402,7 +558,7 @@ fn reconnect_now_skips_the_backoff() {
 fn reconnect_now_during_an_attempt_is_a_no_op() {
     let t0 = Instant::now();
     let mut machine = connected(t0);
-    machine.heartbeat_failed("gone".to_owned(), t0);
+    machine.heartbeat_failed(lost("gone"), t0);
     machine.handle_timeout(t0 + secs(1));
     let plan = started_attempt(&mut machine);
 
@@ -448,7 +604,7 @@ fn cancel_shows_the_last_error_and_abandons_the_attempt_in_flight() {
 fn cancel_while_waiting_cancels_nothing_in_flight() {
     let t0 = Instant::now();
     let mut machine = connected(t0);
-    machine.heartbeat_failed("gone".to_owned(), t0);
+    machine.heartbeat_failed(lost("gone"), t0);
     effects(&mut machine);
     machine.cancel_reconnect();
     assert!(effects(&mut machine).is_empty());
@@ -518,7 +674,7 @@ fn force_reconnect_from_connected_drops_the_transport_and_waits_a_second() {
 fn force_reconnect_while_reconnecting_is_a_no_op() {
     let t0 = Instant::now();
     let mut machine = connected(t0);
-    machine.heartbeat_failed("gone".to_owned(), t0);
+    machine.heartbeat_failed(lost("gone"), t0);
     effects(&mut machine);
     machine.force_reconnect(t0 + secs(10));
     assert!(effects(&mut machine).is_empty());
@@ -673,8 +829,9 @@ fn port_forwards_restart_only_after_a_successful_reconnect() {
         .add_port_forward(pf_config("pf-2", 8081), t0)
         .unwrap();
     effects(&mut machine);
+    machine.heartbeat(t0);
 
-    machine.heartbeat_failed("gone".to_owned(), t0);
+    machine.heartbeat_failed(lost("gone"), t0);
     machine.handle_timeout(t0 + secs(1));
     let failed = started_attempt(&mut machine);
     assert_eq!(

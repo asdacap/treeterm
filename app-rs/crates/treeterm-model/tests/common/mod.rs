@@ -7,7 +7,7 @@ use std::time::Duration;
 use gpui_kit::{App, Entity, TestAppContext};
 use treeterm_core::daemon::DaemonConnection;
 use treeterm_core::rt::Rt;
-use treeterm_testkit::TestDaemon;
+use treeterm_testkit::{RefusingDaemon, TestDaemon};
 
 pub struct Harness {
     pub daemon: TestDaemon,
@@ -99,6 +99,21 @@ pub fn harness() -> Harness {
         .unwrap()
         .unwrap();
     Harness { daemon, conn, rt }
+}
+
+/// A daemon that fails every call with `status` (one too old for this app, say), and a
+/// connection to it.
+pub fn refusing_daemon(status: tonic::Status) -> (RefusingDaemon, DaemonConnection) {
+    let tokio = runtime();
+    let daemon = {
+        let _enter = tokio.enter();
+        RefusingDaemon::start(status)
+    };
+    let rt = Rt::new(tokio.handle().clone());
+    let conn = futures::executor::block_on(DaemonConnection::open(&rt, daemon.socket_path()))
+        .unwrap()
+        .unwrap();
+    (daemon, conn)
 }
 
 /// Daemon events arrive from tokio threads in real time; pump the GPUI test scheduler
