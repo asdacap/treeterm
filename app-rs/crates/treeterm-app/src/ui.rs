@@ -278,6 +278,33 @@ pub fn title_tooltip(text: impl Into<SharedString>) -> impl Fn(&mut Window, &mut
     }
 }
 
+/// A range of selection document orders of a view's own, to start a [`ReadingOrder`] at. A
+/// drag from one run of selectable text to another selects every run of the window whose
+/// order lies between theirs, so two views side by side, or another view's text, must not
+/// share orders.
+pub fn document_orders() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed) << 32
+}
+
+/// Text that can be selected and copied (Cmd/Ctrl+C), as in the browser. GPUI Kit copies
+/// the runs a drag spans by their document order alone, so each run takes the next one: a
+/// drag over several copies them in reading order, a line each.
+pub struct ReadingOrder(u64);
+
+impl ReadingOrder {
+    /// Runs ordered after `order` (a view's [`document_orders`], or where the runs read
+    /// before these stop).
+    pub fn after(order: u64) -> Self {
+        Self(order)
+    }
+
+    pub fn text(&mut self, id: impl Into<ElementId>, text: impl Into<SharedString>) -> gpui_kit::base::SelectableText {
+        self.0 += 1;
+        gpui_kit::base::SelectableText::new(id, text).document_order(self.0)
+    }
+}
+
 /// The 12px spinner after the unread marker while an unread-marker edit is not yet saved
 /// (`Loader2` "Saving workspace attention"), in the row's text colour.
 pub fn attention_saving(color: impl Into<Hsla>) -> gpui_kit::AnyElement {

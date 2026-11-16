@@ -29,6 +29,7 @@ use treeterm_model::review_patch::{DiffSize, FileDiff, FileDiffs, Placeholder, S
 
 use super::ReviewView;
 use crate::comment_ui::{CommentActions, Placement, comment_display, comment_input};
+use crate::ui::ReadingOrder;
 use super::parts::{change_stats, checkbox, disabled_checkbox, outline_button, plain_icon, spinner, spinning_icon, status_badge, title};
 use crate::file_browser_view::{ImageDrawing, image_drawing, language_for};
 use crate::theme::colors;
@@ -266,8 +267,9 @@ fn line_click(
 enum Annotated {
     /// A file's header (and, for an image, both sides under it).
     Header(Header),
-    /// The comments under one line, and the comment box when the draft is there.
-    Comments { comments: Vec<ReviewComment>, draft: bool },
+    /// The comments under one line, their text ordered after `order` (the diff's comments
+    /// take document orders in reading order), and the comment box when the draft is there.
+    Comments { comments: Vec<ReviewComment>, order: u64, draft: bool },
 }
 
 struct Header {
@@ -664,7 +666,17 @@ impl ReviewView {
                 groups.push((key, Vec::new()));
             }
         }
-        for ((path, side, line), list) in groups {
+        // Their text takes the view's document orders in reading order, so that a drag over
+        // several copies them in that order.
+        let keys: Vec<(String, Side, u32)> = groups.iter().map(|(key, _)| key.clone()).collect();
+        let files: Vec<String> = order.iter().map(|file| file.path.clone()).collect();
+        let mut orders = vec![0; groups.len()];
+        let mut next = self.first_order;
+        for ix in treeterm_model::review_find::reading_order(diffs, &files, &keys, self.layout().style) {
+            orders[ix] = next;
+            next += groups[ix].1.len() as u64;
+        }
+        for (((path, side, line), list), text_order) in groups.into_iter().zip(orders) {
             let is_draft = draft.as_ref().is_some_and(|d| d.file_path == path && d.side == side && d.line_number == line);
             let id = ElementId::from(SharedString::from(format!("comments-{path}-{}-{line}", side.as_str())));
             let side = match side {
@@ -672,7 +684,7 @@ impl ReviewView {
                 Side::Modified => DiffSide::Modified,
             };
             annotations.push(DiffAnnotation::line(id.clone(), DiffLinePosition::new(path, side, line as usize)));
-            items.insert(id, Annotated::Comments { comments: list, draft: is_draft });
+            items.insert(id, Annotated::Comments { comments: list, order: text_order, draft: is_draft });
         }
         let draft_box = if draft.is_some() { self.draft_box(window, cx) } else {
             self.draft_input = None;
@@ -728,9 +740,9 @@ impl ReviewView {
                 };
                 match item {
                     Annotated::Header(header) => file_header(header, &state_for_headers, &this, &model, window, cx),
-                    Annotated::Comments { comments, draft } => {
+                    Annotated::Comments { comments, order, draft } => {
                         let input = draft_box.clone().filter(|_| *draft);
-                        comment_group(comments, input, draft_label.clone(), &adding, &model, window, cx)
+                        comment_group(comments, *order, input, draft_label.clone(), &adding, &model, window, cx)
                     }
                 }
             })
@@ -1238,10 +1250,12 @@ fn image_diff(path: &str, sides: ImageSides, cx: &App) -> AnyElement {
     div().bg(bg).child(body).into_any_element()
 }
 
-/// `.pierre-diff-annotation`: a line's comments (`CommentDisplay`) and the comment box
-/// (`CommentInput`).
+/// `.pierre-diff-annotation`: a line's comments (`CommentDisplay`), their text ordered
+/// after `order`, and the comment box (`CommentInput`).
+#[allow(clippy::too_many_arguments)]
 fn comment_group(
     comments: &[ReviewComment],
+    order: u64,
     input: Option<(Entity<TextareaState>, bool)>,
     draft_label: Option<String>,
     adding: &GitOp,
@@ -1258,15 +1272,18 @@ fn comment_group(
     // Over GPUI Kit's annotation padding; its top border is `.pierre-diff-annotation`'s.
     let pad = window.rem_size() * 0.75;
     // Pierre's annotations inherit its monospace font; buttons keep the UI font.
-    let group = v_flex()
+    let mut group = v_flex()
         .mx(-pad)
         .my(-pad)
         .px(px(8.))
         .py(px(4.))
         .on_mouse_down(MouseButton::Right, keep_right_button)
         .bg(colors(cx).bg_secondary)
-        .font_family(super::parts::MONO)
-        .children(comments.iter().map(|comment| comment_display(comment, &Placement::Diff, &actions, cx)));
+        .font_family(super::parts::MONO);
+    let mut text = ReadingOrder::after(order);
+    for comment in comments {
+        group = group.child(comment_display(comment, &Placement::Diff, &actions, &mut text, cx));
+    }
     match input {
         Some((input, has_text)) => group
             .child(comment_input(&input, has_text, draft_label.unwrap_or_default(), adding, &actions, window, cx))

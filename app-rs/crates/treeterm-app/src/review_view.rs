@@ -84,6 +84,9 @@ pub struct ReviewView {
     /// A commit succeeded: empty the message box on the next render.
     clear_message: bool,
     draft_input: Option<stacked::DraftInput>,
+    /// Where the document orders of the diff's comment text start
+    /// ([`crate::ui::document_orders`]).
+    first_order: u64,
     /// The base branch picker, when open: its filter box.
     base_picker: Option<(Entity<InputState>, Subscription)>,
     base_query: String,
@@ -157,6 +160,7 @@ impl ReviewView {
             message_text: String::new(),
             clear_message: false,
             draft_input: None,
+            first_order: crate::ui::document_orders(),
             base_picker: None,
             base_query: String::new(),
             merge_menu: false,

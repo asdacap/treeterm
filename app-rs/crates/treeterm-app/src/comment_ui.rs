@@ -3,7 +3,6 @@
 
 use std::rc::Rc;
 
-use gpui_kit::base::SelectableText;
 use gpui_kit::component::input::{Enter, Textarea, TextareaState};
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{h_flex, v_flex};
@@ -13,6 +12,7 @@ use treeterm_core::review::{Freshness, ReviewComment};
 use treeterm_model::review::GitOp;
 
 use crate::theme::colors;
+use crate::ui::ReadingOrder;
 
 /// Acts on a comment (by id) or on the comment box's text.
 pub type TextAction = Rc<dyn Fn(&str, &mut App)>;
@@ -67,7 +67,15 @@ fn delete_button(id: &str, actions: &CommentActions, cx: &App) -> AnyElement {
 
 /// `CommentDisplay`: the text, its time, and × to delete. The header carries the line
 /// (`Placement::Viewer`) and the "Outdated" badge; with neither, × sits beside the text.
-pub fn comment_display(comment: &ReviewComment, placement: &Placement, actions: &CommentActions, cx: &App) -> AnyElement {
+/// The text takes the next of `text`'s orders: the caller shows its comments in reading
+/// order.
+pub fn comment_display(
+    comment: &ReviewComment,
+    placement: &Placement,
+    actions: &CommentActions,
+    text: &mut ReadingOrder,
+    cx: &App,
+) -> AnyElement {
     let c = colors(cx);
     let (secondary, primary, tertiary, border, accent) = (c.text_secondary, c.text_primary, c.bg_tertiary, c.border, c.accent);
     let outdated = comment.freshness == Freshness::Outdated;
@@ -144,7 +152,7 @@ pub fn comment_display(comment: &ReviewComment, placement: &Placement, actions: 
                 div()
                     .flex_1()
                     .min_w_0()
-                    .child(SelectableText::new(SharedString::from(format!("comment-text-{}", comment.id)), comment.text.clone())),
+                    .child(text.text(SharedString::from(format!("comment-text-{}", comment.id)), comment.text.clone())),
             )
             .when(!header, |d| d.child(div().ml(px(8.)).child(delete_button(&comment.id, actions, cx)))),
     )
@@ -287,24 +295,26 @@ mod tests {
         Delete(String),
     }
 
-    /// A 400px column: `comment` as `placement` shows it, over the comment box. The window's
-    /// focus is the app's: a mouse-down anywhere else takes it from the comment box.
+    /// A 400px column: `comments` as `placement` shows them, over the comment box. The
+    /// window's focus is the app's: a mouse-down anywhere else takes it from the comment box.
     struct Host {
         focus: FocusHandle,
-        comment: ReviewComment,
+        comments: Vec<ReviewComment>,
         placement: Placement,
+        /// The view's own document orders.
+        first_order: u64,
         input: Entity<TextareaState>,
         actions: CommentActions,
     }
 
     impl Render for Host {
         fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-            v_flex()
-                .w(px(400.))
-                .h_full()
-                .track_focus(&self.focus)
-                .child(comment_display(&self.comment, &self.placement, &self.actions, cx))
-                .child(comment_input(&self.input, true, "Comment on line 3".to_owned(), &GitOp::Idle, &self.actions, window, cx))
+            let mut text = ReadingOrder::after(self.first_order);
+            let mut column = v_flex().w(px(400.)).h_full().track_focus(&self.focus);
+            for comment in &self.comments {
+                column = column.child(comment_display(comment, &self.placement, &self.actions, &mut text, cx));
+            }
+            column.child(comment_input(&self.input, true, "Comment on line 3".to_owned(), &GitOp::Idle, &self.actions, window, cx))
         }
     }
 
@@ -329,10 +339,10 @@ mod tests {
         cx.run_until_parked();
     }
 
-    /// An active window (in GPUI Kit's root, which selects and copies text) showing `comment`
-    /// over the focused comment box; what was asked of the buttons and keys.
+    /// An active window (in GPUI Kit's root, which selects and copies text) showing
+    /// `comments` over the focused comment box; what was asked of the buttons and keys.
     fn host(
-        comment: ReviewComment,
+        comments: Vec<ReviewComment>,
         placement: Placement,
         cx: &mut TestAppContext,
     ) -> (Entity<Host>, Rc<RefCell<Vec<Asked>>>, &mut VisualTestContext) {
@@ -350,7 +360,8 @@ mod tests {
             crate::theme::install(cx);
             gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
                 let input = cx.new(|cx| TextareaState::new(window, cx));
-                cx.new(|cx| Host { focus: cx.focus_handle(), comment, placement, input, actions })
+                let first_order = crate::ui::document_orders();
+                cx.new(|cx| Host { focus: cx.focus_handle(), comments, placement, first_order, input, actions })
             })
             .expect("open a window")
         });
@@ -385,7 +396,7 @@ mod tests {
     /// else is held, and `preventDefault`s the newline.
     #[gpui_kit::test]
     fn cmd_or_ctrl_enter_submits_on_every_platform_and_types_no_newline(cx: &mut TestAppContext) {
-        let (view, asked, cx) = host(comment("noted", Freshness::Current), Placement::Diff, cx);
+        let (view, asked, cx) = host(vec![comment("noted", Freshness::Current)], Placement::Diff, cx);
         cx.simulate_input("looks off");
         draw(cx);
         for key in ["cmd-enter", "ctrl-enter", "cmd-shift-enter", "ctrl-alt-enter"] {
@@ -398,7 +409,7 @@ mod tests {
     /// Enter and Shift+Enter type a newline and submit nothing; Esc cancels.
     #[gpui_kit::test]
     fn enter_and_shift_enter_type_a_newline_and_escape_cancels(cx: &mut TestAppContext) {
-        let (view, asked, cx) = host(comment("noted", Freshness::Current), Placement::Diff, cx);
+        let (view, asked, cx) = host(vec![comment("noted", Freshness::Current)], Placement::Diff, cx);
         cx.simulate_input("a");
         press("enter", cx);
         cx.simulate_input("b");
@@ -439,7 +450,7 @@ mod tests {
     /// Drag over [`TEXT`] shown in `placement`, after typing in the comment box, then
     /// Cmd/Ctrl+C: what the clipboard holds.
     fn copy_the_comment(placement: Placement, cx: &mut TestAppContext) -> Option<String> {
-        let (_, asked, cx) = host(comment(TEXT, Freshness::Current), placement, cx);
+        let (_, asked, cx) = host(vec![comment(TEXT, Freshness::Current)], placement, cx);
         cx.simulate_input("draft");
         draw(cx);
         let start = first_text(cx);
@@ -461,5 +472,49 @@ mod tests {
     fn the_comment_text_can_be_selected_and_copied_in_the_file_viewer(cx: &mut TestAppContext) {
         let placement = Placement::Viewer { reveal: Rc::new(|_, _| {}) };
         assert_eq!(copy_the_comment(placement, cx).as_deref(), Some(TEXT));
+    }
+
+    /// Where each run of selectable text starts, top to bottom, in the column of `first`
+    /// (hit testing follows the pointer).
+    fn texts_below(first: Point<Pixels>, cx: &mut VisualTestContext) -> Vec<Point<Pixels>> {
+        let mut starts = Vec::new();
+        let mut inside = false;
+        for y in first.y.as_f32() as u32..600 {
+            let at = point(first.x + px(1.), px(y as f32));
+            cx.simulate_mouse_move(at, None, Modifiers::none());
+            let selectable = cx.update(|window, cx| TextSelection::is_selectable_at(at, window, cx));
+            if selectable && !inside {
+                starts.push(at);
+            }
+            inside = selectable;
+        }
+        starts
+    }
+
+    /// Electron's comments are page text one under another: a drag over several, either
+    /// way, copies them in reading order, a line each. (GPUI Kit orders the runs it copies by
+    /// their document order alone: were the comments' the same, it would copy them in an
+    /// order of its own.)
+    #[gpui_kit::test]
+    fn a_drag_over_several_comments_copies_them_in_reading_order(cx: &mut TestAppContext) {
+        const TEXTS: [&str; 6] = ["first", "second", "third", "fourth", "fifth", "sixth"];
+        let comments = TEXTS
+            .iter()
+            .enumerate()
+            .map(|(n, text)| ReviewComment { id: format!("c{n}"), line_number: n as u32 + 1, ..comment(text, Freshness::Current) })
+            .collect();
+        let (_, asked, cx) = host(comments, Placement::Viewer { reveal: Rc::new(|_, _| {}) }, cx);
+        let texts = texts_below(first_text(cx), cx);
+        assert_eq!(texts.len(), TEXTS.len(), "{texts:?}");
+        // The start of a text's line, and past its end.
+        let start = |at: Point<Pixels>| at + point(px(-1.), px(5.));
+        let past_the_end = |at: Point<Pixels>| at + point(px(300.), px(5.));
+
+        let all = TEXTS.join("\n");
+        assert_eq!(drag_and_copy(start(texts[0]), past_the_end(texts[5]), cx), Some(all.clone()), "downwards");
+        assert_eq!(drag_and_copy(past_the_end(texts[5]), start(texts[0]), cx), Some(all), "upwards");
+        let middle = drag_and_copy(start(texts[1]), past_the_end(texts[4]), cx);
+        assert_eq!(middle.as_deref(), Some("second\nthird\nfourth\nfifth"));
+        assert_eq!(take(&asked), vec![]);
     }
 }

@@ -7,9 +7,15 @@
 //! (side by side: each deletion before its addition; unified: a change's deletions before
 //! its additions), and lines folded away are skipped as Electron skips them. An unchanged
 //! line is found on the new side.
+//!
+//! The same rows give the order a selection over the diff's review comments copies them in.
+
+use std::collections::HashMap;
 
 use treeterm_core::review::Side;
 use treeterm_core::search::{DiffStyle, LineMatcher, UnchangedRegions};
+
+use crate::review_patch::{FileDiff, FileDiffs};
 
 /// Unchanged lines kept around each change before the rest folds (Pierre showed 4).
 pub const DIFF_CONTEXT: usize = 4;
@@ -42,11 +48,12 @@ struct SourceLine {
     text: String,
 }
 
-/// A row of GPUI Kit's diff: an unchanged line on both sides, or the nth line of a
-/// change's deletions beside its nth addition.
+/// A row of GPUI Kit's diff: an unchanged line on both sides (its number in the original
+/// file, and the line in the modified one), or the nth line of a change's deletions beside
+/// its nth addition.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Pair {
-    Unchanged { modified: SourceLine },
+    Unchanged { original: u32, modified: SourceLine },
     Changed { original: Option<SourceLine>, modified: Option<SourceLine> },
 }
 
@@ -135,7 +142,7 @@ fn parse(patch: &str) -> Vec<PatchFile> {
                 Some(b'\\') => {} // "\ No newline at end of file"
                 Some(_) | None => {
                     current.flush(&mut deleted, &mut added);
-                    current.pairs.push(Pair::Unchanged { modified: SourceLine { line: new, text } });
+                    current.pairs.push(Pair::Unchanged { original: old, modified: SourceLine { line: new, text } });
                     old += 1;
                     new += 1;
                 }
@@ -206,7 +213,7 @@ fn rows(file: &PatchFile, layout: DiffLayout) -> Vec<(Side, &SourceLine)> {
             continue;
         }
         match &pairs[ix] {
-            Pair::Unchanged { modified } => {
+            Pair::Unchanged { modified, .. } => {
                 rows.push((Side::Modified, modified));
                 ix += 1;
             }
@@ -263,6 +270,53 @@ pub fn find_in_patch(patch: &str, files: &[String], query: &str, layout: DiffLay
                 .collect::<Vec<_>>()
         })
         .collect()
+}
+
+/// The order to read `lines` (path, side, 1-based line) of the diff in, as indexes into
+/// `lines`: file by file in `files` order, then row by row as the diff lays them out with
+/// every unchanged region unfolded (a fold hides rows but moves none). An unchanged line is
+/// one row on both sides, and a row's deleted side (side by side, its left) is read first.
+/// Lines a file's loaded diff does not show come after those it does, by line; a file not
+/// in `files` comes last.
+pub fn reading_order(diffs: &FileDiffs, files: &[String], lines: &[(String, Side, u32)], style: DiffStyle) -> Vec<usize> {
+    let mut shown: HashMap<&str, HashMap<(Side, u32), usize>> = HashMap::new();
+    for (path, _, _) in lines {
+        if shown.contains_key(path.as_str()) {
+            continue;
+        }
+        let rows = match diffs.get(path) {
+            Some(FileDiff::Loaded(section)) => {
+                parse(section).iter().find(|file| &file.path == path).map(|file| line_rows(file, style)).unwrap_or_default()
+            }
+            Some(FileDiff::NotLoaded | FileDiff::Loading | FileDiff::Failed(_)) | None => HashMap::new(),
+        };
+        shown.insert(path, rows);
+    }
+    let mut order: Vec<usize> = (0..lines.len()).collect();
+    order.sort_by_cached_key(|&ix| {
+        let (path, side, line) = &lines[ix];
+        let file = files.iter().position(|listed| listed == path).unwrap_or(files.len());
+        let row = shown.get(path.as_str()).and_then(|rows| rows.get(&(*side, *line))).copied();
+        (file, row.is_none(), row, *line, *side == Side::Modified)
+    });
+    order
+}
+
+/// Each line's row in `file`'s diff, every unchanged region unfolded, numbered in [`rows`]'
+/// order (side by side, a change's nth deletion just before its nth addition); an unchanged
+/// line has the same row on both sides.
+fn line_rows(file: &PatchFile, style: DiffStyle) -> HashMap<(Side, u32), usize> {
+    let layout = DiffLayout { style, unchanged: UnchangedRegions::Expanded };
+    let mut at: HashMap<(Side, u32), usize> =
+        rows(file, layout).into_iter().enumerate().map(|(row, (side, line))| ((side, line.line), row)).collect();
+    for pair in &file.pairs {
+        if let Pair::Unchanged { original, modified } = pair
+            && let Some(&row) = at.get(&(Side::Modified, modified.line))
+        {
+            at.insert((Side::Original, *original), row);
+        }
+    }
+    at
 }
 
 /// The matches in `file` first ("In this file"), then the rest of the diff in order.
@@ -437,6 +491,109 @@ mod tests {
                 (Side::Modified, 21),
                 (Side::Modified, 22),
             ]
+        );
+    }
+
+    /// `lines` in the order [`reading_order`] reads them, `files` listed with their diffs
+    /// read from `patch` (and `unread` listed, not read yet).
+    fn read_in_order(
+        patch: &str,
+        files: &[&str],
+        unread: &[&str],
+        lines: &[(&str, Side, u32)],
+        style: DiffStyle,
+    ) -> Vec<(String, Side, u32)> {
+        let mut diffs = FileDiffs::not_loaded(files.iter().chain(unread).copied());
+        diffs.set_read(files.iter().copied(), &Ok(patch.to_owned()));
+        let listed: Vec<String> = files.iter().chain(unread).map(|path| (*path).to_owned()).collect();
+        let lines: Vec<(String, Side, u32)> = lines.iter().map(|(path, side, line)| ((*path).to_owned(), *side, *line)).collect();
+        reading_order(&diffs, &listed, &lines, style).into_iter().map(|ix| lines[ix].clone()).collect()
+    }
+
+    fn owned(lines: &[(&str, Side, u32)]) -> Vec<(String, Side, u32)> {
+        lines.iter().map(|(path, side, line)| ((*path).to_owned(), *side, *line)).collect()
+    }
+
+    #[test]
+    fn comments_on_a_change_read_deletion_beside_addition_or_deletions_first() {
+        let patch = "diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1,2 +1,3 @@\n-x one\n-x two\n+x ONE\n+x TWO\n+x three\n";
+        let lines = [
+            ("a.txt", Side::Modified, 1),
+            ("a.txt", Side::Original, 2),
+            ("a.txt", Side::Modified, 3),
+            ("a.txt", Side::Original, 1),
+            ("a.txt", Side::Modified, 2),
+        ];
+        assert_eq!(
+            read_in_order(patch, &["a.txt"], &[], &lines, DiffStyle::Split),
+            owned(&[
+                ("a.txt", Side::Original, 1),
+                ("a.txt", Side::Modified, 1),
+                ("a.txt", Side::Original, 2),
+                ("a.txt", Side::Modified, 2),
+                ("a.txt", Side::Modified, 3),
+            ])
+        );
+        assert_eq!(
+            read_in_order(patch, &["a.txt"], &[], &lines, DiffStyle::Unified),
+            owned(&[
+                ("a.txt", Side::Original, 1),
+                ("a.txt", Side::Original, 2),
+                ("a.txt", Side::Modified, 1),
+                ("a.txt", Side::Modified, 2),
+                ("a.txt", Side::Modified, 3),
+            ])
+        );
+    }
+
+    /// Below a change that added a line, an unchanged line's numbers differ by one: its row,
+    /// not its number, places it, and both its sides share the row (deleted side first).
+    #[test]
+    fn comments_read_by_row_not_by_line_number() {
+        let patch = patch_changing("a", 10, &[2]);
+        let lines = [
+            ("a", Side::Modified, 6),
+            ("a", Side::Original, 5),
+            ("a", Side::Modified, 5),
+            ("a", Side::Original, 2),
+            ("a", Side::Modified, 3),
+        ];
+        let read = owned(&[
+            ("a", Side::Original, 2),
+            ("a", Side::Modified, 3),
+            ("a", Side::Modified, 5),
+            ("a", Side::Original, 5),
+            ("a", Side::Modified, 6),
+        ]);
+        assert_eq!(read_in_order(&patch, &["a"], &[], &lines, DiffStyle::Split), read);
+        assert_eq!(read_in_order(&patch, &["a"], &[], &lines, DiffStyle::Unified), read);
+    }
+
+    /// Files in list order; in a file, the lines its diff does not show (or all of them,
+    /// before its diff is read) after the rest, by line; a file not listed last.
+    #[test]
+    fn comments_read_file_by_file_and_lines_not_shown_last() {
+        let patch = format!("{}{}", whole_file_patch("a", 3, 2), whole_file_patch("b", 3, 2));
+        let lines = [
+            ("gone", Side::Modified, 1),
+            ("a", Side::Original, 50),
+            ("unread", Side::Modified, 9),
+            ("a", Side::Modified, 1),
+            ("b", Side::Modified, 99),
+            ("unread", Side::Original, 3),
+            ("b", Side::Modified, 2),
+        ];
+        assert_eq!(
+            read_in_order(&patch, &["b", "a"], &["unread"], &lines, DiffStyle::Split),
+            owned(&[
+                ("b", Side::Modified, 2),
+                ("b", Side::Modified, 99),
+                ("a", Side::Modified, 1),
+                ("a", Side::Original, 50),
+                ("unread", Side::Original, 3),
+                ("unread", Side::Modified, 9),
+                ("gone", Side::Modified, 1),
+            ])
         );
     }
 }

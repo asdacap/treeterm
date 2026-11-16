@@ -3,9 +3,6 @@
 //! Several of its CSS rules use `var(--border)`, which is not defined: those borders are not
 //! drawn in Electron, so they are not drawn here either.
 
-use std::sync::atomic::{AtomicU64, Ordering};
-
-use gpui_kit::base::SelectableText;
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::*;
@@ -18,7 +15,7 @@ use treeterm_model::session_store::SessionStore;
 use treeterm_model::tool_tabs::comments::{CodeLine, CommentsModel, PushState, created_at};
 
 use crate::theme::colors;
-use crate::ui::{MONO, normal_line};
+use crate::ui::{MONO, ReadingOrder, document_orders, normal_line};
 
 pub struct CommentsView {
     model: Entity<CommentsModel>,
@@ -38,26 +35,6 @@ impl CommentsView {
     pub fn new(model: Entity<CommentsModel>, session: Entity<SessionStore>, workspace_id: String, cx: &mut Context<Self>) -> Self {
         let observe = cx.observe(&model, |_, _, cx| cx.notify());
         Self { model, session, workspace_id, first_order: document_orders(), focus: cx.focus_handle(), _observe: observe }
-    }
-}
-
-/// A range of selection document orders of a view's own. A drag from one run of selectable
-/// text to another selects every run of the window whose order lies between theirs, so two
-/// Comments tabs side by side, or another view's text, must not share orders.
-fn document_orders() -> u64 {
-    static NEXT: AtomicU64 = AtomicU64::new(1);
-    NEXT.fetch_add(1, Ordering::Relaxed) << 32
-}
-
-/// Text that can be selected and copied (Cmd/Ctrl+C), as in the browser: the paths, code,
-/// comments and prompt. Each run takes the next document order, so that a drag over several
-/// copies them in reading order, a line each.
-struct ReadingOrder(u64);
-
-impl ReadingOrder {
-    fn text(&mut self, id: impl Into<ElementId>, text: impl Into<SharedString>) -> SelectableText {
-        self.0 += 1;
-        SelectableText::new(id, text).document_order(self.0)
     }
 }
 
@@ -162,7 +139,8 @@ impl Render for CommentsView {
         let prompted = comments.len() - unprompted;
         let shown: Vec<_> = comments.iter().filter(|c| c.resolution == filter).cloned().collect();
         let contexts: Vec<_> = shown.iter().map(|comment| model.code_context(comment)).collect();
-        let mut text = ReadingOrder(self.first_order);
+        // The paths, code, comments and prompt can be selected and copied, as in the browser.
+        let mut text = ReadingOrder::after(self.first_order);
 
         let tab = |id: &'static str, label: String, target: Resolution, cx: &mut Context<Self>| {
             let active = filter == target;
@@ -430,7 +408,7 @@ mod tests {
 
     impl Render for Card {
         fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-            let mut text = ReadingOrder(0);
+            let mut text = ReadingOrder::after(0);
             let lines = code_context(&self.file, 2).expect("line 2");
             v_flex().w(px(300.)).child(code_block("code", lines, &mut text, cx)).child(text.text("comment", "the comment"))
         }

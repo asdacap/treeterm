@@ -45,7 +45,7 @@ use crate::comment_ui::{CommentActions, Placement, comment_display, comment_inpu
 use crate::editor_hooks::Follow;
 
 use crate::theme::colors;
-use crate::ui;
+use crate::ui::{self, ReadingOrder};
 
 mod markdown;
 mod vs_dark;
@@ -473,6 +473,8 @@ pub struct FileBrowserView {
     definition_clicked: Rc<Cell<bool>>,
     draft_input: Option<DraftInput>,
     comments_scroll: gpui_kit::ScrollHandle,
+    /// Where the [`ReadingOrder`] of the comments' text starts.
+    first_order: u64,
     /// The Files tab is on screen ([`Self::set_visible`]).
     visible: bool,
     _observe: Subscription,
@@ -680,6 +682,7 @@ impl FileBrowserView {
             definition_clicked: Rc::new(Cell::new(false)),
             draft_input: None,
             comments_scroll: gpui_kit::ScrollHandle::new(),
+            first_order: ui::document_orders(),
             visible: false,
             _observe: observe,
             _workspace: comments,
@@ -1763,8 +1766,11 @@ impl FileBrowserView {
         }
         lines.sort_by_key(|(line, _)| *line);
         let count: usize = lines.iter().map(|(_, group)| group.len()).sum();
-        let groups = lines.into_iter().map(|(line, group)| {
-            v_flex()
+        // The comments' text takes document orders in the panel's order.
+        let mut text = ReadingOrder::after(self.first_order);
+        let mut groups = Vec::new();
+        for (line, group) in lines {
+            let mut shown = v_flex()
                 .id(SharedString::from(format!("comment-group-{line}")))
                 .gap(px(4.))
                 .mx(px(8.))
@@ -1774,10 +1780,12 @@ impl FileBrowserView {
                 .rounded(px(4.))
                 .border_1()
                 .border_color(border)
-                .bg(bg_secondary)
-                .children(group.iter().map(|comment| comment_display(comment, &placement, &actions, cx)))
-                .into_any_element()
-        });
+                .bg(bg_secondary);
+            for comment in &group {
+                shown = shown.child(comment_display(comment, &placement, &actions, &mut text, cx));
+            }
+            groups.push(shown.into_any_element());
+        }
         let title = h_flex()
             .flex_shrink_0()
             .gap(px(6.))
