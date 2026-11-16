@@ -23,6 +23,7 @@ mod macos;
 mod menus;
 mod review_view;
 mod search_panel;
+mod tab_layout_view;
 mod tab_strip;
 mod settings_view;
 mod terminal_element;

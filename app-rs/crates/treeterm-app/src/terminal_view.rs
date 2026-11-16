@@ -112,6 +112,14 @@ fn terminal_shadowed(accelerators: impl IntoIterator<Item = &'static str>, optio
         .collect()
 }
 
+/// Whether a terminal coming into view takes keyboard focus: only the workspace's active tab
+/// does (`BaseTerminal` focuses on mount when `activeTabId` is its tab), not another tabset's.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Focus {
+    Take,
+    Leave,
+}
+
 pub struct TerminalView {
     model: Entity<TerminalModel>,
     focus: FocusHandle,
@@ -191,14 +199,14 @@ impl TerminalView {
         &self.focus
     }
 
-    /// This terminal came into view as the shown tab, as an Electron terminal mounts: it fits
-    /// its PTY to itself again, taking it back from a size another attachment set meanwhile,
-    /// and takes keyboard focus. Not from an open dialog, which gives focus back when it
-    /// closes.
-    pub fn on_shown(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// This terminal came into view in its tabset, as an Electron terminal mounts: it fits its
+    /// PTY to itself again, taking it back from a size another attachment set meanwhile, and,
+    /// when it is the workspace's active tab (`Focus::Take`), takes keyboard focus. Not from
+    /// an open dialog, which gives focus back when it closes.
+    pub fn on_shown(&mut self, focus: Focus, window: &mut Window, cx: &mut Context<Self>) {
         use gpui_kit::component::WindowExt as _;
         self.model.update(cx, |model, cx| model.refit(cx));
-        if !window.has_active_dialog(cx) {
+        if focus == Focus::Take && !window.has_active_dialog(cx) {
             window.focus(&self.focus, cx);
         }
     }

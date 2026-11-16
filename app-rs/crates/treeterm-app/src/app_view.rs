@@ -1,11 +1,12 @@
 //! Window content: daemon start-up screen, then tree pane + workspace pane.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use gpui_kit::component::{h_flex, spinner::Spinner, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{AnyElement, App, Context, Entity, EntityId, SharedString, Subscription, WeakEntity, Window, div, px};
 use treeterm_core::keybinding::{Action, PrefixAction};
+use treeterm_core::layout::{LayoutTabSet, NodePath};
 use indexmap::IndexMap;
 use treeterm_core::connection::ConnectionId;
 use treeterm_core::wire::workspace_file::WorktreeSettings;
@@ -16,7 +17,7 @@ use treeterm_model::session_names::Side;
 use treeterm_model::session_store::{SessionEvent, SessionStore, WorkspaceEntry};
 use treeterm_model::workspace_store::{ActivityStyle as _, PageHost, TabContent, WorkspaceStore};
 
-use crate::terminal_view::TerminalView;
+use crate::terminal_view::{Focus, TerminalView};
 use crate::theme::colors;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::Sizable as _;
@@ -125,19 +126,22 @@ struct Connected {
     traffic_badges: HashMap<String, Entity<crate::traffic_badge::TrafficBadge>>,
     /// Web App and Browser tabs not on their Browser sub-tab, by (workspace, tab).
     page_subtabs: HashMap<(String, String), PageSubTab>,
-    /// Each shown workspace's tab strip scroll, by workspace id.
-    tab_strips: HashMap<String, crate::tab_strip::TabStripState>,
+    /// Each shown tabset's strip scroll, by workspace id and tabset.
+    tab_strips: HashMap<(String, NodePath), crate::tab_strip::TabStripState>,
+    /// Each shown workspace's layout (splitters), by workspace id.
+    tab_layouts: HashMap<String, crate::tab_layout_view::TabLayoutState>,
     /// Views of tool tabs (GitHub, Comments, Chat, …).
     tool_views: crate::tool_views::ToolViews,
     /// The header's in-place name or description editor.
     header_edit: Option<HeaderEdit>,
     /// The branch badge reads "Copied!" for 1.5s after a click (`BranchBadge`).
     branch_copied: Option<(String, gpui_kit::Task<()>)>,
-    /// Focus the shown terminal on the next render (after a workspace or tab switch).
+    /// Focus the active tab's terminal (or Review) on the next render (after a workspace or
+    /// tab switch).
     focus_pending: bool,
-    /// The terminal model the last render showed: a terminal coming into view fits again and
-    /// takes focus.
-    shown_terminal: Option<EntityId>,
+    /// The terminal models the last render showed: a terminal coming into view fits again
+    /// (and, as the active tab, takes focus).
+    shown_terminals: HashSet<EntityId>,
     /// The shown loading workspace's git output (`AutoScrollPre`).
     loading_output: LoadingOutput,
     _selection: Subscription,
@@ -430,13 +434,14 @@ impl AppView {
             browser_views: HashMap::new(),
             page_subtabs: HashMap::new(),
             tab_strips: HashMap::new(),
+            tab_layouts: HashMap::new(),
             run_actions: HashMap::new(),
             traffic_badges: HashMap::new(),
             header_edit: None,
             branch_copied: None,
             tool_views: crate::tool_views::ToolViews::new(self.settings.clone()),
             focus_pending: false,
-            shown_terminal: None,
+            shown_terminals: HashSet::new(),
             loading_output: LoadingOutput::default(),
             _selection: selection,
             _session_events: session_events,
@@ -935,10 +940,10 @@ impl Render for AppView {
         for (_, connected) in self.sessions.iter().filter(|(id, _)| on_screen.as_ref() != Some(*id)) {
             hide_reviews(connected, cx);
         }
-        // A session off screen shows no terminal: its terminal is shown again (fits again and
-        // takes focus) when it returns.
+        // A session off screen shows no terminal: its terminals are shown again (fit again,
+        // the active tab's takes focus) when it returns.
         for (_, connected) in self.sessions.iter_mut().filter(|(id, _)| on_screen.as_ref() != Some(*id)) {
-            connected.shown_terminal = None;
+            connected.shown_terminals.clear();
         }
         let pane = match (info, self.current_mut()) {
             (Some(info), _) => info.into_any_element(),
@@ -1999,22 +2004,21 @@ fn escape_description(cx: &mut Context<AppView>) -> impl Fn(&gpui_kit::KeyDownEv
     })
 }
 
-/// The workspace's tab strip: its tabs in layout order, then "+" and the new-tab menu.
-fn workspace_tab_strip(
+/// A tabset's strip: its tabs, then "+" and the new-tab menu, and its maximize toggle.
+fn tabset_strip(
     connected: &mut Connected,
     workspace: &Entity<WorkspaceStore>,
     workspace_id: &str,
-    active: Option<String>,
+    tabset: &LayoutTabSet,
     cx: &mut Context<AppView>,
 ) -> AnyElement {
     use std::rc::Rc;
-    use crate::tab_strip::{NewTabApp, OnId, OnMove, StripTab, TabStrip};
+    use crate::tab_strip::{NewTabApp, OnId, OnMove, OnPress, StripTab, TabStrip};
     let registry = connected.session.read(cx).registry().clone();
     let store = workspace.read(cx);
     let file = &store.workspace().file;
-    let tabs: Vec<StripTab> = store
-        .layout()
-        .tab_order()
+    let tabs: Vec<StripTab> = tabset
+        .tabs
         .iter()
         .filter_map(|id| file.app_states.get_key_value(id))
         .map(|(tab_id, tab)| {
@@ -2036,9 +2040,18 @@ fn workspace_tab_strip(
     let on_select: OnId = {
         let (workspace, view) = (workspace.clone(), view.clone());
         Rc::new(move |tab: &str, _: &mut Window, cx: &mut App| {
-            workspace.update(cx, |w, cx| w.set_active_tab(tab, cx));
+            workspace.update(cx, |w, cx| w.select_tab(tab, cx));
             view.update(cx, |view, cx| view.focus_active_tab(cx));
         })
+    };
+    let path = tabset.path.clone();
+    let on_activate: OnPress = {
+        let (workspace, path) = (workspace.clone(), path.clone());
+        Rc::new(move |_: &mut Window, cx: &mut App| workspace.update(cx, |w, cx| w.activate_tabset(&path, cx)))
+    };
+    let on_maximize: OnPress = {
+        let (workspace, path) = (workspace.clone(), path.clone());
+        Rc::new(move |_: &mut Window, cx: &mut App| workspace.update(cx, |w, cx| w.toggle_maximize(&path, cx)))
     };
     let on_close: OnId = {
         let workspace = workspace.clone();
@@ -2051,16 +2064,32 @@ fn workspace_tab_strip(
             view.update(cx, |view, cx| view.focus_active_tab(cx));
         })
     };
+    // The new tab opens in this tabset (Electron's opened it in the active one).
     let on_new_tab: OnId = {
-        let workspace = workspace.clone();
+        let (workspace, path) = (workspace.clone(), path.clone());
         Rc::new(move |app: &str, _: &mut Window, cx: &mut App| {
-            workspace.update(cx, |w, cx| w.add_tab(app, cx));
+            workspace.update(cx, |w, cx| {
+                w.activate_tabset(&path, cx);
+                w.add_tab(app, cx)
+            });
             view.update(cx, |view, cx| view.focus_active_tab(cx));
         })
     };
-    let strip = TabStrip { tabs, active, apps, on_select, on_close, on_move, on_new_tab };
-    let state = connected.tab_strips.entry(workspace_id.to_owned()).or_default();
-    strip.render(workspace_id, state, cx.entity_id(), cx)
+    let strip = TabStrip {
+        tabs,
+        active: tabset.selected.clone(),
+        apps,
+        on_select,
+        on_close,
+        on_move,
+        on_new_tab,
+        on_activate,
+        maximize: tabset.maximize,
+        on_maximize,
+    };
+    let id = format!("{workspace_id}-{}", path.iter().map(usize::to_string).collect::<Vec<_>>().join("-"));
+    let state = connected.tab_strips.entry((workspace_id.to_owned(), path)).or_default();
+    strip.render(&id, state, cx.entity_id(), cx)
 }
 
 /// No workspace's tabs are on screen (none picked, or the one picked was removed, is loading
@@ -2085,8 +2114,8 @@ fn workspace_pane(
     let (secondary, error) = (c.text_secondary, c.error);
     prune_terminal_views(connected, cx);
     connected.tool_views.prune(connected.session.read(cx), cx);
-    // Set again below if this render shows a terminal.
-    let previous_terminal = connected.shown_terminal.take();
+    // Set again below for each terminal this render shows.
+    let previous_terminals = std::mem::take(&mut connected.shown_terminals);
     let Some(id) = connected.session.read(cx).active_workspace().map(str::to_owned) else {
         hide_reviews(connected, cx);
         // `.workspace-empty`.
@@ -2141,139 +2170,89 @@ fn workspace_pane(
         Some(WorkspaceEntry::OperationError { error, .. }) => Some(error.clone()),
         Some(_) | None => None,
     };
-    let active = workspace.read(cx).shown_tab();
-
-    let tabs = workspace_tab_strip(connected, &workspace, &id, active.clone(), cx);
-
     let header = workspace_header(connected, &workspace, &id, header_inset, operation_error, cx);
 
-    let content: AnyElement = match &active {
-        // An empty tabset: blank under a strip of only "+".
-        None => div().size_full().into_any_element(),
-        Some(tab_id) => match workspace.read(cx).tab_content(tab_id) {
-            Some(TabContent::Terminal(model)) => {
-                let view = connected
-                    .terminal_views
-                    .entry(model.entity_id())
-                    .or_insert_with(|| cx.new(|cx| TerminalView::new(model.clone(), window, cx)))
-                    .clone();
-                show_terminal(connected, previous_terminal, model.entity_id(), &view, window, cx);
-                let prompts = workspace
-                    .read(cx)
-                    .analyzer(tab_id)
-                    .is_some()
-                    .then(|| harness_prompt_buttons(&connected.session, &id, cx))
-                    .flatten();
-                v_flex()
-                    .size_full()
-                    .child(div().relative().flex_1().min_h_0().child(view).children(prompts))
-                    .child(terminal_status_bar(&workspace, tab_id, cx))
-                    .into_any_element()
-            }
-            Some(TabContent::Files(model)) => {
-                let view = connected
-                    .file_views
-                    .entry(model.entity_id())
-                    .or_insert_with(|| {
-                        cx.new(|cx| crate::file_browser_view::FileBrowserView::new(model.clone(), workspace.clone(), cx))
-                    })
-                    .clone();
-                div().size_full().child(view).into_any_element()
-            }
-            Some(TabContent::Editor(model)) => {
-                let view = connected
-                    .editor_views
-                    .entry(model.entity_id())
-                    .or_insert_with(|| cx.new(|cx| crate::text_editor_view::TextEditorView::new(model.clone(), cx)))
-                    .clone();
-                div().size_full().child(view).into_any_element()
-            }
-            Some(TabContent::Review(model)) => {
-                let view = connected
-                    .review_views
-                    .entry(model.entity_id())
-                    .or_insert_with(|| cx.new(|cx| crate::review_view::ReviewView::new(model.clone(), workspace.clone(), window, cx)))
-                    .clone();
-                if std::mem::take(&mut connected.focus_pending) {
-                    let focus = view.read(cx).focus_handle().clone();
-                    window.focus(&focus, cx);
-                }
-                div().size_full().child(view).into_any_element()
-            }
-            Some(TabContent::Browser { page, forward }) => browser_tab(connected, &workspace, &id, tab_id, &page, forward, cx),
-            Some(TabContent::WebApp { app, terminal, forward }) => {
-                web_app_tab(connected, previous_terminal, &workspace, &id, tab_id, &app, terminal, forward, window, cx)
-            }
-            Some(
-                tool @ (TabContent::GitHub
-                | TabContent::WorkspaceSettings
-                | TabContent::AnalyzerHistory(_)
-                | TabContent::Comments(_)
-                | TabContent::TtyList(_)
-                | TabContent::Chat(_)
-                | TabContent::PromptDebugger(_)
-                | TabContent::SshUpload(_)),
-            ) => {
-                let session = connected.session.clone();
-                let view = connected.tool_views.render(&session, &workspace, &id, tab_id, tool, window, cx);
-                div().size_full().child(view).into_any_element()
-            }
-            Some(TabContent::StartingTerminal) => {
-                centered(div().text_color(secondary).child("Starting terminal…"))
-            }
-            Some(TabContent::Failed(message)) => centered(div().text_color(error).child(message)),
-            Some(TabContent::NotPorted(app)) => centered(
-                div()
-                    .text_color(secondary)
-                    .child(format!("“{app}” tabs are not available in the native app yet")),
-            ),
-            None => centered(div().text_color(secondary).child("No tabs")),
-        },
+    // The layout's tabsets (flex-layout's `Layout`), each its strip over the tab it shows; a
+    // maximized one alone.
+    let active = workspace.read(cx).shown_tab();
+    let layout = workspace.read(cx).layout();
+    let tree = layout.tree();
+    let visible: Vec<LayoutTabSet> = match tree.maximized() {
+        Some(maximized) => vec![maximized.clone()],
+        None => tree.tabsets().into_iter().cloned().collect(),
     };
+    let mut panes = HashMap::new();
+    for tabset in &visible {
+        let strip = tabset_strip(connected, &workspace, &id, tabset, cx);
+        let content = match &tabset.selected {
+            // An empty tabset: blank under a strip of only "+".
+            None => div().size_full().into_any_element(),
+            Some(tab_id) => {
+                let focus = if active.as_ref() == Some(tab_id) { Focus::Take } else { Focus::Leave };
+                let shown = ShownTab { previous_terminals: &previous_terminals, focus };
+                tab_content(connected, shown, &workspace, &id, tab_id, window, cx)
+            }
+        };
+        // A press in another tabset's content makes it the active one (flex-layout's `Tab`).
+        let mut body = div().flex_1().min_h_0();
+        if !tabset.active {
+            let (workspace, path) = (workspace.clone(), tabset.path.clone());
+            body = body.capture_any_mouse_down(move |_, _, cx| workspace.update(cx, |w, cx| w.activate_tabset(&path, cx)));
+        }
+        panes.insert(tabset.path.clone(), v_flex().size_full().child(strip).child(body.child(content)).into_any_element());
+    }
+    let on_resize: crate::tab_layout_view::OnResize = {
+        let workspace = workspace.clone();
+        std::rc::Rc::new(move |row: &[usize], weights: &[f64], _: &mut Window, cx: &mut App| {
+            workspace.update(cx, |w, cx| w.resize_layout_row(row, weights, cx));
+        })
+    };
+    let view = cx.entity_id();
+    let state = connected.tab_layouts.entry(id.clone()).or_default();
+    let tabsets = crate::tab_layout_view::TabLayout { tree: &tree, splitters: layout.splitters(), panes, on_resize, id: &id, view }
+        .render(state, cx);
 
-    // Native webviews draw above GPUI: show only the active tab's, and none under a dialog.
+    // Native webviews draw above GPUI: show only those of the tabs shown, and none under a
+    // dialog.
     let dialog_open = {
         use gpui_kit::component::WindowExt as _;
         window.has_active_dialog(cx)
     };
+    let shown: Vec<String> = visible.iter().filter_map(|tabset| tabset.selected.clone()).collect();
     // A Web App or Browser tab shows its page only on its Browser sub-tab.
-    let shown_key = active
-        .clone()
-        .map(|tab| (id.clone(), tab))
-        .filter(|key| connected.page_subtabs.get(key).is_none_or(|sub| *sub == PageSubTab::Browser));
+    let shown_pages: HashSet<(String, String)> = shown
+        .iter()
+        .map(|tab| (id.clone(), tab.clone()))
+        .filter(|key| connected.page_subtabs.get(key).is_none_or(|sub| *sub == PageSubTab::Browser))
+        .collect();
     let views: Vec<((String, String), Entity<crate::browser_view::BrowserView>)> =
         connected.browser_views.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
     for (key, view) in views {
-        let shown = !dialog_open && shown_key.as_ref() == Some(&key);
+        let shown = !dialog_open && shown_pages.contains(&key);
         view.update(cx, |v, cx| v.set_shown(shown, cx));
     }
-    let shown_files = match &active {
-        Some(tab) => match workspace.read(cx).tab_content(tab) {
-            Some(TabContent::Files(model)) => Some(model.entity_id()),
-            Some(_) | None => None,
-        },
-        None => None,
-    };
+    let contents: Vec<TabContent> = shown.iter().filter_map(|tab| workspace.read(cx).tab_content(tab)).collect();
+    let shown_files: HashSet<EntityId> = contents
+        .iter()
+        .filter_map(|content| if let TabContent::Files(model) = content { Some(model.entity_id()) } else { None })
+        .collect();
     let file_views: Vec<(EntityId, Entity<crate::file_browser_view::FileBrowserView>)> =
         connected.file_views.iter().map(|(k, v)| (*k, v.clone())).collect();
     for (model_id, view) in file_views {
-        let shown = !dialog_open && shown_files == Some(model_id);
+        let shown = !dialog_open && shown_files.contains(&model_id);
         view.update(cx, |v, cx| v.set_shown(shown, cx));
     }
     // Review shows a favourite's file (a PDF or model in a webview) in place of the diff, and
     // refreshes when it is shown again (whatever switched to it: the tab strip, a shortcut,
     // the header's Review button, another workspace and back, a synced tab change).
-    let shown_review = match &active {
-        Some(tab) => match workspace.read(cx).tab_content(tab) {
-            Some(TabContent::Review(model)) => Some(model.entity_id()),
-            Some(_) | None => None,
-        },
-        None => None,
-    };
+    let shown_reviews: HashSet<EntityId> = contents
+        .iter()
+        .filter_map(|content| if let TabContent::Review(model) = content { Some(model.entity_id()) } else { None })
+        .collect();
     let review_views: Vec<(EntityId, Entity<crate::review_view::ReviewView>)> =
         connected.review_views.iter().map(|(k, v)| (*k, v.clone())).collect();
     for (model_id, view) in review_views {
-        let visible = shown_review == Some(model_id);
+        let visible = shown_reviews.contains(&model_id);
         view.update(cx, |v, cx| {
             v.set_shown(!dialog_open && visible, cx);
             v.set_visible(visible, cx);
@@ -2285,9 +2264,111 @@ fn workspace_pane(
         .h_full()
         .min_w_0()
         .child(header)
-        .child(tabs)
-        .child(div().flex_1().min_h_0().child(content))
+        .child(div().flex().flex_1().min_h_0().child(tabsets))
         .into_any_element()
+}
+
+/// What the tab `tab_id` shows in its tabset. Only the workspace's active tab takes keyboard
+/// focus when a switch asked for it (`shown.focus`).
+fn tab_content(
+    connected: &mut Connected,
+    shown: ShownTab<'_>,
+    workspace: &Entity<WorkspaceStore>,
+    id: &str,
+    tab_id: &str,
+    window: &mut Window,
+    cx: &mut Context<AppView>,
+) -> AnyElement {
+    let c = colors(cx);
+    let (secondary, error) = (c.text_secondary, c.error);
+    let ShownTab { previous_terminals, focus } = shown;
+    match workspace.read(cx).tab_content(tab_id) {
+        Some(TabContent::Terminal(model)) => {
+            let view = connected
+                .terminal_views
+                .entry(model.entity_id())
+                .or_insert_with(|| cx.new(|cx| TerminalView::new(model.clone(), window, cx)))
+                .clone();
+            show_terminal(connected, previous_terminals, model.entity_id(), &view, focus, window, cx);
+            let prompts = workspace
+                .read(cx)
+                .analyzer(tab_id)
+                .is_some()
+                .then(|| harness_prompt_buttons(&connected.session, id, cx))
+                .flatten();
+            v_flex()
+                .size_full()
+                .child(div().relative().flex_1().min_h_0().child(view).children(prompts))
+                .child(terminal_status_bar(workspace, tab_id, cx))
+                .into_any_element()
+        }
+        Some(TabContent::Files(model)) => {
+            let view = connected
+                .file_views
+                .entry(model.entity_id())
+                .or_insert_with(|| {
+                    cx.new(|cx| crate::file_browser_view::FileBrowserView::new(model.clone(), workspace.clone(), cx))
+                })
+                .clone();
+            div().size_full().child(view).into_any_element()
+        }
+        Some(TabContent::Editor(model)) => {
+            let view = connected
+                .editor_views
+                .entry(model.entity_id())
+                .or_insert_with(|| cx.new(|cx| crate::text_editor_view::TextEditorView::new(model.clone(), cx)))
+                .clone();
+            div().size_full().child(view).into_any_element()
+        }
+        Some(TabContent::Review(model)) => {
+            let view = connected
+                .review_views
+                .entry(model.entity_id())
+                .or_insert_with(|| cx.new(|cx| crate::review_view::ReviewView::new(model.clone(), workspace.clone(), window, cx)))
+                .clone();
+            if focus == Focus::Take && std::mem::take(&mut connected.focus_pending) {
+                let focus = view.read(cx).focus_handle().clone();
+                window.focus(&focus, cx);
+            }
+            div().size_full().child(view).into_any_element()
+        }
+        Some(TabContent::Browser { page, forward }) => browser_tab(connected, workspace, id, tab_id, &page, forward, cx),
+        Some(TabContent::WebApp { app, terminal, forward }) => {
+            web_app_tab(connected, shown, workspace, id, tab_id, &app, terminal, forward, window, cx)
+        }
+        Some(
+            tool @ (TabContent::GitHub
+            | TabContent::WorkspaceSettings
+            | TabContent::AnalyzerHistory(_)
+            | TabContent::Comments(_)
+            | TabContent::TtyList(_)
+            | TabContent::Chat(_)
+            | TabContent::PromptDebugger(_)
+            | TabContent::SshUpload(_)),
+        ) => {
+            let session = connected.session.clone();
+            let view = connected.tool_views.render(&session, workspace, id, tab_id, tool, window, cx);
+            div().size_full().child(view).into_any_element()
+        }
+        Some(TabContent::StartingTerminal) => {
+            centered(div().text_color(secondary).child("Starting terminal…"))
+        }
+        Some(TabContent::Failed(message)) => centered(div().text_color(error).child(message)),
+        Some(TabContent::NotPorted(app)) => centered(
+            div()
+                .text_color(secondary)
+                .child(format!("“{app}” tabs are not available in the native app yet")),
+        ),
+        None => centered(div().text_color(secondary).child("No tabs")),
+    }
+}
+
+/// A tab being drawn in its tabset: the terminals the last render showed, and whether it is
+/// the workspace's active tab.
+#[derive(Clone, Copy)]
+struct ShownTab<'a> {
+    previous_terminals: &'a HashSet<EntityId>,
+    focus: Focus,
 }
 
 /// A Web App tab (`WebAppPane`): Browser and Shell sub-tabs over its page and its server's
@@ -2550,7 +2631,7 @@ fn browser_tab(
 #[allow(clippy::too_many_arguments)]
 fn web_app_tab(
     connected: &mut Connected,
-    previous_terminal: Option<EntityId>,
+    shown: ShownTab<'_>,
     workspace: &Entity<treeterm_model::workspace_store::WorkspaceStore>,
     workspace_id: &str,
     tab_id: &str,
@@ -2583,7 +2664,7 @@ fn web_app_tab(
                     .entry(model.entity_id())
                     .or_insert_with(|| cx.new(|cx| TerminalView::new(model.clone(), window, cx)))
                     .clone();
-                show_terminal(connected, previous_terminal, model.entity_id(), &view, window, cx);
+                show_terminal(connected, shown.previous_terminals, model.entity_id(), &view, shown.focus, window, cx);
                 v_flex()
                     .size_full()
                     .child(div().flex_1().min_h_0().child(view))
@@ -2747,24 +2828,26 @@ fn terminal_status_bar(
         .into_any_element()
 }
 
-/// Show the terminal of `model` in the workspace pane. Electron mounts only the shown tab's
-/// terminal, so one not shown in the last render comes into view as a mount does (it fits
-/// again and takes keyboard focus): after its tab is added or picked here or in another
-/// window, a workspace switch, or the shown tab closing or its program exiting. A tab or
-/// workspace switch that asked for focus also focuses it when it stays shown.
+/// Show the terminal of `model` in its tabset. Electron mounts only the terminals of the tabs
+/// its tabsets show, so one not shown in the last render comes into view as a mount does (it
+/// fits again and, as the active tab, takes keyboard focus): after its tab is added or picked
+/// here or in another window, a workspace switch, its tabset restored, or the tab shown
+/// before it closing or its program exiting. A tab or workspace switch that asked for focus
+/// also focuses the active tab's terminal when it stays shown.
 fn show_terminal(
     connected: &mut Connected,
-    previous: Option<EntityId>,
+    previous: &HashSet<EntityId>,
     model: EntityId,
     view: &Entity<TerminalView>,
+    focus: Focus,
     window: &mut Window,
     cx: &mut Context<AppView>,
 ) {
-    connected.shown_terminal = Some(model);
-    if previous != Some(model) {
-        view.update(cx, |view, cx| view.on_shown(window, cx));
+    connected.shown_terminals.insert(model);
+    if !previous.contains(&model) {
+        view.update(cx, |view, cx| view.on_shown(focus, window, cx));
     }
-    if std::mem::take(&mut connected.focus_pending) {
+    if focus == Focus::Take && std::mem::take(&mut connected.focus_pending) {
         let focus = view.read(cx).focus_handle().clone();
         window.focus(&focus, cx);
     }

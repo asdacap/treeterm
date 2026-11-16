@@ -1,10 +1,10 @@
 //! The tab layout (`metadata.layoutModel`, Electron's flex-layout model) against a real
 //! in-process daemon: what the workspace shows, and what it saves when tabs come and go, are
-//! selected or are dragged.
+//! selected or are dragged, and when a tabset is activated, maximized or resized.
 
 use gpui_kit::{AppContext as _, Entity, TestAppContext};
 use serde_json::{Value, json};
-use treeterm_core::layout::{Layout, Side};
+use treeterm_core::layout::{Layout, LayoutNode, LayoutTabSet, Maximize, Orientation, Side};
 use treeterm_model::session_store::{SessionState, SessionStore, WorkspaceEntry};
 use treeterm_model::settings_store::SettingsStore;
 use treeterm_model::workspace_store::WorkspaceStore;
@@ -241,4 +241,225 @@ fn a_body_from_another_writer_is_shown_with_its_layout_reconciled_but_not_rewrit
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
     assert_eq!(std::fs::read_to_string(&path).unwrap(), written, "the other writer's body stays as written");
+}
+
+/// `a b | (c / d)` as Electron's flex-layout writes it: the left tabset 30 wide showing `b`
+/// and active, the right column 70 wide holding `c` over `d`, 40 and 60 high.
+fn split_layout() -> String {
+    let tab = |id: &str| json!({ "type": "tab", "id": id, "name": id, "component": "workspace-settings", "enableClose": true });
+    json!({
+        "global": { "splitterSize": 4, "splitterExtra": 4, "tabEnableRename": false, "tabEnableRenderOnDemand": false },
+        "borders": [],
+        "layout": { "type": "row", "id": "#root", "children": [
+            { "type": "tabset", "id": "#left", "weight": 30, "selected": 1, "children": [tab("a"), tab("b")], "active": true },
+            { "type": "row", "id": "#column", "weight": 70, "children": [
+                { "type": "tabset", "id": "#top", "weight": 40, "children": [tab("c")] },
+                { "type": "tabset", "id": "#bottom", "weight": 60, "children": [tab("d")] },
+            ]},
+        ]},
+        "popouts": {}
+    })
+    .to_string()
+}
+
+fn open_split(cx: &mut TestAppContext, h: &Harness, store: &Entity<SessionStore>, active: &str) -> (String, Entity<WorkspaceStore>) {
+    let metadata = json!({ "layoutModel": split_layout() });
+    open_workspace(cx, h, store, tabs(&["a", "b", "c", "d"]), Some(active), metadata)
+}
+
+/// The tabset at `path` of a layout.
+fn tabset(layout: &Layout, path: &[usize]) -> LayoutTabSet {
+    layout.tree().tabsets().into_iter().find(|tabset| tabset.path == path).cloned().expect("a tabset there")
+}
+
+fn saved_model(h: &Harness, id: &str) -> Value {
+    serde_json::from_str(file_on_disk(h, id)["metadata"]["layoutModel"].as_str().expect("saved")).unwrap()
+}
+
+#[gpui_kit::test]
+fn a_split_layout_shows_its_tabsets_with_their_weights_and_selections(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    let store = open_store(cx, &h);
+    let (id, workspace) = open_split(cx, &h, &store, "b");
+
+    let tree = workspace.read_with(cx, |w, _| w.layout().tree());
+    assert_eq!(tree.orientation, Orientation::Horizontal);
+    assert_eq!(tree.children.iter().map(LayoutNode::weight).collect::<Vec<_>>(), [30., 70.]);
+    let LayoutNode::Row(column) = &tree.children[1] else { panic!("the right column") };
+    assert_eq!(column.orientation, Orientation::Vertical);
+    assert_eq!(column.children.iter().map(LayoutNode::weight).collect::<Vec<_>>(), [40., 60.]);
+    let shown: Vec<(Vec<usize>, Option<String>, bool, Maximize)> = tree
+        .tabsets()
+        .into_iter()
+        .map(|tabset| (tabset.path.clone(), tabset.selected.clone(), tabset.active, tabset.maximize))
+        .collect();
+    assert_eq!(
+        shown,
+        [
+            (vec![0], Some("b".to_owned()), true, Maximize::Restored),
+            (vec![1, 0], Some("c".to_owned()), false, Maximize::Restored),
+            (vec![1, 1], Some("d".to_owned()), false, Maximize::Restored),
+        ]
+    );
+    assert_eq!(saved_model(&h, &id), serde_json::from_str::<Value>(&split_layout()).unwrap(), "shown, not rewritten");
+}
+
+#[gpui_kit::test]
+fn the_active_tab_is_shown_in_its_tabset_which_keeps_or_takes_the_activation(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    let store = open_store(cx, &h);
+    // An active tab its tabset does not show (another writer's `activeTabId`): shown there,
+    // as `FlexLayoutPane` selects it.
+    let (id, workspace) = open_split(cx, &h, &store, "a");
+    workspace.read_with(cx, |w, _| {
+        assert_eq!(tabset(&w.layout(), &[0]).selected.as_deref(), Some("a"));
+        assert_eq!(w.shown_tab().as_deref(), Some("a"));
+    });
+
+    // A shortcut to a tab its (inactive) tabset already shows: the left tabset stays active.
+    workspace.update(cx, |w, cx| w.set_active_tab("d", cx));
+    wait_for_disk(cx, || file_on_disk(&h, &id)["activeTabId"] == "d");
+    let saved = layout_on_disk(&h, &id).unwrap();
+    assert!(tabset(&saved, &[0]).active);
+    assert!(!tabset(&saved, &[1, 1]).active);
+    assert_eq!(tabset(&saved, &[1, 1]).selected.as_deref(), Some("d"));
+
+    // One its tabset does not show: selected there, and its tabset takes the activation.
+    workspace.update(cx, |w, cx| w.select_tab("c", cx));
+    wait_for_disk(cx, || file_on_disk(&h, &id)["activeTabId"] == "c");
+    let shown = layout_on_disk(&h, &id).unwrap().tree().tabsets()[0].selected.clone().expect("a tab shown");
+    let other = if shown == "a" { "b" } else { "a" };
+    workspace.update(cx, |w, cx| w.set_active_tab(other, cx));
+    wait_for_disk(cx, || file_on_disk(&h, &id)["activeTabId"] == other);
+    let saved = layout_on_disk(&h, &id).unwrap();
+    assert_eq!(saved.selected_tab().as_deref(), Some(other));
+    assert!(tabset(&saved, &[0]).active);
+}
+
+#[gpui_kit::test]
+fn a_tab_clicked_in_its_strip_is_selected_and_its_tabset_activated(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    let store = open_store(cx, &h);
+    let (id, workspace) = open_split(cx, &h, &store, "b");
+
+    // `d`, shown in its tabset already: the bottom tabset becomes the active one.
+    workspace.update(cx, |w, cx| w.select_tab("d", cx));
+    wait_for_disk(cx, || file_on_disk(&h, &id)["activeTabId"] == "d");
+    let saved = layout_on_disk(&h, &id).unwrap();
+    assert!(tabset(&saved, &[1, 1]).active);
+    assert!(!tabset(&saved, &[0]).active);
+
+    // `a`, not shown in the left tabset: selected there, and the left tabset active again.
+    workspace.update(cx, |w, cx| w.select_tab("a", cx));
+    wait_for_disk(cx, || file_on_disk(&h, &id)["activeTabId"] == "a");
+    let left = tabset(&layout_on_disk(&h, &id).unwrap(), &[0]);
+    assert_eq!((left.selected.as_deref(), left.active), (Some("a"), true));
+
+    // Again, or a tab that is gone: nothing changes.
+    let before = workspace.read_with(cx, |w, _| w.file().clone());
+    workspace.update(cx, |w, cx| {
+        w.select_tab("a", cx);
+        w.select_tab("gone", cx);
+    });
+    workspace.read_with(cx, |w, _| assert_eq!(*w.file(), before));
+}
+
+#[gpui_kit::test]
+fn an_activated_tabset_is_saved_and_takes_new_tabs(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    let store = open_store(cx, &h);
+    let (id, workspace) = open_split(cx, &h, &store, "b");
+
+    // A press in the top tabset: it is the active one, the active tab stays `b`.
+    workspace.update(cx, |w, cx| w.activate_tabset(&[1, 0], cx));
+    wait_for_disk(cx, || layout_on_disk(&h, &id).is_some_and(|saved| tabset(&saved, &[1, 0]).active));
+    assert_eq!(file_on_disk(&h, &id)["activeTabId"], "b");
+    assert!(!tabset(&layout_on_disk(&h, &id).unwrap(), &[0]).active);
+
+    let tab = workspace.update(cx, |w, cx| w.add_tab("workspace-settings", cx)).unwrap();
+    wait_for_disk(cx, || file_on_disk(&h, &id)["activeTabId"] == tab.as_str());
+    let top = tabset(&layout_on_disk(&h, &id).unwrap(), &[1, 0]);
+    assert_eq!(top.tabs, ["c", tab.as_str()]);
+    assert_eq!(top.selected.as_deref(), Some(tab.as_str()));
+
+    // A row, nothing there, or the active tabset again: nothing changes.
+    let before = workspace.read_with(cx, |w, _| w.file().clone());
+    workspace.update(cx, |w, cx| {
+        w.activate_tabset(&[1], cx);
+        w.activate_tabset(&[9], cx);
+        w.activate_tabset(&[1, 0], cx);
+    });
+    workspace.read_with(cx, |w, _| assert_eq!(*w.file(), before));
+}
+
+#[gpui_kit::test]
+fn a_maximized_tabset_is_saved_until_restored(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    let store = open_store(cx, &h);
+    let (id, workspace) = open_split(cx, &h, &store, "b");
+
+    workspace.update(cx, |w, cx| w.toggle_maximize(&[1, 1], cx));
+    wait_for_disk(cx, || layout_on_disk(&h, &id).is_some_and(|saved| saved.tree().maximized().is_some()));
+    let model = saved_model(&h, &id);
+    assert_eq!(model["layout"]["children"][1]["children"][1]["maximized"], true);
+    assert_eq!(model["layout"]["children"][1]["children"][1]["active"], true);
+    workspace.read_with(cx, |w, _| assert_eq!(tabset(&w.layout(), &[1, 1]).maximize, Maximize::Maximized));
+
+    workspace.update(cx, |w, cx| w.toggle_maximize(&[1, 1], cx));
+    wait_for_disk(cx, || layout_on_disk(&h, &id).is_some_and(|saved| saved.tree().maximized().is_none()));
+    assert!(tabset(&layout_on_disk(&h, &id).unwrap(), &[1, 1]).active);
+}
+
+#[gpui_kit::test]
+fn the_only_tabset_cannot_be_maximized(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    let store = open_store(cx, &h);
+    let (_, workspace) = open_workspace(cx, &h, &store, tabs(&["a", "b"]), Some("a"), json!({}));
+    workspace.read_with(cx, |w, _| assert_eq!(tabset(&w.layout(), &[0]).maximize, Maximize::Unavailable));
+    let before = workspace.read_with(cx, |w, _| w.file().clone());
+    workspace.update(cx, |w, cx| w.toggle_maximize(&[0], cx));
+    workspace.read_with(cx, |w, _| assert_eq!(*w.file(), before));
+}
+
+#[gpui_kit::test]
+fn a_dropped_splitter_saves_the_rows_new_weights(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    let store = open_store(cx, &h);
+    let (id, workspace) = open_split(cx, &h, &store, "b");
+
+    workspace.update(cx, |w, cx| w.resize_layout_row(&[1], &[25., 75.], cx));
+    wait_for_disk(cx, || saved_model(&h, &id)["layout"]["children"][1]["children"][0]["weight"] == 25);
+    let model = saved_model(&h, &id);
+    assert_eq!(model["layout"]["children"][1]["children"][1]["weight"], 75);
+    assert_eq!(model["layout"]["children"][0]["weight"], 30, "the other rows keep theirs");
+
+    // Not a row, or the wrong count: nothing changes.
+    let before = workspace.read_with(cx, |w, _| w.file().clone());
+    workspace.update(cx, |w, cx| {
+        w.resize_layout_row(&[0], &[50., 50.], cx);
+        w.resize_layout_row(&[], &[100.], cx);
+    });
+    workspace.read_with(cx, |w, _| assert_eq!(*w.file(), before));
+}
+
+#[gpui_kit::test]
+fn a_tabset_whose_last_tab_closes_goes_and_its_neighbour_takes_the_room(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    let store = open_store(cx, &h);
+    let (id, workspace) = open_split(cx, &h, &store, "b");
+
+    workspace.update(cx, |w, cx| w.remove_tab("c", cx));
+    wait_for_disk(cx, || layout_on_disk(&h, &id).is_some_and(|saved| saved.tab_order() == ["a", "b", "d"]));
+    let tree = layout_on_disk(&h, &id).unwrap().tree();
+    // The column, left with the bottom tabset, is replaced by it, with the column's weight.
+    assert_eq!(tree.tabsets().iter().map(|tabset| tabset.path.clone()).collect::<Vec<_>>(), [vec![0], vec![1]]);
+    assert_eq!(tree.children.iter().map(LayoutNode::weight).collect::<Vec<_>>(), [30., 70.]);
 }

@@ -1,12 +1,13 @@
 //! A workspace's tab layout: Electron's flex-layout model (`IJsonModel`), saved as JSON in the
 //! workspace's `metadata.layoutModel` (`FlexLayoutPane.tsx`, `utils/layoutModel.ts`).
 //!
-//! Both apps read and write it. The native app shows the layout's tabs in one strip, tabsets
-//! depth-first, and saves the layout whenever a tab is added, closed, selected or dragged to
-//! another place, as Electron saves every change to its model. The operations follow
-//! flex-layout's own (`addNode`, `deleteTab`, `selectTab`, `moveNode` into a tabset, `tidy`),
-//! and what the native app does not use (the `global` block, borders, ids, weights, other
-//! attributes) is written back as it was read, so Electron restores its splits.
+//! Both apps read and write it. The native app draws the layout as flex-layout does (rows of
+//! tabsets sized by their weights, [`Layout::tree`]), and saves the layout whenever a tab is
+//! added, closed, selected or dragged to another place, a tabset is activated or maximized,
+//! or a splitter is dragged, as Electron saves every change to its model. The operations
+//! follow flex-layout's own (`addNode`, `deleteTab`, `selectTab`, `moveNode` into a tabset,
+//! `setActiveTabset`, `maximizeToggle`, `adjustWeights`, `tidy`), and what the native app does
+//! not use (the `global` block, borders, ids, other attributes) is written back as it was read.
 
 use serde_json::{Value, json};
 
@@ -37,6 +38,199 @@ impl LayoutTab<'_> {
 pub enum Side {
     Before,
     After,
+}
+
+/// Where a node of the main layout is: its child indices from the root row (`[]`).
+pub type NodePath = Vec<usize>;
+
+/// Which way a row lays out its children: side by side or stacked. The root row is
+/// horizontal (unless `rootOrientationVertical`), and each row turns the other way from its
+/// parent (`Node.getOrientation`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Orientation {
+    Horizontal,
+    Vertical,
+}
+
+impl Orientation {
+    fn flip(self) -> Self {
+        match self {
+            Self::Horizontal => Self::Vertical,
+            Self::Vertical => Self::Horizontal,
+        }
+    }
+}
+
+/// A node of the main layout as flex-layout draws it.
+#[derive(Clone, Debug, PartialEq)]
+pub enum LayoutNode {
+    Row(LayoutRow),
+    TabSet(LayoutTabSet),
+}
+
+/// A row (`RowNode`): its children laid out along its orientation, each sized by its weight,
+/// with a splitter between each two.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LayoutRow {
+    pub path: NodePath,
+    /// Its share of its parent row, against its siblings' (`weight`, 100 when unset).
+    pub weight: f64,
+    pub orientation: Orientation,
+    pub children: Vec<LayoutNode>,
+}
+
+/// A tabset (`TabSetNode`): a strip of tabs over the selected one.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LayoutTabSet {
+    pub path: NodePath,
+    pub weight: f64,
+    /// Its tabs' ids, in strip order.
+    pub tabs: Vec<String>,
+    /// The tab it shows: `None` when it selects nothing (`-1`, or an index past its last tab).
+    pub selected: Option<String>,
+    /// The layout's active tabset (where a new tab goes).
+    pub active: bool,
+    pub maximize: Maximize,
+}
+
+/// A tabset's maximize toggle (`TabSetNode.canMaximize`, `isMaximized`): offered once the
+/// layout has more than one tabset, or while it is maximized.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Maximize {
+    /// No toggle: the only tabset, or maximizing is turned off.
+    Unavailable,
+    /// "Maximize tab set".
+    Restored,
+    /// It fills the layout, the others hidden: "Restore tab set".
+    Maximized,
+}
+
+/// The splitters between a row's children (`splitterSize`, and `splitterExtra` more around
+/// them that also takes the pointer), in pixels.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Splitters {
+    pub size: f64,
+    pub extra: f64,
+}
+
+/// A splitter being dragged in a row (flex-layout's `Splitter` on a `RowNode`): where it may
+/// go, and the weights it leaves, from the children's sizes when the drag began. Positions are
+/// of the splitter's leading edge, along the row, in the coordinates `start` is in.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SplitDrag {
+    sizes: Vec<f64>,
+    mins: Vec<f64>,
+    index: usize,
+    splitter: f64,
+    start: f64,
+}
+
+impl SplitDrag {
+    /// The drag of the splitter before child `index` of a row whose children measure `sizes`
+    /// along it and may shrink to `mins`, `splitter` apart, the first starting at `start`.
+    /// `None` unless the splitter is between two children and the row has a size.
+    pub fn new(sizes: Vec<f64>, mins: Vec<f64>, index: usize, splitter: f64, start: f64) -> Option<Self> {
+        let valid = sizes.len() == mins.len() && index >= 1 && index < sizes.len() && sizes.iter().sum::<f64>() > 0.;
+        valid.then_some(Self { sizes, mins, index, splitter, start })
+    }
+
+    /// Where the splitter is when the drag begins (`getSplitterInitials`' `startPosition`).
+    pub fn origin(&self) -> f64 {
+        self.start + self.sizes[..self.index].iter().sum::<f64>() + self.splitter * (self.index - 1) as f64
+    }
+
+    /// `position` kept where the splitter may go (`getSplitterBounds`, `getBoundPosition`):
+    /// far enough along to leave each child before it its minimum, and short enough of the
+    /// row's end to leave the children after it theirs, with the splitters between.
+    pub fn bound(&self, position: f64) -> f64 {
+        let end = self.start + self.sizes.iter().sum::<f64>() + self.splitter * (self.sizes.len() - 1) as f64;
+        let low = self.start + self.mins[..self.index].iter().sum::<f64>() + self.splitter * (self.index - 1) as f64;
+        let high = end - self.mins[self.index..].iter().map(|min| min + self.splitter).sum::<f64>();
+        // In this order: in a row too small for its minimums, the far bound wins.
+        let position = if position < low { low } else { position };
+        if position > high { high } else { position }
+    }
+
+    /// The row's weights with the splitter dropped at `position` (`calculateSplit`): the child
+    /// on the side it moved away from grows by the distance, and the children on the other
+    /// side give it up, the nearest first, each down to its minimum. Weights are percentages
+    /// of the row's size when the drag began.
+    pub fn weights(&self, position: f64) -> Vec<f64> {
+        let (mut sizes, mins, index) = (self.sizes.clone(), &self.mins, self.index);
+        let origin = self.origin();
+        let (grows, shrinking): (usize, Vec<usize>) = if position < origin {
+            (index, (0..index).rev().collect())
+        } else {
+            (index - 1, (index..sizes.len()).collect())
+        };
+        let mut shift = (position - origin).abs();
+        sizes[grows] += shift;
+        for child in shrinking {
+            if sizes[child] - shift > mins[child] {
+                sizes[child] -= shift;
+                break;
+            }
+            shift -= sizes[child] - mins[child];
+            sizes[child] = mins[child];
+        }
+        let total: f64 = self.sizes.iter().sum();
+        sizes.iter().map(|size| size.max(0.1) * 100. / total).collect()
+    }
+}
+
+impl LayoutNode {
+    pub fn path(&self) -> &[usize] {
+        match self {
+            Self::Row(row) => &row.path,
+            Self::TabSet(tabset) => &tabset.path,
+        }
+    }
+
+    pub fn weight(&self) -> f64 {
+        match self {
+            Self::Row(row) => row.weight,
+            Self::TabSet(tabset) => tabset.weight,
+        }
+    }
+
+    /// The least it may measure along `along` (`calcMinMaxSize`): a tabset only needs room
+    /// for its strip (`strip` high), a row the sum of its children's along its orientation
+    /// (with the splitters between) and the largest of them across it.
+    pub fn min_size(&self, along: Orientation, splitter: f64, strip: f64) -> f64 {
+        match self {
+            Self::TabSet(_) => match along {
+                Orientation::Horizontal => 0.,
+                Orientation::Vertical => strip,
+            },
+            Self::Row(row) => {
+                let mins = row.children.iter().map(|child| child.min_size(along, splitter, strip));
+                if along == row.orientation {
+                    mins.sum::<f64>() + splitter * row.children.len().saturating_sub(1) as f64
+                } else {
+                    mins.fold(0., f64::max)
+                }
+            }
+        }
+    }
+}
+
+impl LayoutRow {
+    /// The tabset that fills the layout, if one is maximized.
+    pub fn maximized(&self) -> Option<&LayoutTabSet> {
+        self.tabsets().into_iter().find(|tabset| tabset.maximize == Maximize::Maximized)
+    }
+
+    /// Its tabsets, depth-first.
+    pub fn tabsets(&self) -> Vec<&LayoutTabSet> {
+        let mut found = Vec::new();
+        for child in &self.children {
+            match child {
+                LayoutNode::TabSet(tabset) => found.push(tabset),
+                LayoutNode::Row(row) => found.extend(row.tabsets()),
+            }
+        }
+        found
+    }
 }
 
 /// A layout model, kept as JSON so that attributes the native app does not know survive.
@@ -168,6 +362,115 @@ impl Layout {
         true
     }
 
+    /// The workspace's active tab, as `FlexLayoutPane` follows `activeTabId`: selected in its
+    /// tabset, which becomes the active one, unless it already is the tab its tabset shows.
+    pub fn show(&mut self, tab: &str) {
+        let Some((path, index)) = self.find(tab) else {
+            return;
+        };
+        if self.node(&path).is_some_and(|tabset| usize::try_from(selected(tabset, 0)) == Ok(index)) {
+            return;
+        }
+        self.select(tab);
+    }
+
+    /// The main layout as flex-layout draws it: rows of tabsets, each with its tabs, the one
+    /// it shows, and whether it is active or maximized (the last tabset marked so, as
+    /// `Model.fromJson` reads them).
+    pub fn tree(&self) -> LayoutRow {
+        let tabsets = self.tabsets();
+        let root = self.0.get("layout").unwrap_or(&Value::Null);
+        let marks = Marks {
+            active: self.active_tabset(&tabsets).cloned(),
+            maximized: tabsets.iter().rev().find(|path| self.is_maximized(path)).cloned(),
+            // `canMaximize`: not the root's only child.
+            sole: (kids(root).len() == 1).then(|| vec![0]),
+            enabled: self.global("tabSetEnableMaximize").and_then(Value::as_bool).unwrap_or(true),
+        };
+        let vertical = self.global("rootOrientationVertical").and_then(Value::as_bool).unwrap_or(false);
+        let orientation = if vertical { Orientation::Vertical } else { Orientation::Horizontal };
+        row_view(root, Vec::new(), orientation, &marks)
+    }
+
+    /// The splitters' size and extra hit area (flex-layout's defaults: 8 and 0; Electron's
+    /// model sets 4 and 4).
+    pub fn splitters(&self) -> Splitters {
+        let px = |key: &str, default: f64| self.global(key).and_then(Value::as_f64).unwrap_or(default);
+        Splitters { size: px("splitterSize", 8.), extra: px("splitterExtra", 0.) }
+    }
+
+    /// `Actions.setActiveTabset` (a press in a tabset's strip or content): the tabset at
+    /// `path` becomes the active one. `false`, changing nothing, when it already is or is no
+    /// tabset.
+    pub fn activate_tabset(&mut self, path: &[usize]) -> bool {
+        let tabsets = self.tabsets();
+        if !tabsets.iter().any(|tabset| tabset == path) || self.active_tabset(&tabsets).is_some_and(|active| active == path) {
+            return false;
+        }
+        self.activate(path);
+        true
+    }
+
+    /// `Actions.maximizeToggle` (the tabset's maximize button, or a double-click on its strip):
+    /// a maximized tabset is restored; another one fills the layout instead and becomes the
+    /// active one. `false`, changing nothing, unless the tabset offers the toggle.
+    pub fn toggle_maximize(&mut self, path: &[usize]) -> bool {
+        let tree = self.tree();
+        let Some(maximize) = tree.tabsets().into_iter().find(|tabset| tabset.path == path).map(|tabset| tabset.maximize) else {
+            return false;
+        };
+        match maximize {
+            Maximize::Unavailable => return false,
+            Maximize::Maximized => {
+                if let Some(Value::Object(tabset)) = self.node_mut(path) {
+                    tabset.shift_remove("maximized");
+                }
+            }
+            Maximize::Restored => {
+                for other in self.tabsets() {
+                    if let Some(Value::Object(tabset)) = self.node_mut(&other) {
+                        tabset.shift_remove("maximized");
+                    }
+                }
+                self.activate(path);
+                if let Some(tabset) = self.node_mut(path) {
+                    set(tabset, "maximized", Value::Bool(true));
+                }
+            }
+        }
+        true
+    }
+
+    /// `Actions.adjustWeights` (a splitter dropped): the children of the row at `path` take
+    /// `weights`, in order. `false`, changing nothing, unless it is a row with as many
+    /// children and the weights are numbers.
+    pub fn adjust_weights(&mut self, path: &[usize], weights: &[f64]) -> bool {
+        if !weights.iter().all(|weight| weight.is_finite()) {
+            return false;
+        }
+        let Some(row) = self.node_mut(path).filter(|node| !is_tabset(node)) else {
+            return false;
+        };
+        let Some(children) = row.get_mut("children").and_then(Value::as_array_mut) else {
+            return false;
+        };
+        if children.len() != weights.len() {
+            return false;
+        }
+        for (child, weight) in children.iter_mut().zip(weights) {
+            set(child, "weight", number(*weight));
+        }
+        true
+    }
+
+    fn global(&self, key: &str) -> Option<&Value> {
+        self.0.get("global")?.get(key)
+    }
+
+    fn is_maximized(&self, path: &[usize]) -> bool {
+        self.node(path).is_some_and(|tabset| tabset.get("maximized") == Some(&Value::Bool(true)))
+    }
+
     /// `Actions.addNode(tab, tabset, CENTER, -1, select)` on the active tabset, else the
     /// first one (a tidy layout always has one).
     fn add(&mut self, tab: &LayoutTab<'_>) {
@@ -291,6 +594,53 @@ impl Layout {
             node = node.get_mut("children")?.get_mut(*index)?;
         }
         Some(node)
+    }
+}
+
+/// What [`Layout::tree`] marks on its tabsets.
+struct Marks {
+    active: Option<NodePath>,
+    maximized: Option<NodePath>,
+    /// The root's only child, which offers no maximize toggle.
+    sole: Option<NodePath>,
+    /// `tabSetEnableMaximize`.
+    enabled: bool,
+}
+
+fn row_view(row: &Value, path: NodePath, orientation: Orientation, marks: &Marks) -> LayoutRow {
+    let children = kids(row)
+        .iter()
+        .enumerate()
+        .map(|(index, child)| {
+            let mut path = path.clone();
+            path.push(index);
+            if is_tabset(child) {
+                LayoutNode::TabSet(tabset_view(child, path, marks))
+            } else {
+                LayoutNode::Row(row_view(child, path, orientation.flip(), marks))
+            }
+        })
+        .collect();
+    LayoutRow { weight: weight(row), path, orientation, children }
+}
+
+fn tabset_view(tabset: &Value, path: NodePath, marks: &Marks) -> LayoutTabSet {
+    let shown = usize::try_from(selected(tabset, 0)).ok().and_then(|index| kids(tabset).get(index));
+    let enabled = tabset.get("enableMaximize").and_then(Value::as_bool).unwrap_or(marks.enabled);
+    let maximize = if marks.maximized.as_ref() == Some(&path) {
+        Maximize::Maximized
+    } else if !enabled || marks.sole.as_ref() == Some(&path) {
+        Maximize::Unavailable
+    } else {
+        Maximize::Restored
+    };
+    LayoutTabSet {
+        weight: weight(tabset),
+        tabs: kids(tabset).iter().filter_map(tab_id).map(str::to_owned).collect(),
+        selected: shown.and_then(tab_id).map(str::to_owned),
+        active: marks.active.as_ref() == Some(&path),
+        maximize,
+        path,
     }
 }
 
@@ -705,6 +1055,255 @@ mod tests {
         assert!(!layout.move_tab("gone", "t1", Side::Before));
         assert!(!layout.move_tab("t1", "gone", Side::After));
         assert_eq!(model(&layout), electron(SPLIT));
+    }
+
+    fn tabset(layout: &LayoutRow, path: &[usize]) -> LayoutTabSet {
+        layout.tabsets().into_iter().find(|tabset| tabset.path == path).cloned().expect("a tabset there")
+    }
+
+    #[test]
+    fn a_split_layout_is_drawn_as_its_rows_and_tabsets() {
+        let tree = split().tree();
+        assert_eq!((tree.path.clone(), tree.weight, tree.orientation), (vec![], 100., Orientation::Horizontal));
+        let left = LayoutTabSet {
+            path: vec![0],
+            weight: 50.,
+            tabs: vec!["t1".into(), "t2".into()],
+            selected: Some("t2".into()),
+            active: true,
+            maximize: Maximize::Restored,
+        };
+        let top = LayoutTabSet {
+            path: vec![1, 0],
+            weight: 50.,
+            tabs: vec!["t3".into()],
+            // Unset: the first tab.
+            selected: Some("t3".into()),
+            active: false,
+            maximize: Maximize::Restored,
+        };
+        let bottom = LayoutTabSet { path: vec![1, 1], tabs: vec!["t4".into()], selected: Some("t4".into()), ..top.clone() };
+        let column = LayoutRow {
+            path: vec![1],
+            weight: 50.,
+            orientation: Orientation::Vertical,
+            children: vec![LayoutNode::TabSet(top), LayoutNode::TabSet(bottom)],
+        };
+        assert_eq!(tree.children, vec![LayoutNode::TabSet(left), LayoutNode::Row(column)]);
+        assert_eq!(tree.maximized(), None);
+        assert_eq!(split().splitters(), Splitters { size: 4., extra: 4. });
+    }
+
+    #[test]
+    fn a_layout_without_settings_draws_with_flex_layouts_defaults() {
+        let bare = json!({
+            "global": { "rootOrientationVertical": true }, "borders": [],
+            "layout": { "type": "row", "children": [
+                { "type": "row", "children": [
+                    { "type": "tabset", "selected": -1, "children": [{ "type": "tab", "id": "a" }] },
+                    { "type": "tabset", "selected": 3, "children": [{ "type": "tab", "id": "b" }] },
+                ]},
+            ]},
+        });
+        let layout = Layout::parse(&bare.to_string()).unwrap();
+        assert_eq!(layout.splitters(), Splitters { size: 8., extra: 0. });
+        let tree = layout.tree();
+        assert_eq!(tree.orientation, Orientation::Vertical);
+        let LayoutNode::Row(row) = &tree.children[0] else { panic!("a row") };
+        assert_eq!((row.weight, row.orientation), (100., Orientation::Horizontal));
+        // Selecting nothing, or past the last tab: none shown. No tabset marked active.
+        let (a, b) = (tabset(&tree, &[0, 0]), tabset(&tree, &[0, 1]));
+        assert_eq!((a.selected, b.selected, a.active, b.active), (None, None, false, false));
+        // The root's only child is a row: its tabsets can be maximized.
+        assert_eq!((a.maximize, b.maximize), (Maximize::Restored, Maximize::Restored));
+    }
+
+    #[test]
+    fn the_only_tabset_offers_no_maximize() {
+        let tree = Layout::default_for(&tabs(&["a", "b"]), Some("a")).tree();
+        assert_eq!(tabset(&tree, &[0]).maximize, Maximize::Unavailable);
+        let mut layout = Layout::default_for(&tabs(&["a"]), None);
+        assert!(!layout.toggle_maximize(&[0]));
+
+        // Nor any tabset with maximizing turned off, globally or on itself.
+        let off = SPLIT.replace(r#""global":{"#, r#""global":{"tabSetEnableMaximize":false,"#);
+        assert_eq!(tabset(&Layout::parse(&off).unwrap().tree(), &[0]).maximize, Maximize::Unavailable);
+        let on = off.replace(r##""id":"#top","##, r##""id":"#top","enableMaximize":true,"##);
+        let tree = Layout::parse(&on).unwrap().tree();
+        assert_eq!((tabset(&tree, &[1, 0]).maximize, tabset(&tree, &[1, 1]).maximize), (Maximize::Restored, Maximize::Unavailable));
+    }
+
+    #[test]
+    fn maximizing_a_tabset_makes_it_fill_the_layout_and_active_until_restored() {
+        let mut layout = split();
+        assert!(layout.toggle_maximize(&[1, 0]));
+        // flex-layout's `maximizeToggle('#top')` on SPLIT.
+        let expected = r##"{"global":{"splitterSize":4,"splitterExtra":4,"tabEnableRename":false,"tabEnableRenderOnDemand":false},"borders":[],"layout":{"type":"row","id":"#root","children":[{"type":"tabset","id":"main","weight":50,"selected":1,"children":[{"type":"tab","id":"t1","name":"T t1","component":"terminal","enableClose":true},{"type":"tab","id":"t2","name":"T t2","component":"terminal","enableClose":true}]},{"type":"row","id":"#column","weight":50,"children":[{"type":"tabset","id":"#top","weight":50,"children":[{"type":"tab","id":"t3","name":"T t3","component":"terminal","enableClose":true}],"active":true,"maximized":true},{"type":"tabset","id":"#bottom","weight":50,"children":[{"type":"tab","id":"t4","name":"T t4","component":"terminal","enableClose":true}]}]}]},"popouts":{}}"##;
+        assert_eq!(model(&layout), electron(expected));
+        let tree = layout.tree();
+        assert_eq!(tree.maximized().map(|tabset| tabset.path.clone()), Some(vec![1, 0]));
+        assert!(tabset(&tree, &[1, 0]).active);
+        assert_eq!(tabset(&tree, &[0]).maximize, Maximize::Restored);
+
+        // Another one takes its place.
+        assert!(layout.toggle_maximize(&[0]));
+        let tree = layout.tree();
+        assert_eq!(tree.maximized().map(|tabset| tabset.path.clone()), Some(vec![0]));
+        assert_eq!(model(&layout)["layout"]["children"][1]["children"][0].get("maximized"), None);
+
+        // Restored: the layout as it was, the tabset still the active one.
+        assert!(layout.toggle_maximize(&[0]));
+        assert_eq!(layout.tree().maximized(), None);
+        assert_eq!(model(&layout), electron(SPLIT));
+
+        // Not a tabset.
+        assert!(!layout.toggle_maximize(&[1]));
+        assert!(!layout.toggle_maximize(&[5]));
+        assert_eq!(model(&layout), electron(SPLIT));
+    }
+
+    #[test]
+    fn of_several_tabsets_marked_maximized_the_last_one_is() {
+        let both = SPLIT
+            .replace(r##""id":"#top","##, r##""id":"#top","maximized":true,"##)
+            .replace(r##""id":"#bottom","##, r##""id":"#bottom","maximized":true,"##);
+        let mut layout = Layout::parse(&both).unwrap();
+        assert_eq!(layout.tree().maximized().map(|tabset| tabset.path.clone()), Some(vec![1, 1]));
+        assert_eq!(tabset(&layout.tree(), &[1, 0]).maximize, Maximize::Restored);
+        // Maximizing one clears every other mark.
+        assert!(layout.toggle_maximize(&[0]));
+        let written = model(&layout);
+        assert_eq!(written["layout"]["children"][1]["children"][0].get("maximized"), None);
+        assert_eq!(written["layout"]["children"][1]["children"][1].get("maximized"), None);
+    }
+
+    #[test]
+    fn a_maximized_tabset_closed_empty_takes_the_maximize_with_it() {
+        let mut layout = split();
+        assert!(layout.toggle_maximize(&[1, 1]));
+        layout.reconcile(&tabs(&["t1", "t2", "t3"]));
+        assert_eq!(layout.tree().maximized(), None);
+    }
+
+    #[test]
+    fn activating_a_tabset_moves_the_activation_to_it() {
+        let mut layout = split();
+        assert!(layout.activate_tabset(&[1, 1]));
+        // flex-layout's `setActiveTabset('#bottom')` on SPLIT.
+        let expected = r##"{"global":{"splitterSize":4,"splitterExtra":4,"tabEnableRename":false,"tabEnableRenderOnDemand":false},"borders":[],"layout":{"type":"row","id":"#root","children":[{"type":"tabset","id":"main","weight":50,"selected":1,"children":[{"type":"tab","id":"t1","name":"T t1","component":"terminal","enableClose":true},{"type":"tab","id":"t2","name":"T t2","component":"terminal","enableClose":true}]},{"type":"row","id":"#column","weight":50,"children":[{"type":"tabset","id":"#top","weight":50,"children":[{"type":"tab","id":"t3","name":"T t3","component":"terminal","enableClose":true}]},{"type":"tabset","id":"#bottom","weight":50,"children":[{"type":"tab","id":"t4","name":"T t4","component":"terminal","enableClose":true}],"active":true}]}]},"popouts":{}}"##;
+        assert_eq!(model(&layout), electron(expected));
+        // The tab the layout reports as shown is now the new active tabset's.
+        assert_eq!(layout.selected_tab().as_deref(), Some("t4"));
+
+        // Already active, a row, or nothing there: unchanged.
+        assert!(!layout.activate_tabset(&[1, 1]));
+        assert!(!layout.activate_tabset(&[1]));
+        assert!(!layout.activate_tabset(&[]));
+        assert!(!layout.activate_tabset(&[7]));
+        assert_eq!(model(&layout), electron(expected));
+    }
+
+    #[test]
+    fn the_active_tab_is_shown_without_moving_the_activation_when_its_tabset_shows_it() {
+        // t3 is what its tabset shows already: the left tabset stays the active one.
+        let mut layout = split();
+        layout.show("t3");
+        assert_eq!(model(&layout), electron(SPLIT));
+        layout.show("gone");
+        assert_eq!(model(&layout), electron(SPLIT));
+        // t1 is not: selected, its tabset (already active) keeps the activation.
+        layout.show("t1");
+        assert_eq!(model(&layout)["layout"]["children"][0]["selected"], 0);
+        // From an inactive tabset, the selection moves the activation, as `selectTab` does.
+        let mut layout = Layout::parse(&SPLIT.replace(r##""id":"#bottom","##, r##""id":"#bottom","selected":-1,"##)).unwrap();
+        layout.show("t4");
+        assert_eq!(layout.selected_tab().as_deref(), Some("t4"));
+    }
+
+    #[test]
+    fn dropping_a_splitter_saves_the_rows_weights() {
+        let mut layout = split();
+        assert!(layout.adjust_weights(&[], &[30., 70.]));
+        assert!(layout.adjust_weights(&[1], &[25.5, 74.5]));
+        let written = model(&layout);
+        assert_eq!(written["layout"]["children"][0]["weight"], json!(30));
+        assert_eq!(written["layout"]["children"][1]["weight"], json!(70));
+        assert_eq!(written["layout"]["children"][1]["children"][0]["weight"], json!(25.5));
+        assert_eq!(written["layout"]["children"][1]["children"][1]["weight"], json!(74.5));
+        let tree = layout.tree();
+        assert_eq!(tree.children.iter().map(LayoutNode::weight).collect::<Vec<_>>(), [30., 70.]);
+
+        // Not a row, the wrong count, or not numbers: unchanged.
+        let before = model(&layout);
+        assert!(!layout.adjust_weights(&[0], &[]));
+        assert!(!layout.adjust_weights(&[1], &[50.]));
+        assert!(!layout.adjust_weights(&[4], &[50., 50.]));
+        assert!(!layout.adjust_weights(&[], &[f64::NAN, 50.]));
+        assert_eq!(model(&layout), before);
+    }
+
+    #[test]
+    fn a_row_needs_room_for_its_strips_and_splitters() {
+        let tree = split().tree();
+        let root = LayoutNode::Row(tree.clone());
+        // Side by side: tabsets need no width, the splitter its own.
+        assert_eq!(root.min_size(Orientation::Horizontal, 4., 34.), 4.);
+        // Stacked in the column: two strips and the splitter between.
+        assert_eq!(root.min_size(Orientation::Vertical, 4., 34.), 72.);
+        assert_eq!(tree.children[0].min_size(Orientation::Vertical, 4., 34.), 34.);
+        assert_eq!(tree.children[0].path(), [0]);
+        assert_eq!(tree.children[1].path(), [1]);
+    }
+
+    #[test]
+    fn a_splitter_moves_within_its_row_and_shares_the_row_by_the_childrens_new_sizes() {
+        // Two panes 300px and 700px wide, a 4px splitter between.
+        let drag = SplitDrag::new(vec![300., 700.], vec![0., 0.], 1, 4., 0.).unwrap();
+        assert_eq!(drag.origin(), 300.);
+        assert_eq!(drag.weights(300.), [30., 70.]);
+        assert_eq!(drag.weights(200.), [20., 80.]);
+        assert_eq!(drag.weights(500.), [50., 50.]);
+        // As far as the row's start, and as far as its end leaves room for the splitter.
+        assert_eq!(drag.bound(-50.), 0.);
+        assert_eq!(drag.bound(2000.), 1000.);
+        assert_eq!(drag.bound(420.), 420.);
+        // From 100px in, in the row's coordinates.
+        let drag = SplitDrag::new(vec![300., 700.], vec![0., 0.], 1, 4., 100.).unwrap();
+        assert_eq!((drag.origin(), drag.bound(0.)), (400., 100.));
+        assert_eq!(drag.weights(300.), [20., 80.]);
+    }
+
+    #[test]
+    fn a_splitter_pushed_past_its_neighbour_takes_from_the_next_one() {
+        // Three stacked panes 100px high, each needing its 34px strip.
+        let drag = SplitDrag::new(vec![100., 100., 100.], vec![34., 34., 34.], 2, 4., 0.).unwrap();
+        assert_eq!(drag.origin(), 204.);
+        // Up by 100: the middle pane gives 66 down to its strip, the first one the rest.
+        let weights = drag.weights(104.);
+        let expected = [66., 34., 200.].map(|size| size * 100. / 300.);
+        assert!(weights.iter().zip(expected).all(|(got, want)| (got - want).abs() < 1e-9), "{weights:?}");
+        // Down by 50: the last pane gives it.
+        let weights = drag.weights(254.);
+        let expected = [100., 150., 50.].map(|size| size * 100. / 300.);
+        assert!(weights.iter().zip(expected).all(|(got, want)| (got - want).abs() < 1e-9), "{weights:?}");
+        // No further than every pane before it at its minimum (and the splitter between), nor
+        // past the last one's.
+        assert_eq!(drag.bound(10.), 72.);
+        assert_eq!(drag.bound(299.), 270.);
+        // A collapsed pane still keeps a sliver.
+        let drag = SplitDrag::new(vec![100., 100.], vec![0., 0.], 1, 4., 0.).unwrap();
+        assert_eq!(drag.weights(0.), [0.05, 100.]);
+    }
+
+    #[test]
+    fn a_splitter_drag_needs_a_splitter_and_a_sized_row() {
+        assert_eq!(SplitDrag::new(vec![100., 100.], vec![0., 0.], 0, 4., 0.), None);
+        assert_eq!(SplitDrag::new(vec![100., 100.], vec![0., 0.], 2, 4., 0.), None);
+        assert_eq!(SplitDrag::new(vec![100., 100.], vec![0.], 1, 4., 0.), None);
+        assert_eq!(SplitDrag::new(vec![0., 0.], vec![0., 0.], 1, 4., 0.), None);
+        // In a row too small for its minimums the far bound wins.
+        let drag = SplitDrag::new(vec![20., 20.], vec![34., 34.], 1, 4., 0.).unwrap();
+        assert_eq!(drag.bound(-10.), 44. - 38.);
     }
 
     #[test]

@@ -1581,7 +1581,51 @@ impl WorkspaceStore {
         self.changed(cx);
     }
 
-    /// A tab dragged in the strip and dropped on `side` of `target`: it moves there in the
+    /// A tab clicked in its tabset's strip (flex-layout's `selectTab`): shown there, its
+    /// tabset the active one, and the workspace's active tab; the layout is saved.
+    pub fn select_tab(&mut self, tab_id: &str, cx: &mut Context<Self>) {
+        if !self.workspace.file.app_states.contains_key(tab_id) {
+            return;
+        }
+        let mut layout = self.layout();
+        layout.select(tab_id);
+        let file = &self.workspace.file;
+        let json = layout.to_json();
+        if file.active_tab_id.as_deref() == Some(tab_id) && file.metadata.get(LAYOUT_MODEL) == Some(&json) {
+            return;
+        }
+        self.workspace.file.active_tab_id = Some(tab_id.to_owned());
+        self.put_layout(json, cx);
+    }
+
+    /// A press in a tabset's strip or content (flex-layout's `setActiveTabset`): it becomes
+    /// the active tabset, where a new tab goes, and the layout is saved. The active tab stays.
+    pub fn activate_tabset(&mut self, tabset: &[usize], cx: &mut Context<Self>) {
+        let mut layout = self.layout();
+        if layout.activate_tabset(tabset) {
+            self.put_layout(layout.to_json(), cx);
+        }
+    }
+
+    /// A tabset's maximize button, or a double-click on its strip (flex-layout's
+    /// `maximizeToggle`): it fills the layout, or is restored; the layout is saved.
+    pub fn toggle_maximize(&mut self, tabset: &[usize], cx: &mut Context<Self>) {
+        let mut layout = self.layout();
+        if layout.toggle_maximize(tabset) {
+            self.put_layout(layout.to_json(), cx);
+        }
+    }
+
+    /// A splitter dropped (flex-layout's `adjustWeights`): the row's children take `weights`,
+    /// and the layout is saved.
+    pub fn resize_layout_row(&mut self, row: &[usize], weights: &[f64], cx: &mut Context<Self>) {
+        let mut layout = self.layout();
+        if layout.adjust_weights(row, weights) {
+            self.put_layout(layout.to_json(), cx);
+        }
+    }
+
+    /// A tab dragged in a strip and dropped on `side` of `target`: it moves there in the
     /// layout (into the target's tabset) and is shown, and the layout is saved
     /// (flex-layout's tab drag, which `FlexLayoutPane` saves to `metadata.layoutModel`).
     pub fn move_tab(&mut self, dragged: &str, target: &str, side: Side, cx: &mut Context<Self>) {
@@ -1589,14 +1633,20 @@ impl WorkspaceStore {
         if !layout.move_tab(dragged, target, side) {
             return;
         }
-        self.workspace.file.metadata.insert(LAYOUT_MODEL.to_owned(), layout.to_json());
         self.workspace.file.active_tab_id = Some(dragged.to_owned());
+        self.put_layout(layout.to_json(), cx);
+    }
+
+    /// Save a layout model in the body and report the change.
+    fn put_layout(&mut self, json: String, cx: &mut Context<Self>) {
+        self.workspace.file.metadata.insert(LAYOUT_MODEL.to_owned(), json);
         self.changed(cx);
     }
 
     /// The tab layout (`FlexLayoutPane`'s model): the saved `metadata.layoutModel`, else
     /// Electron's default for the tabs, with tabs added or closed since it was saved
-    /// reconciled in. Built afresh on each call, so it follows bodies other windows write.
+    /// reconciled in, and the active tab shown in its tabset (`FlexLayoutPane` follows
+    /// `activeTabId`). Built afresh on each call, so it follows bodies other windows write.
     pub fn layout(&self) -> Layout {
         let file = &self.workspace.file;
         let tabs: Vec<LayoutTab<'_>> = file
@@ -1612,6 +1662,9 @@ impl WorkspaceStore {
         let saved = file.metadata.get(LAYOUT_MODEL).and_then(|json| Layout::parse(json));
         let mut layout = saved.unwrap_or_else(|| Layout::default_for(&tabs, file.active_tab_id.as_deref()));
         layout.reconcile(&tabs);
+        if let Some(active) = &file.active_tab_id {
+            layout.show(active);
+        }
         layout
     }
 
@@ -1625,14 +1678,11 @@ impl WorkspaceStore {
         }
     }
 
-    /// Put the layout, reconciled with the tabs and selecting the active tab, in the body
+    /// Put the layout, reconciled with the tabs and showing the active tab, in the body
     /// (Electron saves its model after tabs come and go and after each selection); the
     /// caller reports the change.
     fn save_layout(&mut self) {
-        let mut layout = self.layout();
-        if let Some(active) = &self.workspace.file.active_tab_id {
-            layout.select(active);
-        }
+        let layout = self.layout();
         self.workspace.file.metadata.insert(LAYOUT_MODEL.to_owned(), layout.to_json());
     }
 

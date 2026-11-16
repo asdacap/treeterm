@@ -2,6 +2,9 @@
 //! (`flexlayout-new-tab-btn`). Tabs that do not fit scroll sideways under the wheel, the
 //! selected tab is scrolled into view, and a "Hidden tabs" button lists the tabs out of view
 //! (flex-layout's `useTabOverflow`); "+" is a sticky button that stays at the right end.
+//! Once the layout has more than one tabset, the toolbar at the right end also has the
+//! "Maximize tab set" / "Restore tab set" toggle, which a double-click on the strip toggles
+//! too; a press on the strip (not on its buttons) makes the tabset the active one.
 //! A tab dragged anywhere over the strip lands before the first tab whose middle is right of
 //! the pointer, else at the end (flex-layout's tab bar drop).
 
@@ -12,10 +15,10 @@ use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::{ElementExt as _, h_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    AnyElement, Anchor, App, Bounds, Context, DragMoveEvent, EntityId, Pixels, Point, ScrollHandle, SharedString,
-    Window, div, px,
+    AnyElement, Anchor, App, Bounds, Context, DragMoveEvent, EntityId, MouseButton, Pixels, Point, ScrollHandle,
+    SharedString, Window, div, px,
 };
-use treeterm_core::layout::Side;
+use treeterm_core::layout::{Maximize, Side};
 use treeterm_model::workspace_store::ActivityState;
 
 use crate::theme::colors;
@@ -45,9 +48,16 @@ pub type OnId = Rc<dyn Fn(&str, &mut Window, &mut App)>;
 /// What dropping a dragged tab (the first id) on a side of another tab (the second) does.
 pub type OnMove = Rc<dyn Fn(&str, &str, Side, &mut Window, &mut App)>;
 
+/// What a press on the strip, or its maximize toggle, does.
+pub type OnPress = Rc<dyn Fn(&mut Window, &mut App)>;
+
+/// The strip's height, its 1px rule included: what a tabset needs at the least.
+pub const STRIP_HEIGHT: f32 = 34.;
+
 /// One strip's tabs and handlers, drawn with the [`TabStripState`] its view keeps.
 pub struct TabStrip {
     pub tabs: Vec<StripTab>,
+    /// The tab its tabset shows.
     pub active: Option<String>,
     /// The new-tab menu; without any, there is no "+".
     pub apps: Vec<NewTabApp>,
@@ -55,6 +65,11 @@ pub struct TabStrip {
     pub on_close: OnId,
     pub on_move: OnMove,
     pub on_new_tab: OnId,
+    /// A press on the strip, but not on "+" or the toolbar (flex-layout's `setActiveTabset`).
+    pub on_activate: OnPress,
+    /// The tabset's maximize toggle, and what it (or a double-click on the strip) does.
+    pub maximize: Maximize,
+    pub on_maximize: OnPress,
 }
 
 /// A tab being dragged, and its drag image: the tab's icon and title (flex-layout drags the
@@ -355,6 +370,8 @@ impl TabStrip {
                     painted.plus_right = bounds.right();
                     measured.set(painted);
                 })
+                // A press on "+" is not one on the strip (`onInterceptPointerDown`).
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
         });
 
         // The Hidden tabs button (`flexlayout__tab_button_overflow`): flex-layout's caret and
@@ -366,7 +383,7 @@ impl TabStrip {
                 .map(|tab| (tab.id.clone(), tab.icon.clone(), tab.title.clone()))
                 .collect();
             let (on_select, requested) = (self.on_select.clone(), state.reveal_requested.clone());
-            div().h(px(31.)).flex_shrink_0().px(px(3.6)).flex().items_center().child(
+            div().flex().items_center().child(
                 crate::ui::Trigger::new(
                     h_flex()
                         .id(SharedString::from(format!("tab-overflow-{id}")))
@@ -405,6 +422,42 @@ impl TabStrip {
             )
         });
 
+        // The maximize toggle (`flexlayout__tab_toolbar_button-min` / `-max`): flex-layout's
+        // icon at the toolbar's 1em, 1px padding, rounded 4px.
+        let toggle = match self.maximize {
+            Maximize::Unavailable => None,
+            Maximize::Restored => Some(("Maximize tab set", gpui_kit::assets::IconName::Maximize)),
+            Maximize::Maximized => Some(("Restore tab set", gpui_kit::assets::IconName::Minimize)),
+        }
+        .map(|(title, icon)| {
+            let on_maximize = self.on_maximize.clone();
+            div()
+                .id(SharedString::from(format!("tab-maximize-{id}")))
+                .p(px(1.))
+                .rounded(px(4.))
+                .text_color(secondary)
+                .cursor_pointer()
+                .hover(move |s| s.bg(hover).text_color(primary))
+                .tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(title).build(window, cx))
+                .child(gpui_kit::component::Icon::new(icon).size(px(12.)))
+                .on_click(move |_, window, cx| on_maximize(window, cx))
+        });
+
+        // The toolbar (`flexlayout__tab_toolbar`, 0.3em apart): Hidden tabs, then the toggle. A
+        // press there is not one on the strip (`onInterceptPointerDown`).
+        let toolbar = (overflow.is_some() || toggle.is_some()).then(|| {
+            div()
+                .h(px(31.))
+                .flex_shrink_0()
+                .px(px(3.6))
+                .gap(px(3.6))
+                .flex()
+                .items_center()
+                .children(overflow)
+                .children(toggle)
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        });
+
         // After layout, the strip's size and the tabs' places are this frame's: when they
         // leave what was just rendered out of date (the first frame, a resize, the button
         // coming or going, a tab added or closed), render again.
@@ -426,12 +479,20 @@ impl TabStrip {
         };
 
         // `flexlayout__tabset_tabbar_outer`: 33px plus a 1px rule. All of it takes a dragged
-        // tab (flex-layout's `tabStripRect`).
+        // tab (flex-layout's `tabStripRect`). A press on it activates the tabset, and a
+        // double-click toggles its maximize (`onPointerDown`, `onDoubleClick`).
         let ids = self.tabs.iter().map(|tab| tab.id.clone()).collect();
+        let (on_activate, on_maximize, maximize) = (self.on_activate, self.on_maximize, self.maximize);
         h_flex()
             .on_drag_move(drag_over(ids, state, view))
             .on_drop(drop_on(state, self.on_move, view))
-            .h(px(34.))
+            .on_mouse_down(MouseButton::Left, move |event, window, cx| {
+                if event.click_count == 2 && maximize != Maximize::Unavailable {
+                    on_maximize(window, cx);
+                }
+                on_activate(window, cx);
+            })
+            .h(px(STRIP_HEIGHT))
             .flex_shrink_0()
             .px(px(2.))
             .bg(c.bg_secondary)
@@ -445,7 +506,10 @@ impl TabStrip {
                     .items_end()
                     .child(viewport)
                     .children(plus)
-                    .children(overflow)
+                    // The toolbar sits at the strip's end (`flexlayout__tabset_tabbar_inner`
+                    // takes the room between).
+                    .child(div().flex_1())
+                    .children(toolbar)
                     .on_prepaint(check),
             )
             .into_any_element()
@@ -494,6 +558,9 @@ mod tests {
         active: Option<String>,
         /// What the strip asked for: `select <tab>`, `move <dragged> <target> <side>`.
         log: Rc<RefCell<Vec<String>>>,
+        maximize: Maximize,
+        /// Presses on the strip: `activate`, `maximize`.
+        presses: Rc<RefCell<Vec<&'static str>>>,
     }
 
     impl Render for Host {
@@ -519,6 +586,15 @@ mod tests {
                     moves.borrow_mut().push(format!("move {dragged} {target} {side:?}"));
                 }),
                 on_new_tab: none,
+                on_activate: {
+                    let presses = self.presses.clone();
+                    Rc::new(move |_, _| presses.borrow_mut().push("activate"))
+                },
+                maximize: self.maximize,
+                on_maximize: {
+                    let presses = self.presses.clone();
+                    Rc::new(move |_, _| presses.borrow_mut().push("maximize"))
+                },
             };
             let view = cx.entity_id();
             div().pl(px(200.)).w(px(600.)).child(strip.render("test", &mut self.state, view, cx))
@@ -537,13 +613,92 @@ mod tests {
     }
 
     fn strip<'a>(count: usize, active: &str, cx: &'a mut TestAppContext) -> (gpui_kit::Entity<Host>, &'a mut VisualTestContext) {
+        strip_with(count, active, Maximize::Unavailable, cx)
+    }
+
+    fn strip_with<'a>(
+        count: usize,
+        active: &str,
+        maximize: Maximize,
+        cx: &'a mut TestAppContext,
+    ) -> (gpui_kit::Entity<Host>, &'a mut VisualTestContext) {
         cx.update(gpui_kit::init);
         cx.update(crate::theme::install);
         let active = Some(active.to_owned());
-        let (host, cx) =
-            cx.add_window_view(move |_, _| Host { state: TabStripState::default(), count, active, log: Rc::default() });
+        let (host, cx) = cx.add_window_view(move |_, _| Host {
+            state: TabStripState::default(),
+            count,
+            active,
+            log: Rc::default(),
+            maximize,
+            presses: Rc::default(),
+        });
         settle(cx);
         (host, cx)
+    }
+
+    fn presses(host: &gpui_kit::Entity<Host>, cx: &mut VisualTestContext) -> Vec<&'static str> {
+        cx.update(|_, cx| host.read(cx).presses.borrow().clone())
+    }
+
+    fn press(at: Point<Pixels>, clicks: usize, cx: &mut VisualTestContext) {
+        cx.simulate_mouse_move(at, None, Modifiers::default());
+        cx.simulate_event(gpui_kit::MouseDownEvent {
+            button: MouseButton::Left,
+            position: at,
+            modifiers: Modifiers::default(),
+            click_count: clicks,
+            first_mouse: false,
+        });
+        cx.simulate_mouse_up(at, MouseButton::Left, Modifiers::default());
+        settle(cx);
+    }
+
+    #[gpui_kit::test]
+    fn a_press_on_the_strip_activates_its_tabset_but_not_one_on_plus(cx: &mut TestAppContext) {
+        let (host, cx) = strip(2, "t0", cx);
+        let (second, plus_right) = (tab_at(&host, 1, cx), painted(&host, cx).plus_right);
+        // On a tab, and on the strip past "+".
+        press(second.center(), 1, cx);
+        press(point(px(590.), second.center().y), 1, cx);
+        assert_eq!(presses(&host, cx), ["activate", "activate"]);
+        assert_eq!(log(&host, cx), ["select t1"]);
+        // On "+": not the strip's.
+        press(point(plus_right - px(12.), second.center().y), 1, cx);
+        assert_eq!(presses(&host, cx), ["activate", "activate"]);
+    }
+
+    #[gpui_kit::test]
+    fn a_double_click_on_the_strip_toggles_maximize(cx: &mut TestAppContext) {
+        // Between "+" (ending at 544px) and the toggle.
+        let (host, cx) = strip_with(2, "t0", Maximize::Restored, cx);
+        let row = tab_at(&host, 0, cx).center().y;
+        assert!(painted(&host, cx).plus_right < px(555.));
+        press(point(px(560.), row), 2, cx);
+        assert_eq!(presses(&host, cx), ["maximize", "activate"]);
+        // On a tab too (flex-layout's tabs cannot be renamed, so theirs reaches the strip).
+        press(tab_at(&host, 1, cx).center(), 2, cx);
+        assert_eq!(presses(&host, cx), ["maximize", "activate", "maximize", "activate"]);
+    }
+
+    #[gpui_kit::test]
+    fn a_double_click_on_a_strip_without_the_toggle_only_activates(cx: &mut TestAppContext) {
+        let (host, cx) = strip(2, "t0", cx);
+        press(point(px(560.), tab_at(&host, 0, cx).center().y), 2, cx);
+        assert_eq!(presses(&host, cx), ["activate"]);
+    }
+
+    #[gpui_kit::test]
+    fn the_maximize_toggle_sits_at_the_strips_end(cx: &mut TestAppContext) {
+        // The strip ends at 598px (2px padding); the toolbar keeps 3.6px from it, and the
+        // toggle is a 12px icon in 1px padding: its middle is 7px further in.
+        let (host, cx) = strip_with(2, "t0", Maximize::Maximized, cx);
+        let toggle = point(px(598. - 3.6 - 7.), tab_at(&host, 0, cx).center().y);
+        press(toggle, 1, cx);
+        assert_eq!(presses(&host, cx), ["maximize"], "the toolbar is not the strip");
+        // Left of it, the strip (no "+" there).
+        press(point(toggle.x - px(12.), toggle.y), 1, cx);
+        assert_eq!(presses(&host, cx), ["maximize", "activate"]);
     }
 
     fn shown(host: &gpui_kit::Entity<Host>, ix: usize, cx: &mut VisualTestContext) -> bool {

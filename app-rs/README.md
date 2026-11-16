@@ -78,10 +78,12 @@ Done (tested against a real in-process daemon unless noted):
 - **Session/workspace sync (M2):** full write side of `createSessionStore` (ref CAS with
   retry, body CAS with parentHash chain, echo suppression, conflict rewrite, watch reopen,
   lock ops), tabs (add/close/activate/state, PTY creation keyed by `ptyHandle`, close-on-exit,
-  kill-on-close), app registry from settings, tab strip in the order of Electron's
-  flex-layout model (`metadata.layoutModel`, saved back as tabs are added, closed, selected
-  and dragged into order; scrolls when full, Hidden tabs menu, "+" kept at its end),
-  new-tab menu.
+  kill-on-close), app registry from settings, tab layout of Electron's flex-layout model
+  (`metadata.layoutModel`: tabsets side by side or stacked as saved, sized by their weights,
+  each with its strip and selected tab; 4px splitters dragged to resize, a tabset maximized
+  and restored from its strip, a tabset gone with its last tab; saved back as tabs are added,
+  closed, selected and dragged into order or into another tabset; strips scroll when full,
+  Hidden tabs menu, "+" kept at its end), new-tab menu.
 - **Git and worktrees (M2):** exec/fs/git clients, open a directory as a workspace, child
   workspaces (new branch, existing branch, remote branch, existing worktree, quick fork; live
   git output), merge/squash-merge (keep or remove), remove with or without git cleanup.
@@ -297,12 +299,15 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   `forkpty`; the child only calls `chdir` + `execve`). Before, `std::env::set_var` in the
   child of the multi-threaded daemon could deadlock it, and the stuck child kept other
   commands' pipes open (a git command started at the same time never finished).
-- A terminal takes keyboard focus when it comes into view as the shown tab, but not from an
+- A terminal takes keyboard focus when it comes into view as the active tab, but not from an
   open dialog, and not again on every workspace change while it stays shown (Electron
-  focused it on each, taking focus from the sidebar's inputs and from dialogs).
+  focused it on each, taking focus from the sidebar's inputs, from dialogs and from a
+  terminal clicked in another pane).
 - A tab dropped in the strip becomes the active tab (`activeTabId`). Electron's strip showed
   the dropped tab, but its `activeTabId`, which its tab shortcuts act on, stayed on the tab
   that was active before.
+- A tab opened with a pane's "+" opens in that pane (Electron opened it in the last active
+  pane).
 - In a strip too full to show every tab, tabs scrolled out of view are no drop target: a tab
   dropped past the last tab shown lands after it. flex-layout also counted the hidden tabs'
   places past the strip's edge, so a drop over "+" could land among them, out of sight.
