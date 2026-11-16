@@ -67,10 +67,21 @@ pub struct TerminalOptions {
     pub keep_on_exit: bool,
     pub width_limit: WidthLimit,
     pub scrollbar: ScrollbarVisibility,
+    pub selection_copy: SelectionCopy,
     /// `None` turns activity detection off for this terminal (e.g. one analysed by an LLM).
     pub idle_timeout: Option<Duration>,
     /// Output bytes are added here (the workspace's download meter).
     pub traffic: ByteCounter,
+}
+
+/// When selected text reaches the clipboard.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SelectionCopy {
+    /// On Copy only, as xterm.js does (Electron's Terminal tabs).
+    OnCopy,
+    /// Also as soon as a drag, double- or triple-click selects it, as ghostty-web does
+    /// (Electron's Ghostty tabs).
+    OnSelect,
 }
 
 /// Whether the scrollback scrollbar is drawn (and can be dragged). The wheel scrolls the
@@ -128,7 +139,8 @@ enum PtySize {
 pub enum TerminalEvent {
     /// The program exited and the tab should close.
     CloseRequested { exit_code: i32 },
-    /// The program copied text (OSC 52), already allowed by the settings.
+    /// Text for the clipboard: the program copied it (OSC 52, already allowed by the
+    /// settings), or a selection finished with [`SelectionCopy::OnSelect`].
     Clipboard(String),
     Bell,
     Activity(String),
@@ -790,16 +802,23 @@ impl TerminalModel {
     /// The left button came up at `at` after [`Self::press_selection`]. An Alt/Option+click
     /// released within [`ALT_CLICK_MOVE_CURSOR_TIME`] that selected at most one character
     /// moves the program's cursor there with arrow keys, when the newest output is in view
-    /// (xterm.js's `altClickMovesCursor`).
+    /// (xterm.js's `altClickMovesCursor`). Otherwise a terminal with
+    /// [`SelectionCopy::OnSelect`] copies what was selected, as ghostty-web does.
     pub fn release_selection(&mut self, at: CellPoint, modifiers: Modifiers, cx: &mut Context<Self>) {
         let Some(gesture) = self.selection_gesture.take() else {
             return;
         };
+        let text = self.selection_text();
         let held = cx.background_executor().now().saturating_duration_since(gesture.pressed_at);
         // xterm.js counts the selected text in UTF-16 code units.
-        let selected = self.selection_text().map_or(0, |text| text.encode_utf16().count());
+        let selected = text.as_ref().map_or(0, |text| text.encode_utf16().count());
         if modifiers.alt && held < ALT_CLICK_MOVE_CURSOR_TIME && selected <= 1 {
             self.move_cursor_to(at, cx);
+            return;
+        }
+        match (self.options.selection_copy, text) {
+            (SelectionCopy::OnSelect, Some(text)) => cx.emit(TerminalEvent::Clipboard(text)),
+            (SelectionCopy::OnSelect, None) | (SelectionCopy::OnCopy, _) => {}
         }
     }
 

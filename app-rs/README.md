@@ -452,6 +452,10 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   plain click still selects its text. Electron's terminals (xterm.js) linked only OSC 8
   hyperlinks; its Ghostty tabs opened URLs on a plain click. An OSC 8 hyperlink is a link
   only to an `http(s)` URI, as in xterm.js, also where Electron's Ghostty tabs opened any.
+- Electron's Ghostty tabs (`ghostty-terminal`, drawn by ghostty-web there) open as the native
+  terminal. They copy a selection to the clipboard as a drag or double-click makes it, as
+  ghostty-web does, but otherwise select as xterm.js does (its word separators, Shift+click,
+  Alt+drag and Alt+click, the macOS right-click).
 - The attention ding is the system bell (Electron synthesised an 880 Hz tone).
 - The analyzer reads the tab's own terminal; Electron attached a second, headless one.
 - A Prompt Description that sends nothing (no harness running yet, or the write failed)

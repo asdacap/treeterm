@@ -29,7 +29,7 @@ use crate::analyzer::{AnalyzerEvent, AnalyzerModel, LlmService};
 use crate::code_intel::links::Opening;
 use crate::apps::{AI_HARNESS_PREFIX, AppKind, AppRegistry};
 use crate::pty_writer::PtyWriter;
-use crate::terminal::{ScrollbarVisibility, TerminalEvent, TerminalModel, TerminalOptions};
+use crate::terminal::{ScrollbarVisibility, SelectionCopy, TerminalEvent, TerminalModel, TerminalOptions};
 
 /// A workspace as the app uses it: the file body joined with its ref.
 #[derive(Debug, Clone, PartialEq)]
@@ -1190,11 +1190,8 @@ impl WorkspaceStore {
         let settings = &self.settings;
         let flag = |key: &str| state.get(key).and_then(Value::as_bool).unwrap_or(false);
         let sandboxed = Sandbox::from_tab_state(state).is_some_and(|sandbox| sandbox.enabled);
-        let app_background = self
-            .registry
-            .get(&self.workspace.file.app_states[tab_id].application_id)
-            .and_then(|app| app.background())
-            .and_then(parse_hex_color);
+        let app = self.registry.get(&self.workspace.file.app_states[tab_id].application_id);
+        let app_background = app.and_then(|app| app.background()).and_then(parse_hex_color);
         TerminalOptions {
             pty_id,
             background: match (app_background, sandboxed) {
@@ -1206,6 +1203,7 @@ impl WorkspaceStore {
             keep_on_exit: flag("keepOnExit"),
             width_limit: self.width_limit(tab_id),
             scrollbar: self.scrollbar(tab_id),
+            selection_copy: app.map_or(SelectionCopy::OnCopy, |app| app.selection_copy()),
             // Always detecting: the per-tab switch gates only the Working edge, read when it
             // fires, so turning it off still lets a pending Idle land.
             idle_timeout: Some(self.idle_timeout()),

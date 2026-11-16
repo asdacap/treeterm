@@ -718,6 +718,29 @@ fn an_ai_harness_set_to_disable_scrollbar_draws_none(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn a_ghostty_tab_copies_its_selection_as_it_is_made(cx: &mut TestAppContext) {
+    use treeterm_model::terminal::SelectionCopy;
+    cx.executor().allow_parking();
+    let h = harness();
+    std::fs::write(h.daemon.workspaces_dir().join("a.json"), body("a", None)).unwrap();
+    publish(&h, &["a"]);
+    let settings = cx.new(|_| SettingsStore::in_memory(treeterm_core::settings::Settings::default()));
+    let conn = h.conn.clone();
+    let store = cx.new(|cx| SessionStore::new(conn, "client-a".into(), settings, None, cx.new(ConnectionTraffic::new), cx));
+    wait_until(cx, &store, |s| loaded(s, "a"));
+    let workspace = store.read_with(cx, |s, _| ws(s, "a"));
+    let ghostty = workspace.update(cx, |w, cx| w.add_tab("ghostty-terminal", cx)).unwrap();
+    let shell = workspace.update(cx, |w, cx| w.add_tab("terminal", cx)).unwrap();
+    wait_until(cx, &workspace, |w| terminal_of(w, &ghostty).is_some() && terminal_of(w, &shell).is_some());
+    let copy = |cx: &mut TestAppContext, tab: &str| {
+        let terminal = workspace.read_with(cx, |w, _| terminal_of(w, tab).unwrap());
+        terminal.read_with(cx, |t, _| t.options().selection_copy)
+    };
+    assert_eq!(copy(cx, &ghostty), SelectionCopy::OnSelect);
+    assert_eq!(copy(cx, &shell), SelectionCopy::OnCopy);
+}
+
+#[gpui_kit::test]
 fn opening_a_directory_adds_a_root_workspace_with_git_info_and_a_terminal(cx: &mut TestAppContext) {
     cx.executor().allow_parking();
     let h = harness();

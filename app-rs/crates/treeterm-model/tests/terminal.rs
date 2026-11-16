@@ -10,7 +10,7 @@ use treeterm_core::pty::CreatePty;
 use treeterm_core::settings::TerminalSettings;
 use treeterm_model::terminal::{
     ALT_CLICK_MOVE_CURSOR_TIME, BADGE_DOUBLE_CLICK, CellPoint, DRAG_SCROLL_INTERVAL, LinkPress, Overlay, Pointer,
-    ScrollbarVisibility, SelectionKind, TerminalEvent, TerminalModel, TerminalOptions,
+    ScrollbarVisibility, SelectionCopy, SelectionKind, TerminalEvent, TerminalModel, TerminalOptions,
 };
 use treeterm_term::keys::Modifiers;
 use treeterm_term::core::GridSize;
@@ -49,6 +49,7 @@ fn options(pty_id: String) -> TerminalOptions {
         keep_on_exit: false,
         width_limit: WidthLimit::Capped(160),
         scrollbar: ScrollbarVisibility::Shown,
+        selection_copy: SelectionCopy::OnCopy,
         idle_timeout: None,
         traffic: treeterm_core::traffic::ByteCounter::default(),
     }
@@ -470,6 +471,44 @@ fn a_right_click_selects_the_word_unless_inside_the_selection(cx: &mut TestAppCo
         m.select_word_unless_selected(cell(row, 20), cx);
         assert_eq!(m.selection_text().as_deref(), Some("three"));
     });
+}
+
+#[gpui_kit::test]
+fn a_ghostty_tab_copies_a_drag_or_a_double_click_as_it_ends(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    let pty = spawn_shell(&h);
+    let ghostty = TerminalOptions { selection_copy: SelectionCopy::OnSelect, ..options(pty.clone()) };
+    let (model, row) = printed(cx, &h, ghostty, r"abcdef ghi\n", "abcdef ghi");
+    let (events, _subscription) = record(cx, &model);
+    let copied = |events: &RefCell<Vec<TerminalEvent>>| -> Vec<String> {
+        events
+            .borrow()
+            .iter()
+            .filter_map(|event| match event {
+                TerminalEvent::Clipboard(text) => Some(text.clone()),
+                _ => None,
+            })
+            .collect()
+    };
+    model.update(cx, |m, cx| {
+        drag(m, cell(row, 0), right_half(row, 2), Modifiers::default(), cx);
+        m.press_selection(cell(row, 8), 2, Modifiers::default(), cx);
+        m.release_selection(cell(row, 8), Modifiers::default(), cx);
+        // A plain click selects, and copies, nothing.
+        m.press_selection(cell(row, 4), 1, Modifiers::default(), cx);
+        m.release_selection(cell(row, 4), Modifiers::default(), cx);
+    });
+    assert_eq!(copied(&events), ["abc", "ghi"]);
+
+    // A Terminal tab copies only on Copy.
+    let terminal = open(cx, &h, options(pty));
+    let (events, _subscription) = record(cx, &terminal);
+    terminal.update(cx, |m, cx| {
+        drag(m, cell(row, 0), right_half(row, 2), Modifiers::default(), cx);
+        assert_eq!(m.selection_text().as_deref(), Some("abc"));
+    });
+    assert!(copied(&events).is_empty());
 }
 
 #[gpui_kit::test]

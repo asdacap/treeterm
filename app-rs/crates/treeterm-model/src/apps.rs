@@ -8,10 +8,13 @@ use serde_json::{Value, json};
 use treeterm_core::pty::Sandbox;
 use treeterm_core::settings::Settings;
 
-use crate::terminal::ScrollbarVisibility;
+use crate::terminal::{ScrollbarVisibility, SelectionCopy};
 
 /// What every AI-harness application id starts with (`aiharness-<instance>`).
 pub const AI_HARNESS_PREFIX: &str = "aiharness-";
+
+/// The Electron app's Terminal (Ghostty), drawn by ghostty-web there; natively the terminal.
+pub const GHOSTTY_TERMINAL: &str = "ghostty-terminal";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AppKind {
@@ -224,6 +227,16 @@ impl AppDef {
         }
     }
 
+    /// When a terminal of this application copies its selection: a Ghostty tab as soon as it
+    /// is made, as ghostty-web does in Electron.
+    pub fn selection_copy(&self) -> SelectionCopy {
+        if self.id == GHOSTTY_TERMINAL {
+            SelectionCopy::OnSelect
+        } else {
+            SelectionCopy::OnCopy
+        }
+    }
+
     /// The terminal background a tab of this application uses, as `#rrggbb`, if not the default.
     pub fn background(&self) -> Option<&str> {
         match &self.kind {
@@ -421,7 +434,7 @@ impl AppRegistry {
         let mut apps = vec![
             terminal("terminal", true),
             // The Electron app's alternate terminal frontend; natively it is the same terminal.
-            terminal("ghostty-terminal", false),
+            terminal(GHOSTTY_TERMINAL, false),
             AppDef {
                 id: "filesystem".to_owned(),
                 name: "Files".to_owned(),
@@ -789,6 +802,15 @@ mod tests {
         assert_eq!(scrollbar("aiharness-bare"), ScrollbarVisibility::Hidden);
         assert_eq!(scrollbar("aiharness-framed"), ScrollbarVisibility::Shown);
         assert_eq!(scrollbar("terminal"), ScrollbarVisibility::Shown);
+    }
+
+    #[test]
+    fn a_ghostty_tab_copies_its_selection_as_it_is_made() {
+        let registry = AppRegistry::from_settings(&Settings::default());
+        let copy = |id: &str| registry.get(id).unwrap().selection_copy();
+        assert_eq!(copy(GHOSTTY_TERMINAL), SelectionCopy::OnSelect);
+        assert_eq!(copy("terminal"), SelectionCopy::OnCopy);
+        assert_eq!(copy("aiharness-claude"), SelectionCopy::OnCopy);
     }
 
     #[test]
