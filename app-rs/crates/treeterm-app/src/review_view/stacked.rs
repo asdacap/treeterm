@@ -211,45 +211,35 @@ pub struct DraftInput {
 /// Cmd/Ctrl+A) end with no press.
 enum LinePress {
     Idle,
-    Pressed {
-        /// The lines the press selected: one, or more when Shift extended a selection.
-        lines: DiffLineRange,
-        /// The line pressed.
-        at: DiffLinePosition,
-    },
+    Pressed,
 }
 
 impl LinePress {
-    /// Follows the diff's events; `cursor` reads the diff's selection cursor, the line a
-    /// press is on, when one starts. When a selection ends, the line it comments on: a press
-    /// released on the line it pressed (`onLineNumberClick`, which a Shift-click fires too,
-    /// though the Kit extends a selection with it). A drag to other lines and a keyboard
-    /// selection stay selected and comment nowhere.
+    /// Follows the diff's events. When a press ends, `clicked` reads the line number it
+    /// clicked, if any (the diff's `clicked_line`): pressed and released on it, as a DOM
+    /// `click` on it is, Shift or not (the Kit extends a selection with Shift, Electron does
+    /// not). Returns the line a click comments on (`onLineNumberClick`). A press released
+    /// elsewhere (another line number, the code, a header, outside the diff) and a keyboard
+    /// selection comment nowhere.
     fn follow(
         &mut self,
         event: &DiffEvent,
-        cursor: impl FnOnce() -> Option<DiffLinePosition>,
+        clicked: impl FnOnce() -> Option<DiffLinePosition>,
     ) -> Option<(String, Side, u32)> {
         match event {
-            DiffEvent::SelectionStarted(lines) => {
-                *self = match cursor() {
-                    Some(at) => LinePress::Pressed { lines: lines.clone(), at },
-                    None => {
-                        tracing::warn!(?lines, "a line-number press started with no selection cursor; it comments nowhere");
-                        LinePress::Idle
-                    }
-                };
+            DiffEvent::SelectionStarted(_) => {
+                *self = LinePress::Pressed;
                 None
             }
-            DiffEvent::SelectionEnded(ended) => match std::mem::replace(self, LinePress::Idle) {
-                LinePress::Pressed { lines, at } if lines == *ended => {
+            DiffEvent::SelectionEnded(_) => match std::mem::replace(self, LinePress::Idle) {
+                LinePress::Pressed => clicked().map(|at| {
                     let side = match at.side() {
                         DiffSide::Original => Side::Original,
                         DiffSide::Modified => Side::Modified,
                     };
-                    Some((at.path().to_string(), side, u32::try_from(at.line()).unwrap_or(u32::MAX)))
-                }
-                LinePress::Pressed { .. } | LinePress::Idle => None,
+                    (at.path().to_string(), side, u32::try_from(at.line()).unwrap_or(u32::MAX))
+                }),
+                LinePress::Idle => None,
             },
             _ => None,
         }
@@ -266,7 +256,7 @@ fn line_click(
     found: Option<&DiffLineRange>,
     cx: &mut App,
 ) -> Option<(String, Side, u32)> {
-    let clicked = press.follow(event, || state.read(cx).selection_cursor())?;
+    let clicked = press.follow(event, || state.read(cx).clicked_line())?;
     let found = found.cloned();
     state.update(cx, |s, cx| s.set_selected_lines(found, cx));
     Some(clicked)
@@ -1475,45 +1465,33 @@ mod tests {
     }
 
     #[test]
-    fn only_a_press_released_on_the_line_it_pressed_comments() {
+    fn only_a_press_that_clicks_a_line_number_comments() {
         let comment = |side, line| Some(("file.txt".to_owned(), side, line));
-        let unread = || None;
+        let unread = || -> Option<DiffLinePosition> { panic!("only the end of a press reads the line clicked") };
         let one = lines(DiffSide::Modified, 2, 2);
         let mut press = LinePress::Idle;
-        assert_eq!(press.follow(&DiffEvent::SelectionStarted(one.clone()), || at(DiffSide::Modified, 2)), None);
+        assert_eq!(press.follow(&DiffEvent::SelectionStarted(one.clone()), unread), None);
         assert_eq!(press.follow(&DiffEvent::SelectionChanged(Some(one.clone())), unread), None);
-        assert_eq!(press.follow(&DiffEvent::SelectionEnded(one.clone()), unread), comment(Side::Modified, 2));
+        assert_eq!(press.follow(&DiffEvent::SelectionEnded(one.clone()), || at(DiffSide::Modified, 2)), comment(Side::Modified, 2));
         // Shift+Up/Down and Cmd/Ctrl+A end a selection with no press, also after a click.
         assert_eq!(press.follow(&DiffEvent::SelectionEnded(one.clone()), unread), None);
         assert_eq!(press.follow(&DiffEvent::SelectionEnded(lines(DiffSide::Modified, 1, 4)), unread), None);
 
-        // A drag to other lines.
-        assert_eq!(press.follow(&DiffEvent::SelectionStarted(one.clone()), || at(DiffSide::Modified, 2)), None);
-        assert_eq!(press.follow(&DiffEvent::SelectionEnded(lines(DiffSide::Modified, 2, 4)), unread), None);
-
-        // A Shift-click extends a selection to the line clicked, below or above it: a click there.
-        let extended = lines(DiffSide::Modified, 1, 3);
-        assert_eq!(press.follow(&DiffEvent::SelectionStarted(extended.clone()), || at(DiffSide::Modified, 3)), None);
-        assert_eq!(press.follow(&DiffEvent::SelectionEnded(extended.clone()), unread), comment(Side::Modified, 3));
-        assert_eq!(press.follow(&DiffEvent::SelectionStarted(extended.clone()), || at(DiffSide::Modified, 1)), None);
-        assert_eq!(press.follow(&DiffEvent::SelectionEnded(extended.clone()), unread), comment(Side::Modified, 1));
-        // One dragged to another line.
-        assert_eq!(press.follow(&DiffEvent::SelectionStarted(extended), || at(DiffSide::Modified, 3)), None);
-        assert_eq!(press.follow(&DiffEvent::SelectionEnded(lines(DiffSide::Modified, 1, 1)), unread), None);
-        // One across sides (Unified), from a removed line to the added line clicked.
-        let across = lines(DiffSide::Original, 3, 3).with_end_side(DiffSide::Modified);
-        assert_eq!(press.follow(&DiffEvent::SelectionStarted(across.clone()), || at(DiffSide::Modified, 3)), None);
-        assert_eq!(press.follow(&DiffEvent::SelectionEnded(across), unread), comment(Side::Modified, 3));
-
-        // A press whose line the diff does not tell comments nowhere.
+        // A press released elsewhere (another line number, the code, a header, outside the
+        // diff) clicked no line number, also with its line still the only one selected.
         assert_eq!(press.follow(&DiffEvent::SelectionStarted(one.clone()), unread), None);
-        assert_eq!(press.follow(&DiffEvent::SelectionEnded(one), unread), None);
+        assert_eq!(press.follow(&DiffEvent::SelectionEnded(one.clone()), || None), None);
+        assert_eq!(press.follow(&DiffEvent::SelectionStarted(one), unread), None);
+        assert_eq!(press.follow(&DiffEvent::SelectionEnded(lines(DiffSide::Modified, 2, 4)), || None), None);
 
-        // A click on a removed line, after a drag that came back to the line it pressed.
-        let old = lines(DiffSide::Original, 5, 5);
-        assert_eq!(press.follow(&DiffEvent::SelectionStarted(old.clone()), || at(DiffSide::Original, 5)), None);
-        assert_eq!(press.follow(&DiffEvent::SelectionChanged(Some(lines(DiffSide::Original, 5, 6))), unread), None);
-        assert_eq!(press.follow(&DiffEvent::SelectionEnded(old), unread), comment(Side::Original, 5));
+        // A Shift-click selects from the anchor to the line clicked, below or above it, and
+        // comments there; on a removed line too, also across sides (Unified).
+        let extended = lines(DiffSide::Modified, 1, 3);
+        assert_eq!(press.follow(&DiffEvent::SelectionStarted(extended.clone()), unread), None);
+        assert_eq!(press.follow(&DiffEvent::SelectionEnded(extended), || at(DiffSide::Modified, 1)), comment(Side::Modified, 1));
+        let across = lines(DiffSide::Original, 3, 3).with_end_side(DiffSide::Modified);
+        assert_eq!(press.follow(&DiffEvent::SelectionStarted(across.clone()), unread), None);
+        assert_eq!(press.follow(&DiffEvent::SelectionEnded(across), || at(DiffSide::Original, 3)), comment(Side::Original, 3));
     }
 
     /// A one-file diff that comments where `line_click` says, with `found` the find's chosen
@@ -1581,6 +1559,15 @@ mod tests {
         draw(cx);
         assert_eq!(selected(cx), Some(lines(DiffSide::Modified, 1, 3)));
         assert_eq!(comments(cx).len(), 1);
+        // A press on a line number released off the line numbers, in the code or outside the
+        // diff, selects that line and comments nowhere: no click lands on a line number.
+        let from = number(2, cx);
+        for to in [gpui_kit::point(from.x + px(200.), from.y), gpui_kit::point(px(600.), from.y)] {
+            cx.update(|window, cx| window.drag(from, to, cx));
+            draw(cx);
+            assert_eq!(selected(cx), Some(lines(DiffSide::Modified, 2, 2)), "released at {to:?}");
+            assert_eq!(comments(cx).len(), 1, "released at {to:?}");
+        }
 
         let at = number(3, cx);
         cx.simulate_click(at, gpui_kit::Modifiers::none());
@@ -1603,6 +1590,20 @@ mod tests {
         cx.simulate_click(at, gpui_kit::Modifiers::none());
         draw(cx);
         assert_eq!(comments(cx)[3..], [("file.txt".to_owned(), Side::Modified, 2)]);
+        assert_eq!(selected(cx), Some(found.clone()));
+
+        // A press dragged to another line number and back, released on the one it pressed, is
+        // a click there.
+        let (at, away) = (number(3, cx), number(4, cx));
+        let (left, none) = (gpui_kit::MouseButton::Left, gpui_kit::Modifiers::none());
+        cx.simulate_mouse_down(at, left, none);
+        cx.simulate_mouse_move(away, Some(left), none);
+        draw(cx);
+        assert_eq!(selected(cx), Some(lines(DiffSide::Modified, 3, 4)));
+        cx.simulate_mouse_move(at, Some(left), none);
+        cx.simulate_mouse_up(at, left, none);
+        draw(cx);
+        assert_eq!(comments(cx)[4..], [("file.txt".to_owned(), Side::Modified, 3)]);
         assert_eq!(selected(cx), Some(found));
     }
 

@@ -107,6 +107,18 @@ pub enum DiffEvent {
     NearFilesChanged(Vec<SharedString>),
 }
 
+/// TreeTerm patch: a selection gesture's press on a line number, which a release on the
+/// same line number makes a click (see [`DiffState::clicked_line`]).
+#[derive(Clone, Debug)]
+enum LineNumberPress {
+    /// None: a keyboard selection, or no gesture yet.
+    None,
+    /// Pressed on the line number at this line, not released on it.
+    Pressed(DiffLinePosition),
+    /// Pressed and released on the line number at this line.
+    Clicked(DiffLinePosition),
+}
+
 /// TreeTerm patch: how far above and below the viewport a file's rows count as near it
 /// ([`DiffState::near_files`]), as an `IntersectionObserver`'s `rootMargin: '1500px'`.
 pub const NEAR_MARGIN: Pixels = px(1500.);
@@ -276,6 +288,8 @@ pub struct DiffState {
     /// TreeTerm patch: [`Self::expand_unchanged`] revealed every file's unchanged lines
     /// (files [`Self::update_files`] brings in show them too).
     unchanged_expanded: bool,
+    /// TreeTerm patch: the last selection gesture's line-number press.
+    line_number_press: LineNumberPress,
     _presentation: Task<()>,
     _selection_subscription: Subscription,
 }
@@ -410,6 +424,7 @@ impl DiffState {
             top_band: Vec::new(),
             near_files: Vec::new(),
             unchanged_expanded: false,
+            line_number_press: LineNumberPress::None,
             _presentation: Task::ready(()),
             _selection_subscription,
         };
@@ -594,11 +609,17 @@ impl DiffState {
     pub fn selected_lines(&self) -> Option<DiffLineRange> {
         self.selected_lines.clone()
     }
-    /// TreeTerm patch: the line the selection was last moved to (the line number pressed or
-    /// dragged to, or the line Shift+Up/Down reached), which a Shift-click that extends a
-    /// selection does not tell apart from its anchor in [`Self::selected_lines`].
-    pub fn selection_cursor(&self) -> Option<DiffLinePosition> {
-        self.selection_cursor.clone()
+    /// TreeTerm patch: the line number the last selection gesture clicked: pressed and
+    /// released on it, as a DOM `click` on it is, Shift-extended or not and also after a drag
+    /// that came back to it. `None` while the press is held, for one released elsewhere
+    /// (another line number, the code, a header, outside the diff) and for a keyboard
+    /// selection. It holds until the next gesture, so listeners read it on the
+    /// [`DiffEvent::SelectionEnded`] that ends a click.
+    pub fn clicked_line(&self) -> Option<DiffLinePosition> {
+        match &self.line_number_press {
+            LineNumberPress::Clicked(position) => Some(position.clone()),
+            LineNumberPress::None | LineNumberPress::Pressed(_) => None,
+        }
     }
     /// Whether the file at `path` shows only its header.
     pub fn is_file_collapsed(&self, path: &str) -> bool {
@@ -1260,6 +1281,8 @@ impl DiffState {
         TextSelection::clear(window, cx);
         window.focus(&self.focus, cx);
         self.selecting = true;
+        // TreeTerm patch.
+        self.line_number_press = LineNumberPress::Pressed(position.clone());
         cx.emit(DiffEvent::SelectionStarted(range_between(
             &anchor, &position,
         )));
@@ -1293,6 +1316,17 @@ impl DiffState {
             && (anchor.side() == position.side() || self.mode == DiffMode::Unified)
     }
 
+    /// TreeTerm patch: the left button was released on the line number at `position`. An
+    /// active gesture pressed on it clicked it; the diff's own mouse-up listener, which runs
+    /// after the line number's, then ends the gesture with [`Self::end_line_selection`].
+    pub(crate) fn release_line_selection_on(&mut self, position: DiffLinePosition) {
+        if self.selecting
+            && matches!(&self.line_number_press, LineNumberPress::Pressed(pressed) if *pressed == position)
+        {
+            self.line_number_press = LineNumberPress::Clicked(position);
+        }
+    }
+
     /// Finishes an active line-number gesture.
     pub(crate) fn end_line_selection(&mut self, cx: &mut Context<Self>) {
         if !std::mem::take(&mut self.selecting) {
@@ -1312,7 +1346,9 @@ impl DiffState {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.begin_line_selection(position, extend, window, cx);
+        // TreeTerm patch: released on the line number pressed.
+        self.begin_line_selection(position.clone(), extend, window, cx);
+        self.release_line_selection_on(position);
         self.end_line_selection(cx);
     }
 
@@ -1344,6 +1380,8 @@ impl DiffState {
             .unwrap_or_else(|| position.clone());
         TextSelection::clear(window, cx);
         window.focus(&self.focus, cx);
+        // TreeTerm patch.
+        self.line_number_press = LineNumberPress::None;
         let range = self.select_user_range(anchor, position.clone(), cx);
         cx.emit(DiffEvent::SelectionEnded(range));
         if let Some(row) = self.expand_line(&position) {
@@ -1358,6 +1396,8 @@ impl DiffState {
         let count = self.files[file].lines_count(side);
         TextSelection::clear(window, cx);
         window.focus(&self.focus, cx);
+        // TreeTerm patch.
+        self.line_number_press = LineNumberPress::None;
         let range = self.select_user_range(
             self.position(file, side, 0),
             self.position(file, side, count - 1),

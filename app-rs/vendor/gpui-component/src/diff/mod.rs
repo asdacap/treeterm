@@ -1409,6 +1409,9 @@ fn render_gutter(
             let down = code.state.clone();
             let moved = code.state.clone();
             let dragged = position.clone();
+            // TreeTerm patch.
+            let up = code.state.clone();
+            let released = position.clone();
             // A plain hit target: line numbers need no button chrome or state.
             this.child(
                 div()
@@ -1449,6 +1452,13 @@ fn render_gutter(
                                 state.drag_line_selection(dragged.clone(), cx)
                             })
                         }
+                    })
+                    // TreeTerm patch: a gesture released on a line number tells which, before
+                    // the diff's mouse-up listener ends it (children's listeners run first).
+                    .on_mouse_up(MouseButton::Left, move |_, _, cx| {
+                        up.update(cx, |state, _| {
+                            state.release_line_selection_on(released.clone())
+                        })
                     }),
             )
         })
