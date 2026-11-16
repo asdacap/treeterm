@@ -43,6 +43,8 @@ pub struct ElectronLocale {
     date_time: &'static str,
     /// `toLocaleDateString()`.
     date: &'static str,
+    /// `toLocaleTimeString()`.
+    time: &'static str,
     /// `toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })`.
     time_two_digit: &'static str,
 }
@@ -84,6 +86,11 @@ impl ElectronLocale {
     /// `new Date(…).toLocaleDateString()`; `None` when `t` is not a calendar date.
     pub fn date(&self, t: LocalTime) -> Option<String> {
         Some(self.render(self.date, t, self.calendar_date(t)?))
+    }
+
+    /// `new Date(…).toLocaleTimeString()`.
+    pub fn time(&self, t: LocalTime) -> String {
+        self.render(self.time, t, (t.year, t.month, t.day))
     }
 
     /// `toLocaleTimeString` with a 2-digit hour, minute and second.
@@ -388,6 +395,34 @@ mod tests {
     }
 
     #[test]
+    fn times_follow_the_locale_as_to_locale_time_string_does() {
+        let evening = at(2026, 11, 16, 17, 57, 12);
+        let morning = at(2026, 1, 5, 9, 5, 7);
+        let cases = [
+            ("en-US", "5:57:12 PM", "9:05:07 AM"),
+            ("en-GB", "17:57:12", "09:05:07"),
+            ("de", "17:57:12", "09:05:07"),
+            ("ja", "17:57:12", "9:05:07"),
+            ("fi", "17.57.12", "9.05.07"),
+            ("bg", "17:57:12 ч.", "09:05:07 ч."),
+            ("ko", "오후 5:57:12", "오전 9:05:07"),
+            ("zh-TW", "下午5:57:12", "上午9:05:07"),
+            ("ta", "PM 5:57:12", "AM 9:05:07"),
+            ("es-419", "5:57:12 p.m.", "9:05:07 a.m."),
+            ("fa", "۱۷:۵۷:۱۲", "۹:۰۵:۰۷"),
+        ];
+        for (app, evening_text, morning_text) in cases {
+            assert_eq!(locale(app).time(evening), evening_text, "{app}");
+            assert_eq!(locale(app).time(morning), morning_text, "{app}");
+        }
+        // Midnight and noon on a 12-hour clock; midnight on a 24-hour one.
+        assert_eq!(locale("en-US").time(at(2026, 1, 5, 0, 0, 5)), "12:00:05 AM");
+        assert_eq!(locale("en-US").time(at(2026, 3, 25, 12, 0, 0)), "12:00:00 PM");
+        assert_eq!(locale("ja").time(at(2026, 1, 5, 0, 0, 5)), "0:00:05");
+        assert_eq!(locale("en-GB").time(at(2026, 1, 5, 0, 0, 5)), "00:00:05");
+    }
+
+    #[test]
     fn two_digit_times_follow_the_locale_hour_cycle() {
         let afternoon = at(2026, 1, 5, 14, 15, 30);
         let cases = [
@@ -417,11 +452,13 @@ mod tests {
             assert!(locale.icu.parse::<Locale>().is_ok(), "{}", locale.icu);
             let twelve_hour = matches!(locale.day_periods, DayPeriods::AmPm(..));
             assert_eq!(locale.time_two_digit.contains("{a}"), twelve_hour, "{}", locale.app);
+            assert_eq!(locale.time.contains("{a}"), twelve_hour, "{}", locale.app);
             for hour in 0..24 {
                 let t = at(2026, 3, 25, hour, 0, 0);
                 assert!(locale.date_time(t).is_some(), "{}", locale.app);
                 assert!(locale.date(t).is_some(), "{}", locale.app);
                 assert!(!locale.time_two_digit(t).is_empty(), "{}", locale.app);
+                assert!(!locale.time(t).is_empty(), "{}", locale.app);
             }
         }
     }

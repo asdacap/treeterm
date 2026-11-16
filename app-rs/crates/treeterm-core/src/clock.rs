@@ -80,6 +80,15 @@ pub fn locale_date(millis: i64) -> String {
     }
 }
 
+/// `new Date(…).toLocaleTimeString()` in Electron's locale (en-US: `5:57:12 PM`, en-GB:
+/// `17:57:12`); `?` when it cannot be converted.
+pub fn locale_time(at: SystemTime) -> String {
+    match local(at) {
+        Some(t) => ElectronLocale::current().time(t),
+        None => "?".to_owned(),
+    }
+}
+
 /// `toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })` in
 /// Electron's locale (en-US: `05:57:12 PM`, en-GB: `17:57:12`); `?` when it cannot be converted.
 pub fn locale_time_two_digit(at: SystemTime) -> String {
@@ -121,6 +130,7 @@ mod tests {
         assert_eq!(Some(locale_date_time(0)), locale.date_time(epoch));
         assert_eq!(Some(locale_date(0)), locale.date(epoch));
         assert_eq!(locale_time_two_digit(UNIX_EPOCH), locale.time_two_digit(epoch));
+        assert_eq!(locale_time(UNIX_EPOCH), locale.time(epoch));
         assert_ne!(locale_date_time(1_763_315_832_000), "?");
     }
 

@@ -314,7 +314,7 @@ impl Render for MonitorView {
                     .pt(px(4.))
                     .text_size(px(10.))
                     .text_color(secondary)
-                    .child(format!("Updated {}", updated.map(treeterm_core::clock::time_of_day).unwrap_or_default())),
+                    .child(format!("Updated {}", updated.map(treeterm_core::clock::locale_time).unwrap_or_default())),
             )
             .child(
                 div()
