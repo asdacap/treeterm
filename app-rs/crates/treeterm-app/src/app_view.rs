@@ -1305,7 +1305,11 @@ impl AppView {
             HeaderField::Name => {
                 let text = store.read(cx).file().display_name().to_owned();
                 let input = cx.new(|cx| InputState::new(window, cx).default_value(text));
-                input.update(cx, |input, cx| input.focus(window, cx));
+                // `onFocus={(e) => e.target.select()}`: typing replaces the whole name.
+                input.update(cx, |input, cx| {
+                    input.focus(window, cx);
+                    input.select_all(window, cx);
+                });
                 let save = cx.subscribe(&input, move |view, input, event: &InputEvent, cx| match event {
                     InputEvent::PressEnter { .. } | InputEvent::Blur => {
                         let text = input.read(cx).value().to_string();
