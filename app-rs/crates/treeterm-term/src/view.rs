@@ -72,12 +72,18 @@ pub fn buffer_lines<T>(term: &Term<T>) -> Vec<String> {
     (top..=bottom).map(|line| line_text(term, Line(line))).collect()
 }
 
+/// Where the viewport sits, as both Electron engines tell it (`getScrollPosition`): one line
+/// above the newest counts as the bottom, so output still follows there. With a single line
+/// of scrollback, that line in view reads as the top.
 pub fn scroll_position<T>(term: &Term<T>) -> ScrollPosition {
+    let history = term.history_size();
     let offset = term.grid().display_offset();
-    if offset == 0 {
+    if history == 0 {
         ScrollPosition::Bottom
-    } else if offset >= term.history_size() {
+    } else if offset >= history {
         ScrollPosition::Top
+    } else if offset <= 1 {
+        ScrollPosition::Bottom
     } else {
         ScrollPosition::Middle
     }
@@ -170,6 +176,29 @@ mod tests {
         assert_eq!(scroll_position(&term), ScrollPosition::Middle);
         scroll_to_ratio(&mut term, 1.0);
         assert_eq!(scroll_position(&term), ScrollPosition::Bottom);
+    }
+
+    #[test]
+    fn one_line_above_the_bottom_counts_as_the_bottom() {
+        let mut core = core(2);
+        core.feed(b"1\r\n2\r\n3\r\n4\r\n5\r\n6\r\n7\r\n8\r\n9\r\n10");
+        let mut term = core.term().lock();
+        term.scroll_display(Scroll::Delta(1));
+        assert_eq!(scroll_position(&term), ScrollPosition::Bottom);
+        term.scroll_display(Scroll::Delta(1));
+        assert_eq!(scroll_position(&term), ScrollPosition::Middle);
+        term.scroll_display(Scroll::Top);
+        assert_eq!(scroll_position(&term), ScrollPosition::Top);
+    }
+
+    #[test]
+    fn a_single_line_of_scrollback_in_view_is_the_top() {
+        let mut core = core(2);
+        core.feed(b"1\r\n2\r\n3");
+        let mut term = core.term().lock();
+        assert_eq!(term.history_size(), 1);
+        term.scroll_display(Scroll::Delta(1));
+        assert_eq!(scroll_position(&term), ScrollPosition::Top);
     }
 
     #[test]

@@ -11,6 +11,7 @@ use treeterm_model::terminal::{Overlay, TerminalEvent, TerminalModel, TerminalOp
 use treeterm_term::core::GridSize;
 use treeterm_term::fit::WidthLimit;
 use treeterm_term::palette::DEFAULT_BACKGROUND;
+use treeterm_term::view::ScrollPosition;
 
 mod common;
 use common::{Harness, harness, wait_until};
@@ -203,4 +204,29 @@ fn selection_copies_the_selected_text(cx: &mut TestAppContext) {
         m.clear_selection(cx);
         assert_eq!(m.selection_text(), None);
     });
+}
+
+/// A focused shell with 300 lines of scrollback, viewport at the bottom.
+fn with_scrollback(cx: &mut TestAppContext, h: &Harness) -> Entity<TerminalModel> {
+    let pty = spawn_shell(h);
+    let model = open(cx, h, options(pty));
+    model.update(cx, |m, cx| m.set_focused(true, cx));
+    type_line(cx, &model, "seq 1 300; echo scrolled-$((2+3))");
+    wait_until(cx, &model, |m| m.screen_text().contains("scrolled-5"));
+    model
+}
+
+fn position(cx: &mut TestAppContext, model: &Entity<TerminalModel>) -> ScrollPosition {
+    model.read_with(cx, |m, _| m.scroll_position())
+}
+
+#[gpui_kit::test]
+fn one_line_above_the_bottom_reads_bottom(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    let model = with_scrollback(cx, &h);
+    model.update(cx, |m, cx| m.scroll_lines(1, cx));
+    assert_eq!(position(cx, &model), ScrollPosition::Bottom);
+    model.update(cx, |m, cx| m.scroll_lines(1, cx));
+    assert_eq!(position(cx, &model), ScrollPosition::Middle);
 }

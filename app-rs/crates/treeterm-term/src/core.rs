@@ -245,18 +245,22 @@ impl TermCore {
     }
 
     /// Parse PTY output. Returns what the UI should act on.
-    ///
-    /// A viewport at the bottom stays there; one the user scrolled up stays on the same
-    /// lines (alacritty anchors it) unless the terminal is pinned.
     pub fn feed(&mut self, bytes: &[u8]) -> Vec<Notice> {
-        {
-            let mut term = self.term.lock();
-            self.parser.advance(&mut *term, bytes);
-            if self.gate.is_pinned() && term.grid().display_offset() != 0 {
-                term.scroll_display(Scroll::Bottom);
-            }
-        }
+        self.apply_output(|parser, term| parser.advance(term, bytes));
         self.drain_events()
+    }
+
+    /// Put output on the grid. A pinned terminal, or a viewport at the bottom (within one
+    /// line, see [`view::scroll_position`]), shows the newest line afterwards; one the user
+    /// scrolled further up stays on the same lines (alacritty anchors it).
+    fn apply_output(&mut self, apply: impl FnOnce(&mut Processor, &mut Term<Listener>)) {
+        let mut term = self.term.lock();
+        let follow = self.gate.is_pinned()
+            || view::scroll_position(&*term) == view::ScrollPosition::Bottom;
+        apply(&mut self.parser, &mut term);
+        if follow && term.grid().display_offset() != 0 {
+            term.scroll_display(Scroll::Bottom);
+        }
     }
 
     /// When a synchronized update (DEC mode 2026) is buffering output, the moment it must
@@ -267,20 +271,18 @@ impl TermCore {
 
     /// Flush a synchronized update whose deadline passed.
     pub fn flush_sync(&mut self) -> Vec<Notice> {
-        {
-            let mut term = self.term.lock();
-            self.parser.stop_sync(&mut *term);
-        }
+        self.apply_output(|parser, term| parser.stop_sync(term));
         self.drain_events()
     }
 
     /// Apply the size the daemon echoed. This is the only way the grid changes size.
     ///
-    /// A viewport at the bottom (or pinned) stays at the bottom; otherwise it keeps its
-    /// relative position in the scrollback, as the Electron UI does.
+    /// A viewport at the bottom (within one line) or pinned stays at the bottom; otherwise
+    /// it keeps its relative position in the scrollback, as the Electron UI does.
     pub fn resize(&mut self, size: GridSize) {
         let mut term = self.term.lock();
-        let stay_at_bottom = self.gate.is_pinned() || term.grid().display_offset() == 0;
+        let stay_at_bottom = self.gate.is_pinned()
+            || view::scroll_position(&*term) == view::ScrollPosition::Bottom;
         let ratio = view::scroll_ratio(&*term);
         term.resize(size);
         if stay_at_bottom {
@@ -488,6 +490,48 @@ mod tests {
 
         core.gate().set_pinned(true);
         core.feed(b"\r\n8");
+        assert_eq!(core.term().lock().grid().display_offset(), 0);
+    }
+
+    /// Lines 0..40 fed, viewport scrolled `lines` up from the bottom (0: at the bottom).
+    fn scrolled_up(lines: i32) -> TermCore {
+        let (mut core, _) = core_with_answers();
+        for i in 0..40 {
+            core.feed(format!("{i}\r\n").as_bytes());
+        }
+        core.term().lock().scroll_display(Scroll::Delta(lines));
+        core
+    }
+
+    #[test]
+    fn output_follows_from_one_line_up() {
+        let mut core = scrolled_up(1);
+        core.feed(b"new\r\n");
+        assert_eq!(core.term().lock().grid().display_offset(), 0);
+    }
+
+    #[test]
+    fn output_leaves_two_lines_up_anchored() {
+        let mut core = scrolled_up(2);
+        core.feed(b"new\r\n");
+        assert_eq!(core.term().lock().grid().display_offset(), 3);
+    }
+
+    #[test]
+    fn a_synchronized_update_flushed_at_its_deadline_follows_from_the_bottom() {
+        for (scrolled, offset) in [(1, 0), (2, 4)] {
+            let mut core = scrolled_up(0);
+            core.feed(b"\x1b[?2026hnew\r\nlines\r\n");
+            core.term().lock().scroll_display(Scroll::Delta(scrolled));
+            core.flush_sync();
+            assert_eq!(core.term().lock().grid().display_offset(), offset, "{scrolled} up");
+        }
+    }
+
+    #[test]
+    fn resize_stays_at_the_bottom_from_one_line_up() {
+        let mut core = scrolled_up(1);
+        core.resize(GridSize { cols: 20, rows: 8 });
         assert_eq!(core.term().lock().grid().display_offset(), 0);
     }
 
