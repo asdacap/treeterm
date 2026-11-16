@@ -117,6 +117,9 @@ pub fn github_client(
 /// A pull's outcome when its workspace left the session before the pull finished.
 pub const PULL_GONE: &str = "The workspace closed before the pull finished";
 
+/// An `open_github` outcome when its workspace left the session before the URL was found.
+pub const OPEN_GITHUB_GONE: &str = "The workspace closed before its GitHub page was found";
+
 pub struct GitController {
     id: String,
     session: WeakEntity<SessionStore>,
@@ -129,6 +132,9 @@ pub struct GitController {
     /// `pullLoading`.
     pull: PullState,
     _pull: Option<Task<()>>,
+    /// `GitHubButton`'s `loading`.
+    open_github: OpenGitHubState,
+    _open_github: Option<Task<()>>,
     _run: Option<Task<()>>,
     _timer: Option<Task<()>>,
 }
@@ -145,6 +151,8 @@ impl GitController {
             failures: Vec::new(),
             pull: PullState::Idle,
             _pull: None,
+            open_github: OpenGitHubState::Idle,
+            _open_github: None,
             _run: None,
             _timer: None,
         }
@@ -165,6 +173,10 @@ impl GitController {
 
     pub fn pull_state(&self) -> PullState {
         self.pull
+    }
+
+    pub fn open_github_state(&self) -> OpenGitHubState {
+        self.open_github
     }
 
     /// `pullFromRemote`: pull the branch, then refresh the status. The task resolves with
@@ -238,27 +250,50 @@ impl GitController {
         cx.notify();
     }
 
-    /// `openGitHub`: the URL of this workspace's PR, or of the page to create one (the PR
-    /// status is refreshed on the way).
-    pub fn open_github(&self, cx: &mut Context<Self>) -> Task<Result<String, String>> {
+    /// `openGitHub`, as `GitHubButton` runs it: the URL of this workspace's PR, or of the page
+    /// to create one (the PR status is refreshed on the way). The state is `Opening` until it
+    /// resolves, and the lookup goes on when the task is dropped. None while one runs already.
+    pub fn open_github(&mut self, cx: &mut Context<Self>) -> Option<Task<Result<String, String>>> {
+        if self.open_github == OpenGitHubState::Opening {
+            return None;
+        }
+        self.open_github = OpenGitHubState::Opening;
+        let (outcome, receiver) = oneshot::channel();
         let (id, session, git, github) = (self.id.clone(), self.session.clone(), self.git.clone(), self.github.clone());
-        cx.spawn(async move |this, cx| {
+        self._open_github = Some(cx.spawn(async move |this, cx| {
             let deps = Deps { id, session, git, github, cx: cx.clone() };
             let mut sink = cx.clone();
+            let apply_to = this.clone();
             let mut apply = move |update| {
-                match this.update(&mut sink, |controller, cx| {
+                match apply_to.update(&mut sink, |controller, cx| {
                     controller.status.apply(update);
                     cx.notify();
                 }) {
                     Ok(()) | Err(_) => {}
                 }
             };
-            match treeterm_core::git_status::open_github(&deps, &mut apply).await {
+            let result = match treeterm_core::git_status::open_github(&deps, &mut apply).await {
                 Ok(treeterm_core::git_status::GitHubPage::PullRequest { url })
                 | Ok(treeterm_core::git_status::GitHubPage::CreatePullRequest { url }) => Ok(url),
                 Err(error) => Err(error.to_string()),
+            };
+            match this.update(cx, |controller, cx| {
+                controller.open_github = OpenGitHubState::Idle;
+                cx.notify();
+            }) {
+                Ok(()) | Err(_) => {} // Err: workspace gone
             }
-        })
+            match outcome.send(result) {
+                Ok(()) | Err(_) => {} // Err: nobody waits for it
+            }
+        }));
+        cx.notify();
+        Some(cx.foreground_executor().spawn(async move {
+            match receiver.await {
+                Ok(result) => result,
+                Err(oneshot::Canceled) => Err(OPEN_GITHUB_GONE.to_owned()),
+            }
+        }))
     }
 
     /// `pushReviewCommentsToGitHub`: post `comments` on this workspace's PR as inline review
@@ -312,6 +347,13 @@ impl GitController {
 pub enum PullState {
     Idle,
     Pulling,
+}
+
+/// Whether the GitHub buttons' URL is being looked up.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OpenGitHubState {
+    Idle,
+    Opening,
 }
 
 /// What a PR needs, at a glance (`getPrSignal`).

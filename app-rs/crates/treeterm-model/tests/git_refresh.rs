@@ -1,7 +1,8 @@
 //! When a workspace's git status (its `GitController`) refreshes, as Electron's `refreshGit`
 //! callers do: every workspace on load, every select (the shown one too), the AI going idle,
 //! Review's refresh / stage / unstage / commit, and merges (the parent, and a kept child).
-//! And the header's Pull (`pullFromRemote`), whose outcome the button alerts when it fails.
+//! And the header's Pull (`pullFromRemote`), whose outcome the button alerts when it fails,
+//! and its GitHub buttons (`openGitHub`), disabled while the URL resolves.
 //! And the git info a refresh re-reads first (`refreshGitInfo` → `updateGitInfo`): whether
 //! the directory is a repo, its branch and its root.
 //!
@@ -20,7 +21,9 @@ use treeterm_core::git_status::{
     GitStatus, ParentConflicts, ParentDiff, REFRESH_COOLDOWN, WorkingTree,
 };
 use treeterm_core::github::UnavailableGitHub;
-use treeterm_model::git_controller::{GitController, PULL_GONE, PullState};
+use treeterm_model::git_controller::{
+    GitController, OPEN_GITHUB_GONE, OpenGitHubState, PULL_GONE, PullState,
+};
 use treeterm_model::review::{GitOp, ReviewEvent, ReviewModel, StageTarget};
 use treeterm_model::session_store::{AfterMerge, SessionState, SessionStore, WorkspaceEntry};
 use treeterm_model::settings_store::SettingsStore;
@@ -623,6 +626,81 @@ fn a_pull_whose_workspace_goes_first_says_so(cx: &mut TestAppContext) {
     drop(git);
     cx.update(|_| {});
     assert_eq!(finish(cx, pull), Err(PULL_GONE.to_owned()));
+}
+
+/// The GitHub buttons' click: the URL lookup starts (none runs yet).
+fn start_open_github(
+    cx: &mut TestAppContext,
+    controller: &Entity<GitController>,
+) -> Task<Result<String, String>> {
+    controller
+        .update(cx, |git, cx| git.open_github(cx))
+        .expect("no lookup runs yet")
+}
+
+fn open_github_state(
+    cx: &mut TestAppContext,
+    controller: &Entity<GitController>,
+) -> OpenGitHubState {
+    controller.read_with(cx, |git, _| git.open_github_state())
+}
+
+#[gpui_kit::test]
+fn the_github_buttons_are_busy_until_the_url_resolves_and_one_lookup_runs_at_a_time(
+    cx: &mut TestAppContext,
+) {
+    cx.executor().allow_parking();
+    let h = harness();
+    publish_empty(&h);
+    let repo = new_repo(&h);
+    let store = open_store(cx, &h, "client-a");
+    let root = open(cx, &store, &repo);
+    // The buttons show on a child worktree on a branch.
+    let child = add_child(cx, &store, &root, "feature");
+    settle(cx, &store, &[&root, &child]);
+    let git = controller(cx, &store, &child);
+    assert_eq!(open_github_state(cx, &git), OpenGitHubState::Idle);
+
+    let lookup = start_open_github(cx, &git);
+    assert_eq!(open_github_state(cx, &git), OpenGitHubState::Opening);
+    // `disabled={loading}`: a click meanwhile starts nothing.
+    assert!(git.update(cx, |g, cx| g.open_github(cx)).is_none());
+
+    // `alert(result.error)`: the PR lookup's own words.
+    assert_eq!(
+        finish(cx, lookup),
+        Err("GitHub is not available: tls".to_owned())
+    );
+    assert_eq!(open_github_state(cx, &git), OpenGitHubState::Idle);
+
+    // Nobody waiting for the URL does not keep the buttons disabled.
+    drop(start_open_github(cx, &git));
+    assert_eq!(open_github_state(cx, &git), OpenGitHubState::Opening);
+    wait_until(cx, &git, |g| g.open_github_state() == OpenGitHubState::Idle);
+    // And the next click looks it up again.
+    let again = start_open_github(cx, &git);
+    assert!(finish(cx, again).is_err());
+}
+
+#[gpui_kit::test]
+fn opening_github_for_a_workspace_that_goes_first_says_so(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    publish_empty(&h);
+    let store = open_store(cx, &h, "client-a");
+    let git = cx.new(|_| {
+        GitController::new(
+            "gone".to_owned(),
+            store.downgrade(),
+            h.conn.git(),
+            Arc::new(UnavailableGitHub::new("tls".to_owned())),
+        )
+    });
+    let lookup = start_open_github(cx, &git);
+    // The workspace leaves the session (its controller with it) before the lookup ran.
+    drop(git);
+    cx.update(|_| {});
+    assert_eq!(finish(cx, lookup), Err(OPEN_GITHUB_GONE.to_owned()));
 }
 
 /// `(isGitRepo, gitBranch, gitRootPath)`.

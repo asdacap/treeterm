@@ -1710,7 +1710,7 @@ fn git_status_items(
 ) -> Vec<AnyElement> {
     use gpui_kit::component::Sizable as _;
     use treeterm_core::git_status::{ParentConflicts, PullRequest, WorkingTree};
-    use treeterm_model::git_controller::PullState;
+    use treeterm_model::git_controller::{OpenGitHubState, PullState};
     let c = colors(cx);
     let (status, refreshing, failures) = {
         let git = controller.read(cx);
@@ -1825,7 +1825,10 @@ fn git_status_items(
         let open = {
             let controller = controller.clone();
             move |window: &mut Window, cx: &mut App| {
-                let task = controller.update(cx, |git, cx| git.open_github(cx));
+                // None: a click in the same frame as the one that started the lookup.
+                let Some(task) = controller.update(cx, |git, cx| git.open_github(cx)) else {
+                    return;
+                };
                 let handle = window.window_handle();
                 cx.spawn(async move |cx| match task.await {
                     Ok(url) => cx.update(|cx| cx.open_url(&url)),
@@ -1839,6 +1842,8 @@ fn git_status_items(
                 .detach();
             }
         };
+        // `disabled={loading}` on both while the URL resolves, the comments path too.
+        let open_state = controller.read(cx).open_github_state();
         let (main_open, comments_ws) = (open.clone(), workspace.clone());
         items.push(
             h_flex()
@@ -1848,16 +1853,19 @@ fn git_status_items(
                         .tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(main_title.clone()).build(window, cx))
                         .child(crate::ui::icon(IconName::Github, 14., fg))
                         .child(label)
-                        .on_click(move |_, window, cx| {
-                            if unresolved > 0 {
-                                comments_ws.update(cx, |w, cx| {
-                                    if w.open_or_focus_tab("github", cx).is_none() {
-                                        tracing::error!("the github application is not registered");
-                                    }
-                                });
-                            } else {
-                                main_open(window, cx);
-                            }
+                        .map(|button| match open_state {
+                            OpenGitHubState::Opening => disabled(button),
+                            OpenGitHubState::Idle => button.on_click(move |_, window, cx| {
+                                if unresolved > 0 {
+                                    comments_ws.update(cx, |w, cx| {
+                                        if w.open_or_focus_tab("github", cx).is_none() {
+                                            tracing::error!("the github application is not registered");
+                                        }
+                                    });
+                                } else {
+                                    main_open(window, cx);
+                                }
+                            }),
                         }),
                 )
                 .child(
@@ -1867,7 +1875,10 @@ fn git_status_items(
                         .rounded_l(px(0.))
                         .tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(browser_title).build(window, cx))
                         .child(crate::ui::icon(IconName::ExternalLink, 14., fg))
-                        .on_click(move |_, window, cx| open(window, cx)),
+                        .map(|button| match open_state {
+                            OpenGitHubState::Opening => disabled(button),
+                            OpenGitHubState::Idle => button.on_click(move |_, window, cx| open(window, cx)),
+                        }),
                 )
                 .into_any_element(),
         );
