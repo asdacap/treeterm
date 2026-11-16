@@ -337,6 +337,65 @@ fn reset_input_gives_the_terminal_focus_back() {
     app.quit();
 }
 
+/// The window's terminals, as `state` lists them.
+fn terminals(state: &Value) -> &[Value] {
+    state["terminals"].as_array().map(Vec::as_slice).unwrap_or_default()
+}
+
+/// Add a terminal tab to `workspace` and wait until it shows a prompt with keyboard focus
+/// (as a new tab asks for), next to the one on `first_pty`. Returns the new tab's id.
+fn add_terminal_tab(app: &App, workspace: &str, first_pty: &str) -> String {
+    let reply = app.command(&format!("newtab {workspace}"));
+    let tab = reply["tab"].as_str().unwrap_or_else(|| panic!("no tab id in {reply}")).to_owned();
+    app.wait_for("the new tab's terminal with focus", |state| {
+        let terminals = terminals(state);
+        terminals.len() == 2
+            && terminals.iter().any(|t| {
+                t["pty"] != first_pty
+                    && t["overlay"].is_null()
+                    && t["viewFocused"] == true
+                    && !t["screen"].as_str().unwrap_or("").trim().is_empty()
+            })
+    });
+    tab
+}
+
+/// Wait until the terminal on `pty` is the only one left and has keyboard focus, then type a
+/// command into it (no click) and wait for its output.
+fn the_only_terminal_takes_typing(app: &App, pty: &str, marker: &str) {
+    app.wait_for("the remaining terminal with focus", |state| {
+        let terminals = terminals(state);
+        terminals.len() == 1
+            && terminals[0]["pty"] == pty
+            && terminals[0]["focused"] == true
+            && terminals[0]["viewFocused"] == true
+    });
+    app.run(&format!("echo {marker}-$((6*7))"));
+    app.wait_for("the typed command's output", |state| screen(state).contains(&format!("{marker}-42")));
+}
+
+#[test]
+#[ignore = "opens the app window; run with --ignored"]
+fn the_terminal_that_comes_into_view_when_the_shown_tab_closes_takes_focus() {
+    let sandbox = Sandbox::new();
+    let app = sandbox.launch();
+    let state = app.command("state");
+    let workspace = state["active"].as_str().expect("the open workspace").to_owned();
+    let first = terminal(&state).and_then(|t| t["pty"].as_str()).expect("the first terminal's PTY").to_owned();
+
+    // Closing the shown tab asks for no refocus (a tab click does): the terminal that comes
+    // into view takes focus itself, as Electron's does when it mounts as the active tab.
+    let tab = add_terminal_tab(&app, &workspace, &first);
+    app.command(&format!("closetab {workspace} {tab}"));
+    the_only_terminal_takes_typing(&app, &first, "after-close");
+
+    // The same when the shown tab's program exits.
+    add_terminal_tab(&app, &workspace, &first);
+    app.run("exit");
+    the_only_terminal_takes_typing(&app, &first, "after-exit");
+    app.quit();
+}
+
 /// How many dialogs the window shows.
 fn dialogs(state: &Value) -> u64 {
     state["dialogs"]["open"].as_u64().unwrap_or_else(|| panic!("no dialog count in {state}"))
