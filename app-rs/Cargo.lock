@@ -9318,6 +9318,7 @@ dependencies = [
  "futures",
  "gpui-kit",
  "indexmap",
+ "regex",
  "serde",
  "serde_json",
  "tempfile",

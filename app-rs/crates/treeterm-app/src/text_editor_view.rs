@@ -117,7 +117,7 @@ impl TextEditorView {
             }
         };
         crate::editor_hooks::install_definitions(&editor, probe, self.definition_clicked.clone(), go, cx);
-        crate::editor_hooks::install_word_suggestions(&editor, cx);
+        crate::editor_hooks::install_word_suggestions(&editor, monaco_language, cx);
         self.editor = Some(editor.clone());
         Some(editor)
     }
@@ -389,7 +389,7 @@ mod tests {
         });
         let editor = cx.update(|_, cx| host.read(cx).editor.clone());
         cx.update(|window, cx| {
-            crate::editor_hooks::install_word_suggestions(&editor, cx);
+            crate::editor_hooks::install_word_suggestions(&editor, "rust", cx);
             editor.update(cx, |editor, cx| {
                 editor.focus(window, cx);
                 editor.set_selected_range(text.len()..text.len(), cx);
@@ -428,7 +428,7 @@ mod tests {
         });
         let editor = cx.update(|_, cx| host.read(cx).editor.clone());
         cx.update(|window, cx| {
-            crate::editor_hooks::install_word_suggestions(&editor, cx);
+            crate::editor_hooks::install_word_suggestions(&editor, "rust", cx);
             editor.update(cx, |editor, cx| {
                 editor.focus(window, cx);
                 editor.set_selected_range(text.len()..text.len(), cx);

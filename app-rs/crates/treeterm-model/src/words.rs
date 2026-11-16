@@ -3,28 +3,120 @@
 //! worker's `textualSuggest`), filtered and ranked as its suggest widget does ([`fuzzy`]),
 //! and Change All Occurrences (`editor.action.changeAll`).
 //!
-//! A word is Monaco's default: a run of characters that are neither whitespace nor one of
-//! the editor's word separators. (Monaco's default word pattern also reads `3.14` or `.5`
-//! as one word; such words are numbers, which are never suggested.)
+//! The two read words differently, as in Monaco:
+//! - Suggestions use the language's word pattern (its language configuration's
+//!   `wordPattern`): CSS, SCSS and Less words hold `-` and may start with `.`, `#`, `@`, `!`
+//!   or `:`; HTML words hold `-`, `#`, `%` and `?`; TypeScript, JavaScript and PHP words
+//!   hold `$`; Java and Kotlin words `@` and `$`; C# words `@`. Other languages use
+//!   Monaco's default pattern: a number with a decimal point (`3.14`, `.5`), or a run of
+//!   characters that are neither whitespace nor one of the default word separators.
+//! - Change All Occurrences uses the editor's word separators (`editor.wordSeparators`,
+//!   through `getConfiguredWordAtPosition`) in every language: on `name` in PHP's `$name`
+//!   it also changes `$this->name`, as Monaco does.
 
 pub mod fuzzy;
 
 use std::collections::HashSet;
 use std::ops::Range;
+use std::sync::LazyLock;
 
-/// Monaco's `editor.wordSeparators`.
+use regex::Regex;
+
+/// Monaco's `USUAL_WORD_SEPARATORS`, the default `editor.wordSeparators`.
 const WORD_SEPARATORS: &str = "`~!@#$%^&*()-=+[{]}\\|;:'\",.<>/?";
 
 /// The worker stops collecting words once it has more than this many (`_suggestionsLimit`).
 const SUGGESTIONS_LIMIT: usize = 10_000;
 
-/// Whether `c` can be part of a word.
+/// A word pattern Monaco writes as a JavaScript regular expression. Its `\w` and `\d` are
+/// ASCII, so they are spelled out here.
+fn pattern(source: &str) -> Regex {
+    Regex::new(source).unwrap_or_else(|error| panic!("word pattern {source}: {error}"))
+}
+
+/// Monaco's `createWordRegExp(allowed)`: a number with a decimal point, or a run of
+/// characters that are neither whitespace nor a word separator other than `allowed`.
+fn separated_words(allowed: &str) -> Regex {
+    let separators: String =
+        WORD_SEPARATORS.chars().filter(|c| !allowed.contains(*c)).map(|c| regex::escape(&c.to_string())).collect();
+    pattern(&format!(r"(-?[0-9]*\.[0-9][0-9A-Za-z_]*)|([^{separators}\s]+)"))
+}
+
+/// The word pattern of Monaco's `language` (as `detect_monaco_language` names it), from
+/// Monaco 0.55.1's language configurations; the default one for a language with none.
+fn word_pattern(language: &str) -> &'static Regex {
+    static DEFAULT: LazyLock<Regex> = LazyLock::new(|| separated_words(""));
+    // TypeScript, JavaScript (which takes TypeScript's configuration) and PHP.
+    static DOLLAR: LazyLock<Regex> = LazyLock::new(|| separated_words("$"));
+    // Java and Kotlin.
+    static AT_DOLLAR: LazyLock<Regex> = LazyLock::new(|| separated_words("@$"));
+    static CSHARP: LazyLock<Regex> = LazyLock::new(|| separated_words("@"));
+    static HTML: LazyLock<Regex> = LazyLock::new(|| separated_words("#%-?"));
+    // The JSON language service's configuration (`jsonMode`).
+    static JSON: LazyLock<Regex> = LazyLock::new(|| pattern(r#"(-?[0-9]*\.[0-9][0-9A-Za-z_]*)|([^\[\{\]\}:",\s]+)"#));
+    static CSS: LazyLock<Regex> = LazyLock::new(|| {
+        pattern(r"(#?-?[0-9]*\.[0-9][0-9A-Za-z_]*%?)|((::|[@#.!:])?[0-9A-Za-z_\-?]+%?)|::|[@#.!:]")
+    });
+    static SCSS: LazyLock<Regex> = LazyLock::new(|| {
+        pattern(r"(#?-?[0-9]*\.[0-9][0-9A-Za-z_]*%?)|([@$#!.:]?[0-9A-Za-z_\-?]+%?)|[@#!.]")
+    });
+    static LESS: LazyLock<Regex> = LazyLock::new(|| {
+        pattern(r"(#?-?[0-9]*\.[0-9][0-9A-Za-z_]*%?)|([@#!.:]?[0-9A-Za-z_\-?]+%?)|[@#!.]")
+    });
+    static SCALA: LazyLock<Regex> = LazyLock::new(|| {
+        pattern(r"(unary_[@\~!\#%\^\&*()\-=+\\|:<>/?]+)|([a-zA-Z_$][0-9A-Za-z_$]*?_=)|(`[^`]+`)|([a-zA-Z_$][0-9A-Za-z_$]*)")
+    });
+    match language {
+        "typescript" | "javascript" | "php" => &DOLLAR,
+        "java" | "kotlin" => &AT_DOLLAR,
+        "csharp" => &CSHARP,
+        "html" => &HTML,
+        "json" => &JSON,
+        "css" => &CSS,
+        "scss" => &SCSS,
+        "less" => &LESS,
+        "scala" => &SCALA,
+        _ => &DEFAULT,
+    }
+}
+
+/// The lines of `text`, each with the byte it starts at, without their line break.
+fn lines(text: &str) -> impl Iterator<Item = (usize, &str)> {
+    let mut next = 0;
+    text.split('\n').map(move |line| {
+        let start = next;
+        next += line.len() + 1;
+        (start, line.strip_suffix('\r').unwrap_or(line))
+    })
+}
+
+/// The words `pattern` reads in `text`, line by line (a word never spans lines).
+fn pattern_words<'a>(pattern: &'a Regex, text: &'a str) -> impl Iterator<Item = &'a str> {
+    lines(text).flat_map(|(_, line)| pattern.find_iter(line).map(|found| found.as_str()))
+}
+
+/// The bytes of the word `pattern` reads at byte `offset` of `text`, touching it on either
+/// side (the first such word: `getWordAtPosition`); empty when there is none.
+fn pattern_word_around(pattern: &Regex, text: &str, offset: usize) -> Range<usize> {
+    if !text.is_char_boundary(offset) {
+        return offset..offset;
+    }
+    let start = text[..offset].rfind('\n').map_or(0, |index| index + 1);
+    let (_, line) = lines(&text[start..]).next().unwrap_or((0, ""));
+    let at = offset - start;
+    pattern
+        .find_iter(line)
+        .find(|found| found.start() <= at && at <= found.end())
+        .map_or(offset..offset, |found| start + found.start()..start + found.end())
+}
+
+/// Whether `c` can be part of a word, by the editor's word separators.
 fn is_word_char(c: char) -> bool {
     !c.is_whitespace() && !WORD_SEPARATORS.contains(c)
 }
 
-/// The bytes of the word at byte `offset` of `text` (touching it on either side); empty
-/// when there is none.
+/// The bytes of the word at byte `offset` of `text` by the editor's word separators
+/// (touching it on either side); empty when there is none.
 fn word_around(text: &str, offset: usize) -> Range<usize> {
     if !text.is_char_boundary(offset) {
         return offset..offset;
@@ -59,13 +151,11 @@ fn words(text: &str) -> impl Iterator<Item = (Range<usize>, &str)> {
 }
 
 /// Whether JavaScript's `Number(word)` reads `word` as a number, as Monaco's worker asks
-/// before suggesting it. (A word holds no sign or decimal point: they are separators.)
+/// before suggesting it: a decimal number with an optional sign, decimal point and
+/// exponent, `Infinity`, or a hexadecimal, octal or binary integer (`0x1f`).
 fn is_number(word: &str) -> bool {
     let digits = |text: &str, radix: u32| !text.is_empty() && text.chars().all(|c| c.is_digit(radix));
     let radix = |lower: &str, upper: &str| word.strip_prefix(lower).or_else(|| word.strip_prefix(upper));
-    if word == "Infinity" {
-        return true;
-    }
     if let Some(rest) = radix("0x", "0X") {
         return digits(rest, 16);
     }
@@ -75,10 +165,24 @@ fn is_number(word: &str) -> bool {
     if let Some(rest) = radix("0b", "0B") {
         return digits(rest, 2);
     }
-    match word.split_once(['e', 'E']) {
-        Some((mantissa, exponent)) => digits(mantissa, 10) && digits(exponent, 10),
-        None => digits(word, 10),
+    let unsigned = word.strip_prefix(['+', '-']).unwrap_or(word);
+    if unsigned == "Infinity" {
+        return true;
     }
+    let (mantissa, exponent) = match unsigned.split_once(['e', 'E']) {
+        Some((mantissa, exponent)) => (mantissa, Some(exponent)),
+        None => (unsigned, None),
+    };
+    let exponent_ok = exponent.is_none_or(|exponent| digits(exponent.strip_prefix(['+', '-']).unwrap_or(exponent), 10));
+    let mantissa_ok = match mantissa.split_once('.') {
+        Some((whole, fraction)) => {
+            (whole.is_empty() || digits(whole, 10))
+                && (fraction.is_empty() || digits(fraction, 10))
+                && !(whole.is_empty() && fraction.is_empty())
+        }
+        None => digits(mantissa, 10),
+    };
+    mantissa_ok && exponent_ok
 }
 
 /// What asked for suggestions.
@@ -99,13 +203,14 @@ pub struct Suggestions {
     pub words: Vec<String>,
 }
 
-/// The words of `text` to suggest at byte `offset`: those [`fuzzy`] matches what was typed
-/// of the word at the cursor with (its letters in order, the first at a word start or a
-/// camelCase hump), but never that word itself or a number. The best matches come first,
-/// then in byte order (the label order Monaco breaks ties with). With nothing typed (asked
-/// for), every word, in byte order.
-pub fn suggestions(text: &str, offset: usize, trigger: Trigger) -> Suggestions {
-    let word = word_around(text, offset);
+/// The words of `text`, a file of Monaco's `language`, to suggest at byte `offset`: those
+/// [`fuzzy`] matches what was typed of the word at the cursor with (its letters in order,
+/// the first at a word start or a camelCase hump), but never that word itself or a number.
+/// The best matches come first, then in byte order (the label order Monaco breaks ties
+/// with). With nothing typed (asked for), every word, in byte order.
+pub fn suggestions(text: &str, offset: usize, trigger: Trigger, language: &str) -> Suggestions {
+    let pattern = word_pattern(language);
+    let word = pattern_word_around(pattern, text, offset);
     let replace = word.start..offset.max(word.start);
     let typed = &text[replace.clone()];
     if typed.is_empty() && trigger == Trigger::Typing {
@@ -114,7 +219,7 @@ pub fn suggestions(text: &str, offset: usize, trigger: Trigger) -> Suggestions {
     let current = &text[word];
     let mut seen = HashSet::new();
     let mut found = Vec::new();
-    for (_, candidate) in words(text) {
+    for candidate in pattern_words(pattern, text) {
         if candidate == current || is_number(candidate) || !seen.insert(candidate) {
             continue;
         }
@@ -182,9 +287,10 @@ fn find_ignoring_case(text: &str, needle: &str) -> Vec<Range<usize>> {
 }
 
 /// Change All Occurrences: with nothing selected, every occurrence of the word at the
-/// cursor as a whole word in the same case; with a selection, every occurrence of its text
-/// in any case (the find widget's defaults). The one at the selection comes first, to stay
-/// the primary cursor. Empty when the cursor is not on a word.
+/// cursor as a whole word in the same case, words read by the editor's word separators in
+/// every language; with a selection, every occurrence of its text in any case (the find
+/// widget's defaults). The one at the selection comes first, to stay the primary cursor.
+/// Empty when the cursor is not on a word.
 pub fn all_occurrences(text: &str, selection: Range<usize>) -> Vec<Range<usize>> {
     let mut found: Vec<Range<usize>> = if selection.is_empty() {
         let word = word_around(text, selection.start);
@@ -206,8 +312,14 @@ pub fn all_occurrences(text: &str, selection: Range<usize>) -> Vec<Range<usize>>
 mod tests {
     use super::*;
 
+    /// The suggestions at `cursor` in `text`, a plain-text file.
     fn words_at(text: &str, cursor: &str, trigger: Trigger) -> Vec<String> {
-        suggestions(&text.replace(cursor, ""), text.find(cursor).unwrap(), trigger).words
+        words_in("plaintext", text, cursor, trigger)
+    }
+
+    /// The suggestions at `cursor` in `text`, a file of Monaco's `language`.
+    fn words_in(language: &str, text: &str, cursor: &str, trigger: Trigger) -> Vec<String> {
+        suggestions(&text.replace(cursor, ""), text.find(cursor).unwrap(), trigger, language).words
     }
 
     #[test]
@@ -216,7 +328,7 @@ mod tests {
         assert_eq!(words_at(text, "|", Trigger::Typing), ["fooBar", "foobar", "food", "Football"]);
         // What was typed replaces only the part before the cursor.
         let at = text.find('|').unwrap();
-        assert_eq!(suggestions(&text.replace('|', ""), at, Trigger::Typing).replace, at - 2..at);
+        assert_eq!(suggestions(&text.replace('|', ""), at, Trigger::Typing, "plaintext").replace, at - 2..at);
     }
 
     #[test]
@@ -253,6 +365,44 @@ mod tests {
     }
 
     #[test]
+    fn words_are_read_with_the_languages_word_pattern() {
+        let typed = |language: &str, text: &str| words_in(language, text, "|", Trigger::Typing);
+        // CSS, SCSS and Less: `-` joins words, which may start with `.`, `#`, `@`, `!` or `:`.
+        assert_eq!(typed("css", ".btn-primary { font-size: 1.5em }\n.btn|"), [".btn-primary"]);
+        assert_eq!(typed("css", ".btn-primary { font-size: 1.5em }\nfo|"), ["font-size"]);
+        assert_eq!(typed("scss", "$base-color: red;\n$b|"), ["$base-color"]);
+        assert_eq!(typed("less", "@base-color: red;\n@b|"), ["@base-color"]);
+        // HTML: `-`, `#`, `%` and `?` join words.
+        assert_eq!(typed("html", "<li class=\"nav-item\">\nnav|"), ["nav-item"]);
+        // `$` joins TypeScript, JavaScript and PHP words; `@` Java, Kotlin and C# ones.
+        assert_eq!(typed("php", "$name = $this->name;\n$n|"), ["$name"]);
+        assert_eq!(typed("javascript", "const $el = jQuery;\n$|"), ["$el"]);
+        assert_eq!(typed("kotlin", "@JvmStatic fun f() {}\n@J|"), ["@JvmStatic"]);
+        assert_eq!(typed("csharp", "var @class = 1;\n@c|"), ["@class"]);
+        // JSON: only brackets, `:`, `"`, `,` and whitespace end words.
+        assert_eq!(typed("json", "{\"key-name\": -1.5, \"a+b\": true}\nk|"), ["key-name"]);
+        // Scala: setters and backquoted names are words.
+        assert_eq!(typed("scala", "def value_=(v: Int) = `my val`\nva|"), ["value_=", "`my val`"]);
+        // Elsewhere `-`, `$` and `@` end words; a picked word replaces the typed one from its start.
+        assert_eq!(typed("rust", "nav-item $name @attr\nna|"), ["name", "nav"]);
+        let text = "$name\n$n";
+        assert_eq!(suggestions(text, text.len(), Trigger::Typing, "php").replace, 6..8);
+        assert_eq!(suggestions(text, text.len(), Trigger::Typing, "rust").replace, 7..8);
+    }
+
+    #[test]
+    fn numbers_are_what_javascript_reads_as_one() {
+        for number in ["12", "-1.5", "+3", ".5", "1.", "1e3", "1.5E-3", "0x1F", "0o17", "0b101", "Infinity", "-Infinity"] {
+            assert!(is_number(number), "{number}");
+        }
+        for word in [".", "-", "1e", "e3", "1.2.3", "1.5em", "0x", "0b2", "-0x1f", "1_000", "#1.5", "10%"] {
+            assert!(!is_number(word), "{word}");
+        }
+        // A CSS word that is a number (`.5`) is not suggested; one with a unit is.
+        assert_eq!(words_in("css", "a { margin: 1.5px .5 }\n.|", "|", Trigger::Typing), ["1.5px"]);
+    }
+
+    #[test]
     fn suggests_nothing_while_typing_outside_a_word_but_everything_when_asked() {
         assert_eq!(words_at("alpha beta\n|", "|", Trigger::Typing), Vec::<String>::new());
         assert_eq!(words_at("beta alpha 7\n|", "|", Trigger::Invoked), ["alpha", "beta"]);
@@ -267,6 +417,13 @@ mod tests {
         // At the end of a word.
         assert_eq!(all_occurrences(text, 3..3)[0], 0..3);
         assert_eq!(all_occurrences("a  b", 2..2), Vec::<Range<usize>>::new());
+    }
+
+    #[test]
+    fn a_collapsed_cursor_reads_words_by_the_editors_separators_in_every_language() {
+        // On `name` of PHP's `$name`, `$this->name` changes too, as in Monaco.
+        let text = "$name = $this->name;";
+        assert_eq!(all_occurrences(text, 2..2), [1..5, 15..19]);
     }
 
     #[test]

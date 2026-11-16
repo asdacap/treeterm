@@ -130,8 +130,11 @@ pub(crate) fn definition_frame(
     })
 }
 
-/// Monaco's word-based suggestions (the base editor worker's `textualSuggest`).
-struct WordSuggestions;
+/// Monaco's word-based suggestions (the base editor worker's `textualSuggest`) in a file of
+/// Monaco's `language`, whose words they are made of.
+struct WordSuggestions {
+    language: &'static str,
+}
 
 impl CompletionProvider for WordSuggestions {
     fn completions(
@@ -146,9 +149,9 @@ impl CompletionProvider for WordSuggestions {
             CompletionTriggerKind::INVOKED => Trigger::Invoked,
             _ => Trigger::Typing,
         };
-        let text = text.clone();
+        let (text, language) = (text.clone(), self.language);
         cx.background_executor().spawn(async move {
-            let suggestions = words::suggestions(&text.to_string(), offset, trigger);
+            let suggestions = words::suggestions(&text.to_string(), offset, trigger, language);
             let replace = Range::new(
                 text.offset_to_position(suggestions.replace.start),
                 text.offset_to_position(suggestions.replace.end),
@@ -174,12 +177,12 @@ impl CompletionProvider for WordSuggestions {
     }
 }
 
-/// Give `editor` Monaco's word-based suggestions, their letters that match what was typed
-/// highlighted.
-pub(crate) fn install_word_suggestions(editor: &Entity<EditorState>, cx: &mut App) {
+/// Give `editor`, a file of Monaco's `language`, Monaco's word-based suggestions, their
+/// letters that match what was typed highlighted.
+pub(crate) fn install_word_suggestions(editor: &Entity<EditorState>, language: &'static str, cx: &mut App) {
     editor.update(cx, |editor, _| {
         let lsp = editor.lsp_mut();
-        lsp.completion_provider = Some(Rc::new(WordSuggestions));
+        lsp.completion_provider = Some(Rc::new(WordSuggestions { language }));
         lsp.set_completion_highlighter(Rc::new(|typed: &str, item: &CompletionItem| words::highlights(typed, &item.label)));
     });
 }
