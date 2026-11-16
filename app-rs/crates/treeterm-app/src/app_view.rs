@@ -1523,6 +1523,7 @@ fn merge_menu(
             .ml(px(1.))
             .px(px(4.))
             .rounded_l(px(0.))
+            .tooltip(|window, cx| gpui_kit::component::tooltip::Tooltip::new("More options").build(window, cx))
             .child(crate::ui::icon(IconName::ChevronDown, 14., gpui_kit::white())),
     )
     .dropdown_menu_with_anchor(gpui_kit::Anchor::TopRight, move |menu, _window, _cx| {
