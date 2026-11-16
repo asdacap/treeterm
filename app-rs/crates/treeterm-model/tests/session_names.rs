@@ -48,14 +48,35 @@ fn only_the_exact_default_name_clears_a_custom_name(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
-fn a_corrupt_file_is_left_alone(cx: &mut TestAppContext) {
+fn a_corrupt_file_is_moved_aside_and_saving_carries_on(cx: &mut TestAppContext) {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("ui-state.json");
     std::fs::write(&path, "{broken").unwrap();
     let names = cx.new(|_| SessionNames::new(Some(path.clone())));
-    names.update(cx, |n, cx| n.rename(&ConnectionTarget::Local, "Laptop", cx));
-    assert_eq!(names.read_with(cx, |n, _| n.name(&ConnectionTarget::Local)), "Laptop");
-    assert_eq!(std::fs::read_to_string(&path).unwrap(), "{broken");
+    let local = ConnectionTarget::Local;
+    assert_eq!(names.read_with(cx, |n, _| n.name(&local)), "LOCAL", "starts empty");
+
+    names.update(cx, |n, cx| n.rename(&local, "Laptop", cx));
+    assert_eq!(SessionNames::new(Some(path.clone())).name(&local), "Laptop", "saved to disk");
+    let backups: Vec<_> = std::fs::read_dir(dir.path())
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+        .filter(|name| name.starts_with("ui-state.json.corrupt-"))
+        .collect();
+    assert_eq!(backups.len(), 1, "{backups:?}");
+    assert_eq!(std::fs::read_to_string(dir.path().join(&backups[0])).unwrap(), "{broken", "kept");
+}
+
+#[gpui_kit::test]
+fn an_unreadable_file_is_left_alone(cx: &mut TestAppContext) {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("ui-state.json");
+    std::fs::create_dir(&path).unwrap();
+    let names = cx.new(|_| SessionNames::new(Some(path.clone())));
+    let local = ConnectionTarget::Local;
+    names.update(cx, |n, cx| n.rename(&local, "Laptop", cx));
+    assert_eq!(names.read_with(cx, |n, _| n.name(&local)), "Laptop", "for this run");
+    assert!(path.is_dir() && std::fs::read_dir(&path).unwrap().next().is_none(), "not written");
 }
 
 fn remote(host: &str) -> ConnectionTarget {

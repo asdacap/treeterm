@@ -4,14 +4,16 @@
 //! survive reconnects and restarts.
 
 use std::path::PathBuf;
+use std::time::SystemTime;
 
 use gpui_kit::Context;
 use treeterm_core::connection::ConnectionTarget;
 use treeterm_core::settings::MAX_RECENT_DIRECTORIES;
-use treeterm_core::ui_state::{self, UiState};
+use treeterm_core::ui_state::{self, Loaded, UiState};
 
 pub struct SessionNames {
-    /// `None`: nowhere to persist (no config dir); renames last for this run.
+    /// `None`: nowhere to persist (no config dir, or `ui-state.json` cannot be read); renames
+    /// last for this run.
     path: Option<PathBuf>,
     state: UiState,
 }
@@ -33,16 +35,27 @@ pub fn default_name(target: &ConnectionTarget) -> String {
 
 impl SessionNames {
     pub fn new(path: Option<PathBuf>) -> Self {
-        let state = match path.as_deref().map(ui_state::load) {
-            Some(Ok(state)) => state,
+        let Some(path) = path else {
+            return Self { path: None, state: UiState::default() };
+        };
+        let state = match ui_state::load(&path, SystemTime::now()) {
+            Ok(Loaded::Saved(state)) => state,
+            // Electron dropped a corrupt stored value and overwrote it; the file is kept.
+            Ok(Loaded::MovedAside { error, backup }) => {
+                tracing::error!(
+                    %error,
+                    backup = %backup.display(),
+                    "UI state was not valid and was moved aside; session names, order and recent directories start empty"
+                );
+                UiState::default()
+            }
             // Logged, not overwritten: saving would drop whatever the file holds.
-            Some(Err(error)) => {
+            Err(error) => {
                 tracing::error!(%error, "UI state not loaded; session names start empty");
                 return Self { path: None, state: UiState::default() };
             }
-            None => UiState::default(),
         };
-        Self { path, state }
+        Self { path: Some(path), state }
     }
 
     /// The custom name, else the default.

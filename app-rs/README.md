@@ -355,6 +355,9 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   re-expanded every parent whenever any workspace changed).
 - A replayed OSC 52 copy or bell is ignored (it already happened when it first ran).
 - Corrupt `settings.json` is an error (logged; defaults used) instead of being overwritten.
+- A corrupt `ui-state.json` (session names and order, Recent Directories) is logged and kept as
+  `ui-state.json.corrupt-<ms since the epoch>`; the state starts empty and is saved again as
+  usual. Electron dropped a corrupt stored value silently and overwrote it.
 - Merge-and-remove stages untracked files before its WIP commit (Electron's `commit -am`
   skips them, failing the merge or losing new files with the deleted worktree).
 - Review's Refresh also reloads the Commits list once it was shown, keeping as many commits
