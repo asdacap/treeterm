@@ -274,9 +274,13 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   text's colour (Monaco's link is `#4E94CE`).
 - There are no language servers behind the code editors. Monaco's TypeScript / JavaScript
   service (semantic errors such as unresolved imports, IntelliSense, hover types, signature
-  help, references), JSON schemas (validation, completion, hover), hover documentation, CSS
-  value and selector completion, HTML attribute value and entity completion, and formatting
-  are missing. TypeScript and JavaScript syntax errors are read from GPUI Kit's tree-sitter
+  help, references), JSON schemas (validation, completion, hover), JSON completion without
+  a schema (the keys and values the file uses elsewhere, empty objects and arrays, the other
+  boolean), hover documentation, CSS value and selector completion, HTML attribute value and
+  entity completion, and formatting are missing. A problem's hover shows its message without
+  the source and code Monaco adds after it (`json(513)`, `(1005)`). Picking an HTML end
+  tag typed on a line of its own does not move it to its start tag's indentation, as
+  Monaco's does. TypeScript and JavaScript syntax errors are read from GPUI Kit's tree-sitter
   grammars, not TypeScript's parser: they are marked where the parse fails, as "';'
   expected."-style messages or "Unexpected token.", and a `.tsx` file is read with JSX
   (Monaco's worker reads it as plain TypeScript and marks the JSX). CSS files get the lint
@@ -284,13 +288,13 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   get none. JSON whose arrays and objects nest more than 512 deep, and style sheets whose
   blocks do, get no marks or colours (Monaco's workers give up only where JavaScript's stack
   runs out, a few thousand and about a thousand levels deep). Colours are painted behind
-  their text, not as a swatch before it. A completed CSS
-  property is inserted as `name: ` and an HTML attribute as `name=""` with the cursor after
-  it (Monaco's snippets put it between `:` and `;`, or the quotes). Other suggestions are the
-  file's own words (Monaco also takes words from other open files of the same language, and
-  suggests nothing while typing in comments and strings). The right-click menu has no Go to
-  References, Peek, Format Document or Command Palette. Tab indents while suggestions are
-  open (Enter takes one, as in Monaco).
+  their text, not as a swatch before it. A completed CSS property is inserted as `name: `
+  and an HTML attribute as `name=""` with the cursor after it (Monaco's snippets put it
+  between `:` and `;`, or the quotes). Other suggestions are the file's own words (Monaco
+  also takes words from other open files of the same language, and suggests nothing while
+  typing in comments and strings). The right-click menu has no Go to References, Peek,
+  Format Document or Command Palette. Tab indents while suggestions are open (Enter takes
+  one, as in Monaco).
 - Neither the Files viewer nor the Editor tab has Monaco's Peek Definition (Alt+F12, and
   the Peek submenu of the right-click menu): GPUI Kit's editor has no view zones to show a
   peek in. Open Definition to the Side (Cmd/Ctrl+K F12) goes to the definition as F12
