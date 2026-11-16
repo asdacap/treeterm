@@ -5,9 +5,9 @@
 //! page may then go anywhere ([`tab_navigation`]); popups open in the system browser.
 //!
 //! The toolbar follows the webview's own navigation state ([`webview_native`], [`PageNav`]):
-//! its history, a load from its request on, navigations within the page. A load that ends
-//! without a page (server down) shows a message in the page's place, where Chromium shows its
-//! error page and WKWebView nothing.
+//! its history, a load from its request on, navigations within the page. A load that fails
+//! before its page came (server down) shows a message in the page's place, where Electron's
+//! webview shows a blank error page and WKWebView nothing.
 //!
 //! Without GPUI Fast composition the native view is drawn above GPUI content in its bounds,
 //! so the owner hides it whenever its tab is not shown or a dialog is open
@@ -216,8 +216,8 @@ impl BrowserView {
             });
         self.page = match WebView::build(builder, window, cx) {
             Ok(webview) => {
-                self._observer = Some(webview_native::observe(webview.raw(), move |native| {
-                    if observed.send(PageEvent::Nav(NavInput::Native(native))).is_err() {
+                self._observer = Some(webview_native::observe(webview.raw(), move |input| {
+                    if observed.send(PageEvent::Nav(input)).is_err() {
                         tracing::debug!("browser tab closed while its page navigated");
                     }
                 }));
@@ -251,8 +251,8 @@ impl BrowserView {
                     self.probe(cx);
                 }
             }
+            // Its load ends as aborted ([`NavInput::Failed`]), so it did not fail.
             PageEvent::Undisplayable(url) => {
-                self.nav.apply(NavInput::Downloaded);
                 let proxied = if is_allowed_webview_url(&url) { self.proxied.borrow_mut().proxy(&self.proxy, &url) } else { None };
                 match proxied {
                     Some(proxied) => self.load(proxied, cx),
@@ -408,8 +408,8 @@ fn toolbar_button(id: &'static str, glyph: &'static str, title: &'static str, en
         .when(!enabled, |d| d.opacity(0.35))
 }
 
-/// A load that ended before any page came, in Chromium's error page's place (WKWebView
-/// shows nothing; the reason is not known).
+/// A load that failed before any page came, in the error page's place (Electron's webview
+/// shows a blank page, WKWebView nothing).
 fn load_failure(url: &str, cx: &gpui_kit::App) -> impl IntoElement {
     let c = colors(cx);
     div().size_full().bg(c.bg_primary).child(

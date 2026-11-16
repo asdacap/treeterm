@@ -167,9 +167,12 @@ Done (tested against a real in-process daemon unless noted):
   `file:` links are refused. The toolbar follows the webview's own history (Back / Forward),
   loading (Stop and the progress line from the request on) and navigations within the page
   (`pushState`, fragments), which the tab also remembers; Reload bypasses the cache. A load
-  that ends without a page (server down) shows "This site can’t be reached" and its URL in
-  the page's place until the next load (WKWebView draws no error page; the reason, Chromium's
-  error code, is not known); Web App tabs (free port
+  that fails before its page comes (server down; WKWebView's navigation delegate reports it,
+  also for a load the page starts while it still loads; a load stopped or turned into a
+  download is no failure) shows "This site can’t be reached" and its URL in the page's place
+  until a page comes, the address bar staying on the page shown, and Reload loads it again
+  (Electron's webview shows a blank error page there; WKWebView draws none, WebKitGTK its
+  own); Web App tabs (free port
   probed on the daemon's host, dev server with `$PORT`, page once it answers); both reopen
   on the page they last showed (its path on the start page, whatever port the page is on
   this time), and show it only while it is ready; on remote sessions both reach their page

@@ -1,8 +1,10 @@
 //! A Browser tab's webview's own navigation state, which wry does not report: it sends
 //! `Started` only once a response commits, and nothing for a load's request, a load that
 //! fails, or a navigation within the page. WKWebView (key-value observing) and WebKitGTK
-//! (property notifications) report it as it changes. Also the history, reload and stop calls
-//! wry does not wrap, and the Edit menu's commands on a page.
+//! (property notifications) report it as it changes; WKWebView's navigation delegate also
+//! reports a new page's load starting and failing (WebKitGTK shows its own error page). Also
+//! the history, reload and stop calls wry does not wrap, and the Edit menu's commands on a
+//! page.
 
 #[cfg(target_os = "macos")]
 pub use platform::{send_edit, web_page_has_focus};
@@ -59,23 +61,27 @@ impl EditCommand {
 #[cfg(target_os = "macos")]
 mod platform {
     use std::ffi::c_void;
+    use std::rc::Rc;
 
     use objc2::rc::Retained;
-    use objc2::runtime::{AnyObject, NSObject};
-    use objc2::{AllocAnyThread, DefinedClass, define_class, msg_send};
+    use objc2::runtime::{AnyObject, NSObject, ProtocolObject, Sel};
+    use objc2::{AllocAnyThread, DefinedClass, MainThreadOnly, define_class, msg_send};
     use objc2_foundation::{
-        NSDictionary, NSKeyValueChangeKey, NSKeyValueObservingOptions,
-        NSObjectNSKeyValueObserverRegistration, NSObjectProtocol, NSString,
+        NSDictionary, NSError, NSKeyValueChangeKey, NSKeyValueObservingOptions,
+        NSObjectNSKeyValueObserverRegistration, NSObjectProtocol, NSString, NSURL,
+        NSURLErrorFailingURLErrorKey,
     };
-    use objc2_web_kit::WKWebView;
-    use treeterm_model::page_nav::NativeNav;
+    use objc2_web_kit::{WKNavigation, WKNavigationDelegate, WKWebView};
+    use treeterm_model::page_nav::{LoadFailure, NativeNav, NavInput};
 
     /// WKWebView's key-value observable properties a [`NativeNav`] is read from.
     const KEYS: [&str; 4] = ["URL", "loading", "canGoBack", "canGoForward"];
 
+    type Report = Rc<dyn Fn(NavInput)>;
+
     struct ObserverIvars {
         webview: Retained<WKWebView>,
-        report: Box<dyn Fn(NativeNav)>,
+        report: Report,
     }
 
     define_class!(
@@ -96,46 +102,111 @@ mod platform {
             ) {
                 // Read whole: one change can move several properties at once.
                 let ivars = self.ivars();
-                (ivars.report)(snapshot(&ivars.webview));
+                (ivars.report)(NavInput::Native(snapshot(&ivars.webview)));
             }
         }
 
         unsafe impl NSObjectProtocol for Observer {}
     );
 
+    struct DelegateIvars {
+        /// wry's delegate, which keeps handling everything else (navigation policy, commits,
+        /// downloads): calls this one does not answer are forwarded to it.
+        wry: Retained<ProtocolObject<dyn WKNavigationDelegate>>,
+        report: Report,
+    }
+
+    define_class!(
+        /// Stands in for wry's navigation delegate, which does not report a load starting or
+        /// failing before its page came.
+        #[unsafe(super(NSObject))]
+        #[thread_kind = MainThreadOnly]
+        #[name = "TreeTermNavigationDelegate"]
+        #[ivars = DelegateIvars]
+        struct Delegate;
+
+        /// Forwarding to wry's delegate. WebKit asks which callbacks the delegate has when it
+        /// is set, so the answer includes wry's.
+        impl Delegate {
+            #[unsafe(method(respondsToSelector:))]
+            fn responds_to_selector(&self, selector: Sel) -> bool {
+                // SAFETY: NSObject's own answer, for the methods this class defines.
+                let own: bool = unsafe { msg_send![super(self), respondsToSelector: selector] };
+                own || self.ivars().wry.respondsToSelector(selector)
+            }
+
+            #[unsafe(method(forwardingTargetForSelector:))]
+            fn forwarding_target(&self, _selector: Sel) -> *mut AnyObject {
+                Retained::as_ptr(&self.ivars().wry).cast_mut().cast()
+            }
+        }
+
+        unsafe impl NSObjectProtocol for Delegate {}
+
+        unsafe impl WKNavigationDelegate for Delegate {
+            #[unsafe(method(webView:didStartProvisionalNavigation:))]
+            fn did_start_provisional_navigation(
+                &self,
+                webview: &WKWebView,
+                _navigation: Option<&WKNavigation>,
+            ) {
+                (self.ivars().report)(NavInput::Started(url_of(webview)));
+            }
+
+            #[unsafe(method(webView:didFailProvisionalNavigation:withError:))]
+            fn did_fail_provisional_navigation(
+                &self,
+                _webview: &WKWebView,
+                _navigation: Option<&WKNavigation>,
+                error: &NSError,
+            ) {
+                (self.ivars().report)(NavInput::Failed(failure(error)));
+            }
+        }
+    );
+
     /// Reports until dropped.
-    pub struct NavObserver(Retained<Observer>);
+    pub struct NavObserver {
+        observer: Retained<Observer>,
+        /// Set as the webview's navigation delegate in wry's place, which it is again once
+        /// dropped. None when the webview had no delegate to stand in for (wry always sets
+        /// one): its loads' failures then go unreported.
+        delegate: Option<Retained<Delegate>>,
+    }
 
     impl Drop for NavObserver {
         fn drop(&mut self) {
-            let observer = &self.0;
+            let webview = &self.observer.ivars().webview;
             for key in KEYS {
                 // SAFETY: registered for this key on this webview in `observe`.
                 unsafe {
-                    observer
-                        .ivars()
-                        .webview
-                        .removeObserver_forKeyPath(observer, &NSString::from_str(key))
+                    webview.removeObserver_forKeyPath(&self.observer, &NSString::from_str(key))
                 };
+            }
+            if let Some(delegate) = &self.delegate {
+                // SAFETY: wry's delegate, which wry keeps alive with its webview.
+                unsafe { webview.setNavigationDelegate(Some(&*delegate.ivars().wry)) };
             }
         }
     }
 
-    /// Report the webview's navigation state now and whenever it changes, until the observer
-    /// is dropped: on the main thread as WebKit changes it, so in order with wry's callbacks.
-    pub fn observe(webview: &wry::WebView, report: impl Fn(NativeNav) + 'static) -> NavObserver {
+    /// Report the webview's navigation state now and whenever it changes, and a new page's
+    /// load starting or failing, until the observer is dropped: on the main thread as WebKit
+    /// reports them, so in order with wry's callbacks.
+    pub fn observe(webview: &wry::WebView, report: impl Fn(NavInput) + 'static) -> NavObserver {
+        let webview = wk(webview);
+        let report: Report = Rc::new(report);
         let observer = Observer::alloc().set_ivars(ObserverIvars {
-            webview: wk(webview),
-            report: Box::new(report),
+            webview: webview.clone(),
+            report: report.clone(),
         });
         // SAFETY: NSObject's designated initialiser.
         let observer: Retained<Observer> = unsafe { msg_send![super(observer), init] };
-        let ivars = observer.ivars();
         for key in KEYS {
             // SAFETY: the observer outlives the registration (`NavObserver::drop` removes it)
             // and keeps the webview alive until then.
             unsafe {
-                ivars.webview.addObserver_forKeyPath_options_context(
+                webview.addObserver_forKeyPath_options_context(
                     &observer,
                     &NSString::from_str(key),
                     NSKeyValueObservingOptions::New,
@@ -143,23 +214,67 @@ mod platform {
                 );
             }
         }
-        (ivars.report)(snapshot(&ivars.webview));
-        NavObserver(observer)
+        // SAFETY: a property read on the main thread.
+        let delegate = match unsafe { webview.navigationDelegate() } {
+            Some(wry) => {
+                let delegate = Delegate::alloc(webview.mtm()).set_ivars(DelegateIvars {
+                    wry,
+                    report: report.clone(),
+                });
+                // SAFETY: NSObject's designated initialiser.
+                let delegate: Retained<Delegate> = unsafe { msg_send![super(delegate), init] };
+                // SAFETY: the delegate outlives the registration (the webview holds it weakly;
+                // `NavObserver::drop` puts wry's back).
+                unsafe {
+                    webview.setNavigationDelegate(Some(ProtocolObject::from_ref(&*delegate)))
+                };
+                Some(delegate)
+            }
+            None => {
+                tracing::error!(
+                    "a browser tab's webview has no navigation delegate: its failed loads are not shown"
+                );
+                None
+            }
+        };
+        report(NavInput::Native(snapshot(&webview)));
+        NavObserver { observer, delegate }
+    }
+
+    fn url_of(webview: &WKWebView) -> String {
+        // SAFETY: a property read, on the main thread (GPUI's and WebKit's).
+        unsafe { webview.URL() }
+            .and_then(|url| url.absoluteString())
+            .map(|url| url.to_string())
+            .unwrap_or_default()
     }
 
     fn snapshot(webview: &WKWebView) -> NativeNav {
         // SAFETY: plain property reads, on the main thread (GPUI's and WebKit's).
         unsafe {
             NativeNav {
-                url: webview
-                    .URL()
-                    .and_then(|url| url.absoluteString())
-                    .map(|url| url.to_string())
-                    .unwrap_or_default(),
+                url: url_of(webview),
                 loading: webview.isLoading(),
                 can_go_back: webview.canGoBack(),
                 can_go_forward: webview.canGoForward(),
             }
+        }
+    }
+
+    fn failure(error: &NSError) -> LoadFailure {
+        // SAFETY: a static NSString WebKit's errors are keyed by.
+        let key = unsafe { NSURLErrorFailingURLErrorKey };
+        let url = error
+            .userInfo()
+            .objectForKey(key)
+            .and_then(|url| url.downcast::<NSURL>().ok())
+            .and_then(|url| url.absoluteString())
+            .map(|url| url.to_string())
+            .unwrap_or_default();
+        LoadFailure {
+            url,
+            domain: error.domain().to_string(),
+            code: error.code() as i64,
         }
     }
 
@@ -236,7 +351,7 @@ mod platform {
 mod platform {
     use std::rc::Rc;
 
-    use treeterm_model::page_nav::NativeNav;
+    use treeterm_model::page_nav::{NativeNav, NavInput};
     use webkit2gtk::WebViewExt as _;
     use webkit2gtk::glib::SignalHandlerId;
     use webkit2gtk::glib::prelude::ObjectExt as _;
@@ -261,8 +376,8 @@ mod platform {
 
     /// Report the webview's navigation state now and whenever it changes, until the observer
     /// is dropped: on the main thread (GTK runs there) as WebKit changes it, so in order with
-    /// wry's callbacks.
-    pub fn observe(webview: &wry::WebView, report: impl Fn(NativeNav) + 'static) -> NavObserver {
+    /// wry's callbacks. A failed load is not reported: WebKitGTK shows its own error page.
+    pub fn observe(webview: &wry::WebView, report: impl Fn(NavInput) + 'static) -> NavObserver {
         let webview = wry::WebViewExtUnix::webview(webview);
         let report = Rc::new(report);
         let handlers = vec![
@@ -294,13 +409,13 @@ mod platform {
         }
     }
 
-    fn snapshot(webview: &webkit2gtk::WebView) -> NativeNav {
-        NativeNav {
+    fn snapshot(webview: &webkit2gtk::WebView) -> NavInput {
+        NavInput::Native(NativeNav {
             url: webview.uri().map(String::from).unwrap_or_default(),
             loading: webview.is_loading(),
             can_go_back: webview.can_go_back(),
             can_go_forward: webview.can_go_forward(),
-        }
+        })
     }
 
     pub fn go_back(webview: &wry::WebView) {

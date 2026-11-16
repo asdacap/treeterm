@@ -45,9 +45,9 @@ objc2-app-kit = "0.3"
 block2 = "0.6"
 # A GPUI window's NSView, to attach the open panel as a sheet; GPUI's version.
 raw-window-handle = "0.6"
-# A Browser tab's WKWebView's navigation state and calls wry does not wrap
-# (`webview_native.rs`); wry's version.
-objc2-web-kit = { version = "0.3", default-features = false, features = ["std", "objc2-app-kit", "WKWebView", "WKNavigation"] }
+# A Browser tab's WKWebView's navigation state, its failed loads (a navigation delegate
+# standing in for wry's) and calls wry does not wrap (`webview_native.rs`); wry's version.
+objc2-web-kit = { version = "0.3", default-features = false, features = ["std", "objc2-app-kit", "WKWebView", "WKNavigation", "WKNavigationDelegate"] }
 
 # The same for WebKitGTK; wry's pin.
 [target.'cfg(target_os = "linux")'.dependencies]
