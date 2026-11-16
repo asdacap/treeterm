@@ -1621,10 +1621,11 @@ const TRACK_REPEAT: std::time::Duration = std::time::Duration::from_millis(50);
 #[derive(Default)]
 struct TrackPress(Option<gpui_kit::Task<()>>);
 
-/// Presses on the `track` of the [`scrollbar`] `id` along `axis`, off its thumb. As
-/// Chromium's (`Scrollbar::AutoscrollPressedPart`), one pages toward the pointer at once,
-/// then again after [`TRACK_FIRST_REPEAT`] and every [`TRACK_REPEAT`] while the button is
-/// held and the pointer is on that side of the thumb, so the thumb stops where it reaches
+/// Presses on the `track` of the [`scrollbar`] `id` along `axis`, its thumb too. A left press
+/// there starts no text selection, as in Chromium (GPUI Kit's buttons do the same). Off the
+/// thumb, as Chromium's (`Scrollbar::AutoscrollPressedPart`), one pages toward the pointer at
+/// once, then again after [`TRACK_FIRST_REPEAT`] and every [`TRACK_REPEAT`] while the button
+/// is held and the pointer is on that side of the thumb, so the thumb stops where it reaches
 /// the pointer.
 fn track_presses<H: gpui_kit::base::ScrollbarHandle + Clone>(id: ElementId, axis: Axis, handle: H) -> impl IntoElement {
     use gpui_kit::{DispatchPhase, HitboxBehavior, MouseButton, MouseDownEvent, MouseUpEvent};
@@ -1639,6 +1640,9 @@ fn track_presses<H: gpui_kit::base::ScrollbarHandle + Clone>(id: ElementId, axis
                 if phase != DispatchPhase::Bubble || event.button != MouseButton::Left || !hitbox.is_hovered(window) {
                     return;
                 }
+                // GPUI Kit's window selection, painted under the content, sees the press after
+                // the bar.
+                gpui_kit::base::GlobalState::suppress_text_selection(cx);
                 let Some((extent, side)) = track_side(&handle, axis, track, event.position) else {
                     return;
                 };
@@ -2638,9 +2642,9 @@ mod tests {
         assert_eq!(ellipsized_copy(text, text, 4..14), "components");
     }
 
-    /// A 100×100 box scrolling 1000px of content along `axis`, with its [`scrollbar`]: the
-    /// thumb is 20px long (the shortest), travels 80px over the 900px scrolled, and a page is
-    /// 87px.
+    /// A 100×100 box scrolling 1000px of content along `axis`, with its [`scrollbar`], over a
+    /// line of selectable text: the thumb is 20px long (the shortest), travels 80px over the
+    /// 900px scrolled, and a page is 87px.
     struct Scrolled {
         axis: Axis,
         handle: gpui_kit::ScrollHandle,
@@ -2649,7 +2653,7 @@ mod tests {
     impl Render for Scrolled {
         fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
             let (axis, handle) = (self.axis, &self.handle);
-            match axis {
+            let scroller = match axis {
                 Axis::Vertical => div().size(px(100.)).child(scroll_area("scrolled", handle, div().w_full().h(px(1000.)), cx)),
                 Axis::Horizontal => div().size(px(100.)).flex().flex_col().child(
                     div()
@@ -2664,7 +2668,9 @@ mod tests {
             .children(match axis {
                 Axis::Vertical => Vec::new(),
                 Axis::Horizontal => scrollbar("scrolled", axis, handle, cx),
-            })
+            });
+            let text = gpui_kit::base::SelectableText::new("text", "Some selectable text");
+            div().flex().flex_col().child(scroller).child(div().debug_selector(|| "text".to_owned()).child(text))
         }
     }
 
@@ -2674,6 +2680,19 @@ mod tests {
             crate::theme::install(cx);
         });
         let (view, cx) = cx.add_window_view(|_, _| Scrolled { axis, handle: gpui_kit::ScrollHandle::new() });
+        draw_settled(cx);
+        (view, cx)
+    }
+
+    /// [`scrolled`] in a window of GPUI Kit's root, which selects text across the window.
+    fn scrolled_in_root(axis: Axis, cx: &mut TestAppContext) -> (Entity<Scrolled>, &mut VisualTestContext) {
+        let (window, view) = cx.update(|cx| {
+            gpui_kit::init(cx);
+            crate::theme::install(cx);
+            let scrolled = |_: &mut Window, cx: &mut App| cx.new(|_| Scrolled { axis, handle: gpui_kit::ScrollHandle::new() });
+            gpui_kit::open_window(gpui_kit::WindowOptions::default(), cx, scrolled).expect("open a window")
+        });
+        let cx = VisualTestContext::from_window(window, cx).into_mut();
         draw_settled(cx);
         (view, cx)
     }
@@ -2798,5 +2817,35 @@ mod tests {
     #[gpui_kit::test]
     fn a_horizontal_thumb_follows_a_drag_along_its_bar(cx: &mut TestAppContext) {
         a_thumb_follows_a_drag_along_its_bar(Axis::Horizontal, cx);
+    }
+
+    /// Chromium starts no text selection from a press on a scrollbar: held there and moved
+    /// over text, on the thumb (which it drags) or on the track (which it pages), it selects
+    /// nothing.
+    #[gpui_kit::test]
+    fn a_press_on_a_bar_moved_over_text_selects_none_of_it(cx: &mut TestAppContext) {
+        use gpui_kit::base::TextSelection;
+        use gpui_kit::{Modifiers, MouseButton, point};
+        let (view, cx) = scrolled_in_root(Axis::Vertical, cx);
+        let text = cx.debug_bounds("text").expect("the text is drawn");
+        let (start, end) = (point(text.left() + px(1.), text.center().y), point(text.right() - px(1.), text.center().y));
+        let drag = |from: Point<Pixels>, to: Point<Pixels>, cx: &mut VisualTestContext| {
+            cx.simulate_mouse_move(from, None, Modifiers::none());
+            cx.simulate_mouse_down(from, MouseButton::Left, Modifiers::none());
+            cx.simulate_mouse_move(point(from.x, from.y + px(5.)), MouseButton::Left, Modifiers::none());
+            cx.simulate_mouse_move(to, MouseButton::Left, Modifiers::none());
+            cx.simulate_mouse_up(to, MouseButton::Left, Modifiers::none());
+            draw_settled(cx);
+            cx.update(TextSelection::selected_text)
+        };
+
+        // The thumb, at the top of the bar, dragged down over the text: to the end.
+        assert_eq!(drag(on_bar(Axis::Vertical, 5.), end, cx), "");
+        assert_eq!(scrolled_by(&view, cx), 900.);
+        // The track above the thumb, now at the bottom.
+        assert_eq!(drag(on_bar(Axis::Vertical, 5.), end, cx), "");
+        assert_eq!(scrolled_by(&view, cx), 813., "paged up");
+
+        assert_eq!(drag(start, end, cx), "Some selectable text", "a drag over the text selects it");
     }
 }

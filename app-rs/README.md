@@ -400,6 +400,10 @@ The chrome was matched to Electron's computed styles, measured side by side on o
 - The Comments tab's code and generated prompt, and the Settings tab's Raw Workspace JSON,
   are each one run of GPUI Kit text: a drag past the end of a line copies the line break
   too, where Chromium's selection stops at the end of the line.
+- A press on one of the app's classic scrollbars (search results, the Files tree and its
+  file's comments, the Markdown preview, the Comments tab's code, the Raw Workspace JSON)
+  clears the current text selection, as GPUI Kit's window selection clears it on every left
+  press, before the bar sees it; Chromium keeps the selection.
 - In the Review diff, a review comment's text and the diff's code are selected apart: a
   selection running from a comment into the code (or back) copies the comment text only,
   not the code it spans, where Electron copies both, in reading order.
