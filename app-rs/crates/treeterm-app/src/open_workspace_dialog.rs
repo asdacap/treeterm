@@ -167,11 +167,13 @@ impl OpenWorkspaceDialog {
         }
     }
 
-    /// Enter on a focused button of the dialog's own: `ui::bind_keys` unbinds Enter there
-    /// (`KeyControl`), so the Kit's `Confirm`, and [`Self::enter`], never see it. Electron's
-    /// `handleKeyDown` still opens the chosen folder before the button's own activation, so
-    /// the dialog takes the key on its way down to the button. Anywhere else `Confirm` has
-    /// already run, and either opened or found nothing to open.
+    /// Enter on a focused button of the dialog's own (×, a recent row, Browse..., Cancel or
+    /// Open) or on the Default Application select: `ui::bind_keys` unbinds Enter there
+    /// (`KeyControl`, `KeySelect`), so the Kit's `Confirm`, and [`Self::enter`], never see
+    /// it. Electron's `handleKeyDown` still opens the chosen folder before the button's own
+    /// activation, so the dialog takes the key on its way down to the button; with no folder
+    /// the button presses itself, and the select, as on macOS, ignores it. Anywhere else
+    /// `Confirm` has already run, and either opened or found nothing to open.
     fn enter_on_button(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let key = &event.keystroke;
         if key.key != "enter" || key.modifiers.modified() {
@@ -312,12 +314,16 @@ impl OpenWorkspaceDialog {
 
     /// "Default Application": a full-width `.settings-select` whose menu has a separator
     /// after "Use Global Default" (Electron's disabled "──────────" option), then the hint.
-    fn render_default_app(&self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
+    /// It is a `<select>`: Tab reaches it, Space, ArrowUp or ArrowDown open its menu, and its
+    /// border is accent while focused.
+    fn render_default_app(&self, window: &mut Window, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
         let secondary = colors(cx).text_secondary;
         let selected = self.settings.default_application_id.clone();
         let current = default_app_label(&self.choices, &selected);
         let (choices, dialog) = (self.choices.clone(), cx.entity().downgrade());
-        let select = ui::Trigger::new(ui::select_box("open-default-app", current, cx).w_full()).dropdown_menu(
+        let focus = ui::keyed_focus("open-default-app", window, cx);
+        let boxed = ui::key_select_box("open-default-app", current, &focus, cx).w_full();
+        let select = ui::Trigger::new(boxed).dropdown_menu(
             move |mut menu, _, _| {
                 for (index, choice) in choices.iter().enumerate() {
                     if index == 1 {
@@ -384,7 +390,7 @@ impl Render for OpenWorkspaceDialog {
             Picker::Native { .. } => None,
         };
         let recent = (!self.recent.is_empty()).then(|| self.render_recent(window, cx));
-        let default_app = self.render_default_app(cx);
+        let default_app = self.render_default_app(window, cx);
         let disabled = self.selected(cx).is_empty() || picking;
         let open = ui::dialog_key_button("open-submit", "Open", ui::ButtonKind::Primary, disabled, window, cx)
             .on_click(cx.listener(|dialog, _, window, cx| dialog.open_selected(window, cx)));
@@ -392,7 +398,7 @@ impl Render for OpenWorkspaceDialog {
             .on_click(|_, window, cx| window.close_dialog(cx));
         ui::dialog_root(cx)
             .capture_key_down(cx.listener(Self::enter_on_button))
-            .child(ui::dialog_header("Open Workspace", "×", primary, cx))
+            .child(ui::dialog_key_header("Open Workspace", "×", primary, window, cx))
             .child(
                 div()
                     .flex()
@@ -462,8 +468,9 @@ mod tests {
     use std::path::PathBuf;
     use std::rc::Rc;
 
+    use gpui_kit::base::test_support;
     use gpui_kit::{
-        AppContext as _, Entity, KeyDownEvent, KeyUpEvent, Keystroke, Modifiers, TestAppContext, VisualTestContext,
+        AppContext as _, Entity, KeyDownEvent, KeyUpEvent, Keystroke, Modifiers, Role, TestAppContext, VisualTestContext,
         WindowOptions,
     };
     use treeterm_core::settings::Settings;
@@ -624,13 +631,124 @@ mod tests {
     fn a_focused_cancel_closes_without_opening(cx: &mut TestAppContext) {
         for key in ["space", "enter"] {
             let Shown { cx, opened, .. } = open_dialog(&[], cx);
-            // The folder field, Browse..., Cancel.
+            // The folder field, Browse..., the Default Application select, Cancel.
+            press("tab", cx);
             press("tab", cx);
             press("tab", cx);
             press(key, cx);
             assert!(opened.borrow().is_empty(), "{key}");
             assert!(!is_open(cx), "{key}");
         }
+    }
+
+    /// The control holding the focus after a frame: a button by its element id, the folder
+    /// field as "text field", and "" when none of those has it (the select is not observed).
+    fn focused_control(cx: &mut VisualTestContext) -> String {
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+            let mut focused = test_support::snapshots(window).into_iter().filter_map(|control| {
+                let name = match control.role()? {
+                    Role::Button => control.path().last()?.to_string(),
+                    Role::TextInput => "text field".to_owned(),
+                    _ => return None,
+                };
+                (control.focused() == Some(true)).then_some(name)
+            });
+            let control = focused.next().unwrap_or_default();
+            assert_eq!(focused.next(), None, "one control has the focus");
+            control
+        })
+    }
+
+    /// Tab moves through the controls in document order, as Electron's native controls do,
+    /// and round again: the folder field (focused first), Browse..., the Default Application
+    /// select, Cancel, Open (once a folder is chosen), the header's ×, the recent rows.
+    #[gpui_kit::test]
+    fn tab_moves_through_the_controls_in_order(cx: &mut TestAppContext) {
+        let Shown { cx, .. } = open_dialog(&["/home/me/src", "/home/me/web"], cx);
+        assert_eq!(focused_control(cx), "text field");
+        cx.simulate_input("/srv/app");
+        draw(cx);
+        let expected = [
+            "browse",
+            "", // the Default Application select
+            "open-cancel",
+            "open-submit",
+            "dialog-close",
+            "recent-0",
+            "recent-1",
+            "text field",
+        ];
+        let mut reached = Vec::new();
+        for _ in expected {
+            press("tab", cx);
+            reached.push(focused_control(cx));
+        }
+        assert_eq!(reached, expected);
+        assert!(is_open(cx));
+    }
+
+    /// Whether a menu (the select's) is open.
+    fn menu_open(cx: &mut VisualTestContext) -> bool {
+        cx.update(|_, cx| gpui_kit::base::GlobalState::is_in_deferred_context(cx))
+    }
+
+    /// The focused select opens its menu on Space, ArrowDown or ArrowUp, as on macOS. Enter
+    /// on it opens the chosen folder (`handleKeyDown`), and with no folder does nothing.
+    #[gpui_kit::test]
+    fn the_focused_select_opens_its_menu_or_the_folder(cx: &mut TestAppContext) {
+        let Shown { cx, opened, .. } = open_dialog(&[], cx);
+        press("tab", cx);
+        press("tab", cx);
+        assert_eq!(focused_control(cx), "", "the select");
+        press("enter", cx);
+        assert!(!menu_open(cx));
+        assert!(is_open(cx));
+        for key in ["space", "up", "down"] {
+            press(key, cx);
+            assert!(menu_open(cx), "{key} opens the menu");
+            press("escape", cx);
+            assert!(!menu_open(cx), "Escape closes it");
+            assert!(is_open(cx), "and not the dialog");
+        }
+        assert!(opened.borrow().is_empty());
+
+        // A folder chosen: Enter on the select opens it.
+        press("shift-tab", cx);
+        press("shift-tab", cx);
+        assert_eq!(focused_control(cx), "text field");
+        cx.simulate_input("/srv/app");
+        draw(cx);
+        press("tab", cx);
+        press("tab", cx);
+        assert_eq!(focused_control(cx), "", "the select");
+        press("enter", cx);
+        assert_eq!(*opened.borrow(), vec!["/srv/app".to_owned()]);
+        assert!(!is_open(cx));
+    }
+
+    /// The header's × is a `<button>`: Shift+Tab from the folder field reaches it, Space (or
+    /// Enter with no folder) closes the dialog, and Enter with a folder chosen opens it
+    /// (`handleKeyDown`).
+    #[gpui_kit::test]
+    fn the_focused_close_button_closes_or_opens_the_folder(cx: &mut TestAppContext) {
+        for (key, folder) in [("space", ""), ("enter", ""), ("space", "/srv/app")] {
+            let Shown { cx, opened, .. } = open_dialog(&[], cx);
+            cx.simulate_input(folder);
+            draw(cx);
+            press("shift-tab", cx);
+            assert_eq!(focused_control(cx), "dialog-close");
+            press(key, cx);
+            assert!(opened.borrow().is_empty(), "{key} {folder}");
+            assert!(!is_open(cx), "{key} {folder}");
+        }
+        let Shown { cx, opened, .. } = open_dialog(&[], cx);
+        cx.simulate_input("/srv/app");
+        draw(cx);
+        press("shift-tab", cx);
+        press("enter", cx);
+        assert_eq!(*opened.borrow(), vec!["/srv/app".to_owned()]);
+        assert!(!is_open(cx));
     }
 
     /// "Browse..." shows the open panel and reads "Opening..." until it closes, while Enter
