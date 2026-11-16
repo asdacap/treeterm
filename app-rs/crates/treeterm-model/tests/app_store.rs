@@ -24,7 +24,7 @@ use treeterm_model::session_store::{SessionState, SessionStore, WorkspaceEntry};
 use treeterm_model::settings_store::SettingsStore;
 use treeterm_model::system_monitor::{Metrics, POLL_INTERVAL, SystemMonitor};
 use treeterm_model::tool_tabs::ssh_upload::{LinkStatus, SshUpload, UploadTarget};
-use treeterm_model::traffic::{ConnectionTraffic, TrafficMeter};
+use treeterm_model::traffic::{ConnectionTraffic, Reading, TrafficMeter};
 use treeterm_model::web_app::RemoteHost;
 use treeterm_proto::treeterm::WorkspaceRef;
 use treeterm_testkit::fake_ssh::{Proxy, fake_ssh_response, remote_config, ssh_env};
@@ -841,7 +841,7 @@ fn the_connections_download_meter_spans_its_reconnects(cx: &mut TestAppContext) 
     let (traffic_after, meter_after, after) = remote_traffic(cx, &app);
     assert_eq!((traffic_after, meter_after), (traffic, meter.clone()));
     // Never "↓ …" again, and the next generation's bytes count on from the total.
-    assert!(meter.read_with(cx, |m, _| m.is_sampled()));
+    assert!(matches!(meter.read_with(cx, |m, _| m.reading()), Reading::Ready(_)));
     assert!(after.total_bytes > before.total_bytes);
 }
 

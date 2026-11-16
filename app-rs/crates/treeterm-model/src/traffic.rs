@@ -19,6 +19,16 @@ pub enum MeterKind {
     Workspace,
 }
 
+/// What a meter's badge shows (`ConnectionTraffic`'s `TrafficStatus`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Reading {
+    /// A connection meter before its first sample: "↓ …", with no total.
+    Loading,
+    /// The rate and the total received. A workspace meter reads this from the start, at 0
+    /// until its first sample (`NO_TRAFFIC`).
+    Ready(TrafficRate),
+}
+
 pub struct TrafficMeter {
     kind: MeterKind,
     counter: ByteCounter,
@@ -90,6 +100,14 @@ impl TrafficMeter {
     pub fn is_sampled(&self) -> bool {
         self.sampled
     }
+
+    /// What the badge shows: a connection meter is loading until its first sample.
+    pub fn reading(&self) -> Reading {
+        match self.kind {
+            MeterKind::Connection if !self.sampled => Reading::Loading,
+            MeterKind::Connection | MeterKind::Workspace => Reading::Ready(self.rate),
+        }
+    }
 }
 
 /// A connection's download meters, kept as long as the connection is listed: across its
@@ -155,11 +173,13 @@ mod tests {
     fn a_connection_meter_is_sampled_from_the_start(cx: &mut TestAppContext) {
         let meter = cx.new(|cx| TrafficMeter::new(MeterKind::Connection, ByteCounter::default(), cx));
         assert!(!meter.read_with(cx, |m, _| m.is_sampled()));
+        assert_eq!(meter.read_with(cx, |m, _| m.reading()), Reading::Loading);
 
         tick(cx);
 
         assert!(meter.read_with(cx, |m, _| m.is_sampled()));
         assert_eq!(rate(cx, &meter), TrafficRate::default());
+        assert_eq!(meter.read_with(cx, |m, _| m.reading()), Reading::Ready(TrafficRate::default()));
     }
 
     #[gpui_kit::test]
@@ -191,10 +211,13 @@ mod tests {
         }
         assert!(!meter.read_with(cx, |m, _| m.is_sampled()));
         assert_eq!(rate(cx, &meter), TrafficRate::default());
+        // Unlike a connection's, its badge reads "↓ 0 B/s" (`NO_TRAFFIC`) until then.
+        assert_eq!(meter.read_with(cx, |m, _| m.reading()), Reading::Ready(TrafficRate::default()));
 
         counter.add(4_000);
         tick(cx);
         assert_eq!(rate(cx, &meter), TrafficRate { total_bytes: 4_000, bytes_per_sec: 0.0 });
+        assert_eq!(meter.read_with(cx, |m, _| m.reading()), Reading::Ready(rate(cx, &meter)));
 
         counter.add(1_000);
         tick(cx);
