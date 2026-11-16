@@ -2274,6 +2274,11 @@ impl SessionStore {
             let locked = lock.await.unwrap_or_else(|_| Err("session store dropped".to_owned()));
             match locked {
                 Ok(()) => {
+                    // Once the lock is held, an earlier operation's error goes
+                    // (`removeWorkspaceWithLoading` resets the entry to Loaded).
+                    match this.update(cx, |session, cx| session.clear_workspace_error(&id, cx)) {
+                        Ok(()) | Err(_) => {} // Err: store dropped
+                    }
                     let removed = remove_locked(&this, &id, mode, &git, treeterm_core::git::Progress::Silent, cx).await;
                     if let Err(error) = removed {
                         match this.update(cx, |session, cx| session.removal_failed(&id, &store, error, cx)) {

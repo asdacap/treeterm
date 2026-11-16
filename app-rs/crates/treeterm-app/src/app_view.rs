@@ -902,26 +902,8 @@ impl Render for AppView {
         // Native webviews draw above GPUI: hide those of every workspace pane not on screen
         // (the shown one manages its own in `workspace_pane`).
         let on_screen = if info.is_none() { self.active.clone() } else { None };
-        let hidden: Vec<Entity<crate::browser_view::BrowserView>> = self
-            .sessions
-            .iter()
-            .filter(|(id, _)| on_screen.as_ref() != Some(*id))
-            .flat_map(|(_, connected)| connected.browser_views.values().cloned().collect::<Vec<_>>())
-            .collect();
-        let hidden_files: Vec<Entity<crate::file_browser_view::FileBrowserView>> = self
-            .sessions
-            .iter()
-            .filter(|(id, _)| on_screen.as_ref() != Some(*id))
-            .flat_map(|(_, connected)| connected.file_views.values().cloned().collect::<Vec<_>>())
-            .collect();
-        for view in hidden {
-            view.update(cx, |v, cx| v.set_shown(false, cx));
-        }
-        for view in hidden_files {
-            view.update(cx, |v, cx| v.set_shown(false, cx));
-        }
         for (_, connected) in self.sessions.iter().filter(|(id, _)| on_screen.as_ref() != Some(*id)) {
-            hide_reviews(connected, cx);
+            hide_tab_views(connected, cx);
         }
         // A session off screen shows no terminal: its terminals are shown again (fit again,
         // the active tab's takes focus) when it returns.
@@ -1647,13 +1629,11 @@ fn workspace_header(
     workspace: &Entity<treeterm_model::workspace_store::WorkspaceStore>,
     id: &str,
     header_inset: gpui_kit::Pixels,
-    operation_error: Option<String>,
     cx: &mut Context<AppView>,
 ) -> AnyElement {
     use gpui_kit::component::Sizable as _;
     let c = colors(cx);
-    let (secondary, primary, border, bg, accent, error) =
-        (c.text_secondary, c.text_primary, c.border, c.bg_secondary, c.accent, c.error);
+    let (secondary, primary, border, bg, accent) = (c.text_secondary, c.text_primary, c.border, c.bg_secondary, c.accent);
     let file = workspace.read(cx).file().clone();
     let root = file.parent_id.as_deref().is_none_or(str::is_empty);
     let description = file.metadata.get("description").cloned().filter(|d| !d.is_empty());
@@ -1828,7 +1808,6 @@ fn workspace_header(
         .border_color(border)
         .child(top)
         .child(description_row)
-        .when_some(operation_error, |d, message| d.child(div().text_size(px(crate::ui::SMALL)).text_color(error).child(format!("⚠ {message}"))))
         .into_any_element()
 }
 
@@ -1931,16 +1910,83 @@ fn tabset_strip(
     strip.render(&id, state, cx.entity_id(), cx)
 }
 
-/// No workspace's tabs are on screen (none picked, or the one picked was removed, is loading
-/// or failed): the session's Review views are hidden, so they refresh when shown again.
-fn hide_reviews(connected: &Connected, cx: &mut Context<AppView>) {
-    let views: Vec<Entity<crate::review_view::ReviewView>> = connected.review_views.values().cloned().collect();
-    for view in views {
+/// No workspace's tabs are on screen (none picked, or the one picked was removed, is loading,
+/// failed or shows an operation's failure): the session's native webviews are hidden, and
+/// its Review views too, so they refresh when shown again.
+fn hide_tab_views(connected: &Connected, cx: &mut Context<AppView>) {
+    let browsers: Vec<Entity<crate::browser_view::BrowserView>> = connected.browser_views.values().cloned().collect();
+    for view in browsers {
+        view.update(cx, |v, cx| v.set_shown(false, cx));
+    }
+    let files: Vec<Entity<crate::file_browser_view::FileBrowserView>> = connected.file_views.values().cloned().collect();
+    for view in files {
+        view.update(cx, |v, cx| v.set_shown(false, cx));
+    }
+    let reviews: Vec<Entity<crate::review_view::ReviewView>> = connected.review_views.values().cloned().collect();
+    for view in reviews {
         view.update(cx, |v, cx| {
             v.set_shown(false, cx);
             v.set_visible(false, cx);
         });
     }
+}
+
+/// `.workspace-load-error`: the workspace's last operation failed. "Operation failed" and
+/// the message, with Force Unlock (`forceUnlock`, which leaves the error) and Cancel
+/// (`clearWorkspaceError`, which brings the tabs back).
+fn operation_failed(session: &Entity<SessionStore>, id: &str, message: String, cx: &App) -> AnyElement {
+    let c = colors(cx);
+    let unlock = session.clone();
+    let (cancel, cancelled) = (session.clone(), id.to_owned());
+    div()
+        .flex_1()
+        .min_h_0()
+        .flex()
+        .items_center()
+        .justify_center()
+        .child(
+            v_flex()
+                .max_w(px(500.))
+                .text_center()
+                .child(
+                    div()
+                        .mb(px(12.))
+                        .text_size(px(18.))
+                        .font_weight(gpui_kit::FontWeight::BOLD)
+                        .text_color(c.error)
+                        .child("Operation failed"),
+                )
+                .child(
+                    div()
+                        .mb(px(16.))
+                        .p(px(12.))
+                        .rounded(px(4.))
+                        .border_1()
+                        .border_color(c.border)
+                        .bg(c.bg_secondary)
+                        .font_family(crate::ui::MONO)
+                        .text_size(px(12.))
+                        .text_color(c.text_secondary)
+                        .text_left()
+                        .child(message),
+                )
+                .child(
+                    h_flex()
+                        .justify_center()
+                        .gap(px(8.))
+                        .child(
+                            crate::ui::action_button("operation-force-unlock", cx)
+                                .child("Force Unlock")
+                                .on_click(move |_, _, cx| unlock.update(cx, |s, cx| s.force_unlock(cx))),
+                        )
+                        .child(
+                            crate::ui::action_button("operation-cancel", cx)
+                                .child("Cancel")
+                                .on_click(move |_, _, cx| cancel.update(cx, |s, cx| s.clear_workspace_error(&cancelled, cx))),
+                        ),
+                ),
+        )
+        .into_any_element()
 }
 
 fn workspace_pane(
@@ -1956,7 +2002,7 @@ fn workspace_pane(
     // Set again below for each terminal this render shows.
     let previous_terminals = std::mem::take(&mut connected.shown_terminals);
     let Some(id) = connected.session.read(cx).active_workspace().map(str::to_owned) else {
-        hide_reviews(connected, cx);
+        hide_tab_views(connected, cx);
         // `.workspace-empty`.
         return centered(
             v_flex()
@@ -1965,10 +2011,9 @@ fn workspace_pane(
                 .child(div().text_size(px(13.)).text_color(secondary).child("Select a workspace from the sidebar or add a new one to get started.")),
         );
     };
-    let tabs_shown =
-        matches!(connected.session.read(cx).entry(&id), Some(WorkspaceEntry::Loaded(_) | WorkspaceEntry::OperationError { .. }));
-    if !tabs_shown {
-        hide_reviews(connected, cx);
+    // `.workspace-terminal` shows only for a Loaded entry.
+    if !matches!(connected.session.read(cx).entry(&id), Some(WorkspaceEntry::Loaded(_))) {
+        hide_tab_views(connected, cx);
     }
     let workspace = match connected.session.read(cx).entry(&id) {
         // The selection can outlive its workspace when another window removes it.
@@ -2009,7 +2054,18 @@ fn workspace_pane(
         Some(WorkspaceEntry::OperationError { error, .. }) => Some(error.clone()),
         Some(_) | None => None,
     };
-    let header = workspace_header(connected, &workspace, &id, header_inset, operation_error, cx);
+    if let Some(message) = operation_error {
+        // The header over the "Operation failed" panel, in place of the tabs.
+        let header = workspace_header(connected, &workspace, &id, header_inset, cx);
+        return v_flex()
+            .flex_1()
+            .h_full()
+            .min_w_0()
+            .child(header)
+            .child(operation_failed(&connected.session, &id, message, cx))
+            .into_any_element();
+    }
+    let header = workspace_header(connected, &workspace, &id, header_inset, cx);
 
     // The layout's tabsets (flex-layout's `Layout`), each its strip over the tab it shows; a
     // maximized one alone.

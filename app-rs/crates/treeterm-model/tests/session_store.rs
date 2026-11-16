@@ -2411,6 +2411,73 @@ fn a_child_dismissed_while_it_waits_or_git_runs_comes_back(cx: &mut TestAppConte
     assert_eq!(file_on_disk(&h, &created)["parentId"], root.as_str());
 }
 
+/// How a workspace's entry stands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Standing {
+    Loaded,
+    OperationError,
+    Gone,
+}
+
+fn standing(s: &SessionStore, id: &str) -> Standing {
+    match s.entry(id) {
+        Some(WorkspaceEntry::Loaded(_)) => Standing::Loaded,
+        Some(WorkspaceEntry::OperationError { .. }) => Standing::OperationError,
+        None => Standing::Gone,
+        Some(WorkspaceEntry::Loading { .. } | WorkspaceEntry::Error { .. }) => panic!("{id} is not loaded"),
+    }
+}
+
+/// A removal refused the lock shows that on the workspace. Cancel (`clearWorkspaceError`)
+/// brings the same workspace back; a removal that takes the lock first clears an earlier
+/// error (`removeWorkspaceWithLoading`).
+#[gpui_kit::test]
+fn an_operation_error_goes_on_cancel_and_once_a_removal_holds_the_lock(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    std::fs::write(h.daemon.workspaces_dir().join("root.json"), body("root", None)).unwrap();
+    publish(&h, &["root"]);
+    let store = open_store(cx, &h, "client-a");
+    wait_until(cx, &store, |s| loaded(s, "root"));
+    let workspace = store.read_with(cx, |s, _| ws(s, "root"));
+    let other = futures::executor::block_on(treeterm_core::daemon::DaemonConnection::open(&h.rt, h.daemon.socket_path()))
+        .unwrap()
+        .unwrap();
+    let locked = futures::executor::block_on(other.lock_session(std::time::Duration::from_secs(600))).unwrap().unwrap();
+    assert!(matches!(locked, treeterm_core::daemon::SessionLockResult::Acquired(_)));
+    let refused = |cx: &mut TestAppContext| {
+        store.update(cx, |s, cx| s.remove_workspace("root", RemoveMode::KeepWorktreeAndBranch, cx));
+        wait_until(cx, &store, |s| {
+            matches!(s.entry("root"), Some(WorkspaceEntry::OperationError { error, .. }) if error == "Session is locked by another window")
+        });
+    };
+
+    refused(cx);
+    store.update(cx, |s, cx| s.clear_workspace_error("root", cx));
+    store.read_with(cx, |s, _| match s.entry("root") {
+        Some(WorkspaceEntry::Loaded(store)) => assert_eq!(store.entity_id(), workspace.entity_id()),
+        _ => panic!("not loaded again"),
+    });
+
+    refused(cx);
+    let seen = std::rc::Rc::new(std::cell::RefCell::new(vec![Standing::OperationError]));
+    let sink = seen.clone();
+    cx.update(|cx| {
+        cx.observe(&store, move |store, cx| {
+            let now = standing(store.read(cx), "root");
+            let mut seen = sink.borrow_mut();
+            if seen.last() != Some(&now) {
+                seen.push(now);
+            }
+        })
+        .detach()
+    });
+    futures::executor::block_on(other.unlock_session()).unwrap().unwrap();
+    store.update(cx, |s, cx| s.remove_workspace("root", RemoveMode::KeepWorktreeAndBranch, cx));
+    wait_until(cx, &store, |s| s.entry("root").is_none());
+    assert_eq!(*seen.borrow(), vec![Standing::OperationError, Standing::Loaded, Standing::Gone]);
+}
+
 #[gpui_kit::test]
 fn a_file_downloads_to_a_local_path(cx: &mut TestAppContext) {
     cx.executor().allow_parking();
