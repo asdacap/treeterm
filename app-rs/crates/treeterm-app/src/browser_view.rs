@@ -1,6 +1,8 @@
-//! Browser tabs: a local web page in a native webview (WKWebView / WebKitGTK via wry) under
-//! the toolbar of `PageViews.tsx` (back, forward, reload / stop, home, the address bar, open
-//! externally), plus the navigation guard of `src/main/webviewGuard.ts`.
+//! Browser tabs: a web page in a native webview (WKWebView / WebKitGTK via wry) under the
+//! toolbar of `PageViews.tsx` (back, forward, reload / stop, home, the address bar, open
+//! externally). As in Electron, whose guard (`src/main/webviewGuard.ts`) checks only the
+//! page the webview opens on and its popups, the start page must be on localhost but the
+//! page may then go anywhere ([`tab_navigation`]); popups open in the system browser.
 //!
 //! The toolbar follows the webview's own navigation state ([`webview_native`], [`PageNav`]):
 //! its history, a load from its request on, navigations within the page. A load that ends
@@ -16,9 +18,11 @@
 //! loads. Links in the rendered page load in the tab on its origin, elsewhere in the system
 //! browser. WebKit cannot display `text/markdown` (Chromium shows it as text), so a page
 //! the webview cannot display is reloaded through the tab's own URL scheme, which fetches
-//! it and serves markdown as text ([`proxied_url`]); anything else opens in the system
+//! it and serves markdown as text ([`ProxiedPages`]); anything else opens in the system
 //! browser.
 
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::time::Duration;
 
 use gpui_kit::component::input::{InputEvent, InputState};
@@ -30,8 +34,8 @@ use gpui_kit::{
 };
 use gpui_webview::WebView;
 use treeterm_model::apps::{
-    MarkdownLink, PAGE_PROBE_SCRIPT, PageContent, is_allowed_webview_url, is_markdown_page, markdown_link, page_content,
-    proxied_url, resolve_address, unproxied_url,
+    MarkdownLink, PAGE_PROBE_SCRIPT, PageContent, ProxiedPages, TabNavigation, is_allowed_webview_url,
+    is_markdown_page, markdown_link, page_content, resolve_address, tab_navigation,
 };
 use treeterm_model::page_nav::{NavInput, PageNav, PageState, Reload};
 use treeterm_model::workspace_store::WorkspaceStore;
@@ -77,8 +81,9 @@ pub struct BrowserView {
     markdown_scroll: gpui_kit::ScrollHandle,
     /// Where the webview's reports go (its callbacks cannot reach the view).
     events: Option<tokio::sync::mpsc::UnboundedSender<PageEvent>>,
-    /// This tab's URL scheme for pages the webview cannot display ([`proxied_url`]).
+    /// This tab's URL scheme for pages the webview cannot display, and the pages sent there.
     proxy: String,
+    proxied: Rc<RefCell<ProxiedPages>>,
     _observer: Option<webview_native::NavObserver>,
     _events: Option<Task<()>>,
     _address: Vec<Subscription>,
@@ -112,6 +117,7 @@ impl BrowserView {
             markdown_scroll: gpui_kit::ScrollHandle::new(),
             events: None,
             proxy,
+            proxied: Rc::new(RefCell::new(ProxiedPages::default())),
             _observer: None,
             _events: None,
             _address: Vec::new(),
@@ -170,16 +176,19 @@ impl BrowserView {
         let (events, mut updates) = tokio::sync::mpsc::unbounded_channel();
         self.events = Some(events.clone());
         let (undisplayable, observed) = (events.clone(), events.clone());
-        let (proxy, guard_proxy) = (self.proxy.clone(), self.proxy.clone());
+        let (proxy, guard_proxy, proxied) = (self.proxy.clone(), self.proxy.clone(), self.proxied.clone());
         let builder = wry::WebViewBuilder::new()
             .with_url(self.nav.current())
-            // In-page navigation stays on localhost; anything else goes to the system browser.
-            .with_navigation_handler(move |url| {
-                let allowed = is_allowed_webview_url(&url) || url == "about:blank" || unproxied_url(&guard_proxy, &url).is_some();
-                if !allowed {
+            .with_navigation_handler(move |url| match tab_navigation(&url, &guard_proxy) {
+                TabNavigation::InTab => true,
+                TabNavigation::External => {
                     open_externally(&url);
+                    false
                 }
-                allowed
+                TabNavigation::Refused => {
+                    tracing::warn!(%url, "a browser tab refused to go to a local file or an unreadable URL");
+                    false
+                }
             })
             .with_download_started_handler(move |url, _| {
                 if undisplayable.send(PageEvent::Undisplayable(url)).is_err() {
@@ -188,7 +197,7 @@ impl BrowserView {
                 false
             })
             .with_asynchronous_custom_protocol(self.proxy.clone(), move |_, request, responder| {
-                let page = unproxied_url(&proxy, &request.uri().to_string());
+                let page = proxied.borrow().page(&proxy, &request.uri().to_string());
                 std::thread::spawn(move || responder.respond(proxy_response(page)));
             })
             .with_new_window_req_handler(|url, _| {
@@ -243,9 +252,10 @@ impl BrowserView {
             }
             PageEvent::Undisplayable(url) => {
                 self.nav.apply(NavInput::Downloaded);
-                match proxied_url(&self.proxy, &url) {
-                    Some(proxied) if is_allowed_webview_url(&url) => self.load(proxied, cx),
-                    Some(_) | None => tracing::error!(%url, "the browser tab cannot show this page"),
+                let proxied = if is_allowed_webview_url(&url) { self.proxied.borrow_mut().proxy(&self.proxy, &url) } else { None };
+                match proxied {
+                    Some(proxied) => self.load(proxied, cx),
+                    None => tracing::error!(%url, "the browser tab cannot show this page"),
                 }
             }
             // A probe that fails keeps the page's content, as Electron only logs it.

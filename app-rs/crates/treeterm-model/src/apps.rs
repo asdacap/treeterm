@@ -415,6 +415,60 @@ pub fn unproxied_url(proxy: &str, url: &str) -> Option<String> {
     matches!(scheme, "http" | "https").then(|| format!("{scheme}://{rest}"))
 }
 
+/// The pages a tab sent through its proxy scheme ([`proxied_url`]): the only ones the scheme
+/// fetches, so a page from another host ([`tab_navigation`]) cannot make it fetch localhost
+/// pages or open them in the system browser.
+#[derive(Debug, Default)]
+pub struct ProxiedPages(std::collections::HashSet<String>);
+
+impl ProxiedPages {
+    /// Send `url` through the tab's `proxy` scheme: the URL to load instead.
+    pub fn proxy(&mut self, proxy: &str, url: &str) -> Option<String> {
+        let proxied = proxied_url(proxy, url)?;
+        self.0.insert(normalized_url(url));
+        Some(proxied)
+    }
+
+    /// The page a request to the tab's `proxy` scheme stands for, if the tab sent it there.
+    pub fn page(&self, proxy: &str, request: &str) -> Option<String> {
+        let page = unproxied_url(proxy, request)?;
+        self.0.contains(&normalized_url(&page)).then_some(page)
+    }
+}
+
+/// `url` as the URL parser writes it, so a URL reads the same whichever way it was spelled.
+fn normalized_url(url: &str) -> String {
+    match url::Url::parse(url) {
+        Ok(parsed) => parsed.into(),
+        Err(_) => url.to_owned(),
+    }
+}
+
+/// Where a navigation in a Browser or Web App tab's page goes. Electron guards only the page
+/// the webview opens on and its popups (`webviewGuard.ts`), so pages from any host load in
+/// the tab (links, redirects, frames); a link to another app (`mailto:`, `vscode:`) opens in
+/// the system, as Chromium hands such URLs to `shell.openExternal`; a local file is refused,
+/// as Chromium refuses a web page's `file:` links.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TabNavigation {
+    InTab,
+    External,
+    Refused,
+}
+
+/// Where `url` goes in a tab whose own scheme is `proxy` ([`proxied_url`]).
+pub fn tab_navigation(url: &str, proxy: &str) -> TabNavigation {
+    let Ok(parsed) = url::Url::parse(url) else {
+        return TabNavigation::Refused;
+    };
+    match parsed.scheme() {
+        "http" | "https" | "about" | "data" | "blob" | "javascript" => TabNavigation::InTab,
+        scheme if scheme == proxy => TabNavigation::InTab,
+        "file" => TabNavigation::Refused,
+        _ => TabNavigation::External,
+    }
+}
+
 /// Where a link in a rendered markdown page goes (`onMarkdownClick`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MarkdownLink {
@@ -694,6 +748,38 @@ mod tests {
         assert_eq!(unproxied_url("tt-page1", "http://localhost:8765/a.md"), None);
         assert_eq!(unproxied_url("tt-page1", "tt-page12://http.localhost/a.md"), None);
         assert_eq!(unproxied_url("tt-page1", "tt-page1://ftp.localhost/a.md"), None);
+    }
+
+    #[test]
+    fn the_proxy_scheme_serves_only_the_pages_the_tab_sent_through_it() {
+        let mut pages = ProxiedPages::default();
+        assert_eq!(pages.page("tt-page1", "tt-page1://http.localhost:8765/a.md"), None, "nothing sent yet");
+        assert_eq!(pages.proxy("tt-page1", "http://localhost:8765/a.md").as_deref(), Some("tt-page1://http.localhost:8765/a.md"));
+        assert_eq!(pages.page("tt-page1", "tt-page1://http.localhost:8765/a.md").as_deref(), Some("http://localhost:8765/a.md"));
+        // As the URL parser writes it either way.
+        assert_eq!(pages.page("tt-page1", "tt-page1://http.LOCALHOST:8765/a.md").as_deref(), Some("http://LOCALHOST:8765/a.md"));
+        assert_eq!(pages.page("tt-page1", "tt-page1://http.localhost:8765/b.md"), None, "another page");
+        assert_eq!(pages.page("tt-page1", "tt-page2://http.localhost:8765/a.md"), None, "another scheme");
+        assert_eq!(pages.proxy("tt-page1", "file:///etc/passwd"), None);
+        assert_eq!(pages.page("tt-page1", "tt-page1://file./etc/passwd"), None);
+    }
+
+    #[test]
+    fn pages_load_in_the_tab_from_any_host_and_other_apps_links_open_in_the_system() {
+        let go = |url: &str| tab_navigation(url, "tt-page1");
+        assert_eq!(go("http://localhost:3000/a"), TabNavigation::InTab);
+        assert_eq!(go("https://github.com/login/oauth/authorize?x=1"), TabNavigation::InTab);
+        assert_eq!(go("HTTPS://Example.com/"), TabNavigation::InTab);
+        assert_eq!(go("about:blank"), TabNavigation::InTab);
+        assert_eq!(go("about:srcdoc"), TabNavigation::InTab);
+        assert_eq!(go("data:text/html,<p>hi</p>"), TabNavigation::InTab);
+        assert_eq!(go("blob:http://localhost:3000/0d7c5b0e-1f5b-4c4a-9d55-2a1f1a7c1e2f"), TabNavigation::InTab);
+        assert_eq!(go("tt-page1://http.localhost:3000/a.md"), TabNavigation::InTab);
+        assert_eq!(go("mailto:me@example.com"), TabNavigation::External);
+        assert_eq!(go("vscode://file/tmp/a.ts"), TabNavigation::External);
+        assert_eq!(go("tt-page2://http.localhost:3000/a.md"), TabNavigation::External, "another tab's scheme");
+        assert_eq!(go("file:///Applications/Calculator.app"), TabNavigation::Refused);
+        assert_eq!(go("not a url"), TabNavigation::Refused);
     }
 
     #[test]

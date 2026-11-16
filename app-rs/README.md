@@ -156,8 +156,10 @@ Done (tested against a real in-process daemon unless noted):
   the diff, then the repo; the diff's menu searches or copies the selected text or the word
   under the pointer), prompting the AI harness; live merge
   output; git status (uncommitted / conflicts / behind, Pull) and PR indicators.
-- **Web (M8):** Browser tabs in a native webview (localhost guard). The toolbar follows the
-  webview's own history (Back / Forward),
+- **Web (M8):** Browser tabs in a native webview. As in Electron, the start page (and a full
+  address typed) must be on localhost, but links, redirects and frames then load in the tab
+  from any host; links to other apps (`mailto:`, `vscode:`) and popups open in the system,
+  `file:` links are refused. The toolbar follows the webview's own history (Back / Forward),
   loading (Stop and the progress line from the request on) and navigations within the page
   (`pushState`, fragments), which the tab also remembers; Reload bypasses the cache. A load
   that ends without a page (server down) shows "This site can’t be reached" and its URL in
@@ -170,7 +172,7 @@ Done (tested against a real in-process daemon unless noted):
   (status, Restart, ssh output) — remote path not yet run against a host. Markdown pages
   (`text/markdown`, or `.md` sent as `text/plain`) are rendered in the page's place; WebKit
   cannot display `text/markdown`, so such a page is reloaded through the tab's own URL
-  scheme, which fetches it and serves it as text.
+  scheme, which fetches it and serves it as text (only pages the tab itself sent there).
 - **Workspace pane:** header with git status, PR link, Pull, ▶ Run (npm/make/just/Taskfile/
   VS Code tasks, custom runners), Review & Merge / Abandon; AI-harness Prompt Commit /
   Prompt Rebase; Prompt Description / Skip beside a description not yet sent to the
