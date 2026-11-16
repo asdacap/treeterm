@@ -6,8 +6,9 @@
 //! As in Monaco: F12, Cmd/Ctrl+click and the context menu go to the definition of the word
 //! under the cursor (holding Cmd/Ctrl over a word with one underlines it); Cmd/Ctrl+F2
 //! puts a cursor on every occurrence of the word or selection (Change All Occurrences);
-//! typing a word suggests the document's words that have its letters in order, the first
-//! at a word start or camelCase hump (Ctrl+Space asks). The language
+//! typing suggests CSS property names or HTML element and attribute names where the
+//! language's worker offers them, else the document's words that have the typed letters in
+//! order, the first at a word start or camelCase hump (Ctrl+Space asks). The language
 //! workers' problems are marked again as the text changes, CSS colours are painted and
 //! links underlined; Cmd/Ctrl+click opens a link ([`crate::editor_hooks`]).
 
@@ -127,7 +128,7 @@ impl TextEditorView {
             }
         };
         crate::editor_hooks::install_definitions(&editor, probe, self.definition_clicked.clone(), go, cx);
-        crate::editor_hooks::install_word_suggestions(&editor, monaco_language, cx);
+        crate::editor_hooks::install_suggestions(&editor, monaco_language, cx);
         self.editor = Some(editor.clone());
         Some(editor)
     }
@@ -439,7 +440,7 @@ mod tests {
         });
         let editor = cx.update(|_, cx| host.read(cx).editor.clone());
         cx.update(|window, cx| {
-            crate::editor_hooks::install_word_suggestions(&editor, "rust", cx);
+            crate::editor_hooks::install_suggestions(&editor, "rust", cx);
             editor.update(cx, |editor, cx| {
                 editor.focus(window, cx);
                 editor.set_selected_range(text.len()..text.len(), cx);
@@ -478,7 +479,7 @@ mod tests {
         });
         let editor = cx.update(|_, cx| host.read(cx).editor.clone());
         cx.update(|window, cx| {
-            crate::editor_hooks::install_word_suggestions(&editor, "rust", cx);
+            crate::editor_hooks::install_suggestions(&editor, "rust", cx);
             editor.update(cx, |editor, cx| {
                 editor.focus(window, cx);
                 editor.set_selected_range(text.len()..text.len(), cx);
@@ -495,5 +496,55 @@ mod tests {
         });
         // `b` at a hump matches better than inside a word.
         assert_eq!(shown, [("fooBar".to_owned(), vec![0..1, 3..4]), ("foobar".to_owned(), vec![0..1, 3..4])]);
+    }
+
+    #[gpui_kit::test]
+    fn typing_in_html_and_css_offers_the_languages_suggestions(cx: &mut gpui_kit::TestAppContext) {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            bind_keys(cx);
+        });
+        let labels = |editor: &Entity<EditorState>, cx: &mut gpui_kit::VisualTestContext| {
+            cx.update(|_, cx| {
+                let menu = editor.read(cx).completion_menu_state();
+                menu.open.then(|| menu.items.iter().take(2).map(|item| item.label.clone()).collect::<Vec<_>>())
+            })
+        };
+        let text = "<ul>\n";
+        let (host, cx) = cx.add_window_view(|window, cx| Host {
+            editor: cx.new(|cx| EditorState::new(window, cx).language("html").default_value(text)),
+        });
+        let editor = cx.update(|_, cx| host.read(cx).editor.clone());
+        cx.update(|window, cx| {
+            crate::editor_hooks::install_suggestions(&editor, "html", cx);
+            editor.update(cx, |editor, cx| {
+                editor.focus(window, cx);
+                editor.set_selected_range(text.len()..text.len(), cx);
+            });
+        });
+        cx.run_until_parked();
+        // After `<`: the open element's end tag first, then the elements.
+        cx.simulate_keystrokes("<");
+        cx.run_until_parked();
+        assert_eq!(labels(&editor, cx), Some(vec!["/ul".to_owned(), "a".to_owned()]));
+        cx.simulate_keystrokes("/");
+        cx.run_until_parked();
+        assert_eq!(labels(&editor, cx), Some(vec!["/ul".to_owned()]));
+        cx.simulate_keystrokes("enter");
+        cx.run_until_parked();
+        assert_eq!(cx.update(|_, cx| editor.read(cx).value().to_string()), "<ul>\n</ul>");
+
+        // CSS: property names in a rule, inserted with a colon.
+        cx.update(|window, cx| {
+            editor.update(cx, |editor, cx| editor.set_value("a { }", window, cx));
+            crate::editor_hooks::install_suggestions(&editor, "css", cx);
+            editor.update(cx, |editor, cx| editor.set_selected_range(4..4, cx));
+        });
+        cx.simulate_keystrokes("c o l o");
+        cx.run_until_parked();
+        assert_eq!(labels(&editor, cx).map(|labels| labels[0].clone()), Some("color".to_owned()));
+        cx.simulate_keystrokes("enter");
+        cx.run_until_parked();
+        assert_eq!(cx.update(|_, cx| editor.read(cx).value().to_string()), "a { color: }");
     }
 }

@@ -1,21 +1,26 @@
 //! What Monaco's language workers add to the code editors, without a language server: the
-//! problems they mark (squiggles, with a message on hover), CSS colours, and links. Pure functions over a file's text; the code editors install them through GPUI
+//! problems they mark (squiggles, with a message on hover), CSS colours, completions, and
+//! links. Pure functions over a file's text; the code editors install them through GPUI
 //! Kit's LSP hooks.
 //!
 //! - JSON ([`json`]): the JSON worker's problems, ported.
 //! - TypeScript and JavaScript ([`syntax`]): syntax errors, read from the tree-sitter
 //!   grammars GPUI Kit highlights them with.
-//! - CSS, SCSS and Less ([`css`]): colours, and (CSS) the lint warnings about rules and
-//!   declarations.
+//! - CSS, SCSS and Less ([`css`]): colours, property completions, and (CSS) the lint
+//!   warnings about rules and declarations.
+//! - HTML ([`html`]): element and attribute name completions.
 //! - Every language ([`links`]): the URLs the base editor worker links.
 
 pub mod css;
+pub mod html;
 pub mod json;
 pub mod links;
 pub mod syntax;
 mod web_data;
 
 use std::ops::Range;
+
+use crate::words::Trigger;
 
 /// How serious a problem is: Monaco draws errors red and warnings yellow.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,6 +36,36 @@ pub struct Problem {
     pub range: Range<usize>,
     pub severity: Severity,
     pub message: String,
+}
+
+/// A completion a language worker offers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Completion {
+    /// What the list shows, and what is typed is matched with.
+    pub label: String,
+    /// The text a pick puts in place of [`Completions::replace`].
+    pub insert: String,
+}
+
+/// The completions at the cursor, best matches first.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Completions {
+    /// The bytes a picked completion replaces: what was typed, and the rest of the name.
+    pub replace: Range<usize>,
+    pub items: Vec<Completion>,
+}
+
+/// The completions a language worker of Monaco's `language` offers at byte `offset` of
+/// `text`: CSS, SCSS and Less property names, HTML element and attribute names. `None`
+/// where it offers none, and in other languages: Monaco's word suggestions are offered
+/// there ([`crate::words::suggestions`]).
+pub fn completions(language: &str, text: &str, offset: usize, trigger: Trigger) -> Option<Completions> {
+    let found = match language {
+        "css" | "scss" | "less" => css::property_completions(language, text, offset, trigger),
+        "html" => html::completions(text, offset, trigger),
+        _ => None,
+    }?;
+    (!found.items.is_empty()).then_some(found)
 }
 
 /// Monaco marks an empty range (`MarkerDecorations._createDecorationRange`) as the word there;
@@ -105,5 +140,16 @@ mod tests {
         assert_eq!(problems("scss", "a.scss", "a {}"), []);
         assert_eq!(problems("plaintext", "a.jsonc", "[1,]"), []);
         assert_eq!(problems("rust", "a.rs", "fn ("), []);
+    }
+
+    #[test]
+    fn only_languages_with_a_worker_that_completes_have_completions() {
+        let found = completions("css", "a { colo }", 8, Trigger::Typing).expect("properties");
+        assert_eq!((found.replace, found.items[0].label.as_str()), (4..8, "color"));
+        let found = completions("html", "<", 1, Trigger::Typing).expect("elements");
+        assert_eq!(found.replace, 1..1);
+        assert_eq!(completions("rust", "fn colo", 7, Trigger::Typing), None);
+        // Where the worker has nothing, none: word suggestions take over.
+        assert_eq!(completions("css", "a { color: r }", 12, Trigger::Typing), None);
     }
 }

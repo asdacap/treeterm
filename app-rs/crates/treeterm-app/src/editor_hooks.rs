@@ -5,7 +5,8 @@
 //!   it, which a click follows; links (underlined, "Follow link (cmd + click)" on hover,
 //!   Cmd/Ctrl+click opens them); the language workers' problems (squiggles, their message on
 //!   hover); and CSS colours;
-//! - the Editor tab: word suggestions while typing.
+//! - the Editor tab: suggestions while typing, the language's (CSS properties, HTML elements
+//!   and attributes) or else the file's words.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -309,13 +310,15 @@ pub(crate) fn install_colors(editor: &Entity<EditorState>, language: &'static st
     });
 }
 
-/// Monaco's word-based suggestions (the base editor worker's `textualSuggest`) in a file of
-/// Monaco's `language`, whose words they are made of.
-struct WordSuggestions {
+/// Monaco's suggestions in a file of Monaco's `language`: its language worker's (CSS
+/// properties, HTML elements and attributes) where it offers some, else the words of the
+/// file (the base editor worker's `textualSuggest`), as Monaco asks the word-based provider
+/// only when the language's offered nothing.
+struct Suggestions {
     language: &'static str,
 }
 
-impl CompletionProvider for WordSuggestions {
+impl CompletionProvider for Suggestions {
     fn completions(
         &self,
         text: &Rope,
@@ -330,18 +333,26 @@ impl CompletionProvider for WordSuggestions {
         };
         let (text, language) = (text.clone(), self.language);
         cx.background_executor().spawn(async move {
-            let suggestions = words::suggestions(&text.to_string(), offset, trigger, language);
-            let replace = Range::new(
-                text.offset_to_position(suggestions.replace.start),
-                text.offset_to_position(suggestions.replace.end),
-            );
-            let items = suggestions
-                .words
+            let string = text.to_string();
+            let (replace, items, kind): (_, Vec<(String, String)>, _) =
+                match code_intel::completions(language, &string, offset, trigger) {
+                    Some(found) => {
+                        let items = found.items.into_iter().map(|item| (item.label, item.insert)).collect();
+                        (found.replace, items, CompletionItemKind::PROPERTY)
+                    }
+                    None => {
+                        let found = words::suggestions(&string, offset, trigger, language);
+                        let items = found.words.into_iter().map(|word| (word.clone(), word)).collect();
+                        (found.replace, items, CompletionItemKind::TEXT)
+                    }
+                };
+            let replace = lsp_range(&text, replace);
+            let items = items
                 .into_iter()
-                .map(|word| CompletionItem {
-                    label: word.clone(),
-                    kind: Some(CompletionItemKind::TEXT),
-                    text_edit: Some(CompletionTextEdit::Edit(TextEdit { range: replace, new_text: word })),
+                .map(|(label, insert)| CompletionItem {
+                    label,
+                    kind: Some(kind),
+                    text_edit: Some(CompletionTextEdit::Edit(TextEdit { range: replace, new_text: insert })),
                     ..CompletionItem::default()
                 })
                 .collect();
@@ -350,18 +361,19 @@ impl CompletionProvider for WordSuggestions {
     }
 
     /// Every typed character: a word character asks for suggestions, anything else closes
-    /// them (it leaves no word being typed). Pasted text does not, as in Monaco.
+    /// them (it leaves no word being typed) unless the language offers some there (after
+    /// `<` in HTML). Pasted text does not, as in Monaco.
     fn is_completion_trigger(&self, _: usize, new_text: &str, _: &mut App) -> bool {
         new_text.chars().count() == 1
     }
 }
 
-/// Give `editor`, a file of Monaco's `language`, Monaco's word-based suggestions, their
-/// letters that match what was typed highlighted.
-pub(crate) fn install_word_suggestions(editor: &Entity<EditorState>, language: &'static str, cx: &mut App) {
+/// Give `editor`, a file of Monaco's `language`, Monaco's suggestions, their letters that
+/// match what was typed highlighted.
+pub(crate) fn install_suggestions(editor: &Entity<EditorState>, language: &'static str, cx: &mut App) {
     editor.update(cx, |editor, _| {
         let lsp = editor.lsp_mut();
-        lsp.completion_provider = Some(Rc::new(WordSuggestions { language }));
+        lsp.completion_provider = Some(Rc::new(Suggestions { language }));
         lsp.set_completion_highlighter(Rc::new(|typed: &str, item: &CompletionItem| words::highlights(typed, &item.label)));
     });
 }

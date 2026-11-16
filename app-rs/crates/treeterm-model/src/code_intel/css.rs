@@ -1,7 +1,7 @@
 //! What Monaco's CSS worker (vscode-css-languageservice) adds to CSS, SCSS and Less files,
 //! without its parser: the colours it finds in declaration values (`findDocumentColors`),
-//! and the warnings of its lint that read rules and declarations (CSS files only, with
-//! Monaco's default lint settings).
+//! property names to complete inside a rule, and the warnings of its lint that read rules
+//! and declarations (CSS files only, with Monaco's default lint settings).
 //!
 //! The file is read as a tree of rules (`selector { … }`), at-rules and declarations
 //! (`property: value`), split at `{`, `}` and `;` outside strings, comments and brackets.
@@ -11,7 +11,8 @@
 use std::ops::Range;
 
 use super::web_data::{CSS_COLORS, CSS_PROPERTIES};
-use super::{Problem, Severity};
+use super::{Completion, Completions, Problem, Severity};
+use crate::words::{self, Trigger};
 
 /// The style sheet languages the CSS worker reads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -653,6 +654,80 @@ pub fn problems(text: &str) -> Vec<Problem> {
     found
 }
 
+/// What a block holds, for completing in it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Block {
+    /// A rule, or an at-rule of declarations (`@font-face`, `@page`).
+    Declarations,
+    /// Another at-rule's: rules.
+    Rules,
+}
+
+/// Where the statement the cursor (byte `offset`) is in starts, and the block it is in;
+/// `None` at the top of the style sheet.
+fn statement_at(reader: &Reader, offset: usize) -> Option<(usize, Block)> {
+    let mut blocks: Vec<Block> = Vec::new();
+    let mut pos = 0;
+    loop {
+        pos = reader.skip_trivia(pos);
+        let end = reader.statement_end(pos);
+        if pos >= offset || end >= offset || end >= reader.text.len() {
+            return blocks.last().map(|block| (pos.min(offset), *block));
+        }
+        match reader.bytes[end] {
+            b'{' => {
+                let name = reader.text[pos..end].split_whitespace().next().unwrap_or("");
+                let declarations = !name.starts_with('@')
+                    || name.eq_ignore_ascii_case("@font-face")
+                    || name.eq_ignore_ascii_case("@page");
+                blocks.push(if declarations { Block::Declarations } else { Block::Rules });
+            }
+            b'}' => {
+                blocks.pop();
+            }
+            _ => {}
+        }
+        pos = end + 1;
+    }
+}
+
+/// The property names the CSS worker completes at byte `offset` of `text`, a style sheet of
+/// Monaco's `language`: inside a rule, where a property name is being typed (or asked for
+/// with nothing typed, but not right after a `;`). `None` elsewhere, where Monaco's word
+/// suggestions take over.
+pub fn property_completions(language: &str, text: &str, offset: usize, trigger: Trigger) -> Option<Completions> {
+    let dialect = Dialect::of(language)?;
+    let reader = Reader { text, bytes: text.as_bytes(), dialect };
+    let (start, block) = statement_at(&reader, offset)?;
+    if block != Block::Declarations || !text[start..offset].bytes().all(is_name_byte) {
+        return None;
+    }
+    let end = (offset..text.len()).find(|&at| !is_name_byte(reader.bytes[at])).unwrap_or(text.len());
+    let typed = &text[start..offset];
+    if typed.is_empty() && (trigger == Trigger::Typing || text[..offset].ends_with(';')) {
+        return None;
+    }
+    let colon_follows = text[end..].trim_start_matches([' ', '\t']).starts_with(':');
+    let suffix = if colon_follows { "" } else { ": " };
+    let mut ranked: Vec<(i32, String, &str)> = CSS_PROPERTIES
+        .iter()
+        .filter_map(|(name, relevance)| {
+            let score = if typed.is_empty() { 0 } else { words::fuzzy::score(typed, name)?.score };
+            // The worker's `sortText`: vendor-prefixed last, then by relevance.
+            let group = if name.starts_with('-') { 'x' } else { 'd' };
+            Some((score, format!("{group}_{:x}", 255 - u32::from(*relevance)), *name))
+        })
+        .collect();
+    ranked.sort_by(|(score_a, sort_a, a), (score_b, sort_b, b)| {
+        score_b.cmp(score_a).then_with(|| sort_a.cmp(sort_b)).then_with(|| a.cmp(b))
+    });
+    let items = ranked
+        .into_iter()
+        .map(|(_, _, name)| Completion { label: name.to_owned(), insert: format!("{name}{suffix}") })
+        .collect();
+    Some(Completions { replace: start..end, items })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -762,5 +837,43 @@ mod tests {
         assert_eq!(warned("@charset \"utf-8\";\n@import url(x.css);\n@-webkit-keyframes k { }\n@font-face { src: url(x); font-family: X }"), []);
         // A custom property's value may hold a block.
         assert_eq!(warned(":root { --x: { a: b }; --y: 1px; }"), []);
+    }
+
+    /// The labels offered at `|` in `text`, and the text a pick replaces.
+    fn offered(language: &str, text: &str, trigger: Trigger) -> Option<(String, Vec<String>, Vec<String>)> {
+        let offset = text.find('|').expect("a cursor");
+        let text = text.replace('|', "");
+        let completions = property_completions(language, &text, offset, trigger)?;
+        let (labels, inserts) = completions.items.into_iter().take(3).map(|item| (item.label, item.insert)).unzip();
+        Some((text[completions.replace].to_owned(), labels, inserts))
+    }
+
+    #[test]
+    fn property_names_are_completed_where_a_property_is_typed() {
+        let (replace, labels, inserts) = offered("css", "a { colo|r }", Trigger::Typing).expect("properties");
+        assert_eq!(replace, "color");
+        assert_eq!(labels[0], "color");
+        assert_eq!(inserts[0], "color: ");
+        // A colon already there is kept.
+        let (_, labels, inserts) = offered("scss", ".a { .b { backgr|: red; } }", Trigger::Typing).expect("properties");
+        assert_eq!(inserts[0], labels[0]);
+        // Asked for with nothing typed: all of them, the most relevant first, vendor-prefixed last.
+        let (replace, labels, _) = offered("less", "a { color: red; | }", Trigger::Invoked).expect("properties");
+        assert_eq!((replace.as_str(), &labels[..]), ("", &["display", "height", "width"].map(str::to_owned)[..]));
+        let all = property_completions("css", "a {  }", 4, Trigger::Invoked).expect("properties").items;
+        assert_eq!(all.len(), CSS_PROPERTIES.len());
+        assert!(all.last().is_some_and(|item| item.label.starts_with('-')));
+    }
+
+    #[test]
+    fn property_names_are_not_completed_elsewhere() {
+        // In a value, a selector at the top or in `@media`, right after a `;`, and with
+        // nothing typed while typing.
+        assert_eq!(offered("css", "a { color: r| }", Trigger::Typing), None);
+        assert_eq!(offered("css", "di|", Trigger::Typing), None);
+        assert_eq!(offered("css", "@media x { di| }", Trigger::Typing), None);
+        assert_eq!(offered("css", "a { color: red;| }", Trigger::Invoked), None);
+        assert_eq!(offered("css", "a { | }", Trigger::Typing), None);
+        assert_eq!(offered("html", "a { co| }", Trigger::Typing), None);
     }
 }
