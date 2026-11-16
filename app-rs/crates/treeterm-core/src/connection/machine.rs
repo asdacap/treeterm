@@ -167,6 +167,21 @@ enum Step {
     InFlight(AttemptId),
 }
 
+impl Step {
+    /// Back off from `now` until attempt `attempts + 1`, logged as Electron's
+    /// `scheduleReconnectAttempt` did.
+    fn wait_before_next(connection: &ConnectionId, attempts: u32, now: Instant) -> Self {
+        let delay = reconnect_delay(attempts);
+        tracing::info!(
+            %connection,
+            "scheduling reconnect attempt {} in {}ms",
+            attempts + 1,
+            delay.as_millis()
+        );
+        Step::Waiting { until: now + delay }
+    }
+}
+
 pub struct ConnectionMachine<C> {
     id: ConnectionId,
     target: ConnectionTarget,
@@ -307,9 +322,7 @@ impl<C: Clone> ConnectionMachine<C> {
                 } = &mut self.state
                 {
                     tracing::warn!(connection = %self.id, attempt = *attempts, %error, "reconnect attempt failed");
-                    *step = Step::Waiting {
-                        until: now + reconnect_delay(*attempts),
-                    };
+                    *step = Step::wait_before_next(&self.id, *attempts, now);
                     *last = error;
                 } else {
                     tracing::error!(connection = %self.id, %error, "connect failed");
@@ -583,9 +596,7 @@ impl<C: Clone> ConnectionMachine<C> {
         self.state = State::Reconnecting {
             attempts: 0,
             error,
-            step: Step::Waiting {
-                until: now + reconnect_delay(0),
-            },
+            step: Step::wait_before_next(&self.id, 0, now),
         };
         self.emit_status();
     }

@@ -510,6 +510,44 @@ fn first_attempt_after_one_second_then_two_four_eight() {
     }
 }
 
+/// Electron's `scheduleReconnectAttempt` logged each wait; so does the app's log.
+#[test]
+fn each_wait_is_logged_with_the_next_attempt_and_its_delay() {
+    let logs = crate::test_logs::capture();
+    let t0 = Instant::now();
+    let mut machine = connected(t0);
+    machine.handle_timeout(t0 + HEARTBEAT_TIMEOUT);
+    let scheduled = |logs: &crate::test_logs::Captured| -> Vec<String> {
+        logs.text()
+            .lines()
+            .filter_map(|line| {
+                line.split_once("scheduling ")
+                    .map(|(_, rest)| rest.to_owned())
+            })
+            .collect()
+    };
+    assert_eq!(
+        scheduled(&logs),
+        ["reconnect attempt 1 in 1000ms connection=local-1"]
+    );
+    assert!(logs.line("scheduling").unwrap().contains(" INFO "));
+
+    let now = t0 + HEARTBEAT_TIMEOUT + secs(1);
+    machine.handle_timeout(now);
+    let plan = started_attempt(&mut machine);
+    assert_eq!(
+        machine.attempt_finished(plan.id, Err(ConnectionError::HeartbeatLost), now),
+        AttemptVerdict::Applied
+    );
+    assert_eq!(
+        scheduled(&logs),
+        [
+            "reconnect attempt 1 in 1000ms connection=local-1",
+            "reconnect attempt 2 in 2000ms connection=local-1"
+        ]
+    );
+}
+
 #[test]
 fn a_successful_reconnect_resets_attempts_and_rearms_the_heartbeat() {
     let t0 = Instant::now();
