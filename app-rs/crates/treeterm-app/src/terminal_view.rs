@@ -675,7 +675,7 @@ impl Render for TerminalView {
         let model = self.model.read(cx);
         let background = model.options().background;
         let palette = Palette::new(background);
-        let overlay = model.overlay().clone();
+        let overlay = model.banner();
         let alternate = model.is_alternate_screen();
         let mismatch = model.size_mismatch();
         let hovered_link = model.hovered_link();

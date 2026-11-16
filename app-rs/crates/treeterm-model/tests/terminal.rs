@@ -12,6 +12,7 @@ use treeterm_core::settings::TerminalSettings;
 use treeterm_model::terminal::{
     ALT_CLICK_MOVE_CURSOR_TIME, BADGE_DOUBLE_CLICK, CellPoint, DRAG_SCROLL_INTERVAL, IdleSnapshots, LinkPress, Overlay,
     Pointer, ScrollbarVisibility, SelectionCopy, SelectionKind, TerminalEvent, TerminalModel, TerminalOptions,
+    TerminalRole,
 };
 use treeterm_term::keys::Modifiers;
 use treeterm_term::core::GridSize;
@@ -58,7 +59,7 @@ fn options(pty_id: String) -> TerminalOptions {
         pty_id,
         background: DEFAULT_BACKGROUND,
         settings: TerminalSettings::default(),
-        keep_on_exit: false,
+        role: TerminalRole::Tab { keep_on_exit: false },
         width_limit: WidthLimit::Capped(160),
         scrollbar: ScrollbarVisibility::Shown,
         selection_copy: SelectionCopy::OnCopy,
@@ -303,7 +304,7 @@ fn keep_on_exit_prints_the_exit_code_instead(cx: &mut TestAppContext) {
     cx.executor().allow_parking();
     let h = harness();
     let pty = spawn_shell(&h);
-    let model = open(cx, &h, TerminalOptions { keep_on_exit: true, ..options(pty) });
+    let model = open(cx, &h, TerminalOptions { role: TerminalRole::Tab { keep_on_exit: true }, ..options(pty) });
     let (events, _subscription) = record(cx, &model);
 
     // Past the "exited immediately" window.
@@ -323,6 +324,71 @@ fn a_failure_right_after_start_is_explained(cx: &mut TestAppContext) {
     model.update(cx, |m, cx| m.set_focused(true, cx));
     type_line(cx, &model, "exit 7");
     wait_until(cx, &model, |m| *m.overlay() == Overlay::ExitedImmediately(7));
+}
+
+/// The foreground of the cell where `text` starts on screen.
+fn foreground_of(model: &TerminalModel, text: &str) -> Option<treeterm_term::alacritty_terminal::vte::ansi::Color> {
+    use treeterm_term::alacritty_terminal::grid::Dimensions as _;
+    use treeterm_term::alacritty_terminal::index::{Column, Line};
+    let term = model.term().lock();
+    (0..term.screen_lines()).find_map(|line| {
+        let row = &term.grid()[Line(line as i32)];
+        let chars: String = (0..term.columns()).map(|column| row[Column(column)].c).collect();
+        chars.find(text).map(|column| row[Column(column)].fg)
+    })
+}
+
+#[gpui_kit::test]
+fn a_viewer_notes_any_exit_in_grey_and_stays(cx: &mut TestAppContext) {
+    use treeterm_term::alacritty_terminal::vte::ansi::{Color, NamedColor};
+    cx.executor().allow_parking();
+    let h = harness();
+    let pty = spawn_shell(&h);
+    let model = open(cx, &h, TerminalOptions { role: TerminalRole::Viewer, ..options(pty) });
+    let (events, _subscription) = record(cx, &model);
+
+    // Right after attaching, which a tab would explain as a failure to start.
+    model.update(cx, |m, cx| m.set_focused(true, cx));
+    type_line(cx, &model, "exit 7");
+    wait_until(cx, &model, |m| m.screen_text().contains("[Process exited]"));
+    model.read_with(cx, |m, _| {
+        assert_eq!(m.exit_code(), Some(7));
+        assert_eq!(*m.overlay(), Overlay::Hidden);
+        assert_eq!(foreground_of(m, "[Process exited]"), Some(Color::Named(NamedColor::BrightBlack)));
+        assert!(!m.screen_text().contains("Process exited with exit code"));
+    });
+    assert!(events.borrow().contains(&TerminalEvent::Exited(7)));
+    assert!(events.borrow().iter().all(|e| !matches!(e, TerminalEvent::CloseRequested { .. })));
+}
+
+#[gpui_kit::test]
+fn a_viewer_leaves_attaching_and_an_attach_failure_to_its_viewer(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let (_daemon, conn) = refusing_daemon(tonic::Status::unavailable("Connection refused"));
+    let viewer = {
+        let conn = conn.clone();
+        cx.new(|cx| TerminalModel::new(conn, TerminalOptions { role: TerminalRole::Viewer, ..options("p1".into()) }, cx))
+    };
+    let tab = cx.new(|cx| TerminalModel::new(conn, options("p1".into()), cx));
+    assert_eq!(viewer.read_with(cx, |m, _| (m.overlay().clone(), m.banner())), (Overlay::Loading, Overlay::Hidden));
+    assert_eq!(tab.read_with(cx, |m, _| m.banner()), Overlay::Loading);
+
+    let failed = Overlay::AttachFailed("14 UNAVAILABLE: Connection refused".to_owned());
+    wait_until(cx, &viewer, |m| *m.overlay() == failed);
+    assert_eq!(viewer.read_with(cx, |m, _| m.banner()), Overlay::Hidden);
+    wait_until(cx, &tab, |m| *m.overlay() == failed);
+    assert_eq!(tab.read_with(cx, |m, _| m.banner()), failed);
+}
+
+#[gpui_kit::test]
+fn a_viewer_still_says_when_its_stream_ends(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    let conn = h.conn.clone();
+    let options = TerminalOptions { role: TerminalRole::Viewer, ..options("no-such-pty".into()) };
+    let model = cx.new(|cx| TerminalModel::new(conn, options, cx));
+    wait_until(cx, &model, |m| *m.overlay() == Overlay::Disconnected);
+    assert_eq!(model.read_with(cx, |m, _| m.banner()), Overlay::Disconnected);
 }
 
 #[gpui_kit::test]

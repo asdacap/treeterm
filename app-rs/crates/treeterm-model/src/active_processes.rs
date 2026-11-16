@@ -9,7 +9,7 @@ use treeterm_term::fit::WidthLimit;
 use treeterm_term::palette::DEFAULT_BACKGROUND;
 
 use crate::session_store::SessionStore;
-use crate::terminal::{ScrollbarVisibility, SelectionCopy, TerminalModel, TerminalOptions};
+use crate::terminal::{Overlay, ScrollbarVisibility, SelectionCopy, TerminalModel, TerminalOptions, TerminalRole};
 
 #[derive(Debug, Clone)]
 pub enum ProcessList {
@@ -89,7 +89,7 @@ impl ActiveProcesses {
             pty_id: id.to_owned(),
             background: DEFAULT_BACKGROUND,
             settings: self.settings.clone(),
-            keep_on_exit: true,
+            role: TerminalRole::Viewer,
             width_limit: WidthLimit::Off,
             scrollbar: ScrollbarVisibility::Shown,
             selection_copy: SelectionCopy::OnCopy,
@@ -165,6 +165,35 @@ impl ActiveProcesses {
             }
         }));
         cx.notify();
+    }
+}
+
+/// What the viewer of a process shows (`PtyViewerStatus`), from its terminal.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ViewerStatus {
+    /// "Attaching to process..." over the terminal, until the daemon's first message.
+    Attaching,
+    Ready,
+    /// The attach failed: "Failed to attach to process" and why, in place of the terminal.
+    Failed(String),
+}
+
+pub fn viewer_status(terminal: &TerminalModel) -> ViewerStatus {
+    match terminal.overlay() {
+        Overlay::Loading => ViewerStatus::Attaching,
+        Overlay::AttachFailed(message) => ViewerStatus::Failed(attach_error(message, terminal.pty_id())),
+        Overlay::Hidden | Overlay::Error(_) | Overlay::ExitedImmediately(_) | Overlay::Disconnected => {
+            ViewerStatus::Ready
+        }
+    }
+}
+
+/// Why the attach failed, or Electron's text naming the PTY when the error says nothing.
+fn attach_error(message: &str, pty_id: &str) -> String {
+    if message.is_empty() {
+        format!("Failed to attach to PTY session {pty_id}")
+    } else {
+        message.to_owned()
     }
 }
 
@@ -268,6 +297,12 @@ mod tests {
             .collect();
         assert_eq!(shape, [("B", vec!["2", "4"]), ("A", vec!["3"]), ("Unknown", vec!["1", "5"])]);
         assert!(group_by_workspace(&[], &workspaces).is_empty());
+    }
+
+    #[test]
+    fn an_attach_error_without_text_names_the_pty() {
+        assert_eq!(attach_error("", "p1"), "Failed to attach to PTY session p1");
+        assert_eq!(attach_error("14 UNAVAILABLE: refused", "p1"), "14 UNAVAILABLE: refused");
     }
 
     #[test]

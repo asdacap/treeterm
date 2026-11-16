@@ -1,13 +1,15 @@
 //! "Window → Active Processes" dialog. Port of `ActiveProcessesDialog.tsx`; the live view
-//! is the native terminal (Electron's `PtyViewer`).
+//! is the native terminal in [`pty_viewer`] (Electron's `PtyViewer`).
 
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 
 use gpui_kit::component::WindowExt as _;
 use gpui_kit::prelude::*;
-use gpui_kit::{AnyElement, App, Context, Entity, SharedString, Subscription, Window, div, px};
-use treeterm_model::active_processes::{ActiveProcesses, ProcessList, display_name, relative_time, workspace_labels};
+use gpui_kit::{AnyElement, App, Context, Entity, FontWeight, SharedString, Subscription, Window, div, px, rgb};
+use treeterm_model::active_processes::{
+    ActiveProcesses, ProcessList, ViewerStatus, display_name, relative_time, viewer_status, workspace_labels,
+};
 use treeterm_model::app_store::AppStore;
 use treeterm_model::session_store::SessionStore;
 
@@ -40,19 +42,21 @@ impl ActiveProcessesView {
         }
     }
 
-    /// The view of the selected process's terminal, made when the selection changes.
-    fn terminal_view(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<Entity<TerminalView>> {
+    /// The view of the selected process's terminal, made when the selection changes, and
+    /// what the viewer shows.
+    fn terminal_view(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<(ViewerStatus, Entity<TerminalView>)> {
         let (id, terminal) = {
             let model = self.model.read(cx);
             let (id, terminal) = model.selected()?;
             (id.to_owned(), terminal.clone())
         };
+        let status = viewer_status(terminal.read(cx));
         match &self.terminal {
-            Some((shown, view)) if *shown == id => Some(view.clone()),
+            Some((shown, view)) if *shown == id => Some((status, view.clone())),
             Some(_) | None => {
                 let view = cx.new(|cx| TerminalView::new(terminal, window, cx));
                 self.terminal = Some((id, view.clone()));
-                Some(view)
+                Some((status, view))
             }
         }
     }
@@ -116,6 +120,70 @@ impl ActiveProcessesView {
     }
 }
 
+/// Electron's `PtyViewer`: the terminal inset 4px (`.active-processes-pty-viewer`) under
+/// "Attaching to process..." until it is attached, or in its place, "Failed to attach to
+/// process" and why. Its parent sizes it: the failure fills a flex column (Active
+/// Processes) but sits at the top of a block (the TTY list's viewer), as in Electron.
+pub(crate) fn pty_viewer(status: ViewerStatus, terminal: Entity<TerminalView>) -> AnyElement {
+    let attaching = match status {
+        ViewerStatus::Failed(message) => {
+            return div()
+                .flex()
+                .flex_1()
+                .min_h_0()
+                .items_center()
+                .justify_center()
+                .p(px(24.))
+                .text_center()
+                .text_color(rgb(0xf44336))
+                .child(
+                    div()
+                        .child(
+                            div()
+                                .mb(px(8.))
+                                .text_size(px(16.))
+                                .line_height(ui::normal_line(16.))
+                                .font_weight(FontWeight::BOLD)
+                                .child("Failed to attach to process"),
+                        )
+                        .child(
+                            div()
+                                .text_size(px(13.))
+                                .line_height(ui::normal_line(13.))
+                                .opacity(0.8)
+                                .child(message),
+                        ),
+                )
+                .into_any_element();
+        }
+        ViewerStatus::Attaching => true,
+        ViewerStatus::Ready => false,
+    };
+    div()
+        .relative()
+        .flex_1()
+        .min_h_0()
+        .size_full()
+        .child(div().size_full().p(px(4.)).child(terminal))
+        .when(attaching, |d| {
+            d.child(
+                div()
+                    .absolute()
+                    .inset_0()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .text_size(px(16.))
+                    .line_height(ui::normal_line(16.))
+                    .text_color(rgb(0x888888))
+                    // Over the terminal, which it keeps from the pointer.
+                    .occlude()
+                    .child("Attaching to process..."),
+            )
+        })
+        .into_any_element()
+}
+
 /// `.active-processes-empty`: 13px secondary text, centred.
 fn empty(text: impl Into<SharedString>, color: gpui_kit::Hsla) -> AnyElement {
     let text: SharedString = text.into();
@@ -139,7 +207,7 @@ impl Render for ActiveProcessesView {
         let list = self.list(cx);
         let stop_error = self.model.read(cx).stop_error().map(str::to_owned);
         let detail = match self.terminal_view(window, cx) {
-            Some(terminal) => div()
+            Some((status, terminal)) => div()
                 .flex()
                 .flex_col()
                 .size_full()
@@ -172,7 +240,7 @@ impl Render for ActiveProcessesView {
                             d.child(div().text_size(px(12.)).text_color(error).truncate().child(text))
                         }),
                 )
-                .child(div().flex_1().min_h_0().p(px(4.)).child(terminal))
+                .child(pty_viewer(status, terminal))
                 .into_any_element(),
             None => empty("Select a process to view its terminal", secondary),
         };

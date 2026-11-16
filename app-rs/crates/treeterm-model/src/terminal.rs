@@ -63,8 +63,7 @@ pub struct TerminalOptions {
     pub pty_id: String,
     pub background: Rgb,
     pub settings: TerminalSettings,
-    /// Keep the tab (with a "Process exited" line) when the program exits.
-    pub keep_on_exit: bool,
+    pub role: TerminalRole,
     pub width_limit: WidthLimit,
     pub scrollbar: ScrollbarVisibility,
     pub selection_copy: SelectionCopy,
@@ -72,6 +71,20 @@ pub struct TerminalOptions {
     pub idle_timeout: Option<Duration>,
     /// Output bytes are added here (the workspace's download meter).
     pub traffic: ByteCounter,
+}
+
+/// What the terminal is shown as, which decides what a program's exit does and what the
+/// terminal's own banner leaves to its container.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TerminalRole {
+    /// A workspace tab (`BaseTerminal`). The tab closes when the program exits, or stays
+    /// with a "Process exited" line when `keep_on_exit`; a non-zero exit right after
+    /// attaching shows why instead.
+    Tab { keep_on_exit: bool },
+    /// The live view of a PTY in Active Processes or the session's TTY list (`PtyViewer`):
+    /// an exit adds a grey "[Process exited]" line and the view stays. The viewer shows
+    /// attaching and an attach failure itself.
+    Viewer,
 }
 
 /// When selected text reaches the clipboard.
@@ -420,6 +433,15 @@ impl TerminalModel {
 
     pub fn overlay(&self) -> &Overlay {
         &self.overlay
+    }
+
+    /// The overlay the terminal draws over itself. A viewer leaves attaching and an attach
+    /// failure to the viewer around it, which shows them in its own way (`PtyViewer`).
+    pub fn banner(&self) -> Overlay {
+        match (self.options.role, &self.overlay) {
+            (TerminalRole::Viewer, Overlay::Loading | Overlay::AttachFailed(_)) => Overlay::Hidden,
+            (TerminalRole::Viewer | TerminalRole::Tab { .. }, overlay) => overlay.clone(),
+        }
     }
 
     pub fn title(&self) -> Option<&str> {
@@ -1196,10 +1218,17 @@ impl TerminalModel {
     fn on_exit(&mut self, code: i32, cx: &mut Context<Self>) {
         self.exited = Some(code);
         cx.emit(TerminalEvent::Exited(code));
+        let keep_on_exit = match self.options.role {
+            TerminalRole::Tab { keep_on_exit } => keep_on_exit,
+            TerminalRole::Viewer => {
+                write_local(&self.attachment.term, b"\r\n\x1b[90m[Process exited]\x1b[0m\r\n");
+                return;
+            }
+        };
         let elapsed = cx.background_executor().now() - self.attachment.connected_at;
         if code != 0 && elapsed < IMMEDIATE_EXIT_WINDOW {
             self.overlay = Overlay::ExitedImmediately(code);
-        } else if self.options.keep_on_exit {
+        } else if keep_on_exit {
             write_local(
                 &self.attachment.term,
                 format!("\r\n\x1b[2mProcess exited with exit code {code}\x1b[0m\r\n").as_bytes(),

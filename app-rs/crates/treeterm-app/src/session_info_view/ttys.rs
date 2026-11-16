@@ -9,11 +9,12 @@ use gpui_kit::{
     Subscription, Window, canvas, div, point, px, rgb, size,
 };
 use treeterm_core::connection::ConnectionId;
-use treeterm_model::active_processes::{PtyGroup, relative_time};
+use treeterm_model::active_processes::{PtyGroup, ViewerStatus, relative_time, viewer_status};
 use treeterm_model::app_store::AppStore;
 use treeterm_model::session_tty_list::{SessionTtyList, TtyListBody};
 use treeterm_model::terminal::TerminalModel;
 
+use crate::active_processes_view::pty_viewer;
 use crate::terminal_view::TerminalView;
 use crate::theme::colors;
 use crate::ui::{MONO, dialog_close, dialog_shadow, modal, normal_line, text_button};
@@ -47,12 +48,13 @@ impl SessionTtys {
         text_button(id, "Kill", 12., (4., 10.), gpui_kit::white(), rgb(DANGER), gpui_kit::transparent_black(), 4.)
     }
 
-    /// The viewer of the selected PTY, made when the selection changes.
-    fn viewer(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<(String, Entity<TerminalView>)> {
+    /// The viewer of the selected PTY, made when the selection changes, and what it shows.
+    fn viewer(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<(String, ViewerStatus, Entity<TerminalView>)> {
         let (id, terminal) = {
             let (id, terminal) = self.list.read(cx).selected(cx)?;
             (id.to_owned(), terminal.clone())
         };
+        let status = viewer_status(terminal.read(cx));
         let view = match &self.viewer {
             Some((shown, view)) if *shown == terminal => view.clone(),
             Some(_) | None => {
@@ -61,7 +63,7 @@ impl SessionTtys {
                 view
             }
         };
-        Some((id, view))
+        Some((id, status, view))
     }
 
     fn body(&self, body: TtyListBody, cx: &mut Context<Self>) -> AnyElement {
@@ -227,7 +229,7 @@ impl Render for SessionTtys {
         }
         let c = colors(cx);
         let (bg, secondary, primary, border) = (c.bg_primary, c.text_secondary, c.text_primary, c.border);
-        let dialog = viewer.map(|(id, terminal)| {
+        let dialog = viewer.map(|(id, status, terminal)| {
             let size = window.viewport_size();
             let width = (f32::from(size.width) * 0.8).min(1000.);
             let short: String = id.chars().take(8).collect();
@@ -260,8 +262,8 @@ impl Render for SessionTtys {
                                 }))),
                         ),
                 )
-                // `.active-processes-pty-viewer`: the terminal inset 4px.
-                .child(div().flex_1().min_h_0().p(px(4.)).child(terminal));
+                // `.pty-viewer-dialog-body`.
+                .child(div().flex_1().min_h_0().child(pty_viewer(status, terminal)));
             modal(window, content, move |_, cx| list.update(cx, |l, cx| l.deselect(cx)))
         });
         v_flex()

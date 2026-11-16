@@ -8,14 +8,16 @@ use std::time::Duration;
 use gpui_kit::{AppContext as _, Entity, TestAppContext};
 use treeterm_core::pty::CreatePty;
 use treeterm_core::settings::TerminalSettings;
-use treeterm_model::active_processes::{ActiveProcesses, ProcessList, workspace_labels};
+use treeterm_model::active_processes::{
+    ActiveProcesses, ProcessList, ViewerStatus, viewer_status, workspace_labels,
+};
 use treeterm_model::session_store::{SessionStore, WorkspaceEntry};
 use treeterm_model::settings_store::SettingsStore;
 use treeterm_model::traffic::ConnectionTraffic;
 use treeterm_proto::treeterm::WorkspaceRef;
 
 mod common;
-use common::{Harness, harness, wait_until, wait_until_app};
+use common::{Harness, harness, refusing_daemon, wait_until, wait_until_app};
 
 /// A shell with an empty config dir, so the user's dotfiles stay out of the test.
 fn spawn_shell(h: &Harness) -> String {
@@ -133,6 +135,35 @@ fn clicking_the_selected_row_does_not_list_again(cx: &mut TestAppContext) {
     // Another row does, and the daemon has the new PTY.
     model.update(cx, |m, cx| m.select_and_relist(&b, cx));
     wait_until(cx, &model, |m| listed(m) == Some(sorted(&[&a, &b, &c])));
+}
+
+/// What the viewer of the selected process shows.
+fn status(m: &ActiveProcesses, cx: &gpui_kit::App) -> Option<ViewerStatus> {
+    m.selected().map(|(_, terminal)| viewer_status(terminal.read(cx)))
+}
+
+#[gpui_kit::test]
+fn the_viewer_attaches_then_shows_the_process(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    let a = spawn_shell(&h);
+    let model = open(cx, &h);
+    assert_eq!(model.read_with(cx, status), None);
+
+    model.update(cx, |m, cx| m.select(&a, cx));
+    assert_eq!(model.read_with(cx, status), Some(ViewerStatus::Attaching));
+    wait_until_app(cx, &model, |m, cx| status(m, cx) == Some(ViewerStatus::Ready));
+}
+
+#[gpui_kit::test]
+fn a_viewer_whose_attach_fails_says_why(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let (_daemon, conn) = refusing_daemon(tonic::Status::unavailable("Connection refused"));
+    let model = cx.new(|cx| ActiveProcesses::new(conn, TerminalSettings::default(), cx));
+    model.update(cx, |m, cx| m.select("p1", cx));
+    assert_eq!(model.read_with(cx, status), Some(ViewerStatus::Attaching));
+    let failed = ViewerStatus::Failed("14 UNAVAILABLE: Connection refused".to_owned());
+    wait_until_app(cx, &model, |m, cx| status(m, cx) == Some(failed.clone()));
 }
 
 /// A session member: `id`'s body is named `name`, its ref points at `<root>/<id>`.

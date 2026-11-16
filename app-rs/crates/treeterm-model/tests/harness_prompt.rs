@@ -17,7 +17,9 @@ use treeterm_model::analyzer::LlmService;
 use treeterm_model::harness_prompts::{self, HarnessPrompt};
 use treeterm_model::session_store::{SessionState, SessionStore, WorkspaceEntry};
 use treeterm_model::settings_store::SettingsStore;
-use treeterm_model::terminal::{Overlay, ScrollbarVisibility, SelectionCopy, TerminalModel, TerminalOptions};
+use treeterm_model::terminal::{
+    Overlay, ScrollbarVisibility, SelectionCopy, TerminalModel, TerminalOptions, TerminalRole,
+};
 use treeterm_model::traffic::ConnectionTraffic;
 use treeterm_model::workspace_store::{TabContent, WorkspaceStore};
 use treeterm_proto::treeterm::WorkspaceRef;
@@ -164,7 +166,7 @@ fn viewer(cx: &mut TestAppContext, h: &Harness, pty_id: &str) -> Entity<Terminal
         pty_id: pty_id.to_owned(),
         background: DEFAULT_BACKGROUND,
         settings: TerminalSettings::default(),
-        keep_on_exit: true,
+        role: TerminalRole::Tab { keep_on_exit: true },
         width_limit: WidthLimit::Capped(160),
         scrollbar: ScrollbarVisibility::Shown,
         selection_copy: SelectionCopy::OnCopy,

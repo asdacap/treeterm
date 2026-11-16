@@ -572,6 +572,14 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   makes it, as ghostty-web does (it has no triple-click), but otherwise select as xterm.js
   does (its word separators, Shift+click, Alt+drag and Alt+click, the macOS right-click). A
   plain click copies nothing; ghostty-web copied the character under it.
+- The live view of a PTY (Active Processes, and Open in the session pane's TTY list) is the
+  app's terminal: the terminal settings' font, cursor style and blink, the terminal palette
+  (ANSI colours, cursor, selection), 50,000 lines of scrollback, and a tab's scroll badge,
+  ALT SCREEN badge and refresh button. Electron's `PtyViewer` drew 13px `monospace` in
+  xterm.js's default colours (it set only the background and foreground), with an
+  always-blinking block cursor and 5000 lines. When its stream ends or fails without the
+  program exiting, the view says so ("Terminal disconnected", or the error) in a banner;
+  Electron's viewer showed nothing.
 - The attention ding is the system bell (Electron synthesised an 880 Hz tone).
 - The analyzer reads the tab's own terminal; Electron attached a second, headless one.
 - A change of the analyzer's classification settings (provider, model, reasoning effort,

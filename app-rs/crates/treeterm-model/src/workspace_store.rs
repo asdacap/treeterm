@@ -32,7 +32,7 @@ use crate::code_intel::links::Opening;
 use crate::apps::{AI_HARNESS_PREFIX, AppDef, AppKind, AppRegistry};
 use crate::pty_writer::PtyWriter;
 use crate::session_store::ConnectionStatus;
-use crate::terminal::{ScrollbarVisibility, SelectionCopy, TerminalEvent, TerminalModel, TerminalOptions};
+use crate::terminal::{ScrollbarVisibility, SelectionCopy, TerminalEvent, TerminalModel, TerminalOptions, TerminalRole};
 
 /// A workspace as the app uses it: the file body joined with its ref.
 #[derive(Debug, Clone, PartialEq)]
@@ -1274,7 +1274,7 @@ impl WorkspaceStore {
             pty_id,
             background: self.background(tab_id),
             settings: settings.terminal.clone(),
-            keep_on_exit: flag("keepOnExit"),
+            role: TerminalRole::Tab { keep_on_exit: flag("keepOnExit") },
             width_limit: self.width_limit(tab_id),
             scrollbar: self.scrollbar(tab_id),
             selection_copy: app.map_or(SelectionCopy::OnCopy, |app| app.selection_copy()),
