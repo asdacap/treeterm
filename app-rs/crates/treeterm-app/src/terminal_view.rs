@@ -718,7 +718,7 @@ impl Render for TerminalView {
             root = root.child(
                 badge(
                     "size-mismatch",
-                    format!("{} x {}", mismatch.actual.cols, mismatch.actual.rows),
+                    format!("{}x{}", mismatch.actual.cols, mismatch.actual.rows),
                     rgba(0xb42828b3).into(),
                     gpui_kit::rgb(0xb42828).into(),
                     gpui_kit::rgb(0xff9090).into(),
