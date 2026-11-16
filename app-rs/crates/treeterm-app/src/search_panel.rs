@@ -44,7 +44,8 @@ pub struct ResultsList {
 
 impl ResultsList {
     pub fn new() -> Self {
-        // Every row is measured, so the scrollbar knows the whole height, as Chromium's does.
+        // Every row is measured, so the scrollbar knows the whole height, as Chromium's does:
+        // the first layout measures them all, and a later one the rows `sync` marks.
         Self { list: ListState::new(1, ListAlignment::Top, px(200.)).measure_all(), rows: Vec::new() }
     }
 
@@ -56,7 +57,15 @@ impl ResultsList {
                     self.list.remeasure_items(index..index + 1);
                 }
             }
-            RowsChange::Splice { old, count } => self.list.splice(old, count),
+            RowsChange::Splice { old, count } => {
+                let start = old.start;
+                self.list.splice(old, count);
+                // A splice leaves the new rows unmeasured (no height) without asking for
+                // another measure-all pass, so rows arriving off screen would be missing
+                // from the thumb until scrolled into view. Marking them asks for that pass;
+                // the other rows keep their heights and the list its scroll position.
+                self.list.remeasure_items(start..start + count);
+            }
         }
         self.rows = rows.to_vec();
     }
@@ -239,4 +248,76 @@ pub fn panel(bar: Bar, rows: Vec<SearchRow>, results: &mut ResultsList, actions:
         )
         .children(listed)
         .into_any_element()
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui_kit::{Context, ListOffset, Render, TestAppContext, VisualTestContext, point, size};
+
+    use super::*;
+
+    /// Every row (and the bottom padding) is this tall, so the heights add up exactly.
+    const ROW: f32 = 20.;
+    /// Shorter than the rows, and than the rows plus the list's 200px overdraw.
+    const VIEWPORT: f32 = 100.;
+
+    struct Results(ListState);
+
+    impl Render for Results {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            list(self.0.clone(), |_, _, _| div().h(px(ROW)).w_full().into_any_element()).size_full()
+        }
+    }
+
+    fn draw(view: &Entity<Results>, cx: &mut VisualTestContext) {
+        let view = view.clone();
+        cx.draw(point(px(0.), px(0.)), size(px(200.), px(VIEWPORT)), move |_, _| view.into_any_element());
+    }
+
+    /// What the thumb is sized for: the rows' height (and the padding) less the viewport.
+    fn max_offset(rows: usize) -> gpui_kit::Pixels {
+        px((rows + 1) as f32 * ROW - VIEWPORT)
+    }
+
+    fn repo_hit(line_number: u64) -> SearchRow {
+        SearchRow::InRepo(RepoHit { file_path: "a.rs".into(), line_number, column: 1, preview: "x".into() })
+    }
+
+    /// Repo hits arriving below the in-file rows, out of view, count in the scrollbar in the
+    /// frame they arrive, while the list stays where it was scrolled to.
+    #[gpui_kit::test]
+    fn rows_spliced_in_off_screen_count_in_the_scrollbar(cx: &mut TestAppContext) {
+        let cx = cx.add_empty_window();
+        let mut results = ResultsList::new();
+        let view = cx.update(|_, cx| cx.new(|_| Results(results.list.clone())));
+
+        let in_file = (0..30).map(|index| SearchRow::InFile { index, line_number: index + 1, preview: "x".into(), active: index == 0 });
+        let mut rows: Vec<SearchRow> = std::iter::once(SearchRow::Section("In this file")).chain(in_file).collect();
+        rows.extend([SearchRow::Section("In repo"), SearchRow::Note("Searching repo…".into())]);
+        results.sync(&rows);
+        draw(&view, cx);
+        assert_eq!(results.list.max_offset_for_scrollbar().y, max_offset(rows.len()));
+
+        let scrolled = ListOffset { item_ix: 3, offset_in_item: px(5.) };
+        results.list.scroll_to(scrolled);
+        draw(&view, cx);
+
+        // A batch of hits goes in before the trailing note, 640px down.
+        let note = rows.pop().expect("the trailing note");
+        rows.push(SearchRow::File("a.rs".into()));
+        rows.extend((1..=10).map(repo_hit));
+        rows.push(note);
+        results.sync(&rows);
+        draw(&view, cx);
+        assert_eq!(results.list.max_offset_for_scrollbar().y, max_offset(rows.len()));
+        assert_eq!(results.list.logical_scroll_top(), scrolled);
+
+        // The last batch and the end of the search in one frame: the note gives way to hits.
+        rows.pop();
+        rows.extend((11..=20).map(repo_hit));
+        results.sync(&rows);
+        draw(&view, cx);
+        assert_eq!(results.list.max_offset_for_scrollbar().y, max_offset(rows.len()));
+        assert_eq!(results.list.logical_scroll_top(), scrolled);
+    }
 }
