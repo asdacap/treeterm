@@ -770,6 +770,19 @@ impl ReviewModel {
         self.reload_all(cx);
     }
 
+    /// The parent's branch changed or became known, making `base` this tab's base. A tab
+    /// following the parent compares against it; one keeping its base (an override) checks
+    /// its conflicts again against the parent's branch: made before that branch was known,
+    /// at start-up, its check found no parent.
+    pub(crate) fn parent_branch_changed(&mut self, base: ReviewBase, cx: &mut Context<Self>) {
+        if base == self.base {
+            self.check_conflicts(cx);
+            cx.notify();
+        } else {
+            self.compare_against(base, cx);
+        }
+    }
+
     /// The workspace is on another branch (a checkout, a rename): everything reloads.
     pub(crate) fn branch_changed(&mut self, cx: &mut Context<Self>) {
         self.reload_all(cx);

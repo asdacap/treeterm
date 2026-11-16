@@ -1337,7 +1337,8 @@ fn the_parents_branch_changing_keeps_the_review_and_moves_its_default_base(cx: &
     wait_review(cx, &follows, "reloaded", |r, _| !r.is_loading() && r.overview().committed == 0);
     assert!(matches!(follows.read_with(cx, |r, _| r.content()), ReviewContent::Committed(c) if c.base_branch == "dev"));
     assert_eq!(pinned.read_with(cx, |r, _| r.base().clone()), ReviewBase::Branch("main".into()));
-    assert!(!pinned.read_with(cx, |r, _| r.is_loading()));
+    // It only checks its conflicts against `dev`.
+    wait_review(cx, &pinned, "checked", |r, _| !r.is_loading());
     assert_eq!(pinned.read_with(cx, |r, _| r.overview().committed), 1);
 }
 
@@ -1430,6 +1431,40 @@ fn a_childs_review_made_before_its_parents_branch_is_known_shows_committed_once_
     // The view picked stays.
     assert_eq!(picked.read_with(cx, |r, _| r.mode()), ReviewMode::Uncommitted);
     assert_eq!(review_tab(cx, &child, &picked_tab).entity_id(), picked.entity_id());
+}
+
+#[gpui_kit::test]
+fn a_childs_review_with_its_own_base_checks_conflicts_once_the_parents_branch_is_known(cx: &mut TestAppContext) {
+    use treeterm_model::review::{ConflictCheck, Conflicts, ReviewBase};
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let repo = TempRepo::new(&h);
+    repo.write("a.txt", "one\n");
+    repo.commit_all("base");
+    repo.git(&["checkout", "-q", "-b", "feature"]);
+    repo.write("a.txt", "FEATURE\n");
+    repo.commit_all("on feature");
+    // The parent moved on, changing the same line.
+    repo.git(&["checkout", "-q", "main"]);
+    repo.write("a.txt", "MAIN\n");
+    repo.commit_all("on main");
+    repo.git(&["checkout", "-q", "feature"]);
+    let state = serde_json::json!({ "baseBranchOverride": "main" });
+    let tabs = serde_json::json!({ "pinned": { "applicationId": "review", "title": "Review", "state": state } });
+    let (store, child, refs) = child_before_parent(cx, &h, &repo, tabs);
+    let review = review_tab(cx, &child, "pinned");
+    // No parent's branch: nothing to check against.
+    wait_review(cx, &review, "loaded", |r, _| !r.is_loading() && r.overview().committed == 1);
+    assert_eq!(review.read_with(cx, |r, _| r.conflicts().clone()), Conflicts::default());
+
+    // Its base stays, but the conflicts are checked against the parent's branch now known.
+    add_parent(cx, &h, &store, &child, refs);
+    assert_eq!(review.read_with(cx, |r, _| r.base().clone()), ReviewBase::Branch("main".into()));
+    wait_review(cx, &review, "checked", |r, _| !r.is_loading() && r.conflicts().parent_has_new_commits);
+    let conflicts = review.read_with(cx, |r, _| r.conflicts().clone());
+    assert_eq!(conflicts.check, ConflictCheck::Idle);
+    assert_eq!(conflicts.last.conflicted_files, ["a.txt"]);
 }
 
 #[gpui_kit::test]

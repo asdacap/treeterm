@@ -513,7 +513,8 @@ impl WorkspaceStore {
         }
         self.parent_branch = branch;
         // Review tabs following the parent (no `baseBranchOverride`) compare against its new
-        // branch, keeping their view (Electron's effect on `effectiveBaseBranch`).
+        // branch, keeping their view (Electron's effect on `effectiveBaseBranch`); the others
+        // check their conflicts against it.
         let reviews: Vec<(Entity<crate::review::ReviewModel>, crate::review::ReviewBase)> = self
             .workspace
             .file
@@ -528,7 +529,7 @@ impl WorkspaceStore {
             })
             .collect();
         for (review, base) in reviews {
-            review.update(cx, |r, cx| r.compare_against(base, cx));
+            review.update(cx, |r, cx| r.parent_branch_changed(base, cx));
         }
         cx.notify();
     }
