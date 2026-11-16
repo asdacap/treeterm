@@ -1874,7 +1874,11 @@ fn review_find_opens_only_while_the_diff_list_is_on_screen(cx: &mut TestAppConte
     workspace.update(cx, |w, cx| w.add_favourite_path("notes.md", cx));
     wait_review(cx, &review, "favourites", |r, _| matches!(r.favourites(), Favourites::Ready(files) if files.len() == 1));
     let Favourites::Ready(files) = review.read_with(cx, |r, _| r.favourites().clone()) else { unreachable!() };
+    // The bar goes with the list the viewer replaces: back to the diff, it opens empty.
+    review.update(cx, |r, cx| r.open_find("a.txt", cx));
+    review.update(cx, |r, cx| r.set_find_query("notes", cx));
     review.update(cx, |r, cx| r.select_favourite(files[0].clone(), cx));
+    assert_eq!(review.read_with(cx, |r, _| r.find().clone()), DiffFind::Closed { query: String::new() });
     assert!(!opens(cx));
     review.update(cx, |r, cx| r.show_diff(cx));
     assert!(opens(cx));

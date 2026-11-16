@@ -1091,12 +1091,14 @@ impl ReviewView {
         self.model.update(cx, |m, cx| m.set_visible(visible, cx));
     }
 
-    /// `renderRightPane`: the selected favourite's file viewer in the diff's place.
+    /// `renderRightPane`: the selected favourite's file viewer in the diff's place. Electron
+    /// unmounts the diff's list meanwhile: back to the diff, a new list starts.
     fn favourite_pane(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let FavouriteSelection::Selected { viewer, .. } = self.model.read(cx).favourite_selection().clone() else {
             self.favourite_view = None;
             return None;
         };
+        self.unmount_list();
         let view = match &self.favourite_view {
             Some((shown, view)) if *shown == viewer.entity_id() => view.clone(),
             Some(_) | None => {
@@ -1562,11 +1564,14 @@ impl ReviewView {
     }
 
     /// Electron unmounts `StackedDiffList` here (another view, no changes, no commit picked,
-    /// loading or a load error): the next list's files start afresh, at the top, with
-    /// "Collapse all" untouched (`collapseAll` nonce 0).
+    /// loading, a load error, a favourite's viewer in its place): the next list's files start
+    /// afresh, at the top (or at the file to scroll to), with "Collapse all" untouched
+    /// (`collapseAll` nonce 0).
     fn unmount_list(&mut self) {
         self.diff = None;
         self.collapse_all = CollapseAll::Untouched;
+        self.closed_drawn.clear();
+        self.find_selection = None;
     }
 
     fn body(&mut self, mode: ReviewMode, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {

@@ -1854,7 +1854,9 @@ impl ReviewModel {
     }
 
     /// Show a favourite that is not in the diff in a file viewer, in the diff's place (one in
-    /// the diff is scrolled to instead: [`Self::show_diff`]).
+    /// the diff is scrolled to instead: [`Self::show_diff`]). The diff's list goes meanwhile
+    /// (`renderRightPane`), and its find bar with it: back to the diff, a new list's bar is
+    /// closed and empty.
     pub fn select_favourite(&mut self, file: FavouriteFile, cx: &mut Context<Self>) {
         if self.favourite.relative_path() == Some(file.relative_path.as_str()) {
             return;
@@ -1864,6 +1866,8 @@ impl ReviewModel {
         };
         let viewer = workspace.update(cx, |w, cx| w.file_viewer(&file.path, cx));
         self.favourite = FavouriteSelection::Selected { file, viewer };
+        self.find = DiffFind::Closed { query: String::new() };
+        self._find = None;
         cx.notify();
     }
 
