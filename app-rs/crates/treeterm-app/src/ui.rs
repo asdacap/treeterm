@@ -1035,9 +1035,13 @@ pub const FILE_ERROR: u32 = 0xf14c4c;
 /// Width of Electron's `::-webkit-scrollbar`.
 const SCROLLBAR: f32 = 10.;
 
-/// Dragging the thumb of the [`scroll_area`] named `0`, grabbed `1` below its top.
+/// Dragging the thumb of the [`scrollbar`] named `id`, grabbed `grab` below its top (known
+/// once the drag starts; the drag's value, not its view, reaches the moves).
 #[derive(Clone)]
-struct ThumbDrag(ElementId, gpui_kit::Pixels);
+struct ThumbDrag {
+    id: ElementId,
+    grab: std::rc::Rc<std::cell::Cell<gpui_kit::Pixels>>,
+}
 
 impl gpui_kit::Render for ThumbDrag {
     fn render(&mut self, _: &mut Window, _: &mut gpui_kit::Context<Self>) -> impl IntoElement {
@@ -1045,22 +1049,39 @@ impl gpui_kit::Render for ThumbDrag {
     }
 }
 
-/// A vertically scrolling column with Electron's classic scrollbar (`::-webkit-scrollbar`:
-/// 10px, a `#3c3c3c` thumb rounded 5px on a clear track). While there is something to
-/// scroll, the bar takes its 10px from the content, as Chromium's does.
+/// A vertically scrolling column with Electron's classic scrollbar (see [`scrollbar`]).
 pub fn scroll_area(id: impl Into<ElementId>, handle: &gpui_kit::ScrollHandle, content: impl IntoElement, cx: &App) -> Div {
-    use gpui_kit::{Bounds, DragMoveEvent, point, px as pixels};
     let id: ElementId = id.into();
-    let viewport = f32::from(handle.bounds().size.height);
-    let max = f32::from(handle.max_offset().y);
-    let overflowing = max > 0. && viewport > 0.;
-    // Whether the bar shows is only known after layout: ask for another frame when it changes.
+    div()
+        .size_full()
+        .min_h_0()
+        .flex()
+        .relative()
+        .child(div().id(id.clone()).flex_1().min_w_0().h_full().overflow_y_scroll().track_scroll(handle).child(content))
+        .children(scrollbar(id, handle, cx))
+}
+
+/// Electron's classic scrollbar (`::-webkit-scrollbar`: 10px, a `#3c3c3c` thumb rounded 5px
+/// on a clear track, `--bg-hover` under the pointer) for what `handle` scrolls vertically,
+/// to follow it in a row. While there is something to scroll, the bar takes its 10px from
+/// the content, as Chromium's does; its thumb can be dragged.
+pub fn scrollbar<H: gpui_kit::base::ScrollbarHandle + Clone>(id: impl Into<ElementId>, handle: &H, cx: &App) -> Vec<gpui_kit::AnyElement> {
+    use gpui_kit::{Bounds, DragMoveEvent, point, px as pixels};
+    // The height shown, how far it scrolls and whether it does.
+    fn extent(handle: &impl gpui_kit::base::ScrollbarHandle) -> (f32, f32, bool) {
+        let viewport = f32::from(handle.viewport_bounds().size.height);
+        let max = f32::from(handle.content_size().height) - viewport;
+        (viewport, max, max > 0. && viewport > 0.)
+    }
+    let id: ElementId = id.into();
+    let (viewport, max, overflowing) = extent(handle);
+    // Whether the bar shows is only known once the content is laid out (before the bar in
+    // its row): ask for another frame when it changes.
     let probe = {
         let handle = handle.clone();
         gpui_kit::canvas(
             move |_: Bounds<gpui_kit::Pixels>, window, _| {
-                let now = f32::from(handle.max_offset().y) > 0. && f32::from(handle.bounds().size.height) > 0.;
-                if now != overflowing {
+                if extent(&handle).2 != overflowing {
                     window.refresh();
                 }
             },
@@ -1074,19 +1095,20 @@ pub fn scroll_area(id: impl Into<ElementId>, handle: &gpui_kit::ScrollHandle, co
         let thumb = (viewport * viewport / content).max(20.);
         let travel = viewport - thumb;
         let top = travel * (-f32::from(handle.offset().y) / max).clamp(0., 1.);
-        let thumb_color = colors(cx).border;
-        let (drag_handle, drag_id, thumb_id) = (handle.clone(), id.clone(), id.clone());
+        let c = colors(cx);
+        let (thumb_color, hover) = (c.border, c.bg_hover);
+        let (drag_handle, drag_id, thumb_id) = (handle.clone(), id.clone(), id);
         div()
             .w(pixels(SCROLLBAR))
             .h_full()
             .flex_shrink_0()
             .relative()
             .on_drag_move(move |event: &DragMoveEvent<ThumbDrag>, window, cx| {
-                let ThumbDrag(dragged, grab) = event.drag(cx);
-                if *dragged != drag_id || travel <= 0. {
+                let drag = event.drag(cx);
+                if drag.id != drag_id || travel <= 0. {
                     return;
                 }
-                let at = f32::from(event.event.position.y - event.bounds.top() - *grab).clamp(0., travel);
+                let at = f32::from(event.event.position.y - event.bounds.top() - drag.grab.get()).clamp(0., travel);
                 drag_handle.set_offset(point(drag_handle.offset().x, pixels(-(max * at / travel))));
                 window.refresh();
             })
@@ -1099,20 +1121,17 @@ pub fn scroll_area(id: impl Into<ElementId>, handle: &gpui_kit::ScrollHandle, co
                     .h(pixels(thumb))
                     .rounded(pixels(5.))
                     .bg(thumb_color)
-                    .on_drag(ThumbDrag(thumb_id, pixels(0.)), move |drag, position, _, cx| {
-                        let grab = position.y - pixels(top);
-                        cx.new(|_| ThumbDrag(drag.0.clone(), grab))
+                    .hover(move |d| d.bg(hover))
+                    .on_drag(ThumbDrag { id: thumb_id, grab: Default::default() }, |drag, grab, _, cx| {
+                        drag.grab.set(grab.y);
+                        cx.new(|_| drag.clone())
                     }),
             )
+            .into_any_element()
     });
-    div()
-        .size_full()
-        .min_h_0()
-        .flex()
-        .relative()
-        .child(probe)
-        .child(div().id(id).flex_1().min_w_0().h_full().overflow_y_scroll().track_scroll(handle).child(content))
-        .children(bar)
+    let mut parts = vec![probe.into_any_element()];
+    parts.extend(bar);
+    parts
 }
 
 /// Lucide's star, filled (`<Star fill="currentColor" />`); `filled: false` is the outline.

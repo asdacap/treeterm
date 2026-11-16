@@ -11,7 +11,7 @@ use gpui_kit::prelude::*;
 use gpui_kit::{AnyElement, App, Entity, Focusable as _, FontWeight, ListAlignment, ListState, Window, div, list, px, relative, rgb};
 use treeterm_core::review::Side;
 use treeterm_core::search::RepoHit;
-use treeterm_model::search_panel::{SearchRow, expand_tabs};
+use treeterm_model::search_panel::{RowsChange, SearchRow, expand_tabs, rows_change};
 
 use crate::theme::colors;
 use crate::ui;
@@ -37,23 +37,28 @@ pub struct PanelActions {
 
 /// The results list, told which rows changed so its scroll position survives appended hits.
 pub struct ResultsList {
+    /// One item more than `rows`: the bottom padding.
     list: ListState,
     rows: Vec<SearchRow>,
 }
 
 impl ResultsList {
     pub fn new() -> Self {
-        Self { list: ListState::new(0, ListAlignment::Top, px(200.)), rows: Vec::new() }
+        // Every row is measured, so the scrollbar knows the whole height, as Chromium's does.
+        Self { list: ListState::new(1, ListAlignment::Top, px(200.)).measure_all(), rows: Vec::new() }
     }
 
     fn sync(&mut self, rows: &[SearchRow]) {
-        let unchanged = self.rows.iter().zip(rows).take_while(|(a, b)| a == b).count();
-        if unchanged != self.rows.len() || unchanged != rows.len() {
-            // One more row than results: the bottom padding.
-            let old = if self.rows.is_empty() { self.list.item_count() } else { self.rows.len() + 1 };
-            self.list.splice(unchanged..old, rows.len() + 1 - unchanged);
-            self.rows = rows.to_vec();
+        match rows_change(&self.rows, rows) {
+            RowsChange::Unchanged => return,
+            RowsChange::Remeasure(changed) => {
+                for index in changed {
+                    self.list.remeasure_items(index..index + 1);
+                }
+            }
+            RowsChange::Splice { old, count } => self.list.splice(old, count),
         }
+        self.rows = rows.to_vec();
     }
 }
 
@@ -160,12 +165,14 @@ pub fn panel(bar: Bar, rows: Vec<SearchRow>, results: &mut ResultsList, actions:
     let rows = Rc::new(rows);
     let listed = bar.has_query.then(|| {
         let (rows, actions) = (rows.clone(), actions.clone());
-        list(results.list.clone(), move |index, _, cx| match rows.get(index) {
+        let list = list(results.list.clone(), move |index, _, cx| match rows.get(index) {
             Some(found) => row(found.clone(), index, &actions, cx),
             None => div().h(px(8.)).into_any_element(),
         })
         .flex_1()
-        .min_h_0()
+        .min_w_0()
+        .h_full();
+        h_flex().flex_1().min_h_0().child(list).children(ui::scrollbar("search-results", &results.list, cx))
     });
     let step = |forward: bool| {
         let step = actions.step.clone();

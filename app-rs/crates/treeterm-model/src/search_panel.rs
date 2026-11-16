@@ -102,6 +102,28 @@ pub fn expand_tabs(preview: &str) -> String {
     expanded
 }
 
+/// How the panel's list goes from showing one set of rows to another, keeping what it
+/// measured of the rows that stay (and so the scroll position).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RowsChange {
+    Unchanged,
+    /// As many rows as before; these changed in place (moving the active match changes two).
+    Remeasure(Vec<usize>),
+    /// The rows at `old` are replaced by `count` new ones; those before and after stay.
+    Splice { old: std::ops::Range<usize>, count: usize },
+}
+
+/// What changed from `old` to `new`.
+pub fn rows_change(old: &[SearchRow], new: &[SearchRow]) -> RowsChange {
+    if old.len() == new.len() {
+        let changed: Vec<usize> = old.iter().zip(new).enumerate().filter(|(_, (a, b))| a != b).map(|(index, _)| index).collect();
+        return if changed.is_empty() { RowsChange::Unchanged } else { RowsChange::Remeasure(changed) };
+    }
+    let before = old.iter().zip(new).take_while(|(a, b)| a == b).count();
+    let after = old[before..].iter().rev().zip(new[before..].iter().rev()).take_while(|(a, b)| a == b).count();
+    RowsChange::Splice { old: before..old.len() - after, count: new.len() - before - after }
+}
+
 /// `countLabel`: the panel's match counter (`3/12`, `12 found`, `Searching…`).
 pub fn count_label(query: &str, active: Option<usize>, total: usize, pending: bool) -> String {
     if query.is_empty() {
@@ -228,6 +250,41 @@ mod tests {
         assert_eq!(expand_tabs("é\tx"), format!("é{}x", " ".repeat(7)), "a character is one column, whatever its bytes");
         assert_eq!(expand_tabs("no tabs  here"), "no tabs  here");
         assert_eq!(expand_tabs(""), "");
+    }
+
+    #[test]
+    fn only_the_rows_that_changed_are_measured_again() {
+        let row = |index: usize, active: bool| SearchRow::InFile { index, line_number: index + 1, preview: "x".into(), active };
+        let note = |text: &str| SearchRow::Note(text.to_owned());
+        let rows = vec![SearchRow::Section("In this file"), row(0, true), row(1, false), row(2, false)];
+        assert_eq!(rows_change(&rows, &rows), RowsChange::Unchanged);
+        assert_eq!(rows_change(&[], &[]), RowsChange::Unchanged);
+
+        // Moving to the next match changes the old and the new active row only.
+        let stepped = vec![SearchRow::Section("In this file"), row(0, false), row(1, true), row(2, false)];
+        assert_eq!(rows_change(&rows, &stepped), RowsChange::Remeasure(vec![1, 2]));
+
+        // Repo hits arriving go in before the trailing note.
+        let searching = vec![SearchRow::Section("In repo"), note("Searching repo…")];
+        let found = vec![
+            SearchRow::Section("In repo"),
+            SearchRow::File("a.rs".into()),
+            SearchRow::InRepo(hit("a.rs", 1)),
+            note("Searching repo…"),
+        ];
+        assert_eq!(rows_change(&searching, &found), RowsChange::Splice { old: 1..1, count: 2 });
+        assert_eq!(rows_change(&found, &searching), RowsChange::Splice { old: 1..3, count: 0 });
+
+        // A change at the end, from and to nothing.
+        let done = vec![SearchRow::Section("In repo"), SearchRow::File("a.rs".into()), SearchRow::InRepo(hit("a.rs", 1))];
+        assert_eq!(rows_change(&found, &done), RowsChange::Splice { old: 3..4, count: 0 });
+        assert_eq!(rows_change(&[], &rows), RowsChange::Splice { old: 0..0, count: 4 });
+        assert_eq!(rows_change(&rows, &[]), RowsChange::Splice { old: 0..4, count: 0 });
+
+        // Repeated rows are not counted twice: what stays before and after never overlaps.
+        let same = vec![note("a"), note("a")];
+        assert_eq!(rows_change(&same, &same[..1]), RowsChange::Splice { old: 1..2, count: 0 });
+        assert_eq!(rows_change(&same[..1], &same), RowsChange::Splice { old: 1..1, count: 1 });
     }
 
     #[test]
