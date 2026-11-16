@@ -214,6 +214,9 @@ pub enum GitHubError {
     NoPrForBranch,
     #[error("Invalid GitHub response: {0}")]
     InvalidResponse(String),
+    /// The session has no GitHub client (its HTTP setup failed); the reason is given.
+    #[error("GitHub is not available: {0}")]
+    Unavailable(String),
     #[error(transparent)]
     Exec(#[from] ExecError),
     #[error(transparent)]
@@ -634,5 +637,51 @@ impl GitHubApi for GitHubClient {
                 .await
         }
         .boxed()
+    }
+}
+
+/// Stands in for [`GitHubClient`] when it cannot be built: every call fails with
+/// [`GitHubError::Unavailable`], so git status still works without PR info.
+#[derive(Debug, Clone)]
+pub struct UnavailableGitHub {
+    reason: String,
+}
+
+impl UnavailableGitHub {
+    pub fn new(reason: String) -> Self {
+        Self { reason }
+    }
+
+    fn fail<T: Send + 'static>(&self) -> BoxFuture<'static, Result<T, GitHubError>> {
+        let reason = self.reason.clone();
+        async move { Err(GitHubError::Unavailable(reason)) }.boxed()
+    }
+}
+
+impl GitHubApi for UnavailableGitHub {
+    fn get_pr_info(
+        &self,
+        _repo_path: &str,
+        _head: &str,
+        _base: &str,
+    ) -> BoxFuture<'static, Result<PrLookup, GitHubError>> {
+        self.fail()
+    }
+
+    fn list_open_prs(
+        &self,
+        _repo_path: &str,
+    ) -> BoxFuture<'static, Result<Vec<PrListItem>, GitHubError>> {
+        self.fail()
+    }
+
+    fn post_review_comments(
+        &self,
+        _repo_path: &str,
+        _head: &str,
+        _base: &str,
+        _comments: Vec<ReviewComment>,
+    ) -> BoxFuture<'static, Result<PostCommentsOutcome, GitHubError>> {
+        self.fail()
     }
 }

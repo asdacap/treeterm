@@ -49,6 +49,9 @@ pub enum WorkspaceEvent {
     /// Review's "Close and Clean" in tab `tab`: remove this workspace, keeping its branch
     /// (a refusal goes back to that tab, [`WorkspaceStore::close_failed`]).
     CloseAndCleanRequested { tab: String },
+    /// `refreshGit`: git state may have changed (the AI finished, Review staged, committed
+    /// or reloaded): the session refreshes this workspace's git status.
+    GitRefreshRequested,
 }
 
 impl EventEmitter<WorkspaceEvent> for WorkspaceStore {}
@@ -655,6 +658,13 @@ impl WorkspaceStore {
         }
     }
 
+    /// The AI went idle or completed (`refreshGitInfo` + `refreshGit`): re-read the branch,
+    /// and have the session refresh the git status.
+    pub fn refresh_git(&mut self, cx: &mut Context<Self>) {
+        self.refresh_git_branch(cx);
+        cx.emit(WorkspaceEvent::GitRefreshRequested);
+    }
+
     /// Re-read the checked-out branch (the analyzer saw the program change things).
     pub fn refresh_git_branch(&mut self, cx: &mut Context<Self>) {
         let git = self.conn.git();
@@ -835,7 +845,9 @@ impl WorkspaceStore {
                             },
                             cx,
                         ),
-                        crate::review::ReviewEvent::Committed => {}
+                        crate::review::ReviewEvent::Committed | crate::review::ReviewEvent::GitChanged => {
+                            cx.emit(WorkspaceEvent::GitRefreshRequested);
+                        }
                         crate::review::ReviewEvent::CloseRequested => store.remove_tab(&owned_tab, cx),
                         crate::review::ReviewEvent::MergeRequested { squash, after } => {
                             cx.emit(WorkspaceEvent::MergeRequested { squash: *squash, after: *after });
@@ -1039,7 +1051,7 @@ impl WorkspaceStore {
             AnalyzerEvent::SetActivity { state, detail } => store.set_activity(&owned_tab, *state, detail.clone(), cx),
             AnalyzerEvent::UpdateMetadata { key, value } => store.update_metadata(key, value, cx),
             AnalyzerEvent::BranchRenamed(branch) => store.set_git_branch(branch, cx),
-            AnalyzerEvent::RefreshGit => store.refresh_git_branch(cx),
+            AnalyzerEvent::RefreshGit => store.refresh_git(cx),
             AnalyzerEvent::Write(text) => store.write_for_analyzer(&pty_id, text, cx),
         });
         Some((analyzer, events))

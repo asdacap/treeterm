@@ -107,6 +107,7 @@ impl ReviewView {
             ReviewEvent::ConfirmMerge { squash, files } => view.confirm_merge(*squash, *files, window, cx),
             ReviewEvent::StateChanged(_)
             | ReviewEvent::StateRemoved(_)
+            | ReviewEvent::GitChanged
             | ReviewEvent::CloseRequested
             | ReviewEvent::MergeRequested { .. }
             | ReviewEvent::CloseAndCleanRequested => {}

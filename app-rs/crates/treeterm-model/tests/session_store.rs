@@ -39,11 +39,23 @@ fn open_store(cx: &mut TestAppContext, h: &Harness, client: &str) -> Entity<Sess
     let conn = h.conn.clone();
     let client = client.to_owned();
     let settings = cx.new(|_| SettingsStore::in_memory(Default::default()));
-    cx.new(|cx| SessionStore::new(conn, client, settings, None, cx))
+    let store = cx.new(|cx| SessionStore::new(conn, client, settings, None, cx));
+    // Every workspace refreshes its git status on load: a child's PR lookup fails at once
+    // instead of running the machine's `gh`.
+    let github = std::sync::Arc::new(treeterm_core::github::UnavailableGitHub::new("not in tests".to_owned()));
+    store.update(cx, |s, _| s.set_github_api(github));
+    store
 }
 
 fn loaded(s: &SessionStore, id: &str) -> bool {
     matches!(s.entry(id), Some(WorkspaceEntry::Loaded(_)))
+}
+
+/// `ids` are loaded and none of their git status refreshes (each runs one on load) is
+/// running.
+fn git_idle(s: &SessionStore, cx: &gpui_kit::App, ids: &[&str]) -> bool {
+    ids.iter()
+        .all(|id| loaded(s, id) && s.git_controller(id).is_some_and(|c| !c.read(cx).is_refreshing()))
 }
 
 fn ws(s: &SessionStore, id: &str) -> Entity<WorkspaceStore> {
@@ -216,8 +228,15 @@ fn concurrent_writers_both_keep_their_tabs(cx: &mut TestAppContext) {
         let disk = file_on_disk(&h, "a");
         disk["metadata"]["fromA"] == "1" || disk["metadata"]["fromB"] == "1"
     });
-    // The loser adopted the winner; its own edit was replaced, as in Electron. A later
-    // edit from either side lands on top of the merged state.
+    // The loser adopts the winner once its watch reports it; its own edit was replaced, as
+    // in Electron. (An edit made before that report would be replaced too.)
+    for window in [&first, &second] {
+        wait_until_app(cx, window, |s, cx| {
+            let disk = file_on_disk(&h, "a")["metadata"].clone();
+            serde_json::to_value(&ws(s, "a").read(cx).file().metadata).unwrap() == disk
+        });
+    }
+    // A later edit from either side lands on top of the merged state.
     wb.update(cx, |w, cx| w.update_metadata("later", "1", cx));
     wait_for_disk(cx, || file_on_disk(&h, "a")["metadata"]["later"] == "1");
     wait_until_app(cx, &first, |s, cx| {
@@ -752,6 +771,8 @@ fn a_merge_whose_conflict_check_cannot_run_still_merges(cx: &mut TestAppContext)
     let root = open_repo_workspace(cx, &store, &repo);
     let child = store.update(cx, |s, cx| s.add_child_workspace(&root, "feat-gone".into(), false, None, cx)).unwrap();
     wait_child(cx, &store, &child);
+    // Its git status refresh on load re-reads the branch git has: let it finish first.
+    wait_until_app(cx, &store, |s, cx| git_idle(s, cx, &[&child]));
     // The child records a branch git does not have: the dry-run fails on it.
     let child_ws = store.read_with(cx, |s, _| ws(s, &child));
     child_ws.update(cx, |w, cx| w.set_git_branch("no-such-branch", cx));

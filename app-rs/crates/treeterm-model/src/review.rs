@@ -113,8 +113,12 @@ pub enum ReviewEvent {
     StateChanged(Value),
     /// Drop a key from the tab's state (Electron persists `undefined`, never `null`).
     StateRemoved(&'static str),
-    /// A commit succeeded (the view clears its message box).
+    /// A commit succeeded (the view clears its message box; the workspace's git status is
+    /// refreshed).
     Committed,
+    /// Staging changed the index, or Review reloaded: refresh the workspace's git status
+    /// (`refreshGit`).
+    GitChanged,
     /// "Cancel" / "Close": close this Review tab.
     CloseRequested,
     /// The merge buttons: merge this workspace's branch into its parent.
@@ -962,6 +966,7 @@ impl ReviewModel {
                 Ok(()) => {
                     model.staging = GitOp::Idle;
                     model.reload_quietly(cx);
+                    cx.emit(ReviewEvent::GitChanged);
                 }
                 Err(error) => model.staging = GitOp::Failed(error),
             }
@@ -1018,13 +1023,14 @@ impl ReviewModel {
     }
 
     /// "Refresh changes": reload everything, keeping what is shown until the new content
-    /// arrives (`handleRefresh`).
+    /// arrives, and refresh the workspace's git status (`handleRefresh`).
     pub fn refresh(&mut self, cx: &mut Context<Self>) {
         if let FavouriteSelection::Selected { file, viewer } = &self.favourite {
             let path = file.path.clone();
             viewer.update(cx, |viewer, cx| viewer.open(&path, false, cx));
         }
         self.reload_quietly(cx);
+        cx.emit(ReviewEvent::GitChanged);
     }
 
     /// A load is running (the refresh button spins).

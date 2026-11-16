@@ -279,7 +279,7 @@ impl CommentsModel {
 
     /// "Push to GitHub": post the unprompted comments on the branch's PR; those posted count
     /// as prompted. `github` is the session's controller for this workspace (`None` when
-    /// the session has no GitHub client).
+    /// the workspace is not loaded).
     pub fn push_to_github(&mut self, github: Option<Entity<GitController>>, cx: &mut Context<Self>) {
         if self.push == PushState::Pushing {
             return;

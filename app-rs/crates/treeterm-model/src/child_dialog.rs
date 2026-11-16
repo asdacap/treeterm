@@ -456,11 +456,7 @@ impl ChildDialogModel {
                     }
                 }
                 ChildTab::Pr => {
-                    let listed = match github {
-                        Some(github) => github.list_open_prs(&root).await.map_err(|e| e.to_string()),
-                        None => Err("GitHub is not available".to_owned()),
-                    };
-                    match listed {
+                    match github.list_open_prs(&root).await.map_err(|e| e.to_string()) {
                         Ok(list) => (None, Box::new(move |m| m.prs.listing = Listing::Loaded(list))),
                         Err(e) => (failed("pull requests", e), emptied(tab)),
                     }

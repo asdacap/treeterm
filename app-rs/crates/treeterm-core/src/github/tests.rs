@@ -635,3 +635,20 @@ mod create_github_api {
         ));
     }
 }
+
+mod unavailable_github {
+    use super::*;
+
+    #[test]
+    fn every_call_fails_with_the_reason() {
+        let api: Arc<dyn GitHubApi> = Arc::new(UnavailableGitHub::new("tls".to_owned()));
+        let expected = "GitHub is not available: tls";
+        let lookup = block_on(api.get_pr_info("/repo", "feature", "main"));
+        assert!(matches!(&lookup, Err(GitHubError::Unavailable(reason)) if reason == "tls"));
+        assert_eq!(lookup.unwrap_err().to_string(), expected);
+        let listed = block_on(api.list_open_prs("/repo"));
+        assert_eq!(listed.unwrap_err().to_string(), expected);
+        let posted = block_on(api.post_review_comments("/repo", "feature", "main", Vec::new()));
+        assert_eq!(posted.unwrap_err().to_string(), expected);
+    }
+}

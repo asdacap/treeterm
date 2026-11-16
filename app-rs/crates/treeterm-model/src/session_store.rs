@@ -372,8 +372,9 @@ pub struct SessionStore {
     registry_api: Option<treeterm_core::worktree_registry::WorktreeRegistry>,
     /// Each loaded workspace's git status (`gitController`).
     git_controllers: HashMap<String, Entity<crate::git_controller::GitController>>,
-    /// The PR lookup client (`None` if it could not be built: no PR info then).
-    github: Option<Arc<dyn treeterm_core::github::GitHubApi>>,
+    /// The PR lookup client. If it could not be built, one whose every call fails with why:
+    /// git status still works, without PR info.
+    github: Arc<dyn treeterm_core::github::GitHubApi>,
     github_settings: crate::git_controller::SharedGithubSettings,
     disposed: bool,
     /// The daemon's id for the session (from the last snapshot).
@@ -394,10 +395,10 @@ impl SessionStore {
         let github_settings: crate::git_controller::SharedGithubSettings =
             Arc::new(RwLock::new(settings.read(cx).settings().github.clone()));
         let github = match crate::git_controller::github_client(&conn, github_settings.clone()) {
-            Ok(client) => Some(client),
+            Ok(client) => client,
             Err(error) => {
                 tracing::error!(%error, "no GitHub client: PR status is off");
-                None
+                Arc::new(treeterm_core::github::UnavailableGitHub::new(error.to_string()))
             }
         };
         let mut events = conn.watch_session(&client_id);
@@ -889,6 +890,7 @@ impl SessionStore {
             WorkspaceEvent::Changed => session.enqueue_content_sync(&owned, cx),
             WorkspaceEvent::AttentionRecorded => cx.emit(SessionEvent::AttentionRecorded(owned.clone())),
             WorkspaceEvent::LabelsChanged => session.save_registry_entry(&owned, cx),
+            WorkspaceEvent::GitRefreshRequested => session.refresh_git_status(&owned, cx),
             WorkspaceEvent::MergeRequested { squash, after } => session.merge_workspace(&owned, *squash, *after, cx),
             WorkspaceEvent::CloseAndCleanRequested { tab } => {
                 if let Err(error) = session.close_and_clean_workspace(&owned, cx) {
@@ -897,16 +899,13 @@ impl SessionStore {
             }
         });
         let viewed = self.viewed.as_deref() == Some(id.as_str());
-        if let Some(github) = self.github.clone() {
-            let (git, session, owned) = (self.conn.git(), cx.weak_entity(), id.clone());
-            let controller = cx.new(|_| crate::git_controller::GitController::new(owned, session, git, github));
-            cx.observe(&controller, |_, _, cx| cx.notify()).detach();
-            // Selected before it finished loading: refresh now (`setActiveWorkspace` could not).
-            if viewed {
-                controller.update(cx, |c, cx| c.refresh(cx));
-            }
-            self.git_controllers.insert(id.clone(), controller);
-        }
+        let (git, session, owned, github) = (self.conn.git(), cx.weak_entity(), id.clone(), self.github.clone());
+        let controller = cx.new(|_| crate::git_controller::GitController::new(owned, session, git, github));
+        cx.observe(&controller, |_, _, cx| cx.notify()).detach();
+        self.git_controllers.insert(id.clone(), controller);
+        // `onLoaded`: every workspace's status (and the tree's PR badge and behind count) is
+        // known without opening it.
+        self.refresh_git_status(&id, cx);
         self.store_events.insert(id, subscription);
         store.update(cx, |w, cx| w.set_viewed(viewed, cx));
         cx.observe(&store, |session, _, cx| {
@@ -966,15 +965,26 @@ impl SessionStore {
         self.git_controllers.get(id)
     }
 
-    /// The window now shows `workspace` of this session (or none of its workspaces):
-    /// a viewed unread workspace is acknowledged, and its git status refreshed
-    /// (`setActiveWorkspace`).
-    pub fn set_viewed_workspace(&mut self, workspace: Option<String>, cx: &mut Context<Self>) {
-        if self.viewed == workspace {
+    /// `refreshGit` for workspace `id`: git state may have changed. A workspace not loaded
+    /// (or gone) and a disposed session have nothing to refresh.
+    pub fn refresh_git_status(&mut self, id: &str, cx: &mut Context<Self>) {
+        if self.disposed {
             return;
         }
-        if let Some(controller) = workspace.as_deref().and_then(|id| self.git_controllers.get(id)).cloned() {
+        if let Some(controller) = self.git_controllers.get(id).cloned() {
             controller.update(cx, |c, cx| c.refresh(cx));
+        }
+    }
+
+    /// The window now shows `workspace` of this session (or none of its workspaces):
+    /// a viewed unread workspace is acknowledged, and its git status refreshed
+    /// (`setActiveWorkspace`), also when it was shown already (a click on its row).
+    pub fn set_viewed_workspace(&mut self, workspace: Option<String>, cx: &mut Context<Self>) {
+        if let Some(id) = workspace.as_deref() {
+            self.refresh_git_status(id, cx);
+        }
+        if self.viewed == workspace {
+            return;
         }
         self.viewed = workspace;
         let stores: Vec<(String, Entity<WorkspaceStore>)> = self
@@ -1984,14 +1994,14 @@ impl SessionStore {
         published
     }
 
-    /// The PR lookup client, if one could be built (`useGitHubApi`).
-    pub fn github_api(&self) -> Option<Arc<dyn treeterm_core::github::GitHubApi>> {
+    /// The PR lookup client (`useGitHubApi`).
+    pub fn github_api(&self) -> Arc<dyn treeterm_core::github::GitHubApi> {
         self.github.clone()
     }
 
     /// Look PRs up with `github` (tests give a fake); workspaces loaded from now on use it.
     pub fn set_github_api(&mut self, github: Arc<dyn treeterm_core::github::GitHubApi>) {
-        self.github = Some(github);
+        self.github = github;
     }
 
     /// The worktree registry of this session's host, when the app gave it one.
@@ -2157,10 +2167,12 @@ impl SessionStore {
     /// and branch. git's output, the removal's included, goes to the child (its Review tab
     /// shows it, and it goes with the child). Failures also show on the child, unless the
     /// merge was refused before git ran (the lock, a child or parent it cannot merge).
+    /// After a merge the parent's git status is refreshed, and the child's if it was kept.
     pub fn merge_workspace(&mut self, id: &str, squash: bool, after: AfterMerge, cx: &mut Context<Self>) {
         let Some(store) = self.workspace_store(id).cloned() else {
             return;
         };
+        let parent_id = store.read(cx).file().parent_id.clone();
         store.update(cx, |w, cx| w.start_merge_output(squash, after, cx));
         let (lines_tx, mut lines_rx) = futures::channel::mpsc::unbounded::<String>();
         let output = store.downgrade();
@@ -2211,7 +2223,15 @@ impl SessionStore {
             drop(lines_tx);
             forward.await;
             match this.update(cx, |session, cx| match result {
-                Ok(()) => store.update(cx, |w, cx| w.finish_merge_output(&Ok(()), cx)),
+                Ok(()) => {
+                    store.update(cx, |w, cx| w.finish_merge_output(&Ok(()), cx));
+                    if after == AfterMerge::Keep {
+                        session.refresh_git_status(&id, cx);
+                    }
+                    if let Some(parent) = &parent_id {
+                        session.refresh_git_status(parent, cx);
+                    }
+                }
                 Err(MergeFailure::Refused(error)) => store.update(cx, |w, cx| w.finish_merge_output(&Err(error), cx)),
                 Err(MergeFailure::Failed(error)) => {
                     store.update(cx, |w, cx| w.finish_merge_output(&Err(error.clone()), cx));
