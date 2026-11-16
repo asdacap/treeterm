@@ -307,7 +307,7 @@ impl SettingsView {
 
     /// Start (or, clicked again, stop) recording a keybinding button's key. While recording,
     /// every keystroke goes to the recorder first (before key bindings such as Tab's focus
-    /// move or Escape's close), as Electron's `preventDefault` + `stopPropagation` do.
+    /// move), as Electron's `preventDefault` + `stopPropagation` do.
     /// Only the keys the shortcuts claim come before it: Electron's prefix handler runs in
     /// the capture phase, so recording the current prefix key takes a second press.
     fn toggle_recording(&mut self, target: Recording, window: &mut Window, cx: &mut Context<Self>) {
@@ -525,7 +525,11 @@ impl SettingsDialog {
         let section = self.section.clone();
         let view = cx.new(|cx| SettingsView::new(store, keybindings, section, window, cx));
         self.open = view.downgrade();
-        window.open_dialog(cx, move |dialog, _window, cx| ui::dialog_frame(dialog, 600., cx).child(view.clone()));
+        window.open_dialog(cx, move |dialog, _window, cx| {
+            // Electron's has no Escape handler: Escape would close it and drop the edits
+            // unasked. The backdrop, × and Cancel close it.
+            ui::dialog_frame(dialog, 600., cx).keyboard(false).child(view.clone())
+        });
     }
 
     /// The dialog's view while it is open.
@@ -1071,5 +1075,27 @@ mod tests {
         let view = open(&mut dialog, &store, &keybindings, cx);
         assert_eq!(shown(&view, cx), Section::Llm);
         assert_eq!(cx.update(|_, cx| view.read(cx).error().cloned()), None, "the error went with the dialog");
+    }
+
+    /// Escape leaves Settings open with its edits, wherever the focus is: Electron's dialog
+    /// has no Escape handler. While recording, Escape is the key recorded.
+    #[gpui_kit::test]
+    fn escape_leaves_settings_open_with_its_edits(cx: &mut TestAppContext) {
+        let (cx, _, view) = dialog(cx);
+        let font_size = cx.update(|_, cx| view.read(cx).inputs.font_size.clone());
+        focus_field(&font_size, cx);
+        cx.update(|window, cx| font_size.update(cx, |input, cx| input.set_value("20", window, cx)));
+        cx.simulate_keystrokes("escape");
+        tab_to("save-settings", cx);
+        cx.simulate_keystrokes("escape");
+        cx.run_until_parked();
+        assert!(cx.update(|window, cx| window.has_active_dialog(cx)), "still open");
+        assert_eq!(texts(cx, &view).font_size, "20");
+
+        cx.update(|window, cx| view.update(cx, |view, cx| view.toggle_recording(Recording::Action(1), window, cx)));
+        cx.simulate_keystrokes("escape");
+        cx.run_until_parked();
+        assert_eq!(texts(cx, &view).action_keys[1], "Escape");
+        assert!(cx.update(|window, cx| window.has_active_dialog(cx)), "still open");
     }
 }
