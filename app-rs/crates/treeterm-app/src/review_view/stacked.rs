@@ -21,7 +21,7 @@ use gpui_kit::{
 };
 use treeterm_core::git::{FileChangeStats, FileChangeStatus, Staging, UncommittedFile};
 use treeterm_core::review::{ReviewComment, Side};
-use treeterm_model::review::{CollapseAll, CommentDraft, GitOp, ImageSides, ReviewMode, ReviewModel, StageTarget};
+use treeterm_model::review::{CollapseAll, CommentDraft, DiffList, GitOp, ImageSides, ReviewMode, ReviewModel, StageTarget};
 
 use super::ReviewView;
 use crate::comment_ui::{CommentActions, Placement, comment_display, comment_input};
@@ -50,20 +50,24 @@ impl ListedFile {
     }
 }
 
-/// Which list a `DiffState` shows: a view's, and in Commits a commit's. Electron mounts a
-/// `StackedDiffList` per view; a commit's files replace the last commit's after none.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ListId {
-    mode: ReviewMode,
-    commit: Option<String>,
-}
-
 /// How the list to show differs from the cached one.
+#[derive(Debug, PartialEq, Eq)]
 enum ListChange {
     Same,
     /// Other files or another patch: the paths listed before.
     Files(HashSet<String>),
     New,
+}
+
+/// How `list`, whose patch and paths make `key`, differs from the cached list (with its
+/// key and paths). Electron mounts a `StackedDiffList` per view, keyed by nothing else; in
+/// Commits a commit's files replace the last commit's after none (`setCommitDiffFiles([])`).
+fn list_change(cached: Option<(&DiffList, &str, &[String])>, list: &DiffList, key: &str) -> ListChange {
+    match cached {
+        Some((cached, cached_key, _)) if cached == list && cached_key == key => ListChange::Same,
+        Some((cached, _, order)) if cached == list => ListChange::Files(order.iter().cloned().collect()),
+        Some(_) | None => ListChange::New,
+    }
 }
 
 /// The listed files of a patch, in list order (a path listed twice, once).
@@ -104,7 +108,7 @@ pub fn tree_sorted(files: &[ListedFile]) -> Vec<ListedFile> {
 
 /// The parsed patch shown, for one patch and one filtered, tree-ordered file list.
 pub struct DiffCache {
-    list: ListId,
+    list: DiffList,
     key: String,
     pub state: Entity<DiffState>,
     order: Vec<String>,
@@ -129,7 +133,7 @@ impl DiffCache {
 
     /// The view whose list this is.
     pub fn mode(&self) -> ReviewMode {
-        self.list.mode
+        self.list.mode()
     }
 }
 
@@ -304,18 +308,14 @@ impl ReviewView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<Entity<DiffState>, String> {
-        let list = {
-            let model = self.model.read(cx);
-            ListId { mode: model.mode(), commit: model.selected_commit().map(|s| s.commit.hash.clone()) }
+        // The views draw a diff only where the model has a list (Commits: a picked commit).
+        let Some(list) = self.model.read(cx).diff_list() else {
+            return Err("no list of files to show".to_owned());
         };
         let key = format!("{patch}\u{0}{}", order.iter().map(|f| f.path.as_str()).collect::<Vec<_>>().join("\u{0}"));
         // Another view's list is dropped as it shows (`ReviewView::body`); another commit's
         // files are a new `DiffState` that keeps "Collapse all" (the list stays mounted).
-        let change = match &self.diff {
-            Some(diff) if diff.list == list && diff.key == key => ListChange::Same,
-            Some(diff) if diff.list == list => ListChange::Files(diff.order.iter().cloned().collect()),
-            Some(_) | None => ListChange::New,
-        };
+        let change = list_change(self.diff.as_ref().map(|diff| (&diff.list, diff.key.as_str(), diff.order.as_slice())), &list, &key);
         let relisted = !matches!(change, ListChange::Same);
         let fresh = match change {
             ListChange::Same => Vec::new(),
@@ -1417,5 +1417,23 @@ mod tests {
             .map(|f| f.path)
             .collect();
         assert_eq!(tree, ["dir/b.txt", "a.txt", "z.txt"], "folders first, as the tree");
+    }
+
+    #[test]
+    fn a_list_is_kept_until_another_view_or_commit_shows() {
+        let order = ["a.txt".to_owned(), "b.txt".to_owned()];
+        let committed = Some((&DiffList::Committed, "key", &order[..]));
+        // Nothing cached, or another list: a new one.
+        assert_eq!(list_change(None, &DiffList::Committed, "key"), ListChange::New);
+        assert_eq!(list_change(committed, &DiffList::Uncommitted, "key"), ListChange::New);
+        let first = DiffList::Commit("1".to_owned());
+        assert_eq!(list_change(Some((&first, "key", &order[..])), &DiffList::Commit("2".to_owned()), "key"), ListChange::New);
+        // The same list: kept as it is, or its files replaced (those listed before given).
+        assert_eq!(list_change(committed, &DiffList::Committed, "key"), ListChange::Same);
+        assert_eq!(
+            list_change(committed, &DiffList::Committed, "other"),
+            ListChange::Files(HashSet::from(["a.txt".to_owned(), "b.txt".to_owned()]))
+        );
+        assert_eq!(list_change(Some((&first, "key", &order[..])), &first, "other"), ListChange::Files(order.into_iter().collect()));
     }
 }

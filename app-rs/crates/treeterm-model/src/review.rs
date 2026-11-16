@@ -536,6 +536,27 @@ pub fn newly_entered<'a>(previous: &[String], band: &'a [String]) -> Option<&'a 
     band.iter().rev().find(|path| !previous.contains(path)).map(String::as_str)
 }
 
+/// Which list of files the diff shows (`StackedDiffList`): each view mounts its own, and in
+/// Commits it lists the picked commit's files (another commit's replace them).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DiffList {
+    Committed,
+    Uncommitted,
+    /// The picked commit's, by its hash.
+    Commit(String),
+}
+
+impl DiffList {
+    /// The view showing it.
+    pub fn mode(&self) -> ReviewMode {
+        match self {
+            DiffList::Committed => ReviewMode::Committed,
+            DiffList::Uncommitted => ReviewMode::Uncommitted,
+            DiffList::Commit(_) => ReviewMode::Commits,
+        }
+    }
+}
+
 /// The last "Collapse all" / "Expand all" of a list (`collapseAll`). It lasts as long as
 /// the list: files listed later follow it. Another view's list starts untouched.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -733,6 +754,17 @@ impl ReviewModel {
 
     pub fn selected_commit(&self) -> Option<&SelectedCommit> {
         self.selected_commit.as_ref()
+    }
+
+    /// The list the diff shows in the current view; none in Commits until a commit is
+    /// picked (`selectedCommit && <StackedDiffList>`). Committed and Uncommitted keep theirs
+    /// whatever happens to the picked commit (a base change, a checkout, a refresh).
+    pub fn diff_list(&self) -> Option<DiffList> {
+        match self.mode {
+            ReviewMode::Committed => Some(DiffList::Committed),
+            ReviewMode::Uncommitted => Some(DiffList::Uncommitted),
+            ReviewMode::Commits => self.selected_commit.as_ref().map(|s| DiffList::Commit(s.commit.hash.clone())),
+        }
     }
 
     pub fn ignore_whitespace(&self) -> bool {
@@ -2316,6 +2348,13 @@ mod tests {
         assert_eq!(newly_entered(&band(&["a", "b"]), &band(&["b"])), None);
         assert_eq!(newly_entered(&band(&["b"]), &band(&["b"])), None);
         assert_eq!(newly_entered(&band(&["b"]), &[]), None);
+    }
+
+    #[test]
+    fn a_diff_list_belongs_to_its_view() {
+        assert_eq!(DiffList::Committed.mode(), ReviewMode::Committed);
+        assert_eq!(DiffList::Uncommitted.mode(), ReviewMode::Uncommitted);
+        assert_eq!(DiffList::Commit("abc".to_owned()).mode(), ReviewMode::Commits);
     }
 
     #[test]

@@ -1412,6 +1412,56 @@ fn the_commits_list_loads_once_and_keeps_its_pages_and_selection(cx: &mut TestAp
 }
 
 #[gpui_kit::test]
+fn the_diff_list_is_the_views_and_in_commits_the_picked_commits(cx: &mut TestAppContext) {
+    use treeterm_model::review::{DiffList, Loaded};
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let repo = TempRepo::new(&h);
+    repo.write("a.txt", "one\n");
+    repo.commit_all("base");
+    repo.git(&["branch", "other"]);
+    repo.git(&["checkout", "-q", "-b", "feature"]);
+    repo.write("a.txt", "two\n");
+    repo.commit_all("first");
+    repo.write("a.txt", "three\n");
+    repo.commit_all("second");
+    let store = open_store(cx, &h);
+    let workspace = open_repo_workspace(cx, &h, &store, &repo);
+    let (_, review) =
+        open_review_with(cx, &workspace, serde_json::json!({ "viewMode": "committed", "baseBranchOverride": "main" }));
+    wait_review(cx, &review, "committed", |r, _| matches!(r.content(), ReviewContent::Committed(_)));
+    let list = |cx: &mut TestAppContext| review.read_with(cx, |r, _| r.diff_list());
+    assert_eq!(list(cx), Some(DiffList::Committed));
+
+    // Commits: no list until a commit is picked, then the commit's.
+    review.update(cx, |r, cx| r.set_mode(ReviewMode::Commits, cx));
+    wait_review(cx, &review, "commits", |r, _| matches!(r.content(), ReviewContent::Commits(c) if c.len() == 2));
+    assert_eq!(list(cx), None);
+    let picked = review.read_with(cx, |r, _| match r.content() {
+        ReviewContent::Commits(commits) => commits[1].hash.clone(),
+        other => panic!("{other:?}"),
+    });
+    review.update(cx, |r, cx| r.select_commit(&picked, cx));
+    assert_eq!(list(cx), Some(DiffList::Commit(picked.clone())));
+    wait_review(cx, &review, "commit diff", |r, _| matches!(r.selected_commit().map(|s| &s.diff), Some(Loaded::Ready(_))));
+
+    // Committed keeps its list when another base drops the picked commit (the diff keeps
+    // its place and collapsed files).
+    review.update(cx, |r, cx| r.set_mode(ReviewMode::Committed, cx));
+    assert_eq!(list(cx), Some(DiffList::Committed));
+    review.update(cx, |r, cx| r.set_base(Some("other".into()), cx));
+    assert!(review.read_with(cx, |r, _| r.selected_commit().is_none()));
+    assert_eq!(list(cx), Some(DiffList::Committed));
+    review.update(cx, |r, cx| r.set_mode(ReviewMode::Uncommitted, cx));
+    assert_eq!(list(cx), Some(DiffList::Uncommitted));
+    // And Commits shows none again.
+    review.update(cx, |r, cx| r.set_mode(ReviewMode::Commits, cx));
+    assert_eq!(list(cx), None);
+    wait_review(cx, &review, "commits since other", |r, _| matches!(r.content(), ReviewContent::Commits(c) if c.len() == 2));
+}
+
+#[gpui_kit::test]
 fn an_empty_commits_list_shows_loading_while_it_reloads(cx: &mut TestAppContext) {
     let _serial = serial();
     cx.executor().allow_parking();
