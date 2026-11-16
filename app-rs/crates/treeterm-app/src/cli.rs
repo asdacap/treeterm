@@ -38,7 +38,7 @@ pub fn parse_ssh_target(target: &str, now_ms: u128) -> Option<SshConnectionConfi
         return None;
     }
     let (host, port) = match rest.split_once(':') {
-        Some((host, port)) => (host, port.parse::<u16>().ok().filter(|p| *p > 0)?),
+        Some((host, port)) => (host, parse_port(port)?),
         None => (rest, 22),
     };
     if host.is_empty() || host.contains('@') {
@@ -54,6 +54,18 @@ pub fn parse_ssh_target(target: &str, now_ms: u128) -> Option<SshConnectionConfi
         port_forwards: Vec::new(),
         extra: Default::default(),
     })
+}
+
+/// The target's port: digits only, as `parseSSHTarget`'s `\d+` (no sign, no spaces), and one
+/// ssh can use (1–65535; Electron also passed 0 and larger numbers on to ssh).
+fn parse_port(port: &str) -> Option<u16> {
+    if port.is_empty() || !port.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    match port.parse::<u16>() {
+        Ok(0) | Err(_) => None,
+        Ok(port) => Some(port),
+    }
 }
 
 /// `args` without the program name; `cwd` resolves a relative directory.
@@ -101,7 +113,15 @@ mod tests {
         assert_eq!(config.id, "ssh-box.lan-5");
         assert_eq!(config.display_name(), "me@box.lan:2222");
         assert_eq!(parse_ssh_target("me@box", 5).unwrap().port, 22);
-        for bad in ["box", "@box", "me@", "me@box:x", "me@box:0"] {
+        assert_eq!(parse_ssh_target("me@box:022", 5).unwrap().port, 22);
+        assert_eq!(parse_ssh_target("me@box:65535", 5).unwrap().port, 65535);
+        assert_eq!(parse_ssh_target("me:x@box", 5).unwrap().user, "me:x");
+        // The port is `\d+` (no sign, no spaces) and one ssh can use; the host has no `@`.
+        let bad = [
+            "box", "@box", "me@", "me@box:", "me@box:x", "me@box:0", "me@box:+22", "me@box:-22", "me@box: 22",
+            "me@box:22 ", "me@box:65536", "me@box:1:2", "me@a@box",
+        ];
+        for bad in bad {
             assert!(parse_ssh_target(bad, 5).is_none(), "{bad}");
         }
     }
