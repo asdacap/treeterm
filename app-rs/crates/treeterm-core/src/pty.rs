@@ -59,26 +59,28 @@ pub enum PtyEvent {
     Exit { code: i32, signal: Option<i32> },
 }
 
-impl TryFrom<PtyOutput> for PtyEvent {
-    type Error = ApiError;
-
-    fn try_from(output: PtyOutput) -> Result<Self, ApiError> {
-        use pty_output::Output;
-        match output.output {
-            Some(Output::Data(data)) => Ok(PtyEvent::Data(data.data)),
-            Some(Output::Resize(size)) => Ok(PtyEvent::Resize {
-                cols: dimension(size.cols)?,
-                rows: dimension(size.rows)?,
-            }),
-            Some(Output::ReplayStart(Empty {})) => Ok(PtyEvent::ReplayStart),
-            Some(Output::ReplayEnd(Empty {})) => Ok(PtyEvent::ReplayEnd),
-            Some(Output::Exit(exit)) => Ok(PtyEvent::Exit {
-                code: exit.exit_code,
-                signal: exit.signal,
-            }),
-            None => Err(ApiError::Protocol("PtyOutput without a payload")),
-        }
-    }
+/// The event `output` carries; `None` for an output kind this client does not know (one a
+/// newer daemon added, which prost decodes as no payload). Electron's `PtyStream` skips
+/// those too.
+fn event(output: PtyOutput) -> Result<Option<PtyEvent>, ApiError> {
+    use pty_output::Output;
+    let Some(output) = output.output else {
+        return Ok(None);
+    };
+    let event = match output {
+        Output::Data(data) => PtyEvent::Data(data.data),
+        Output::Resize(size) => PtyEvent::Resize {
+            cols: dimension(size.cols)?,
+            rows: dimension(size.rows)?,
+        },
+        Output::ReplayStart(Empty {}) => PtyEvent::ReplayStart,
+        Output::ReplayEnd(Empty {}) => PtyEvent::ReplayEnd,
+        Output::Exit(exit) => PtyEvent::Exit {
+            code: exit.exit_code,
+            signal: exit.signal,
+        },
+    };
+    Ok(Some(event))
 }
 
 fn dimension(value: i32) -> Result<u16, ApiError> {
@@ -242,13 +244,20 @@ pub(crate) fn attach(
             .pty_stream(ReceiverStream::new(request_rx))
             .await
     };
+    let session_id = session_id.to_owned();
     let events = rt.subscribe(PumpGuarded {
         stream: call
             .map_ok(tonic::Response::into_inner)
             .try_flatten_stream()
-            .map(|item| {
-                item.map_err(ApiError::from)
-                    .and_then(PtyEvent::try_from)
+            .filter_map(move |item| {
+                let decoded = item.map_err(ApiError::from).and_then(event).transpose();
+                if decoded.is_none() {
+                    tracing::warn!(
+                        %session_id,
+                        "ignoring PTY output of a kind this client does not know (newer daemon?)"
+                    );
+                }
+                futures::future::ready(decoded)
             })
             .boxed(),
         _pump: pump,
@@ -340,50 +349,49 @@ mod tests {
     fn converts_every_output_kind() {
         use pty_output::Output;
         assert_eq!(
-            PtyEvent::try_from(output(Output::Data(treeterm_proto::treeterm::PtyData {
+            event(output(Output::Data(treeterm_proto::treeterm::PtyData {
                 data: b"hi".to_vec()
             })))
             .unwrap(),
-            PtyEvent::Data(b"hi".to_vec())
+            Some(PtyEvent::Data(b"hi".to_vec()))
         );
         assert_eq!(
-            PtyEvent::try_from(output(Output::Resize(PtyResizeData { cols: 80, rows: 24 })))
-                .unwrap(),
-            PtyEvent::Resize { cols: 80, rows: 24 }
+            event(output(Output::Resize(PtyResizeData { cols: 80, rows: 24 }))).unwrap(),
+            Some(PtyEvent::Resize { cols: 80, rows: 24 })
         );
         assert_eq!(
-            PtyEvent::try_from(output(Output::ReplayStart(Empty {}))).unwrap(),
-            PtyEvent::ReplayStart
+            event(output(Output::ReplayStart(Empty {}))).unwrap(),
+            Some(PtyEvent::ReplayStart)
         );
         assert_eq!(
-            PtyEvent::try_from(output(Output::ReplayEnd(Empty {}))).unwrap(),
-            PtyEvent::ReplayEnd
+            event(output(Output::ReplayEnd(Empty {}))).unwrap(),
+            Some(PtyEvent::ReplayEnd)
         );
         assert_eq!(
-            PtyEvent::try_from(output(Output::Exit(treeterm_proto::treeterm::PtyExit {
+            event(output(Output::Exit(treeterm_proto::treeterm::PtyExit {
                 exit_code: 3,
                 signal: Some(9)
             })))
             .unwrap(),
-            PtyEvent::Exit {
+            Some(PtyEvent::Exit {
                 code: 3,
                 signal: Some(9)
-            }
+            })
         );
     }
 
     #[test]
-    fn rejects_empty_output_and_bad_sizes() {
-        assert!(PtyEvent::try_from(PtyOutput { output: None }).is_err());
+    fn skips_an_unknown_output_kind_and_rejects_bad_sizes() {
+        assert_eq!(event(PtyOutput { output: None }).unwrap(), None);
         assert!(
-            PtyEvent::try_from(output(pty_output::Output::Resize(PtyResizeData {
+            event(output(pty_output::Output::Resize(PtyResizeData {
                 cols: 0,
                 rows: 24
             })))
             .is_err()
         );
         assert!(
-            PtyEvent::try_from(output(pty_output::Output::Resize(PtyResizeData {
+            event(output(pty_output::Output::Resize(PtyResizeData {
                 cols: 70_000,
                 rows: 24
             })))
