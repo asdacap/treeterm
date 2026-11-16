@@ -72,6 +72,16 @@ enum FileText {
     Unreadable,
 }
 
+/// The code around `line` of `file` once it is read: none while it is read, when it cannot be,
+/// and when it is empty (`content ? extractCodeContext(…) : null`).
+fn context_of(file: &FileText, line: u32) -> Option<Vec<CodeLine>> {
+    match file {
+        FileText::Loaded(text) if text.is_empty() => None,
+        FileText::Loaded(text) => code_context(text, line),
+        FileText::Loading | FileText::Unreadable => None,
+    }
+}
+
 /// "Push to GitHub".
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PushState {
@@ -169,12 +179,9 @@ impl CommentsModel {
         }
     }
 
-    /// The code around `comment`, once its file is read.
+    /// The code around `comment`, once its file is read; none for an empty file.
     pub fn code_context(&self, comment: &ReviewComment) -> Option<Vec<CodeLine>> {
-        match self.files.get(&comment.file_path)? {
-            FileText::Loaded(text) => code_context(text, comment.line_number),
-            FileText::Loading | FileText::Unreadable => None,
-        }
+        context_of(self.files.get(&comment.file_path)?, comment.line_number)
     }
 
     /// Read every commented file not read yet (once per file).
@@ -359,5 +366,17 @@ mod tests {
         assert_eq!(last.last().map(|l| l.number), Some(10));
         assert!(code_context(&text, 0).is_none());
         assert!(code_context(&text, 11).is_none());
+    }
+
+    /// Electron shows the code only for a file with text: `content ? extractCodeContext(…) : null`.
+    #[test]
+    fn a_comment_shows_code_only_once_its_file_is_read_and_not_empty() {
+        let read = context_of(&FileText::Loaded("a\nb".into()), 2).unwrap();
+        assert_eq!(read.iter().filter(|l| l.target).map(|l| l.text.as_str()).collect::<Vec<_>>(), vec!["b"]);
+        // `extractCodeContext('', 1)` would give one empty line 1.
+        assert_eq!(code_context("", 1).map(|lines| lines.len()), Some(1));
+        assert!(context_of(&FileText::Loaded(String::new()), 1).is_none());
+        assert!(context_of(&FileText::Loading, 1).is_none());
+        assert!(context_of(&FileText::Unreadable, 1).is_none());
     }
 }
