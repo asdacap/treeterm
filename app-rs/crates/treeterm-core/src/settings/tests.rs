@@ -71,8 +71,33 @@ mod load_settings {
 
         assert_eq!(settings.terminal.font_size, 14.0);
         assert_eq!(settings, Settings::default());
-        // Unlike Electron, loading never writes; the first save creates the file.
+        // Loading never writes: the settings store creates the file with `create_if_missing`.
         assert!(!settings_path(dir.path()).exists());
+    }
+
+    /// Electron's `loadSettings` writes the defaults when there is no file; here that is
+    /// `create_if_missing`, which never replaces a file that exists.
+    #[test]
+    fn writes_defaults_when_settings_file_does_not_exist() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("userData");
+
+        assert!(create_if_missing(&dir, &Settings::default()).unwrap());
+        assert_eq!(read_back(&dir), serde_json::to_string_pretty(&Settings::default()).unwrap());
+
+        // Another app's file stays as it is.
+        let other = "{\"terminal\": {\"maxCols\": 90}}";
+        std::fs::write(settings_path(&dir), other).unwrap();
+        assert!(!create_if_missing(&dir, &Settings::default()).unwrap());
+        assert_eq!(read_back(&dir), other);
+    }
+
+    #[test]
+    fn creating_the_file_reports_a_failed_write() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+
+        // The user-data "directory" is a file, so settings.json cannot be created in it.
+        assert!(matches!(create_if_missing(file.path(), &Settings::default()), Err(SettingsError::Write { .. })));
     }
 
     #[test]

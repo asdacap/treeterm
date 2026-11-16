@@ -91,6 +91,40 @@ fn a_corrupt_file_keeps_the_settings_and_reports(cx: &mut TestAppContext) {
     assert_eq!(std::fs::read(dir.path().join("settings.json")).unwrap(), b"{nope");
 }
 
+/// Electron's `loadSettings` writes the defaults when there is no file.
+#[gpui_kit::test]
+fn a_missing_settings_file_is_created_with_the_defaults(cx: &mut TestAppContext) {
+    let root = tempfile::tempdir().unwrap();
+    let dir = root.path().join("userData");
+    let path = dir.clone();
+    let store = cx.new(|cx| SettingsStore::new(Some(path), cx));
+    let written = std::fs::read(settings::settings_path(&dir)).expect("settings.json is created");
+    assert_eq!(written, serde_json::to_vec_pretty(&Settings::default()).unwrap());
+    store.read_with(cx, |s, _| assert_eq!(s.error(), None));
+
+    // An existing file is left as it is.
+    let mut mine = Settings::default();
+    mine.terminal.max_cols = 90;
+    settings::save(&dir, &mine).unwrap();
+    let before = std::fs::read(settings::settings_path(&dir)).unwrap();
+    let path = dir.clone();
+    let store = cx.new(|cx| SettingsStore::new(Some(path), cx));
+    assert_eq!(std::fs::read(settings::settings_path(&dir)).unwrap(), before);
+    store.read_with(cx, |s, _| assert_eq!(s.settings().terminal.max_cols, 90));
+}
+
+#[gpui_kit::test]
+fn a_settings_file_that_cannot_be_created_is_reported(cx: &mut TestAppContext) {
+    // The user-data "directory" is a file: neither it nor settings.json can be created.
+    let file = tempfile::NamedTempFile::new().unwrap();
+    let path = file.path().to_owned();
+    let store = cx.new(|cx| SettingsStore::new(Some(path), cx));
+    store.read_with(cx, |s, _| {
+        assert!(s.error().unwrap().starts_with("cannot write"), "{:?}", s.error());
+        assert_eq!(**s.settings(), Settings::default());
+    });
+}
+
 /// `saveSettings` sets the settings only once written: a failed save changes nothing, and
 /// saving the same change again retries the write.
 #[gpui_kit::test]

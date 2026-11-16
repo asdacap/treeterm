@@ -69,8 +69,9 @@ fn modified(dir: &Path) -> Option<SystemTime> {
 }
 
 impl SettingsStore {
-    /// Load from `user_data_dir` and start watching. A missing file is the defaults; an
-    /// unreadable or corrupt one keeps the defaults and records the error.
+    /// Load from `user_data_dir` and start watching. A missing file is the defaults, written
+    /// to disk as Electron's `loadSettings` does; an unreadable or corrupt one keeps the
+    /// defaults (and the file) and records the error.
     pub fn new(user_data_dir: Option<PathBuf>, cx: &mut Context<Self>) -> Self {
         let mut store = Self {
             user_data_dir,
@@ -84,6 +85,7 @@ impl SettingsStore {
             _poll: None,
         };
         store.reload();
+        store.create_file();
         if store.user_data_dir.is_some() {
             let executor = cx.background_executor().clone();
             store._poll = Some(cx.spawn(async move |this, cx| {
@@ -143,6 +145,21 @@ impl SettingsStore {
                 tracing::error!(%error, "settings unreadable; keeping the current settings");
                 self.error = Some(error.to_string());
                 false
+            }
+        }
+    }
+
+    /// Write the settings when there is no file yet, as Electron's `loadSettings` does.
+    fn create_file(&mut self) {
+        let Some(dir) = &self.user_data_dir else {
+            return;
+        };
+        match settings::create_if_missing(dir, &self.settings) {
+            Ok(true) => self.seen = modified(dir),
+            Ok(false) => {}
+            Err(error) => {
+                tracing::error!(%error, "cannot create the settings file");
+                self.error = Some(error.to_string());
             }
         }
     }

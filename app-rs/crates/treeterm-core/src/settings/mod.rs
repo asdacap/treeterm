@@ -680,6 +680,28 @@ pub fn load(user_data_dir: &Path) -> Result<Settings, SettingsError> {
 /// Write `settings` as Electron's `saveSettings` does (`JSON.stringify(settings, null, 2)`),
 /// creating the directory if needed.
 pub fn save(user_data_dir: &Path, settings: &Settings) -> Result<(), SettingsError> {
+    let (path, json) = prepare_write(user_data_dir, settings)?;
+    // In place, like Electron's writeFileSync: keeps the file's mode, inode and symlink.
+    std::fs::write(&path, json).map_err(|source| SettingsError::Write { path, source })
+}
+
+/// Electron's `loadSettings` with no file: write `settings` (the defaults) as [`save`] does.
+/// A file that exists is never replaced, even one another app wrote after it was found
+/// missing. Returns whether the file was created.
+pub fn create_if_missing(user_data_dir: &Path, settings: &Settings) -> Result<bool, SettingsError> {
+    use std::io::Write as _;
+    let (path, json) = prepare_write(user_data_dir, settings)?;
+    let mut file = match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => return Ok(false),
+        Err(source) => return Err(SettingsError::Write { path, source }),
+    };
+    file.write_all(&json).map_err(|source| SettingsError::Write { path, source })?;
+    Ok(true)
+}
+
+/// The file's path and contents, with its directory created.
+fn prepare_write(user_data_dir: &Path, settings: &Settings) -> Result<(PathBuf, Vec<u8>), SettingsError> {
     let path = settings_path(user_data_dir);
     let json = match serde_json::to_vec_pretty(settings) {
         Ok(json) => json,
@@ -688,6 +710,5 @@ pub fn save(user_data_dir: &Path, settings: &Settings) -> Result<(), SettingsErr
     if let Err(source) = std::fs::create_dir_all(user_data_dir) {
         return Err(SettingsError::Write { path: user_data_dir.to_owned(), source });
     }
-    // In place, like Electron's writeFileSync: keeps the file's mode, inode and symlink.
-    std::fs::write(&path, json).map_err(|source| SettingsError::Write { path, source })
+    Ok((path, json))
 }
