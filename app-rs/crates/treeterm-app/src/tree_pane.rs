@@ -559,6 +559,8 @@ impl TreePane {
             .on_click(cx.listener(move |pane, _: &ClickEvent, _, cx| {
                 pane.select(select_id.clone(), cx);
             }))
+            // The chevron toggles; a row without children keeps the 16px slot, and a click
+            // there selects the row (`.tree-item-expand-placeholder`).
             .child(
                 div()
                     .id(SharedString::from(format!("ws-toggle-{id}")))
@@ -567,12 +569,15 @@ impl TreePane {
                     .flex()
                     .justify_center()
                     .text_color(secondary)
-                    .hover(move |d| d.text_color(primary))
                     .children(expand.map(|name| ui::icon(name, 16., secondary)))
-                    .on_click(cx.listener(move |pane, _: &ClickEvent, _, cx| {
-                        cx.stop_propagation();
-                        pane.toggle(&toggle_id, cx);
-                    })),
+                    .when(has_children, |slot| {
+                        slot.hover(move |d| d.text_color(primary)).on_click(cx.listener(
+                            move |pane, _: &ClickEvent, _, cx| {
+                                cx.stop_propagation();
+                                pane.toggle(&toggle_id, cx);
+                            },
+                        ))
+                    }),
             )
             .child(div().mr(px(8.)).flex_shrink_0().flex().items_center().child(icon))
             .when_some(pr, |row, (number, state_color, signal)| {
