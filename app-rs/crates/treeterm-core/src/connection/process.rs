@@ -88,7 +88,41 @@ pub enum ProcessEvent {
 #[error("{message}")]
 pub struct SpawnError {
     pub program: String,
+    /// Node's text for it (`spawn ssh ENOENT`), which Electron shows.
     pub message: String,
+}
+
+/// Node's name for an errno a spawn fails with (libuv's `uv_err_name`).
+fn errno_name(errno: i32) -> Option<&'static str> {
+    Some(match errno {
+        libc::E2BIG => "E2BIG",
+        libc::EACCES => "EACCES",
+        libc::EAGAIN => "EAGAIN",
+        libc::EFAULT => "EFAULT",
+        libc::EINVAL => "EINVAL",
+        libc::EIO => "EIO",
+        libc::EISDIR => "EISDIR",
+        libc::ELOOP => "ELOOP",
+        libc::EMFILE => "EMFILE",
+        libc::ENAMETOOLONG => "ENAMETOOLONG",
+        libc::ENFILE => "ENFILE",
+        libc::ENOENT => "ENOENT",
+        libc::ENOMEM => "ENOMEM",
+        libc::ENOTDIR => "ENOTDIR",
+        libc::EPERM => "EPERM",
+        libc::ETXTBSY => "ETXTBSY",
+        _ => return None,
+    })
+}
+
+/// The text of Node's spawn `error` (`spawn <program> <errno name>`), which Electron shows
+/// after its own prefix ("Port forward error: ", "Failed to spawn ssh: ", …). An error
+/// without a known errno keeps its own text.
+fn spawn_error_message(program: &str, error: &std::io::Error) -> String {
+    match error.raw_os_error().and_then(errno_name) {
+        Some(name) => format!("spawn {program} {name}"),
+        None => format!("spawn {program} {error}"),
+    }
 }
 
 /// Starts child processes. Implemented by [`TokioSpawner`] and by
@@ -192,7 +226,7 @@ impl ProcessSpawner for TokioSpawner {
             .spawn()
             .map_err(|error| SpawnError {
                 program: command.program.clone(),
-                message: error.to_string(),
+                message: spawn_error_message(&command.program, &error),
             })?;
         let stdin = child.stdin.take();
         let stdout = child.stdout.take().expect("stdout was piped");
@@ -308,22 +342,55 @@ mod tests {
         assert!(!alive, "child {pid} survived its Process");
     }
 
-    #[test]
-    fn a_missing_program_is_a_spawn_error() {
+    /// Spawning `program` fails: the error.
+    fn spawn_error(program: &str) -> SpawnError {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .unwrap();
         let _guard = runtime.enter();
-        let error = TokioSpawner
-            .spawn(&ProcessCommand::new(
-                "/nonexistent/treeterm-no-such-program",
-                vec![],
-            ))
+        TokioSpawner
+            .spawn(&ProcessCommand::new(program, vec![]))
             .err()
-            .unwrap();
+            .unwrap()
+    }
+
+    #[test]
+    fn a_missing_program_is_a_spawn_error_in_nodes_words() {
+        let error = spawn_error("/nonexistent/treeterm-no-such-program");
         assert_eq!(error.program, "/nonexistent/treeterm-no-such-program");
-        assert!(!error.message.is_empty());
+        assert_eq!(
+            error.message,
+            "spawn /nonexistent/treeterm-no-such-program ENOENT"
+        );
+        // Looked up on PATH, it is named as it was asked for.
+        assert_eq!(
+            spawn_error("treeterm-no-such-program").to_string(),
+            "spawn treeterm-no-such-program ENOENT"
+        );
+    }
+
+    #[test]
+    fn a_program_that_cannot_be_run_is_a_spawn_error_in_nodes_words() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let path = file.path().to_str().unwrap().to_owned();
+        assert_eq!(spawn_error(&path).message, format!("spawn {path} EACCES"));
+    }
+
+    #[test]
+    fn a_spawn_error_without_a_known_errno_keeps_its_own_text() {
+        let error = std::io::Error::other("no pipes left");
+        assert_eq!(
+            spawn_error_message("ssh", &error),
+            "spawn ssh no pipes left"
+        );
+        let unnamed = std::io::Error::from_raw_os_error(libc::EDOM);
+        assert_eq!(
+            spawn_error_message("ssh", &unnamed),
+            format!("spawn ssh {unnamed}")
+        );
+        let named = std::io::Error::from_raw_os_error(libc::ENOTDIR);
+        assert_eq!(spawn_error_message("ssh", &named), "spawn ssh ENOTDIR");
     }
 
     #[test]
