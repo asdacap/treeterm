@@ -28,6 +28,10 @@ pub const SCROLLBACK_LINES: usize = 50_000;
 /// Largest clipboard write a program may make through OSC 52.
 pub const MAX_OSC52_BYTES: usize = 1024 * 1024;
 
+/// The characters that end a double-clicked word: xterm.js's default `wordSeparator`, so
+/// `src/main.rs:42`, `a|b`, `<tag>` and URLs select whole, as in Electron.
+pub const XTERM_WORD_SEPARATORS: &str = " ()[]{}',\"`";
+
 pub type SharedTerm = Arc<FairMutex<Term<Listener>>>;
 
 /// A terminal's grid size in cells.
@@ -91,6 +95,7 @@ impl EmulatorSettings {
             } else {
                 Osc52::Disabled
             },
+            semantic_escape_chars: XTERM_WORD_SEPARATORS.to_owned(),
             ..Config::default()
         }
     }
@@ -548,6 +553,28 @@ mod tests {
         core.term().lock().scroll_display(Scroll::Bottom);
         core.resize(GridSize { cols: 20, rows: 4 });
         assert_eq!(view::scroll_position(&*core.term().lock()), view::ScrollPosition::Bottom);
+    }
+
+    /// The text a double-click at `column` of the first row of `text` selects.
+    fn double_clicked(text: &str, column: usize) -> String {
+        use alacritty_terminal::index::{Column, Line, Point, Side};
+        use alacritty_terminal::selection::{Selection, SelectionType};
+        let (mut core, _) = core_with_answers();
+        core.resize(GridSize { cols: 40, rows: 2 });
+        core.feed(text.as_bytes());
+        let mut term = core.term().lock();
+        let at = Point::new(Line(0), Column(column));
+        term.selection = Some(Selection::new(SelectionType::Semantic, at, Side::Left));
+        term.selection_to_string().unwrap()
+    }
+
+    #[test]
+    fn a_double_click_selects_a_word_bounded_by_xterm_js_separators() {
+        assert_eq!(double_clicked("see src/main.rs:42 now", 6), "src/main.rs:42");
+        assert_eq!(double_clicked("open https://x.io/a?b=1 now", 8), "https://x.io/a?b=1");
+        assert_eq!(double_clicked("a<b>c|d e", 2), "a<b>c|d");
+        assert_eq!(double_clicked("call f(x) now", 5), "f", "stops at the paren");
+        assert_eq!(double_clicked("say 'yo',\"hi\"", 5), "yo");
     }
 
     #[test]
