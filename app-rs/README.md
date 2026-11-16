@@ -202,7 +202,9 @@ The chrome was matched to Electron's computed styles, measured side by side on o
 - Text: GPUI renders the system font 1–3px wider per label and has no `letter-spacing`;
   Chromium colour-manages saturated colours (same tokens, different pixels).
 - GPUI Kit limits: tooltips are not the native macOS ones; dialog shadows are lighter; the
-  diff view keeps 19.2px rows, its own fold rows and two columns for added/deleted files;
+  diff view keeps 19.2px rows, its own fold rows and two columns for added/deleted files,
+  and shows a file once, so a partially staged file has one section with both Unstage and
+  Stage (Electron lists it twice, each section with the staged hunks);
   the editor has no minimap and cannot open space between lines, so the Files viewer lists
   its file's review comments (and the comment box) in a panel under the editor instead of
   Monaco's view zones; selects open a Kit menu, not the native popup; textareas have no

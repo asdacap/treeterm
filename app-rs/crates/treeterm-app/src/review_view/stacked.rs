@@ -131,6 +131,8 @@ struct Header {
     /// A binary file and whether the view has it folded.
     binary: Option<bool>,
     file: ListedFile,
+    /// Uncommitted files: the lists it is in, in list order (a button each).
+    staging: Vec<Staging>,
     viewed: bool,
     /// The files above it (right-click "Viewed" marks them).
     above: Vec<String>,
@@ -378,7 +380,8 @@ impl ReviewView {
         let mut items: HashMap<ElementId, Annotated> = HashMap::new();
         let binary = self.diff.as_ref().map(|diff| diff.binary.clone()).unwrap_or_default();
         let model = self.model.read(cx);
-        for (index, file) in order.iter().enumerate() {
+        for (index, staging) in file_headers(order) {
+            let file = &order[index];
             let id = ElementId::from(SharedString::from(format!("header-{}", file.path)));
             annotations.push(DiffAnnotation::file(id.clone(), file.path.clone()));
             items.insert(
@@ -386,6 +389,7 @@ impl ReviewView {
                 Annotated::Header(Header {
                     binary: binary.contains(&file.path).then(|| self.closed_binary.contains(&file.path)),
                     file: file.clone(),
+                    staging,
                     viewed: viewed.contains(&file.path),
                     above: order[..index].iter().map(|f| f.path.clone()).collect(),
                     image: model.image(&file.path).cloned(),
@@ -498,6 +502,25 @@ impl ReviewView {
         // a rem that makes its code 12px.
         RemScope { rem: px(16. * 12. / 13.), child: diff }.into_any_element()
     }
+}
+
+/// One header per path, at its first listing, with the lists the path is in (in list
+/// order). A partially staged file is listed twice: `StackedDiffList` gives it an "Unstage"
+/// section and a "Stage" section, both showing its staged hunks. GPUI Kit keys files by
+/// path, so the diff shows it once, under one header with both buttons.
+fn file_headers(order: &[ListedFile]) -> Vec<(usize, Vec<Staging>)> {
+    let mut headers: Vec<(usize, Vec<Staging>)> = Vec::new();
+    let mut at: HashMap<&str, usize> = HashMap::new();
+    for (index, file) in order.iter().enumerate() {
+        match at.get(file.path.as_str()) {
+            Some(&header) => headers[header].1.extend(file.staged),
+            None => {
+                at.insert(&file.path, headers.len());
+                headers.push((index, file.staged.into_iter().collect()));
+            }
+        }
+    }
+    headers
 }
 
 /// Pierre's body and its changed-row tints, as Chromium draws them.
@@ -654,18 +677,27 @@ fn header_row(
             }
         }
     };
-    let stage = file.staged.map(|staged| {
-        let (model, target) = (model.clone(), StageTarget::File(file.path.clone()));
-        outline_button(SharedString::from(format!("header-stage-{}", file.path)), 11., (1., 6.), 3., !staging_busy, cx)
-            .child(if staged == Staging::Staged { "Unstage" } else { "Stage" })
-            .when(!staging_busy, |d| {
+    let stage: Vec<_> = header
+        .staging
+        .iter()
+        .map(|&staged| {
+            let (model, target) = (model.clone(), StageTarget::File(file.path.clone()));
+            let (id, label) = match staged {
+                Staging::Staged => (format!("header-unstage-{}", file.path), "Unstage"),
+                Staging::Unstaged => (format!("header-stage-{}", file.path), "Stage"),
+            };
+            outline_button(SharedString::from(id), 11., (1., 6.), 3., !staging_busy, cx).child(label).when(!staging_busy, |d| {
                 d.on_click(move |_, _, cx| {
                     cx.stop_propagation();
                     let target = target.clone();
-                    model.update(cx, |m, cx| if staged == Staging::Staged { m.unstage(target, cx) } else { m.stage(target, cx) });
+                    model.update(cx, |m, cx| match staged {
+                        Staging::Staged => m.unstage(target, cx),
+                        Staging::Unstaged => m.stage(target, cx),
+                    });
                 })
             })
-    });
+        })
+        .collect();
     let refresh = {
         let model = model.clone();
         div()
@@ -1071,6 +1103,27 @@ mod tests {
         draw(cx);
         assert_eq!(comments(cx)[1..], [("file.txt".to_owned(), Side::Modified, 3)]);
         assert_eq!(selected(cx), None);
+    }
+
+    fn listed(path: &str, staged: Option<Staging>) -> ListedFile {
+        ListedFile { path: path.to_owned(), status: FileChangeStatus::Modified, stats: FileChangeStats::Unknown, staged }
+    }
+
+    #[test]
+    fn a_partially_staged_file_has_one_header_with_both_buttons() {
+        let order = [
+            listed("a.txt", Some(Staging::Unstaged)),
+            listed("b.txt", Some(Staging::Staged)),
+            listed("b.txt", Some(Staging::Unstaged)),
+            listed("c.txt", Some(Staging::Staged)),
+        ];
+        assert_eq!(
+            file_headers(&order),
+            [(0, vec![Staging::Unstaged]), (1, vec![Staging::Staged, Staging::Unstaged]), (3, vec![Staging::Staged])]
+        );
+        // Committed files have no button.
+        assert_eq!(file_headers(&[listed("a.txt", None), listed("b.txt", None)]), [(0, vec![]), (1, vec![])]);
+        assert_eq!(file_headers(&[]), []);
     }
 
     #[gpui_kit::test]
