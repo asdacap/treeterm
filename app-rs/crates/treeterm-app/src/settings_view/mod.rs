@@ -16,10 +16,11 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use gpui_kit::component::WindowExt as _;
-use gpui_kit::component::input::{InputEvent, InputState, TextareaState};
+use gpui_kit::component::input::{AnyInputState, InputEvent, InputState, TextareaState};
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    App, Context, Entity, FocusHandle, SharedString, Subscription, Task, WeakEntity, Window, canvas, div, px,
+    App, Bounds, Context, Entity, FocusHandle, Focusable as _, Pixels, SharedString, Subscription, Task, WeakEntity,
+    WeakFocusHandle, Window, canvas, div, point, px,
 };
 use treeterm_core::keybinding::Os;
 use treeterm_core::settings::{
@@ -74,9 +75,10 @@ pub struct SettingsView {
     error: Option<SharedString>,
     saving: Saving,
     recording: Option<Recording>,
-    /// Takes the keystrokes while recording.
+    /// Takes the keystrokes while recording, before the focused button (which keeps the focus,
+    /// as in Electron) or a key binding sees them.
     intercept: Option<Subscription>,
-    /// Focused while recording, so no input takes the keys too.
+    /// The dialog's own.
     focus: FocusHandle,
     /// The Classifier Provider select's, which its `<label>` focuses.
     provider_focus: FocusHandle,
@@ -84,6 +86,9 @@ pub struct SettingsView {
     /// up to 80% of the window, as Electron's does.
     body_height: f32,
     scroll: gpui_kit::ScrollHandle,
+    /// The focus [`SettingsView::reveal_focus`] last saw, so that the panel scrolls only as the
+    /// focus moves.
+    focus_seen: Option<WeakFocusHandle>,
 }
 
 /// The single-value text fields; see [`Texts`] for what each holds.
@@ -248,6 +253,7 @@ impl SettingsView {
             provider_focus: cx.focus_handle(),
             body_height: 0.,
             scroll: gpui_kit::ScrollHandle::new(),
+            focus_seen: None,
         }
     }
 
@@ -308,7 +314,7 @@ impl SettingsView {
     /// move), as Electron's `preventDefault` + `stopPropagation` do.
     /// Only the keys the shortcuts claim come before it: Electron's prefix handler runs in
     /// the capture phase, so recording the current prefix key takes a second press.
-    fn toggle_recording(&mut self, target: Recording, window: &mut Window, cx: &mut Context<Self>) {
+    fn toggle_recording(&mut self, target: Recording, cx: &mut Context<Self>) {
         self.recording = if self.recording == Some(target) { None } else { Some(target) };
         self.intercept = self.recording.map(|_| {
             let (view, keybindings) = (cx.entity().downgrade(), self.keybindings.clone());
@@ -325,7 +331,6 @@ impl SettingsView {
                 }
             })
         });
-        window.focus(&self.focus, cx);
         cx.notify();
     }
 
@@ -347,6 +352,36 @@ impl SettingsView {
         self.intercept = None;
         cx.notify();
         true
+    }
+
+    /// Chromium's `focus()` scroll: once the focus has moved to a control in the panel, from
+    /// the keyboard or a `<label>`, scroll the panel so that the control is in view
+    /// ([`ui::reveal_scroll_top`]). A control pressed with the pointer stays where it is, as
+    /// Chromium scrolls only for a focus that sets the selection, which a mouse focus does not.
+    /// Runs once the panel's controls are laid out, which report where they are
+    /// ([`ui::FocusedControl`]).
+    fn reveal_focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(focused) = window.focused(cx) else {
+            self.focus_seen = None;
+            return;
+        };
+        if self.focus_seen.as_ref().is_some_and(|seen| *seen == focused) {
+            return;
+        }
+        self.focus_seen = Some(focused.downgrade());
+        let Some(control) = ui::FocusedControl::bounds_of(&focused, cx).or_else(|| input_bounds(&focused, window, cx))
+        else {
+            return; // the focus is outside the panel
+        };
+        if !window.last_input_was_keyboard() && control.contains(&window.mouse_position()) {
+            return;
+        }
+        let top = -f32::from(self.scroll.offset().y);
+        let max = f32::from(self.scroll.max_offset().y);
+        if let Some(scrolled) = ui::reveal_scroll_top(control, self.scroll.bounds(), top, max) {
+            self.scroll.set_offset(point(self.scroll.offset().x, px(-scrolled)));
+            cx.notify();
+        }
     }
 
     /// `.settings-tabs`: 140px, 8px vertical padding, a right border; `.settings-tab` buttons
@@ -430,6 +465,17 @@ impl Render for SettingsView {
         .top_0()
         .left_0()
         .size_full();
+        // Around the section: what its controls report is all [`Self::reveal_focus`] reads.
+        let forget_focused = canvas(|_, _, cx| ui::FocusedControl::clear(cx), |_, _, _, _| {});
+        let revealing = cx.entity().downgrade();
+        let reveal = canvas(
+            move |_, window, cx| {
+                if let Err(error) = revealing.update(cx, |view, cx| view.reveal_focus(window, cx)) {
+                    tracing::debug!(%error, "settings closed");
+                }
+            },
+            |_, _, _, _| {},
+        );
         let error = colors(cx).error;
         let header = ui::dialog_key_header("Settings", "×", colors(cx).text_primary, window, cx);
         let sidebar = self.sidebar(window, cx);
@@ -460,7 +506,9 @@ impl Render for SettingsView {
                                 // The scrollbar's 10px gutter when the section overflows.
                                 .pr(px(if overflows { 30. } else { 20. }))
                                 .py(px(16.))
-                                .child(div().relative().child(body).child(measure)),
+                                .child(
+                                    div().relative().child(forget_focused).child(body).child(measure).child(reveal),
+                                ),
                         )
                         .when(overflows, |panel| {
                             panel.child(ui::scrollbar_thumb(&self.scroll, content_height, natural, cx))
@@ -484,6 +532,16 @@ impl Render for SettingsView {
                     .child(cancel)
                     .child(save),
             )
+    }
+}
+
+/// Where the GPUI Kit text field or textarea `focused` focuses has its text, if it has the
+/// focus (the Kit's inputs take no [`ui::FocusedControl`] probe).
+fn input_bounds(focused: &FocusHandle, window: &mut Window, cx: &mut App) -> Option<Bounds<Pixels>> {
+    match window.focused_input(cx)? {
+        AnyInputState::Input(state) => (state.focus_handle(cx) == *focused).then(|| state.read(cx).input_bounds()),
+        AnyInputState::Textarea(state) => (state.focus_handle(cx) == *focused).then(|| state.read(cx).input_bounds()),
+        AnyInputState::Editor(_) | AnyInputState::Otp(_) => None,
     }
 }
 
@@ -627,7 +685,7 @@ mod tests {
     #[gpui_kit::test]
     fn recording_the_current_prefix_key_takes_a_second_press(cx: &mut TestAppContext) {
         let (cx, keybindings, view) = dialog(cx);
-        cx.update(|window, cx| view.update(cx, |view, cx| view.toggle_recording(Recording::Prefix, window, cx)));
+        cx.update(|_, cx| view.update(cx, |view, cx| view.toggle_recording(Recording::Prefix, cx)));
 
         cx.simulate_keystrokes("ctrl-b");
         assert_eq!(mode(cx, &keybindings), PrefixMode::Active);
@@ -738,7 +796,7 @@ mod tests {
     #[gpui_kit::test]
     fn action_keys_in_prefix_mode_are_not_recorded(cx: &mut TestAppContext) {
         let (cx, keybindings, view) = dialog(cx);
-        cx.update(|window, cx| view.update(cx, |view, cx| view.toggle_recording(Recording::Action(1), window, cx)));
+        cx.update(|_, cx| view.update(cx, |view, cx| view.toggle_recording(Recording::Action(1), cx)));
 
         cx.simulate_keystrokes("ctrl-b c");
         assert_eq!(mode(cx, &keybindings), PrefixMode::Idle);
@@ -1132,10 +1190,106 @@ mod tests {
         assert!(cx.update(|window, cx| window.has_active_dialog(cx)), "still open");
         assert_eq!(texts(cx, &view).font_size, "20");
 
-        cx.update(|window, cx| view.update(cx, |view, cx| view.toggle_recording(Recording::Action(1), window, cx)));
+        cx.update(|_, cx| view.update(cx, |view, cx| view.toggle_recording(Recording::Action(1), cx)));
         cx.simulate_keystrokes("escape");
         cx.run_until_parked();
         assert_eq!(texts(cx, &view).action_keys[1], "Escape");
         assert!(cx.update(|window, cx| window.has_active_dialog(cx)), "still open");
+    }
+
+    /// A keybinding button keeps the focus while it records and after, as Electron's does: Tab
+    /// goes on from it. The key recorded does not press it again, Space and Enter included.
+    #[gpui_kit::test]
+    fn a_keybinding_button_keeps_the_focus_while_and_after_it_records(cx: &mut TestAppContext) {
+        let (cx, _, view) = dialog(cx);
+        show(Section::Keybindings, cx, &view);
+        tab_to("prefix-key", cx);
+        press("space", cx);
+        assert_eq!(recording(cx, &view), Some(Recording::Prefix));
+        assert_eq!(focused_control(cx), "prefix-key");
+
+        cx.simulate_keystrokes("ctrl-a");
+        assert_eq!(recording(cx, &view), None);
+        assert_eq!(texts(cx, &view).prefix_key, "CommandOrControl+A");
+        assert_eq!(focused_control(cx), "prefix-key");
+        cx.simulate_keystrokes("tab");
+        assert_eq!(focused_control(cx), "text field", "the Timeout field, after the button");
+
+        cx.simulate_keystrokes("tab");
+        let new_tab = focused_control(cx);
+        for key in ["space", "enter"] {
+            press("enter", cx);
+            assert_eq!(recording(cx, &view), Some(Recording::Action(0)));
+            press(key, cx);
+            assert_eq!(recording(cx, &view), None, "{key} was recorded, not a press");
+            assert_eq!(focused_control(cx), new_tab);
+        }
+        assert_eq!(texts(cx, &view).action_keys[0], "Enter");
+    }
+
+    /// Where the focused control of the panel was drawn, as [`SettingsView::reveal_focus`]
+    /// finds it.
+    fn focused_bounds(cx: &mut VisualTestContext) -> Bounds<Pixels> {
+        cx.update(|window, cx| {
+            let focused = window.focused(cx).expect("a control has the focus");
+            ui::FocusedControl::bounds_of(&focused, cx)
+                .or_else(|| input_bounds(&focused, window, cx))
+                .expect("the control is in the panel")
+        })
+    }
+
+    /// Draw until the panel stops scrolling: a frame scrolls it, the next shows it scrolled.
+    fn settle(cx: &mut VisualTestContext) {
+        for _ in 0..3 {
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            cx.run_until_parked();
+        }
+    }
+
+    /// Tab and Shift+Tab onto a control below or above the panel's fold scroll the panel until
+    /// the whole control shows, as Chromium's `focus()` does, and leave it where it is while
+    /// the focused control shows already.
+    #[gpui_kit::test]
+    fn the_panel_scrolls_a_control_tabbed_to_into_view(cx: &mut TestAppContext) {
+        let (cx, _, view) = dialog(cx);
+        show(Section::Llm, cx, &view);
+        settle(cx);
+        let scrolled = |cx: &mut VisualTestContext| cx.update(|_, cx| -f32::from(view.read(cx).scroll.offset().y));
+        let panel = cx.update(|_, cx| view.read(cx).scroll.bounds());
+        assert!(cx.update(|_, cx| f32::from(view.read(cx).scroll.max_offset().y)) > 100., "the section overflows");
+        let in_view = |cx: &mut VisualTestContext| {
+            let control = focused_bounds(cx);
+            control.top() >= panel.top() - px(0.5) && control.bottom() <= panel.bottom() + px(0.5)
+        };
+
+        tab_to("Debug", cx);
+        let mut controls = 0;
+        loop {
+            cx.simulate_keystrokes("tab");
+            settle(cx);
+            if focused_control(cx) == "cancel-settings" {
+                break;
+            }
+            controls += 1;
+            assert!(in_view(cx), "control {controls} shows once focused");
+        }
+        let bottom = scrolled(cx);
+        assert!(bottom > 100., "the panel scrolled down");
+        cx.simulate_keystrokes("shift-tab");
+        settle(cx);
+        assert!(in_view(cx));
+        assert_eq!(scrolled(cx), bottom, "the last control showed already");
+
+        // Back up from Safe Paths to Base URL, the first field.
+        let (safe_paths, base_url) =
+            cx.update(|_, cx| (view.read(cx).inputs.safe_paths.clone(), view.read(cx).inputs.llm_base_url.clone()));
+        focus_field(&safe_paths, cx);
+        settle(cx);
+        while !is_focused(&base_url, cx) {
+            cx.simulate_keystrokes("shift-tab");
+            settle(cx);
+            assert!(in_view(cx), "{} shows once focused", focused_control(cx));
+        }
+        assert!(scrolled(cx) < 50., "the panel scrolled back up");
     }
 }

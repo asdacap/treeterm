@@ -113,7 +113,9 @@ Done (tested against a real in-process daemon unless noted):
   as with xterm.js), Exit and Kill Daemon; all 13 Settings sections (reopened on the one shown
   last; Escape leaves the dialog open), whose controls Tab reaches as Electron's native ones
   (Space or Enter presses a button, Space toggles a checkbox, Space or an arrow opens a
-  select, Tab leaves a textarea, a linked label focuses its control); live reload when
+  select, Tab leaves a textarea, a linked label focuses its control, the panel scrolls a
+  control focused from the keyboard or its label into view, and a keybinding button keeps the
+  focus while and after it records); live reload when
   Electron edits `settings.json`; close confirmation for unmerged workspaces; Window → Active
   Processes.
 - **Connections (M4):** local + SSH sessions on the core connection manager (bootstrap,
@@ -370,8 +372,7 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   and Settings' and Add Child's textareas resize down to one line, where Chromium's go down
   to none; GPUI has no backdrop filter, so the prefix-mode
   overlay does not blur what is behind it; GPUI has no animated scrolling, so the Chat tab
-  jumps to its last message where Electron's smooth-scrolls there; GPUI does not scroll a
-  focused control into view, so Tab can focus a Settings field below the panel's fold. Off
+  jumps to its last message where Electron's smooth-scrolls there. Off
   macOS the menu bar is GPUI Kit's, drawn in the window (not GTK's), above dialogs so that it
   stays usable while one is open, as GTK's is. On macOS GPUI greys out an
   Edit item that nothing focused can do (Undo, Redo or Cut in a terminal, Paste with no input

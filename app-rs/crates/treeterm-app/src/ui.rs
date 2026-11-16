@@ -742,7 +742,11 @@ pub fn key_select_box(
 /// Space, ArrowUp or ArrowDown open its menu, but Enter does not. `focus` is its focus handle,
 /// which a `<label>` linked to it focuses ([`keyed_focus`] when none is).
 pub fn key_select(boxed: Stateful<Div>, focus: &FocusHandle) -> Stateful<Div> {
-    boxed.track_focus(&focus.clone().tab_stop(true)).key_context(KEY_SELECT).role(gpui_kit::Role::ComboBox)
+    boxed
+        .track_focus(&focus.clone().tab_stop(true))
+        .key_context(KEY_SELECT)
+        .role(gpui_kit::Role::ComboBox)
+        .child(focus_probe(focus))
 }
 
 /// A `.context-menu-item` for GPUI Kit's popup menu: 13px text on a 31.5px pitch (the menu
@@ -818,6 +822,76 @@ pub fn alert_failure(outcome: gpui_kit::Task<Result<(), String>>, window: &mut W
             }
         })
         .detach();
+}
+
+/// The control holding the focus and where it was last drawn, as its [`focus_probe`]
+/// reports it, for a scroller that brings the focused control into view.
+#[derive(Default)]
+pub struct FocusedControl(Option<(gpui_kit::WeakFocusHandle, gpui_kit::Bounds<gpui_kit::Pixels>)>);
+
+impl gpui_kit::Global for FocusedControl {}
+
+impl FocusedControl {
+    /// Forget the control reported. A scroller does this before its content is drawn, so that
+    /// a control [`Self::bounds_of`] finds after it is one of its own.
+    pub fn clear(cx: &mut App) {
+        cx.default_global::<Self>().0 = None;
+    }
+
+    /// Where the control `focus` focuses was drawn since [`Self::clear`], if it reports.
+    pub fn bounds_of(focus: &FocusHandle, cx: &App) -> Option<gpui_kit::Bounds<gpui_kit::Pixels>> {
+        match cx.try_global::<Self>() {
+            Some(FocusedControl(Some((reported, bounds)))) if reported == focus => Some(*bounds),
+            Some(_) | None => None,
+        }
+    }
+}
+
+/// Laid over a control (absolutely, at its size): while `focus`, the control's focus handle,
+/// has the focus, it reports where the control is drawn ([`FocusedControl`]).
+fn focus_probe(focus: &FocusHandle) -> impl IntoElement + use<> {
+    let focus = focus.clone();
+    gpui_kit::canvas(
+        move |bounds, window, cx| {
+            if focus.is_focused(window) {
+                cx.default_global::<FocusedControl>().0 = Some((focus.downgrade(), bounds));
+            }
+        },
+        |_, _, _, _| {},
+    )
+    .absolute()
+    .top_0()
+    .left_0()
+    .size_full()
+}
+
+/// The scroll top (the distance scrolled from the top, within `0..=max`) that brings `control`
+/// into `viewport`, as Chromium's `focus()` scrolls (`ScrollAlignment::CenterIfNeeded`): none
+/// while it is wholly in view or covers the viewport; partly in view, its nearest edge goes to
+/// the viewport's; out of view, it is centred. Both were drawn scrolled to `top`.
+pub fn reveal_scroll_top(
+    control: gpui_kit::Bounds<gpui_kit::Pixels>,
+    viewport: gpui_kit::Bounds<gpui_kit::Pixels>,
+    top: f32,
+    max: f32,
+) -> Option<f32> {
+    let (control_top, control_bottom) = (f32::from(control.top()), f32::from(control.bottom()));
+    let (viewport_top, viewport_bottom) = (f32::from(viewport.top()), f32::from(viewport.bottom()));
+    let (height, viewport_height) = (control_bottom - control_top, viewport_bottom - viewport_top);
+    let visible = (control_bottom.min(viewport_bottom) - control_top.max(viewport_top)).max(0.);
+    let by = if visible >= height || visible >= viewport_height {
+        return None;
+    } else if visible > 0. {
+        // Chromium's closest edge: the bottom one for a control below and smaller than the
+        // viewport, or above and larger.
+        let bottom = (control_bottom > viewport_bottom && height < viewport_height)
+            || (control_bottom < viewport_bottom && height > viewport_height);
+        if bottom { control_bottom - viewport_bottom } else { control_top - viewport_top }
+    } else {
+        (control_top + control_bottom - viewport_top - viewport_bottom) / 2.
+    };
+    let scrolled = (top + by).clamp(0., max);
+    (scrolled != top).then_some(scrolled)
 }
 
 /// The app's `::-webkit-scrollbar` (10px gutter, transparent track, a border-colour thumb
@@ -1541,6 +1615,7 @@ pub fn ringless_key_button(id: impl Into<ElementId>, focus: &FocusHandle, radius
         // The line box the button inherits (the base button sets the font size's).
         .line_height(relative(1.2))
         .rounded(px(radius))
+        .child(focus_probe(focus))
 }
 
 /// A native `<input type="checkbox">` of `size` px ([`checkbox_box`]) with its `<label>`:
@@ -1564,7 +1639,11 @@ pub fn key_checkbox(
         .key_context(KEY_CONTROL)
         .checked(checked)
         .disabled(disabled)
-        .child(checkbox_box(checked, disabled, size).when(ring, |b| b.child(focus_outline(radius))))
+        .child(
+            checkbox_box(checked, disabled, size)
+                .when(ring, |b| b.child(focus_outline(radius)))
+                .child(focus_probe(&focus)),
+        )
 }
 
 /// Whether a click came from Enter on the focused control.
@@ -1711,6 +1790,30 @@ mod tests {
     use gpui_kit::{Context, KeyDownEvent, KeyUpEvent, Keystroke, Render, TestAppContext, VisualTestContext};
 
     use super::*;
+
+    /// A control at `top`, `height` tall, in a 100px viewport at y 50 scrolled 40px of 300.
+    fn revealed(top: f32, height: f32) -> Option<f32> {
+        use gpui_kit::{Bounds, point, size};
+        let control = Bounds::new(point(px(0.), px(top)), size(px(10.), px(height)));
+        let viewport = Bounds::new(point(px(0.), px(50.)), size(px(10.), px(100.)));
+        reveal_scroll_top(control, viewport, 40., 300.)
+    }
+
+    /// Chromium's `CenterIfNeeded`: in view, nothing; partly in view, the nearest edge; out of
+    /// view, centred; never past the ends.
+    #[test]
+    fn a_focused_control_scrolls_into_view_as_in_chromium() {
+        assert_eq!(revealed(50., 100.), None, "wholly in view");
+        assert_eq!(revealed(60., 20.), None);
+        assert_eq!(revealed(20., 200.), None, "covering the viewport");
+        assert_eq!(revealed(140., 20.), Some(50.), "partly below: its bottom at the bottom");
+        assert_eq!(revealed(40., 20.), Some(30.), "partly above: its top at the top");
+        assert_eq!(revealed(100., 150.), Some(90.), "partly below and taller: its top at the top");
+        assert_eq!(revealed(-40., 150.), Some(0.), "partly above and taller: its bottom at the bottom");
+        assert_eq!(revealed(300., 20.), Some(250.), "below: centred");
+        assert_eq!(revealed(0., 20.), Some(0.), "above: centred, as far as it goes");
+        assert_eq!(revealed(900., 20.), Some(300.), "as far as it goes");
+    }
 
     gpui_kit::actions!(ui_test, [Submit]);
 

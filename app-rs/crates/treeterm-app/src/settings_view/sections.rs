@@ -381,7 +381,7 @@ impl SettingsView {
         };
         let recording_prefix = self.recording == Some(Recording::Prefix);
         let prefix = keybinding_button("prefix-key", prefix_label, recording_prefix, false, window, cx)
-            .on_click(cx.listener(|view, _, window, cx| view.toggle_recording(Recording::Prefix, window, cx)));
+            .on_click(cx.listener(|view, _, _, cx| view.toggle_recording(Recording::Prefix, cx)));
         let mut list = section()
             .child(group(
                 "Prefix Key",
@@ -400,7 +400,7 @@ impl SettingsView {
             let recording = self.recording == Some(Recording::Action(index));
             let text = if recording { "Press key...".to_owned() } else { input.read(cx).value().to_uppercase() };
             let button = keybinding_button(("action-key", index), text, recording, true, window, cx).on_click(cx.listener(
-                move |view, _, window, cx| view.toggle_recording(Recording::Action(index), window, cx),
+                move |view, _, _, cx| view.toggle_recording(Recording::Action(index), cx),
             ));
             // `.keybinding-row`: label and button 8px apart.
             list = list.child(div().flex().flex_col().gap(px(8.)).child(label(action_label(*action), cx)).child(button));
