@@ -5,8 +5,8 @@ use gpui_kit::component::input::{Escape, Input, InputEvent, InputState};
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    App, Context, Entity, EventEmitter, FontWeight, SharedString, Subscription, Window, div, px,
-    relative,
+    App, Context, Entity, EventEmitter, FocusHandle, Focusable as _, FontWeight, SharedString,
+    Subscription, Window, div, px, relative,
 };
 use treeterm_core::fs::FsClient;
 use treeterm_model::dir_browser::{DirBrowser, DirBrowserEvent, Listing};
@@ -25,10 +25,21 @@ pub enum RemoteDirBrowserEvent {
     Cancelled,
 }
 
+/// Where the keyboard focus is, for a host that handles Enter itself.
+pub enum BrowserFocus {
+    /// The path field, whose Enter goes to the typed path.
+    PathField,
+    /// Elsewhere in the browser: on one of its buttons, which Enter presses.
+    Inside,
+    Outside,
+}
+
 pub struct RemoteDirBrowserView {
     browser: Entity<DirBrowser>,
     /// The editable path; Enter goes there, and so does leaving it.
     path: Entity<InputState>,
+    /// The whole browser's, to tell whether the focus is inside it.
+    focus: FocusHandle,
     _subscriptions: [Subscription; 3],
 }
 
@@ -108,6 +119,7 @@ impl RemoteDirBrowserView {
         Self {
             browser,
             path,
+            focus: cx.focus_handle(),
             _subscriptions: [typed, navigated, changed],
         }
     }
@@ -116,18 +128,31 @@ impl RemoteDirBrowserView {
     fn typed(&self, cx: &App) -> String {
         self.path.read(cx).value().to_string()
     }
+
+    /// Where the keyboard focus is, for Open Workspace's Enter.
+    pub fn keyboard_focus(&self, window: &Window, cx: &App) -> BrowserFocus {
+        if self.path.read(cx).focus_handle(cx).is_focused(window) {
+            BrowserFocus::PathField
+        } else if self.focus.contains_focused(window, cx) {
+            BrowserFocus::Inside
+        } else {
+            BrowserFocus::Outside
+        }
+    }
 }
 
 impl Render for RemoteDirBrowserView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let c = colors(cx);
-        let (primary, secondary, accent, border, hover, bg) = (
+        let (primary, secondary, accent, border, hover, bg, tertiary, error) = (
             c.text_primary,
             c.text_secondary,
             c.accent,
             c.border,
             c.bg_hover,
             c.bg_secondary,
+            c.bg_tertiary,
+            c.error,
         );
         let browser = self.browser.read(cx);
         let (at_root, crumbs, listing) = (
@@ -136,11 +161,10 @@ impl Render for RemoteDirBrowserView {
             browser.listing().clone(),
         );
         // `.remote-dir-up-btn`: "..", 4px 10px, bold 13px; dimmed at the root.
-        let up_button = div()
-            .id("dir-up")
+        let up_button = ui::key_button("dir-up", 4., window, cx)
+            .disabled(at_root)
             .px(px(10.))
             .py(px(4.))
-            .rounded(px(4.))
             .border_1()
             .border_color(border)
             .bg(bg)
@@ -152,15 +176,12 @@ impl Render for RemoteDirBrowserView {
             .child("..")
             .tooltip(|window, cx| Tooltip::new("Go up").build(window, cx))
             .when(at_root, |d| d.opacity(0.4))
-            .when(!at_root, |d| {
-                d.cursor_pointer()
-                    .hover(move |d| d.bg(hover))
-                    .on_click(cx.listener(|view, _, _, cx| {
-                        let typed = view.typed(cx);
-                        view.browser
-                            .update(cx, |browser, cx| browser.go_up(&typed, cx))
-                    }))
-            });
+            .when(!at_root, |d| d.cursor_pointer().hover(move |d| d.bg(hover)))
+            .on_click(cx.listener(|view, _, _, cx| {
+                let typed = view.typed(cx);
+                view.browser
+                    .update(cx, |browser, cx| browser.go_up(&typed, cx))
+            }));
         let path_input = gpui_kit::Styled::h(Input::new(&self.path), px(24.))
             .flex_1()
             .px(px(8.))
@@ -184,28 +205,32 @@ impl Render for RemoteDirBrowserView {
             let last = i + 1 == count;
             let target = crumb.target;
             breadcrumb = breadcrumb.child(
-                div()
-                    .id(SharedString::from(format!("crumb-{target}")))
-                    .px(px(2.))
-                    .py(px(1.))
-                    .rounded(px(2.))
-                    .font_family(BUTTON_FONT)
-                    .line_height(relative(1.2))
-                    .when(last, |d| {
-                        d.text_color(primary).font_weight(FontWeight::MEDIUM)
+                ui::key_button(
+                    SharedString::from(format!("crumb-{target}")),
+                    2.,
+                    window,
+                    cx,
+                )
+                .disabled(last)
+                .px(px(2.))
+                .py(px(1.))
+                .font_family(BUTTON_FONT)
+                .line_height(relative(1.2))
+                .when(last, |d| {
+                    d.text_color(primary).font_weight(FontWeight::MEDIUM)
+                })
+                .when(!last, |d| {
+                    d.text_color(accent)
+                        .cursor_pointer()
+                        .hover(move |d| d.bg(hover))
+                })
+                .child(crumb.label)
+                .on_click(cx.listener(move |view, _, _, cx| {
+                    let typed = view.typed(cx);
+                    view.browser.update(cx, |browser, cx| {
+                        browser.open_crumb(&typed, target.clone(), cx)
                     })
-                    .when(!last, |d| {
-                        d.text_color(accent)
-                            .cursor_pointer()
-                            .hover(move |d| d.bg(hover))
-                            .on_click(cx.listener(move |view, _, _, cx| {
-                                let typed = view.typed(cx);
-                                view.browser.update(cx, |browser, cx| {
-                                    browser.open_crumb(&typed, target.clone(), cx)
-                                })
-                            }))
-                    })
-                    .child(crumb.label),
+                })),
             );
             if !last {
                 breadcrumb = breadcrumb.child(div().text_color(secondary).child("/"));
@@ -227,7 +252,7 @@ impl Render for RemoteDirBrowserView {
             .overflow_y_scroll();
         list = match listing {
             Listing::Loading => list.child(status("Loading...".to_owned(), secondary)),
-            Listing::Failed(message) => list.child(status(message, c.error)),
+            Listing::Failed(message) => list.child(status(message, error)),
             Listing::Loaded(dirs) if dirs.is_empty() => {
                 list.child(status("No subdirectories".to_owned(), secondary))
             }
@@ -237,13 +262,10 @@ impl Render for RemoteDirBrowserView {
                     let path = SharedString::from(dir.path);
                     let tooltip = path.clone();
                     list = list.child(
-                        div()
-                            .id(SharedString::from(format!("dir-{path}")))
-                            .flex()
-                            .items_center()
+                        ui::key_button(SharedString::from(format!("dir-{path}")), 3., window, cx)
+                            .justify_start()
                             .px(px(8.))
                             .py(px(5.))
-                            .rounded(px(3.))
                             .border_1()
                             .border_color(gpui_kit::transparent_black())
                             .font_family(BUTTON_FONT)
@@ -268,6 +290,7 @@ impl Render for RemoteDirBrowserView {
             }
         };
         div()
+            .track_focus(&self.focus)
             .flex()
             .flex_col()
             .gap(px(8.))
@@ -275,7 +298,7 @@ impl Render for RemoteDirBrowserView {
             .rounded(px(4.))
             .border_1()
             .border_color(border)
-            .bg(c.bg_tertiary)
+            .bg(tertiary)
             .child(
                 div()
                     .flex()
@@ -300,11 +323,12 @@ impl Render for RemoteDirBrowserView {
                     .border_t_1()
                     .border_color(border)
                     .child(
-                        ui::dialog_button(
+                        ui::dialog_key_button(
                             "dir-cancel",
                             "Cancel",
                             ui::ButtonKind::Secondary,
                             false,
+                            window,
                             cx,
                         )
                         .font_family(BUTTON_FONT)
@@ -313,11 +337,12 @@ impl Render for RemoteDirBrowserView {
                         ),
                     )
                     .child(
-                        ui::dialog_button(
+                        ui::dialog_key_button(
                             "dir-select",
                             "Select",
                             ui::ButtonKind::Primary,
                             false,
+                            window,
                             cx,
                         )
                         .font_family(BUTTON_FONT)
@@ -340,7 +365,7 @@ mod tests {
     use treeterm_core::rt::Rt;
     use treeterm_core::transport::DaemonClient;
 
-    use super::RemoteDirBrowserView;
+    use super::{BrowserFocus, RemoteDirBrowserView};
 
     /// A browser of a host that never answers (its listing stays "Loading..."), from `/srv`.
     fn browser<'a>(
@@ -372,7 +397,8 @@ mod tests {
         cx.update(|_, cx| view.read(cx).browser.read(cx).current().to_owned())
     }
 
-    /// `onBlur={handlePathSubmit}`: leaving the path field goes to the typed path.
+    /// `onBlur={handlePathSubmit}`: leaving the path field goes to the typed path. The
+    /// browser also tells where the focus is (Open Workspace's Enter).
     #[gpui_kit::test]
     fn leaving_the_path_field_goes_to_the_typed_path(cx: &mut TestAppContext) {
         let tokio = tokio::runtime::Runtime::new().unwrap();
@@ -380,6 +406,10 @@ mod tests {
         // Focus events only reach an active window.
         cx.update(|window, _| window.activate_window());
         draw(cx);
+        let focus = |cx: &mut VisualTestContext| {
+            cx.update(|window, cx| view.read(cx).keyboard_focus(window, cx))
+        };
+        assert!(matches!(focus(cx), BrowserFocus::Outside));
 
         let path = cx.update(|_, cx| view.read(cx).path.clone());
         cx.update(|window, cx| {
@@ -389,10 +419,13 @@ mod tests {
             })
         });
         draw(cx);
+        assert!(matches!(focus(cx), BrowserFocus::PathField));
         assert_eq!(current(&view, cx), "/srv", "typing alone goes nowhere");
 
-        cx.update(|window, cx| window.blur(cx));
+        // Tab: on to the first breadcrumb, a button.
+        cx.update(|window, cx| window.focus_next(cx));
         draw(cx);
+        assert!(matches!(focus(cx), BrowserFocus::Inside));
         assert_eq!(current(&view, cx), "/srv/app");
         assert_eq!(
             cx.update(|_, cx| path.read(cx).value().to_string()),

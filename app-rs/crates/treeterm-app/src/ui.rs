@@ -336,6 +336,30 @@ pub fn dialog_button(
     disabled: bool,
     cx: &App,
 ) -> Stateful<Div> {
+    dialog_button_look(div().id(id), label, kind, disabled, cx)
+}
+
+/// [`dialog_button`] as a `<button>` ([`key_button`]): Tab reaches it unless it is disabled,
+/// and Enter or Space presses it.
+pub fn dialog_key_button(
+    id: impl Into<ElementId>,
+    label: impl Into<SharedString>,
+    kind: ButtonKind,
+    disabled: bool,
+    window: &mut Window,
+    cx: &mut App,
+) -> gpui_kit::base::Button {
+    let button = key_button(id, 4., window, cx).disabled(disabled);
+    dialog_button_look(button, label, kind, disabled, cx)
+}
+
+fn dialog_button_look<B: Styled + InteractiveElement + ParentElement + IntoElement>(
+    button: B,
+    label: impl Into<SharedString>,
+    kind: ButtonKind,
+    disabled: bool,
+    cx: &App,
+) -> B {
     let c = colors(cx);
     let (bg, fg, hover): (Hsla, Hsla, Hsla) = match kind {
         ButtonKind::Secondary => (c.bg_tertiary, c.text_primary, c.bg_hover),
@@ -343,8 +367,7 @@ pub fn dialog_button(
         ButtonKind::Warning => (rgb(0xb36200).into(), gpui_kit::white(), rgb(0xcc7000).into()),
     };
     let label: SharedString = label.into();
-    div()
-        .id(id)
+    button
         .flex_shrink_0()
         .px(px(16.))
         .py(px(8.))
