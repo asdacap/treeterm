@@ -1567,7 +1567,8 @@ fn ignoring_whitespace_hides_a_change_at_a_lines_ends_but_not_within_it(cx: &mut
         Some(FileDiff::Loaded(section)) => section,
         other => panic!("{path}: {other:?}"),
     };
-    wait_review(cx, &review, "committed", |r, _| matches!(r.content(), ReviewContent::Committed(c) if c.diffs.is_complete()));
+    wait_review(cx, &review, "committed", |r, _| matches!(r.content(), ReviewContent::Committed(_)));
+    read_all(cx, &review);
     assert!(section(cx, "a.txt").contains("-let x = 1;\n-run(x);\n+    let x = 1;\n+run( x);\n"), "{}", section(cx, "a.txt"));
 
     // The re-indented line is unchanged, shown as it is now; the respaced one still changed.
@@ -1583,7 +1584,8 @@ fn ignoring_whitespace_hides_a_change_at_a_lines_ends_but_not_within_it(cx: &mut
 
     // So are the staged and unstaged changes; an untracked file is all added.
     review.update(cx, |r, cx| r.set_mode(ReviewMode::Uncommitted, cx));
-    wait_review(cx, &review, "uncommitted", |r, _| matches!(r.content(), ReviewContent::Uncommitted(u) if u.diffs.is_complete()));
+    wait_review(cx, &review, "uncommitted", |r, _| matches!(r.content(), ReviewContent::Uncommitted(_)));
+    read_all(cx, &review);
     assert!(section(cx, "s.txt").contains("@@ -1,2 +1,2 @@\n   s\n-x y\n+x  y\n"), "{}", section(cx, "s.txt"));
     assert!(section(cx, "w.txt").contains("@@ -1,2 +1,2 @@\n w  \n-x y\n+x\ty\n"), "{}", section(cx, "w.txt"));
     assert!(section(cx, "u.txt").contains("@@ -0,0 +1 @@\n+  u\n"), "{}", section(cx, "u.txt"));
@@ -1596,9 +1598,8 @@ fn ignoring_whitespace_hides_a_change_at_a_lines_ends_but_not_within_it(cx: &mut
         other => panic!("{other:?}"),
     });
     review.update(cx, |r, cx| r.select_commit(&hash, cx));
-    wait_review(cx, &review, "the commit", |r, _| {
-        matches!(r.selected_commit().map(|s| &s.diff), Some(Loaded::Ready(d)) if d.diffs.is_complete())
-    });
+    wait_review(cx, &review, "the commit", |r, _| matches!(r.selected_commit().map(|s| &s.diff), Some(Loaded::Ready(_))));
+    read_all(cx, &review);
     assert!(section(cx, "a.txt").contains(ignored), "{}", section(cx, "a.txt"));
 }
 
@@ -2727,10 +2728,13 @@ fn a_commits_rename_reads_as_a_deletion_and_an_addition_also_read_together(cx: &
     let (c, d) = (file_diff(cx, &review, "c.txt"), file_diff(cx, &review, "d.txt"));
     assert!(deleted(&c) && added(&d), "{c:?} {d:?}");
 
-    // Read again together (a reload reads every file asked for in one command; here `-w`,
-    // which drops w.txt's whitespace change): still a deletion and an addition, not one rename.
+    // Read again together (a reload reads every file asked for in one command; here ignoring
+    // whitespace, which makes w.txt's respaced line unchanged): still a deletion and an
+    // addition, not one rename.
     review.update(cx, |r, cx| r.set_ignore_whitespace(true, cx));
-    wait_review(cx, &review, "read again with -w", |r, _| shown_diffs(r).get("w.txt") == Some(&FileDiff::Loaded(String::new())));
+    wait_review(cx, &review, "read again ignoring whitespace", |r, _| {
+        matches!(shown_diffs(r).get("w.txt"), Some(FileDiff::Loaded(section)) if !section.contains("\n-x\n"))
+    });
     let (c, d) = (file_diff(cx, &review, "c.txt"), file_diff(cx, &review, "d.txt"));
     assert!(deleted(&c) && added(&d), "{c:?} {d:?}");
 }
