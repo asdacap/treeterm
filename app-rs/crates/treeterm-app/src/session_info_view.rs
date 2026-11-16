@@ -121,8 +121,8 @@ pub struct SessionInfoView {
     forward_dialog: Option<Entity<forward_dialog::ForwardDialog>>,
     /// Polls only while the Monitor sub-tab is shown.
     monitor: Option<Entity<monitor::MonitorView>>,
-    /// JSON tab: paths flipped from their default fold, and the session it follows while shown
-    /// (the connected one, or the one kept while the connection is down).
+    /// JSON tab, while shown: paths flipped from their default fold, and the session it
+    /// follows (the connected one, or the one kept while the connection is down).
     json_toggled: HashSet<String>,
     json_follow: Option<(EntityId, Subscription)>,
     /// TTYs tab: the session's PTYs, grouped by workspace.
@@ -368,9 +368,7 @@ impl SessionInfoView {
         let view = cx.entity().downgrade();
         let viewer = crate::json_view::render(tree, secondary, primary, move |path, _, cx| {
             match view.update(cx, |view, cx| {
-                if !view.json_toggled.remove(&path) {
-                    view.json_toggled.insert(path);
-                }
+                crate::json_view::toggle(&mut view.json_toggled, &path);
                 cx.notify();
             }) {
                 Ok(()) | Err(_) => {} // Err: the pane closed
@@ -585,6 +583,8 @@ impl Render for SessionInfoView {
             self.upload = None;
         }
         if active != Tab::Json {
+            // Electron unmounts the JsonViewer, so its folds are back to the default too.
+            self.json_toggled.clear();
             self.json_follow = None;
         }
         if active != Tab::Tty {

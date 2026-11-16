@@ -1,5 +1,6 @@
 //! `JsonViewer.tsx`: a JSON value as a foldable tree. The root starts open and everything
-//! below it folded; a toggle (or a folded value's "N items") flips it.
+//! below it folded; a toggle (or a folded value's "N items") flips it and puts everything
+//! inside it back to its default fold.
 
 use std::collections::HashSet;
 
@@ -36,6 +37,19 @@ pub enum Node {
 /// `toggled` holds the paths flipped from their default (only the root starts open).
 pub fn tree(value: &Value, toggled: &HashSet<String>) -> Node {
     node(value, String::new(), 0, toggled)
+}
+
+/// Flip `path` from its default fold, and put its descendants back to theirs: each
+/// Electron `JsonCollection` keeps its own state, which goes when its parent folds and
+/// unmounts it.
+pub fn toggle(toggled: &mut HashSet<String>, path: &str) {
+    if !toggled.remove(path) {
+        toggled.insert(path.to_owned());
+    }
+    // Keys are escaped (`child_path`), so this prefix matches the descendants only; the
+    // root's ("/") matches every other path.
+    let inside = format!("{path}/");
+    toggled.retain(|other| !other.starts_with(&inside));
 }
 
 fn child_path(parent: &str, key: &str) -> String {
@@ -322,5 +336,45 @@ mod tests {
         // The path still names the key as it is.
         let Node::Open { children, .. } = shown else { panic!("root folded") };
         assert!(matches!(&children[0].1, Node::Folded { path, .. } if path == "/two\n  lines"));
+    }
+
+    #[test]
+    fn toggle_flips_a_path_from_its_default() {
+        let mut toggled = HashSet::new();
+        toggle(&mut toggled, "/b");
+        assert_eq!(toggled, HashSet::from(["/b".to_owned()]));
+        toggle(&mut toggled, "/b");
+        assert!(toggled.is_empty());
+    }
+
+    #[test]
+    fn folding_a_collection_puts_its_children_back_to_folded() {
+        let value = json!({ "b": { "c": "x", "d": [1, 2] }, "bb": { "e": [3] } });
+        let mut toggled = HashSet::new();
+        for path in ["/b", "/b/d", "/bb", "/bb/e"] {
+            toggle(&mut toggled, path);
+        }
+        let bb = ["  bb: {", "    e: [", "      0: 3", "    ]", "  }", "}"];
+        let b = ["{", "  b: {", "    c: \"x\",", "    d: [", "      0: 1,", "      1: 2", "    ]", "  },"];
+        assert_eq!(lines(&tree(&value, &toggled)), [b.as_slice(), &bb].concat());
+        toggle(&mut toggled, "/b");
+        toggle(&mut toggled, "/b");
+        // "/bb" only shares a prefix with "/b": it and its child stay open.
+        let b = ["{", "  b: {", "    c: \"x\",", "    d: folded(2)", "  },"];
+        assert_eq!(lines(&tree(&value, &toggled)), [b.as_slice(), &bb].concat());
+    }
+
+    #[test]
+    fn folding_the_root_puts_everything_back_to_its_default() {
+        let value = json!({ "b": { "d": [1, 2] }, "a/b": { "x": 1 } });
+        let mut toggled = HashSet::new();
+        for path in ["/b", "/b/d", "/a~1b"] {
+            toggle(&mut toggled, path);
+        }
+        toggle(&mut toggled, "");
+        assert_eq!(toggled, HashSet::from([String::new()]));
+        assert_eq!(lines(&tree(&value, &toggled)), ["folded(2)"]);
+        toggle(&mut toggled, "");
+        assert!(toggled.is_empty());
     }
 }
