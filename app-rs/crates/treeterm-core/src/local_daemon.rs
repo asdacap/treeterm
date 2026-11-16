@@ -8,7 +8,8 @@ use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use crate::paths::SOCKET_PATH_ENV;
-use crate::transport::{ConnectError, connect_unix};
+use crate::traffic::ByteCounter;
+use crate::transport::{CONNECT_TIMEOUT, ConnectError, connect_unix, connect_unix_ready};
 
 const SOCKET_POLL_ATTEMPTS: u32 = 20;
 const SOCKET_POLL_INTERVAL: Duration = Duration::from_millis(250);
@@ -50,6 +51,7 @@ pub enum LocalDaemonError {
 /// Make sure a daemon is accepting connections on `spec.socket_path`, spawning one if not.
 /// Must run on the tokio runtime.
 pub async fn ensure_running(spec: &LocalDaemonSpec) -> Result<DaemonStart, LocalDaemonError> {
+    // A single try: a stale socket is replaced at once (Electron waited up to 5 s for it).
     match connect_unix(&spec.socket_path).await {
         Ok(_probe) => return Ok(DaemonStart::AlreadyRunning),
         Err(error) => tracing::info!(%error, "no daemon reachable; starting one"),
@@ -63,7 +65,8 @@ pub async fn ensure_running(spec: &LocalDaemonSpec) -> Result<DaemonStart, Local
     let pid = spawn_detached(spec)?;
     wait_for_socket(&spec.socket_path).await?;
     tokio::time::sleep(BIND_SETTLE).await;
-    connect_unix(&spec.socket_path).await?;
+    let deadline = tokio::time::Instant::now() + CONNECT_TIMEOUT;
+    connect_unix_ready(&spec.socket_path, ByteCounter::default(), deadline).await?;
     Ok(DaemonStart::Spawned { pid })
 }
 

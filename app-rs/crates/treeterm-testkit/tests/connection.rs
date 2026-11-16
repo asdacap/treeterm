@@ -236,6 +236,37 @@ async fn force_reconnect_hands_out_a_new_generation() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn opening_waits_for_a_daemon_that_starts_accepting_within_five_seconds() {
+    let daemon = TestDaemon::start();
+    let dir = tempfile::Builder::new()
+        .prefix("tt")
+        .tempdir_in("/tmp")
+        .unwrap();
+    let socket = dir.path().join("p.sock");
+    // The socket is there but nobody accepts yet (a fresh tunnel whose daemon is not up).
+    drop(std::os::unix::net::UnixListener::bind(&socket).unwrap());
+    let late = {
+        let socket = socket.clone();
+        let target = daemon.socket_path().to_owned();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(1500)).await;
+            Proxy::start(&socket, &target)
+        })
+    };
+
+    let started = std::time::Instant::now();
+    let conn = DaemonConnection::open(&rt(), &socket)
+        .await
+        .unwrap()
+        .unwrap();
+    // Attempts at 0 s and 1 s are refused; the one at 2.6 s gets through.
+    assert!(started.elapsed() >= Duration::from_millis(1500));
+    assert!(started.elapsed() < Duration::from_secs(5));
+    let _proxy = late.await.unwrap();
+    conn.list_pty_sessions().await.unwrap().unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_reconnect_fails_the_commands_running_on_the_lost_generation() {
     let daemon = TestDaemon::start();
     let dir = tempfile::Builder::new()

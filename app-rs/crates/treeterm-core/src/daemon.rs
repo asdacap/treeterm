@@ -16,7 +16,9 @@ use crate::connection::ConnectionId;
 use crate::pty::{AttachKind, CreatePty, PtyAttachment};
 use crate::rt::{Fut, Rt, Sub, TaskLost};
 use crate::traffic::ByteCounter;
-use crate::transport::{ConnectError, DaemonClient, connect_unix_metered, daemon_client};
+use crate::transport::{
+    CONNECT_TIMEOUT, ConnectError, DaemonClient, connect_unix_ready, daemon_client,
+};
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum ApiError {
@@ -66,7 +68,12 @@ impl From<tonic::Status> for ApiError {
 /// grpc-js's `callErrorFromStatus` message: `13 INTERNAL: spawn failed`.
 fn grpc_message(status: &tonic::Status) -> String {
     let code = status.code();
-    format!("{} {}: {}", i32::from(code), grpc_code_name(code), status.message())
+    format!(
+        "{} {}: {}",
+        i32::from(code),
+        grpc_code_name(code),
+        status.message()
+    )
 }
 
 /// The `Status` enum names of grpc-js (and of the gRPC spec).
@@ -110,11 +117,13 @@ pub struct DaemonConnection {
 }
 
 impl DaemonConnection {
-    /// Open both connections. Must run on the tokio runtime behind `rt`.
+    /// Open both connections, waiting up to [`CONNECT_TIMEOUT`] in all for the daemon to
+    /// accept them (see [`connect_unix_ready`]). Must run on the tokio runtime behind `rt`.
     pub async fn connect(rt: Rt, socket_path: PathBuf) -> Result<Self, ConnectError> {
         let received = ByteCounter::default();
-        let main = connect_unix_metered(&socket_path, received.clone()).await?;
-        let session = connect_unix_metered(&socket_path, received.clone()).await?;
+        let deadline = tokio::time::Instant::now() + CONNECT_TIMEOUT;
+        let main = connect_unix_ready(&socket_path, received.clone(), deadline).await?;
+        let session = connect_unix_ready(&socket_path, received.clone(), deadline).await?;
         Ok(Self {
             rt,
             socket_path,
@@ -244,7 +253,11 @@ impl DaemonConnection {
 
     /// Run commands on the daemon's host (`ExecStream`).
     pub fn exec_client(&self) -> crate::exec::ExecClient {
-        crate::exec::ExecClient::on_connection(self.rt.clone(), self.main.clone(), self.lost.subscribe())
+        crate::exec::ExecClient::on_connection(
+            self.rt.clone(),
+            self.main.clone(),
+            self.lost.subscribe(),
+        )
     }
 
     /// `connection` was lost on this generation (it went to reconnecting): every command still
@@ -339,7 +352,9 @@ mod tests {
     #[test]
     fn every_code_has_its_grpc_name() {
         let messages: Vec<String> = (0..=16)
-            .map(|code| ApiError::from(tonic::Status::new(tonic::Code::from(code), "x")).to_string())
+            .map(|code| {
+                ApiError::from(tonic::Status::new(tonic::Code::from(code), "x")).to_string()
+            })
             .collect();
         assert_eq!(
             messages,

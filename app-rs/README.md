@@ -211,6 +211,8 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   connection, instead of failing with "connection … lost while command was running"
   (Electron kept the old session until the reconnect). Other commands on the lost
   connection fail with that error, as in Electron.
+- A stale local daemon socket is replaced at once (Electron waited up to 5 s for it to
+  answer). Connections to use still wait up to 5 s for the daemon, as in Electron.
 - Placeholders for refs another window removed are dropped with the ref.
 - A replayed OSC 52 copy or bell is ignored (it already happened when it first ran).
 - Corrupt `settings.json` is an error (logged; defaults used) instead of being overwritten.
