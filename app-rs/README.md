@@ -81,9 +81,11 @@ Done (tested against a real in-process daemon unless noted):
   kill-on-close), app registry from settings, tab layout of Electron's flex-layout model
   (`metadata.layoutModel`: tabsets side by side or stacked as saved, sized by their weights,
   each with its strip and selected tab; 4px splitters dragged to resize, a tabset maximized
-  and restored from its strip, a tabset gone with its last tab; saved back as tabs are added,
-  closed, selected and dragged into order or into another tabset; strips scroll when full,
-  Hidden tabs menu, "+" kept at its end), new-tab menu.
+  and restored from its strip, a tabset gone with its last tab; a tab dragged onto a pane
+  docks into it or beside it, splitting it, or along an edge of the whole layout on its edge
+  docks, outlined where it lands; saved back as tabs are added, closed, selected, dragged into
+  order or into another tabset, and docked; strips scroll when full, Hidden tabs menu, "+"
+  kept at its end), new-tab menu.
 - **Git and worktrees (M2):** exec/fs/git clients, open a directory as a workspace, child
   workspaces (new branch, existing branch, remote branch, existing worktree, quick fork; live
   git output), merge/squash-merge (keep or remove), remove with or without git cleanup.
@@ -281,6 +283,10 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   out, zoom level, Zoom in and Print (100% is the width WebKit fits the pages to, not the
   pages' own size). There is no page box, thumbnails, fit or rotate; those need a bundled
   PDF viewer (pdf.js).
+- While a tab is dragged, the outline of where it would dock jumps to its place (flex-layout
+  slides it there in 0.3 s), the edge docks' arrows are text triangles, and a pane showing a
+  web page (Browser, Web App, a PDF) draws its page over the outline and edge docks: native
+  webviews draw above the window's content.
 
 ## Known differences from Electron (deliberate)
 
@@ -348,9 +354,9 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   open dialog, and not again on every workspace change while it stays shown (Electron
   focused it on each, taking focus from the sidebar's inputs, from dialogs and from a
   terminal clicked in another pane).
-- A tab dropped in the strip becomes the active tab (`activeTabId`). Electron's strip showed
-  the dropped tab, but its `activeTabId`, which its tab shortcuts act on, stayed on the tab
-  that was active before.
+- A tab dropped in a strip, or docked into or beside a pane or at the layout's edge, becomes
+  the active tab (`activeTabId`). Electron showed the dropped tab, but its `activeTabId`,
+  which its tab shortcuts act on, stayed on the tab that was active before.
 - A tab opened with a pane's "+" opens in that pane (Electron opened it in the last active
   pane).
 - In a strip too full to show every tab, tabs scrolled out of view are no drop target: a tab

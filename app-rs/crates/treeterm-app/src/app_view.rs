@@ -6,7 +6,7 @@ use gpui_kit::component::{h_flex, spinner::Spinner, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{AnyElement, App, Context, Entity, EntityId, SharedString, Subscription, WeakEntity, Window, div, px};
 use treeterm_core::keybinding::{Action, PrefixAction};
-use treeterm_core::layout::{LayoutTabSet, NodePath};
+use treeterm_core::layout::{DropTarget, LayoutTabSet, NodePath};
 use indexmap::IndexMap;
 use treeterm_core::connection::ConnectionId;
 use treeterm_core::wire::workspace_file::WorktreeSettings;
@@ -1920,6 +1920,7 @@ fn tabset_strip(
     workspace: &Entity<WorkspaceStore>,
     workspace_id: &str,
     tabset: &LayoutTabSet,
+    docks_at_edge: crate::tab_layout_view::DocksAtEdge,
     cx: &mut Context<AppView>,
 ) -> AnyElement {
     use std::rc::Rc;
@@ -1996,6 +1997,7 @@ fn tabset_strip(
         on_activate,
         maximize: tabset.maximize,
         on_maximize,
+        docks_at_edge,
     };
     let id = format!("{workspace_id}-{}", path.iter().map(usize::to_string).collect::<Vec<_>>().join("-"));
     let state = connected.tab_strips.entry((workspace_id.to_owned(), path)).or_default();
@@ -2173,9 +2175,10 @@ fn workspace_pane(
         Some(maximized) => vec![maximized.clone()],
         None => tree.tabsets().into_iter().cloned().collect(),
     };
+    let docks_at_edge = connected.tab_layouts.entry(id.clone()).or_default().docks_at_edge();
     let mut panes = HashMap::new();
     for tabset in &visible {
-        let strip = tabset_strip(connected, &workspace, &id, tabset, cx);
+        let strip = tabset_strip(connected, &workspace, &id, tabset, docks_at_edge.clone(), cx);
         let content = match &tabset.selected {
             // An empty tabset: blank under a strip of only "+".
             None => div().size_full().into_any_element(),
@@ -2199,10 +2202,19 @@ fn workspace_pane(
             workspace.update(cx, |w, cx| w.resize_layout_row(row, weights, cx));
         })
     };
+    // A tab dropped on a tabset's content or the layout's edge docks there, and is focused.
+    let on_dock: crate::tab_layout_view::OnDock = {
+        let (workspace, view) = (workspace.clone(), cx.entity());
+        std::rc::Rc::new(move |tab: &str, target: &DropTarget, _: &mut Window, cx: &mut App| {
+            workspace.update(cx, |w, cx| w.dock_tab(tab, target, cx));
+            view.update(cx, |view, cx| view.focus_active_tab(cx));
+        })
+    };
     let view = cx.entity_id();
     let state = connected.tab_layouts.entry(id.clone()).or_default();
-    let tabsets = crate::tab_layout_view::TabLayout { tree: &tree, splitters: layout.splitters(), panes, on_resize, id: &id, view }
-        .render(state, cx);
+    let tabsets =
+        crate::tab_layout_view::TabLayout { tree: &tree, splitters: layout.splitters(), panes, on_resize, on_dock, id: &id, view }
+            .render(state, cx);
 
     // Native webviews draw above GPUI: show only those of the tabs shown, and none under a
     // dialog.

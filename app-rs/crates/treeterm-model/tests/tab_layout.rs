@@ -1,10 +1,10 @@
 //! The tab layout (`metadata.layoutModel`, Electron's flex-layout model) against a real
 //! in-process daemon: what the workspace shows, and what it saves when tabs come and go, are
-//! selected or are dragged, and when a tabset is activated, maximized or resized.
+//! selected, dragged or docked, and when a tabset is activated, maximized or resized.
 
 use gpui_kit::{AppContext as _, Entity, TestAppContext};
 use serde_json::{Value, json};
-use treeterm_core::layout::{Layout, LayoutNode, LayoutTabSet, Maximize, Orientation, Side};
+use treeterm_core::layout::{Dock, DropTarget, Edge, Layout, LayoutNode, LayoutTabSet, Maximize, Orientation, Side};
 use treeterm_model::session_store::{SessionState, SessionStore, WorkspaceEntry};
 use treeterm_model::settings_store::SettingsStore;
 use treeterm_model::workspace_store::WorkspaceStore;
@@ -462,4 +462,54 @@ fn a_tabset_whose_last_tab_closes_goes_and_its_neighbour_takes_the_room(cx: &mut
     // The column, left with the bottom tabset, is replaced by it, with the column's weight.
     assert_eq!(tree.tabsets().iter().map(|tabset| tabset.path.clone()).collect::<Vec<_>>(), [vec![0], vec![1]]);
     assert_eq!(tree.children.iter().map(LayoutNode::weight).collect::<Vec<_>>(), [30., 70.]);
+}
+
+#[gpui_kit::test]
+fn a_docked_tab_splits_its_tabset_or_the_layout_and_is_saved_there_shown(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    let store = open_store(cx, &h);
+    let (id, workspace) = open_workspace(cx, &h, &store, tabs(&["a", "b", "c"]), Some("a"), json!({}));
+    let into = |path: &[usize], dock: Dock| DropTarget::TabSet { path: path.to_vec(), dock };
+    let ids = |ids: &[&str]| ids.iter().map(|id| id.to_string()).collect::<Vec<_>>();
+
+    // On the right of the only tabset's content: a tabset of its own beside it, shown there.
+    workspace.update(cx, |w, cx| w.dock_tab("c", &into(&[0], Dock::Edge(Edge::Right)), cx));
+    wait_for_disk(cx, || file_on_disk(&h, &id)["activeTabId"] == "c");
+    let shown: Vec<(Vec<String>, Option<String>, bool, f64)> = layout_on_disk(&h, &id)
+        .unwrap()
+        .tree()
+        .tabsets()
+        .into_iter()
+        .map(|tabset| (tabset.tabs.clone(), tabset.selected.clone(), tabset.active, tabset.weight))
+        .collect();
+    assert_eq!(
+        shown,
+        [(ids(&["a", "b"]), Some("a".to_owned()), false, 50.), (ids(&["c"]), Some("c".to_owned()), true, 50.)]
+    );
+    workspace.read_with(cx, |w, _| assert_eq!(w.shown_tab().as_deref(), Some("c")));
+
+    // Back on the middle of the left one: it joins its tabs, and the empty right one goes.
+    workspace.update(cx, |w, cx| w.dock_tab("c", &into(&[0], Dock::Center), cx));
+    wait_for_disk(cx, || layout_on_disk(&h, &id).is_some_and(|saved| saved.tree().tabsets().len() == 1));
+    let only = tabset(&layout_on_disk(&h, &id).unwrap(), &[0]);
+    assert_eq!((only.tabs, only.selected.as_deref()), (ids(&["a", "b", "c"]), Some("c")));
+
+    // At the layout's bottom edge: a pane across the whole layout, under the rest.
+    workspace.update(cx, |w, cx| w.dock_tab("b", &DropTarget::LayoutEdge(Edge::Bottom), cx));
+    wait_for_disk(cx, || file_on_disk(&h, &id)["activeTabId"] == "b");
+    let tree = layout_on_disk(&h, &id).unwrap().tree();
+    let [LayoutNode::Row(column)] = tree.children.as_slice() else { panic!("one column: {tree:?}") };
+    assert_eq!(column.orientation, Orientation::Vertical);
+    let panes: Vec<(Vec<String>, f64, bool)> =
+        column.tabsets().into_iter().map(|tabset| (tabset.tabs.clone(), tabset.weight, tabset.active)).collect();
+    assert_eq!(panes, [(ids(&["a", "c"]), 75., false), (ids(&["b"]), 25., true)]);
+
+    // A tab that is gone, or no tabset there: nothing changes.
+    let before = workspace.read_with(cx, |w, _| w.file().clone());
+    workspace.update(cx, |w, cx| {
+        w.dock_tab("gone", &DropTarget::LayoutEdge(Edge::Top), cx);
+        w.dock_tab("a", &into(&[0], Dock::Center), cx);
+    });
+    workspace.read_with(cx, |w, _| assert_eq!(*w.file(), before));
 }

@@ -6,7 +6,8 @@
 //! "Maximize tab set" / "Restore tab set" toggle, which a double-click on the strip toggles
 //! too; a press on the strip (not on its buttons) makes the tabset the active one.
 //! A tab dragged anywhere over the strip lands before the first tab whose middle is right of
-//! the pointer, else at the end (flex-layout's tab bar drop).
+//! the pointer, else at the end (flex-layout's tab bar drop), but not on the layout's edge
+//! docks lying over the strip.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -21,6 +22,7 @@ use gpui_kit::{
 use treeterm_core::layout::{Maximize, Side};
 use treeterm_model::workspace_store::ActivityState;
 
+use crate::tab_layout_view::DocksAtEdge;
 use crate::theme::colors;
 
 /// A tab as the strip shows it.
@@ -70,6 +72,9 @@ pub struct TabStrip {
     /// The tabset's maximize toggle, and what it (or a double-click on the strip) does.
     pub maximize: Maximize,
     pub on_maximize: OnPress,
+    /// Whether the tab dragged over the layout is on one of its edge docks, which then takes
+    /// it from the strip under it.
+    pub docks_at_edge: DocksAtEdge,
 }
 
 /// A tab being dragged, and its drag image: the tab's icon and title (flex-layout drags the
@@ -79,6 +84,17 @@ pub struct DraggedTab {
     id: String,
     icon: String,
     title: String,
+}
+
+impl DraggedTab {
+    pub fn new(id: &str, icon: &str, title: &str) -> Self {
+        Self { id: id.to_owned(), icon: icon.to_owned(), title: title.to_owned() }
+    }
+
+    /// The tab's id.
+    pub fn id(&self) -> &str {
+        &self.id
+    }
 }
 
 impl Render for DraggedTab {
@@ -124,16 +140,18 @@ fn shown_tabs<'a>(scroll: &ScrollHandle, ids: &'a [String]) -> Vec<(&'a String, 
 }
 
 /// While a tab is dragged over the strip (`event.bounds`), the hint follows the pointer:
-/// where the tab would land among the strip's tabs, `ids`. It goes when the pointer leaves.
+/// where the tab would land among the strip's tabs, `ids`. It goes when the pointer leaves,
+/// or is on one of the layout's edge docks lying over the strip.
 fn drag_over(
     ids: Vec<String>,
     state: &TabStripState,
+    docks_at_edge: DocksAtEdge,
     view: EntityId,
 ) -> impl Fn(&DragMoveEvent<DraggedTab>, &mut Window, &mut App) + 'static {
     let (hint, scroll) = (state.drop_hint.clone(), state.scroll.clone());
     move |event, _, cx| {
         let pointer = event.event.position;
-        let next = if event.bounds.contains(&pointer) {
+        let next = if event.bounds.contains(&pointer) && !docks_at_edge() {
             landing(&shown_tabs(&scroll, &ids), pointer).map(|(tab, side)| (String::clone(tab), side))
         } else {
             None
@@ -301,10 +319,9 @@ impl TabStrip {
                     })
                     .on_click(move |_, window, cx| on_select(&select_id, window, cx))
                     .relative()
-                    .on_drag(
-                        DraggedTab { id: tab.id.clone(), icon: tab.icon.clone(), title: tab.title.clone() },
-                        |dragged, _, _, cx| cx.new(|_| dragged.clone()),
-                    )
+                    .on_drag(DraggedTab::new(&tab.id, &tab.icon, &tab.title), |dragged, _, _, cx| {
+                        cx.new(|_| dragged.clone())
+                    })
                     // flex-layout's drop outline in a tab strip: a 3px accent bar from 2px left
                     // of the edge the tab would land against.
                     .when_some(side, |d, side| {
@@ -484,7 +501,7 @@ impl TabStrip {
         let ids = self.tabs.iter().map(|tab| tab.id.clone()).collect();
         let (on_activate, on_maximize, maximize) = (self.on_activate, self.on_maximize, self.maximize);
         h_flex()
-            .on_drag_move(drag_over(ids, state, view))
+            .on_drag_move(drag_over(ids, state, self.docks_at_edge, view))
             .on_drop(drop_on(state, self.on_move, view))
             .on_mouse_down(MouseButton::Left, move |event, window, cx| {
                 if event.click_count == 2 && maximize != Maximize::Unavailable {
@@ -561,6 +578,8 @@ mod tests {
         maximize: Maximize,
         /// Presses on the strip: `activate`, `maximize`.
         presses: Rc<RefCell<Vec<&'static str>>>,
+        /// The layout's edge docks take the dragged tab.
+        at_edge: Rc<Cell<bool>>,
     }
 
     impl Render for Host {
@@ -594,6 +613,10 @@ mod tests {
                 on_maximize: {
                     let presses = self.presses.clone();
                     Rc::new(move |_, _| presses.borrow_mut().push("maximize"))
+                },
+                docks_at_edge: {
+                    let at_edge = self.at_edge.clone();
+                    Rc::new(move || at_edge.get())
                 },
             };
             let view = cx.entity_id();
@@ -632,6 +655,7 @@ mod tests {
             log: Rc::default(),
             maximize,
             presses: Rc::default(),
+            at_edge: Rc::default(),
         });
         settle(cx);
         (host, cx)
@@ -912,6 +936,23 @@ mod tests {
         drag_to(below, cx);
         assert_eq!(hint(&host, cx), None);
         cx.simulate_mouse_up(below, MouseButton::Left, Modifiers::default());
+        assert_eq!(log(&host, cx), Vec::<String>::new());
+    }
+
+    #[gpui_kit::test]
+    fn a_tab_on_an_edge_dock_of_the_layout_lands_nowhere_in_the_strip(cx: &mut TestAppContext) {
+        let (host, cx) = strip(2, "t0", cx);
+        let (first, second) = (tab_at(&host, 0, cx), tab_at(&host, 1, cx));
+        drag(second.center(), point(first.left() + px(4.), first.center().y), cx);
+        assert_eq!(hint(&host, cx), hinted("t0", Side::Before));
+
+        // The layout docks it at its edge there: the strip shows nothing, and takes no drop.
+        cx.update(|_, cx| host.read(cx).at_edge.set(true));
+        let on_dock = point(first.center().x, first.top() + px(2.));
+        drag_to(on_dock, cx);
+        assert_eq!(hint(&host, cx), None);
+        settle(cx);
+        cx.simulate_mouse_up(on_dock, MouseButton::Left, Modifiers::default());
         assert_eq!(log(&host, cx), Vec::<String>::new());
     }
 

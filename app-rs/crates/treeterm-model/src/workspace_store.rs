@@ -17,7 +17,7 @@ use treeterm_core::attention::{
     ObservedSession, ObservedWorkspace, SessionStatus, apply_attention_mutations, has_unread_workspace_attention,
 };
 use treeterm_core::daemon::DaemonConnection;
-use treeterm_core::layout::{Layout, LayoutTab, Side};
+use treeterm_core::layout::{DropTarget, Layout, LayoutTab, Side};
 use treeterm_core::pty::{CreatePty, Sandbox};
 use treeterm_core::settings::Settings;
 use treeterm_core::wire::workspace_file::{AppState, WorkspaceFile};
@@ -1695,6 +1695,19 @@ impl WorkspaceStore {
             return;
         }
         self.workspace.file.active_tab_id = Some(dragged.to_owned());
+        self.put_layout(layout.to_json(), cx);
+    }
+
+    /// A tab dragged onto a tabset's content or the layout's edge and dropped there
+    /// (flex-layout's `moveNode` to a dock location, saved by `FlexLayoutPane`): it joins that
+    /// tabset, or a new one splitting it or along the layout's edge, and is shown; the layout
+    /// is saved.
+    pub fn dock_tab(&mut self, tab: &str, target: &DropTarget, cx: &mut Context<Self>) {
+        let mut layout = self.layout();
+        if !layout.dock(tab, target) {
+            return;
+        }
+        self.workspace.file.active_tab_id = Some(tab.to_owned());
         self.put_layout(layout.to_json(), cx);
     }
 

@@ -3,11 +3,13 @@
 //!
 //! Both apps read and write it. The native app draws the layout as flex-layout does (rows of
 //! tabsets sized by their weights, [`Layout::tree`]), and saves the layout whenever a tab is
-//! added, closed, selected or dragged to another place, a tabset is activated or maximized,
-//! or a splitter is dragged, as Electron saves every change to its model. The operations
-//! follow flex-layout's own (`addNode`, `deleteTab`, `selectTab`, `moveNode` into a tabset,
-//! `setActiveTabset`, `maximizeToggle`, `adjustWeights`, `tidy`), and what the native app does
-//! not use (the `global` block, borders, ids, other attributes) is written back as it was read.
+//! added, closed, selected, dragged to another place or docked, a tabset is activated or
+//! maximized, or a splitter is dragged, as Electron saves every change to its model. The
+//! operations follow flex-layout's own (`addNode`, `deleteTab`, `selectTab`, `moveNode` into
+//! a tabset, beside it or at the layout's edge, `setActiveTabset`, `maximizeToggle`,
+//! `adjustWeights`, `tidy`), and what the native app does not use (the `global` block,
+//! borders, ids, other attributes) is written back as it was read. Tabsets and rows it adds
+//! have no id: flex-layout gives them one when it loads the model.
 
 use serde_json::{Value, json};
 
@@ -38,6 +40,70 @@ impl LayoutTab<'_> {
 pub enum Side {
     Before,
     After,
+}
+
+/// A side of a tabset or of the whole layout (flex-layout's `DockLocation` other than
+/// `CENTER`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Edge {
+    Top,
+    Bottom,
+    Left,
+    Right,
+}
+
+impl Edge {
+    /// The way a row runs to have this side at one of its ends.
+    pub fn orientation(self) -> Orientation {
+        match self {
+            Self::Top | Self::Bottom => Orientation::Vertical,
+            Self::Left | Self::Right => Orientation::Horizontal,
+        }
+    }
+
+    /// Whether it is the row's far end (`DockLocation.indexPlus`).
+    fn is_far(self) -> bool {
+        match self {
+            Self::Top | Self::Left => false,
+            Self::Bottom | Self::Right => true,
+        }
+    }
+}
+
+/// Where in a tabset's content a dragged tab docks: into the tabset, or beside it on one
+/// side, splitting it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Dock {
+    Center,
+    Edge(Edge),
+}
+
+impl Dock {
+    /// `DockLocation.getLocation` for a point `x` across and `y` down the content, as
+    /// fractions of its width and height: the middle half on both axes is its centre, the
+    /// rest the side of the triangle (between the diagonals) the point is in.
+    pub fn at(x: f64, y: f64) -> Self {
+        let middle = 0.25..0.75;
+        if middle.contains(&x) && middle.contains(&y) {
+            return Self::Center;
+        }
+        let (below_falling, below_rising) = (y >= x, y >= 1. - x);
+        Self::Edge(match (below_falling, below_rising) {
+            (true, true) => Edge::Bottom,
+            (true, false) => Edge::Left,
+            (false, true) => Edge::Right,
+            (false, false) => Edge::Top,
+        })
+    }
+}
+
+/// Where a dragged tab is dropped to dock (flex-layout's drop targets other than the strips).
+#[derive(Clone, Debug, PartialEq)]
+pub enum DropTarget {
+    /// The content of the tabset at `path`.
+    TabSet { path: NodePath, dock: Dock },
+    /// An edge of the whole layout (`enableEdgeDock`, on by default).
+    LayoutEdge(Edge),
 }
 
 /// Where a node of the main layout is: its child indices from the root row (`[]`).
@@ -387,9 +453,116 @@ impl Layout {
             sole: (kids(root).len() == 1).then(|| vec![0]),
             enabled: self.global("tabSetEnableMaximize").and_then(Value::as_bool).unwrap_or(true),
         };
+        row_view(root, Vec::new(), self.root_orientation(), &marks)
+    }
+
+    /// Drop `tab` where it docks (`Actions.moveNode` to a tabset's or the root's dock
+    /// location): at the end of a tabset's tabs, in a new tabset beside it splitting it, or
+    /// in a new tabset along an edge of the whole layout. It is selected where it lands, that
+    /// tabset becomes the active one, and a tabset it leaves empty is deleted. `false`,
+    /// changing nothing, unless the tab is in a tabset and the target is one.
+    pub fn dock(&mut self, tab: &str, target: &DropTarget) -> bool {
+        let Some((from, index)) = self.find(tab) else {
+            return false;
+        };
+        match target {
+            DropTarget::TabSet { path, dock } => {
+                if !self.tabsets().contains(path) {
+                    return false;
+                }
+                let Some(node) = self.node_mut(&from).and_then(|tabset| remove_child(tabset, index, 0)) else {
+                    return false;
+                };
+                match dock {
+                    Dock::Center => self.drop_tab(path, None, node),
+                    Dock::Edge(edge) => self.split(path, *edge, node),
+                }
+            }
+            DropTarget::LayoutEdge(edge) => {
+                let Some(tabset) = self.node_mut(&from) else {
+                    return false;
+                };
+                let Some(node) = children_mut(tabset).map(|children| children.remove(index)) else {
+                    return false;
+                };
+                // `RowNode.drop`: the tabset it leaves selects its first tab.
+                set(tabset, "selected", json!(0));
+                self.dock_at_edge(*edge, node);
+            }
+        }
+        self.tidy();
+        true
+    }
+
+    /// `TabSetNode.drop` on an edge of the tabset at `path`: a new tabset of `tab` on that
+    /// side of it. In a row running that way the two share the tabset's weight; otherwise a
+    /// new row of the two, half each, takes the tabset's place and weight.
+    fn split(&mut self, path: &[usize], edge: Edge, tab: Value) {
+        // A tabset is never the root.
+        let Some((&place, parent)) = path.split_last() else {
+            return;
+        };
+        let along = self.orientation_at(parent) == edge.orientation();
+        let far = usize::from(edge.is_far());
+        let Some(row) = self.node_mut(parent).and_then(children_mut) else {
+            return;
+        };
+        let held = weight(&row[place]);
+        let mut tabset = json!({ "type": "tabset", "children": [tab] });
+        let mut added = parent.to_vec();
+        if along {
+            set(&mut row[place], "weight", number(held / 2.));
+            set(&mut tabset, "weight", number(held / 2.));
+            row.insert(place + far, tabset);
+            added.push(place + far);
+        } else {
+            let mut beside = row.remove(place);
+            set(&mut beside, "weight", number(50.));
+            set(&mut tabset, "weight", number(50.));
+            let children = if far == 1 { [beside, tabset] } else { [tabset, beside] };
+            row.insert(place, json!({ "type": "row", "weight": number(held), "children": children }));
+            added.extend([place, far]);
+        }
+        self.activate(&added);
+    }
+
+    /// `RowNode.drop` on the root at `edge`: a new tabset of `tab` at that end of the root, a
+    /// third as heavy as the root's children together; when the root runs the other way, a
+    /// new row of the new tabset (25) and a row of everything else (75) replaces them.
+    fn dock_at_edge(&mut self, edge: Edge, tab: Value) {
+        let along = self.root_orientation() == edge.orientation();
+        let far = usize::from(edge.is_far());
+        let Some(root) = self.0.get_mut("layout") else {
+            return;
+        };
+        let total: f64 = kids(root).iter().map(weight).sum();
+        let third = if total == 0. { 100. / 3. } else { total / 3. };
+        let Some(children) = children_mut(root) else {
+            return;
+        };
+        let added = if along {
+            let place = if far == 1 { children.len() } else { 0 };
+            children.insert(place, json!({ "type": "tabset", "weight": number(third), "children": [tab] }));
+            vec![place]
+        } else {
+            let tabset = json!({ "type": "tabset", "weight": 25, "children": [tab] });
+            let rest = json!({ "type": "row", "weight": 75, "children": std::mem::take(children) });
+            let pair = if far == 1 { [rest, tabset] } else { [tabset, rest] };
+            children.push(json!({ "type": "row", "children": pair }));
+            vec![0, far]
+        };
+        self.activate(&added);
+    }
+
+    /// The way the root row runs (`rootOrientationVertical`).
+    fn root_orientation(&self) -> Orientation {
         let vertical = self.global("rootOrientationVertical").and_then(Value::as_bool).unwrap_or(false);
-        let orientation = if vertical { Orientation::Vertical } else { Orientation::Horizontal };
-        row_view(root, Vec::new(), orientation, &marks)
+        if vertical { Orientation::Vertical } else { Orientation::Horizontal }
+    }
+
+    /// The way the row at `path` runs: each row turns the other way from its parent.
+    fn orientation_at(&self, path: &[usize]) -> Orientation {
+        path.iter().fold(self.root_orientation(), |orientation, _| orientation.flip())
     }
 
     /// The splitters' size and extra hit area (flex-layout's defaults: 8 and 0; Electron's
@@ -1318,5 +1491,187 @@ mod tests {
         layout.reconcile(&tabs(&["t1", "t2", "t3", "t4", "b2"]));
         assert_eq!(layout.tab_order(), ["t1", "t2", "t3", "t4", "b2"]);
         assert_eq!(model(&layout)["borders"][0]["selected"], 0);
+    }
+
+    #[test]
+    fn a_point_docks_in_the_middle_half_else_at_the_side_of_its_triangle() {
+        let edge = Dock::Edge;
+        // `DockLocation.getLocation`: the middle half on both axes, its near bounds included.
+        assert_eq!(Dock::at(0.5, 0.5), Dock::Center);
+        assert_eq!(Dock::at(0.25, 0.25), Dock::Center);
+        assert_eq!(Dock::at(0.74, 0.74), Dock::Center);
+        assert_eq!(Dock::at(0.75, 0.5), edge(Edge::Right));
+        assert_eq!(Dock::at(0.5, 0.75), edge(Edge::Bottom));
+        // Elsewhere, the side whose triangle (between the diagonals) holds the point.
+        assert_eq!(Dock::at(0.1, 0.5), edge(Edge::Left));
+        assert_eq!(Dock::at(0.9, 0.5), edge(Edge::Right));
+        assert_eq!(Dock::at(0.5, 0.1), edge(Edge::Top));
+        assert_eq!(Dock::at(0.5, 0.9), edge(Edge::Bottom));
+        assert_eq!(Dock::at(0.2, 0.7), edge(Edge::Left));
+        // On a diagonal: left before top, bottom before left, right before top.
+        assert_eq!(Dock::at(0.1, 0.1), edge(Edge::Left));
+        assert_eq!(Dock::at(0.1, 0.9), edge(Edge::Bottom));
+        assert_eq!(Dock::at(0.9, 0.1), edge(Edge::Right));
+        assert_eq!(Dock::at(0.9, 0.9), edge(Edge::Bottom));
+    }
+
+    /// The main layout as flex-layout writes it: a tabset's `selected` left out at its
+    /// default (0), and without the ids flex-layout gives the nodes it adds (`#new…` in the
+    /// fixtures below; the native app gives none, flex-layout adds them when it loads).
+    fn as_written(node: &Value) -> Value {
+        let Value::Object(fields) = node else {
+            return node.clone();
+        };
+        let mut fields = fields.clone();
+        if fields.get("selected") == Some(&json!(0)) {
+            fields.shift_remove("selected");
+        }
+        if fields.get("id").and_then(Value::as_str).is_some_and(|id| id.starts_with("#new")) {
+            fields.shift_remove("id");
+        }
+        if let Some(Value::Array(children)) = fields.get_mut("children") {
+            *children = children.iter().map(as_written).collect();
+        }
+        Value::Object(fields)
+    }
+
+    /// `layout` with `tab` docked at `target`: the main layout as written.
+    fn docked(mut layout: Layout, tab: &str, target: DropTarget) -> Value {
+        assert!(layout.dock(tab, &target), "{tab} docks at {target:?}");
+        as_written(&model(&layout)["layout"])
+    }
+
+    /// The main layout Electron's flex-layout wrote after the same `moveNode`.
+    fn flex_layout(json: &str) -> Value {
+        as_written(&electron(json))
+    }
+
+    fn into(path: &[usize], dock: Dock) -> DropTarget {
+        DropTarget::TabSet { path: path.to_vec(), dock }
+    }
+
+    /// Two tabs in the root's only tabset.
+    const ONE: &str = r##"{"global":{},"borders":[],"layout":{"type":"row","id":"#root","children":[{"type":"tabset","id":"only","children":[{"type":"tab","id":"a"},{"type":"tab","id":"b"}],"active":true}]}}"##;
+
+    fn one() -> Layout {
+        Layout::parse(ONE).expect("valid")
+    }
+
+    #[test]
+    fn a_tab_docked_in_a_tabsets_middle_joins_the_end_of_its_tabs_selected() {
+        // flex-layout's `moveNode('t2', '#top', CENTER, -1)`.
+        let expected = r##"{"type":"row","id":"#root","children":[{"type":"tabset","id":"main","weight":50,"children":[{"type":"tab","id":"t1","name":"T t1","component":"terminal","enableClose":true}]},{"type":"row","id":"#column","weight":50,"children":[{"type":"tabset","id":"#top","weight":50,"selected":1,"children":[{"type":"tab","id":"t3","name":"T t3","component":"terminal","enableClose":true},{"type":"tab","id":"t2","name":"T t2","component":"terminal","enableClose":true}],"active":true},{"type":"tabset","id":"#bottom","weight":50,"children":[{"type":"tab","id":"t4","name":"T t4","component":"terminal","enableClose":true}]}]}]}"##;
+        assert_eq!(docked(split(), "t2", into(&[1, 0], Dock::Center)), flex_layout(expected));
+
+        // `moveNode('a', 'only', CENTER, -1)`: its own tabset's middle, to the end of it.
+        let expected = r##"{"type":"row","id":"#root","children":[{"type":"tabset","id":"only","selected":1,"children":[{"type":"tab","id":"b"},{"type":"tab","id":"a"}],"active":true}]}"##;
+        assert_eq!(docked(one(), "a", into(&[0], Dock::Center)), flex_layout(expected));
+        // The last tab stays where it is, selected.
+        let mut layout = one();
+        assert!(layout.dock("b", &into(&[0], Dock::Center)));
+        assert_eq!(layout.tab_order(), ["a", "b"]);
+        assert_eq!(layout.selected_tab().as_deref(), Some("b"));
+    }
+
+    #[test]
+    fn a_tab_docked_on_a_tabsets_side_along_its_row_shares_the_tabsets_weight() {
+        // `moveNode('t1', '#bottom', TOP, -1)`: above t4, in the column.
+        let expected = r##"{"type":"row","id":"#root","children":[{"type":"tabset","id":"main","weight":50,"children":[{"type":"tab","id":"t2","name":"T t2","component":"terminal","enableClose":true}]},{"type":"row","id":"#column","weight":50,"children":[{"type":"tabset","id":"#top","weight":50,"children":[{"type":"tab","id":"t3","name":"T t3","component":"terminal","enableClose":true}]},{"type":"tabset","id":"#new0","weight":25,"children":[{"type":"tab","id":"t1","name":"T t1","component":"terminal","enableClose":true}],"active":true},{"type":"tabset","id":"#bottom","weight":25,"children":[{"type":"tab","id":"t4","name":"T t4","component":"terminal","enableClose":true}]}]}]}"##;
+        assert_eq!(docked(split(), "t1", into(&[1, 1], Dock::Edge(Edge::Top))), flex_layout(expected));
+
+        // `moveNode('t1', 'main', RIGHT, -1)`: out of its own tabset, beside it.
+        let expected = r##"{"type":"row","id":"#root","children":[{"type":"tabset","id":"main","weight":25,"children":[{"type":"tab","id":"t2","name":"T t2","component":"terminal","enableClose":true}]},{"type":"tabset","id":"#new0","weight":25,"children":[{"type":"tab","id":"t1","name":"T t1","component":"terminal","enableClose":true}],"active":true},{"type":"row","id":"#column","weight":50,"children":[{"type":"tabset","id":"#top","weight":50,"children":[{"type":"tab","id":"t3","name":"T t3","component":"terminal","enableClose":true}]},{"type":"tabset","id":"#bottom","weight":50,"children":[{"type":"tab","id":"t4","name":"T t4","component":"terminal","enableClose":true}]}]}]}"##;
+        assert_eq!(docked(split(), "t1", into(&[0], Dock::Edge(Edge::Right))), flex_layout(expected));
+
+        // `moveNode('t3', '#top', BOTTOM, -1)`: the only tab of its tabset, which goes, leaving
+        // the new one half its weight.
+        let expected = r##"{"type":"row","id":"#root","children":[{"type":"tabset","id":"main","weight":50,"selected":1,"children":[{"type":"tab","id":"t1","name":"T t1","component":"terminal","enableClose":true},{"type":"tab","id":"t2","name":"T t2","component":"terminal","enableClose":true}]},{"type":"row","id":"#column","weight":50,"children":[{"type":"tabset","id":"#new0","weight":25,"children":[{"type":"tab","id":"t3","name":"T t3","component":"terminal","enableClose":true}],"active":true},{"type":"tabset","id":"#bottom","weight":50,"children":[{"type":"tab","id":"t4","name":"T t4","component":"terminal","enableClose":true}]}]}]}"##;
+        assert_eq!(docked(split(), "t3", into(&[1, 0], Dock::Edge(Edge::Bottom))), flex_layout(expected));
+
+        // `moveNode('a', 'only', RIGHT, -1)`: a tabset without a weight shares the default 100.
+        let expected = r##"{"type":"row","id":"#root","children":[{"type":"tabset","id":"only","weight":50,"children":[{"type":"tab","id":"b"}]},{"type":"tabset","id":"#new0","weight":50,"children":[{"type":"tab","id":"a"}],"active":true}]}"##;
+        assert_eq!(docked(one(), "a", into(&[0], Dock::Edge(Edge::Right))), flex_layout(expected));
+    }
+
+    #[test]
+    fn a_tab_docked_on_a_tabsets_side_across_its_row_makes_a_row_of_the_two() {
+        // `moveNode('t3', 'main', BOTTOM, -1)`: a column of main over t3 where main was; t3's
+        // tabset goes, and t4's takes the column's place.
+        let expected = r##"{"type":"row","id":"#root","children":[{"type":"row","id":"#new0","weight":50,"children":[{"type":"tabset","id":"main","weight":50,"selected":1,"children":[{"type":"tab","id":"t1","name":"T t1","component":"terminal","enableClose":true},{"type":"tab","id":"t2","name":"T t2","component":"terminal","enableClose":true}]},{"type":"tabset","id":"#new1","weight":50,"children":[{"type":"tab","id":"t3","name":"T t3","component":"terminal","enableClose":true}],"active":true}]},{"type":"tabset","id":"#bottom","weight":50,"children":[{"type":"tab","id":"t4","name":"T t4","component":"terminal","enableClose":true}]}]}"##;
+        assert_eq!(docked(split(), "t3", into(&[0], Dock::Edge(Edge::Bottom))), flex_layout(expected));
+
+        // `moveNode('t4', '#top', LEFT, -1)`: a row of t4 and t3 in the column, which, left
+        // with only that row, hands its children its weight in the root.
+        let expected = r##"{"type":"row","id":"#root","children":[{"type":"tabset","id":"main","weight":50,"selected":1,"children":[{"type":"tab","id":"t1","name":"T t1","component":"terminal","enableClose":true},{"type":"tab","id":"t2","name":"T t2","component":"terminal","enableClose":true}]},{"type":"tabset","id":"#new0","weight":25,"children":[{"type":"tab","id":"t4","name":"T t4","component":"terminal","enableClose":true}],"active":true},{"type":"tabset","id":"#top","weight":25,"children":[{"type":"tab","id":"t3","name":"T t3","component":"terminal","enableClose":true}]}]}"##;
+        assert_eq!(docked(split(), "t4", into(&[1, 0], Dock::Edge(Edge::Left))), flex_layout(expected));
+    }
+
+    #[test]
+    fn a_tab_docked_at_the_layouts_edge_along_the_root_takes_a_third_of_it() {
+        // `moveNode('t2', '#root', LEFT, -1)`: the tabset it left selects its first tab.
+        let expected = r##"{"type":"row","id":"#root","children":[{"type":"tabset","id":"#new0","weight":33.333333333333336,"children":[{"type":"tab","id":"t2","name":"T t2","component":"terminal","enableClose":true}],"active":true},{"type":"tabset","id":"main","weight":50,"children":[{"type":"tab","id":"t1","name":"T t1","component":"terminal","enableClose":true}]},{"type":"row","id":"#column","weight":50,"children":[{"type":"tabset","id":"#top","weight":50,"children":[{"type":"tab","id":"t3","name":"T t3","component":"terminal","enableClose":true}]},{"type":"tabset","id":"#bottom","weight":50,"children":[{"type":"tab","id":"t4","name":"T t4","component":"terminal","enableClose":true}]}]}]}"##;
+        assert_eq!(docked(split(), "t2", DropTarget::LayoutEdge(Edge::Left)), flex_layout(expected));
+
+        // `moveNode('t4', '#root', RIGHT, -1)`: weighed before the tabset it left goes.
+        let expected = r##"{"type":"row","id":"#root","children":[{"type":"tabset","id":"main","weight":50,"selected":1,"children":[{"type":"tab","id":"t1","name":"T t1","component":"terminal","enableClose":true},{"type":"tab","id":"t2","name":"T t2","component":"terminal","enableClose":true}]},{"type":"tabset","id":"#top","weight":50,"children":[{"type":"tab","id":"t3","name":"T t3","component":"terminal","enableClose":true}]},{"type":"tabset","id":"#new0","weight":33.333333333333336,"children":[{"type":"tab","id":"t4","name":"T t4","component":"terminal","enableClose":true}],"active":true}]}"##;
+        assert_eq!(docked(split(), "t4", DropTarget::LayoutEdge(Edge::Right)), flex_layout(expected));
+
+        // A root weighing nothing counts as 100.
+        let zero = Layout::parse(&ONE.replace(r#""id":"only","#, r#""id":"only","weight":0,"#)).expect("valid");
+        let expected = r##"{"type":"row","id":"#root","children":[{"type":"tabset","id":"#new0","weight":33.333333333333336,"children":[{"type":"tab","id":"a"}],"active":true},{"type":"tabset","id":"only","weight":0,"children":[{"type":"tab","id":"b"}]}]}"##;
+        assert_eq!(docked(zero, "a", DropTarget::LayoutEdge(Edge::Left)), flex_layout(expected));
+    }
+
+    #[test]
+    fn a_tab_docked_at_the_layouts_edge_across_the_root_takes_a_quarter_beside_the_rest() {
+        // `moveNode('t2', '#root', TOP, -1)`: a column of t2 (25) over a row of the rest (75).
+        let expected = r##"{"type":"row","id":"#root","children":[{"type":"row","id":"#new0","children":[{"type":"tabset","id":"#new1","weight":25,"children":[{"type":"tab","id":"t2","name":"T t2","component":"terminal","enableClose":true}],"active":true},{"type":"row","id":"#new2","weight":75,"children":[{"type":"tabset","id":"main","weight":50,"children":[{"type":"tab","id":"t1","name":"T t1","component":"terminal","enableClose":true}]},{"type":"row","id":"#column","weight":50,"children":[{"type":"tabset","id":"#top","weight":50,"children":[{"type":"tab","id":"t3","name":"T t3","component":"terminal","enableClose":true}]},{"type":"tabset","id":"#bottom","weight":50,"children":[{"type":"tab","id":"t4","name":"T t4","component":"terminal","enableClose":true}]}]}]}]}]}"##;
+        assert_eq!(docked(split(), "t2", DropTarget::LayoutEdge(Edge::Top)), flex_layout(expected));
+
+        // `moveNode('t2', '#root', BOTTOM, -1)`: the rest over t2.
+        let expected = r##"{"type":"row","id":"#root","children":[{"type":"row","id":"#new0","children":[{"type":"row","id":"#new1","weight":75,"children":[{"type":"tabset","id":"main","weight":50,"children":[{"type":"tab","id":"t1","name":"T t1","component":"terminal","enableClose":true}]},{"type":"row","id":"#column","weight":50,"children":[{"type":"tabset","id":"#top","weight":50,"children":[{"type":"tab","id":"t3","name":"T t3","component":"terminal","enableClose":true}]},{"type":"tabset","id":"#bottom","weight":50,"children":[{"type":"tab","id":"t4","name":"T t4","component":"terminal","enableClose":true}]}]}]},{"type":"tabset","id":"#new2","weight":25,"children":[{"type":"tab","id":"t2","name":"T t2","component":"terminal","enableClose":true}],"active":true}]}]}"##;
+        assert_eq!(docked(split(), "t2", DropTarget::LayoutEdge(Edge::Bottom)), flex_layout(expected));
+
+        // `moveNode('a', '#root', TOP, -1)`: the rest being one tabset, it takes its row's
+        // place and weight.
+        let expected = r##"{"type":"row","id":"#root","children":[{"type":"row","id":"#new0","children":[{"type":"tabset","id":"#new1","weight":25,"children":[{"type":"tab","id":"a"}],"active":true},{"type":"tabset","id":"only","weight":75,"children":[{"type":"tab","id":"b"}]}]}]}"##;
+        assert_eq!(docked(one(), "a", DropTarget::LayoutEdge(Edge::Top)), flex_layout(expected));
+    }
+
+    #[test]
+    fn a_vertical_root_has_its_ends_at_the_top_and_bottom() {
+        let vertical =
+            || Layout::parse(&SPLIT.replace(r#""global":{"#, r#""global":{"rootOrientationVertical":true,"#)).expect("valid");
+        // `moveNode('t2', '#root', BOTTOM, -1)`: a third, at the root's end.
+        let expected = r##"{"type":"row","id":"#root","children":[{"type":"tabset","id":"main","weight":50,"children":[{"type":"tab","id":"t1","name":"T t1","component":"terminal","enableClose":true}]},{"type":"row","id":"#column","weight":50,"children":[{"type":"tabset","id":"#top","weight":50,"children":[{"type":"tab","id":"t3","name":"T t3","component":"terminal","enableClose":true}]},{"type":"tabset","id":"#bottom","weight":50,"children":[{"type":"tab","id":"t4","name":"T t4","component":"terminal","enableClose":true}]}]},{"type":"tabset","id":"#new0","weight":33.333333333333336,"children":[{"type":"tab","id":"t2","name":"T t2","component":"terminal","enableClose":true}],"active":true}]}"##;
+        assert_eq!(docked(vertical(), "t2", DropTarget::LayoutEdge(Edge::Bottom)), flex_layout(expected));
+        // `moveNode('t2', '#root', LEFT, -1)`: a quarter, beside the rest.
+        let expected = r##"{"type":"row","id":"#root","children":[{"type":"row","id":"#new0","children":[{"type":"tabset","id":"#new1","weight":25,"children":[{"type":"tab","id":"t2","name":"T t2","component":"terminal","enableClose":true}],"active":true},{"type":"row","id":"#new2","weight":75,"children":[{"type":"tabset","id":"main","weight":50,"children":[{"type":"tab","id":"t1","name":"T t1","component":"terminal","enableClose":true}]},{"type":"row","id":"#column","weight":50,"children":[{"type":"tabset","id":"#top","weight":50,"children":[{"type":"tab","id":"t3","name":"T t3","component":"terminal","enableClose":true}]},{"type":"tabset","id":"#bottom","weight":50,"children":[{"type":"tab","id":"t4","name":"T t4","component":"terminal","enableClose":true}]}]}]}]}]}"##;
+        assert_eq!(docked(vertical(), "t2", DropTarget::LayoutEdge(Edge::Left)), flex_layout(expected));
+        // `moveNode('t3', 'main', BOTTOM, -1)`: the root runs down, so t3 shares main's weight.
+        let expected = r##"{"type":"row","id":"#root","children":[{"type":"tabset","id":"main","weight":25,"selected":1,"children":[{"type":"tab","id":"t1","name":"T t1","component":"terminal","enableClose":true},{"type":"tab","id":"t2","name":"T t2","component":"terminal","enableClose":true}]},{"type":"tabset","id":"#new0","weight":25,"children":[{"type":"tab","id":"t3","name":"T t3","component":"terminal","enableClose":true}],"active":true},{"type":"tabset","id":"#bottom","weight":50,"children":[{"type":"tab","id":"t4","name":"T t4","component":"terminal","enableClose":true}]}]}"##;
+        assert_eq!(docked(vertical(), "t3", into(&[0], Dock::Edge(Edge::Bottom))), flex_layout(expected));
+        // `moveNode('t3', 'main', LEFT, -1)`: a row of the two.
+        let expected = r##"{"type":"row","id":"#root","children":[{"type":"row","id":"#new0","weight":50,"children":[{"type":"tabset","id":"#new1","weight":50,"children":[{"type":"tab","id":"t3","name":"T t3","component":"terminal","enableClose":true}],"active":true},{"type":"tabset","id":"main","weight":50,"selected":1,"children":[{"type":"tab","id":"t1","name":"T t1","component":"terminal","enableClose":true},{"type":"tab","id":"t2","name":"T t2","component":"terminal","enableClose":true}]}]},{"type":"tabset","id":"#bottom","weight":50,"children":[{"type":"tab","id":"t4","name":"T t4","component":"terminal","enableClose":true}]}]}"##;
+        assert_eq!(docked(vertical(), "t3", into(&[0], Dock::Edge(Edge::Left))), flex_layout(expected));
+    }
+
+    #[test]
+    fn a_dock_of_an_unknown_or_border_tab_or_onto_no_tabset_changes_nothing() {
+        let bordered = SPLIT.replace(
+            r#""borders":[]"#,
+            r#""borders":[{"type":"border","location":"left","children":[{"type":"tab","id":"b1"}]}]"#,
+        );
+        let mut layout = Layout::parse(&bordered).unwrap();
+        let unchanged = model(&layout);
+        assert!(!layout.dock("gone", &into(&[0], Dock::Center)));
+        assert!(!layout.dock("gone", &DropTarget::LayoutEdge(Edge::Top)));
+        assert!(!layout.dock("b1", &into(&[0], Dock::Center)));
+        assert!(!layout.dock("b1", &DropTarget::LayoutEdge(Edge::Left)));
+        // Onto a row, nothing, or the root.
+        assert!(!layout.dock("t1", &into(&[1], Dock::Center)));
+        assert!(!layout.dock("t1", &into(&[5], Dock::Edge(Edge::Top))));
+        assert!(!layout.dock("t1", &into(&[], Dock::Center)));
+        assert_eq!(model(&layout), unchanged);
     }
 }
