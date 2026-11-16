@@ -314,6 +314,9 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   Kit selects text: a selection over several lines copies a blank line as nothing, and a
   path cut short by its ellipsis cannot be selected (its tooltip shows it whole). A long
   code line scrolls sideways with the wheel or trackpad, but without Chromium's scrollbar.
+- In the Review diff, a review comment's text and the diff's code are selected apart: a
+  selection running from a comment into the code (or back) copies the comment text only,
+  not the code it spans, where Electron copies both, in reading order.
 - View → Actual Size, Zoom In and Zoom Out scale terminal text only (in Chromium's steps and
   25%–500% limits, for every window): GPUI has no page zoom, and the rest of the window is
   laid out in fixed pixels. The level is restored at the next start, as Electron's is, from the
