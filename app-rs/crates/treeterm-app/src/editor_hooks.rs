@@ -4,27 +4,28 @@
 //! - both editors: the underline under a word with a definition while Cmd/Ctrl is held over
 //!   it, which a click follows; links (underlined, "Follow link (cmd + click)" on hover,
 //!   Cmd/Ctrl+click opens a web link in the browser and a `file:` link in an Editor tab);
-//!   the language workers' problems (squiggles, their message on hover); and CSS colours;
-//! - the Editor tab: suggestions while typing, the language's (CSS properties, HTML elements
-//!   and attributes, JSON keys and values) or else the words of the file and of the other
-//!   open files of its language; none while typing in a comment or a string, unless the
-//!   character typed asks the language's worker.
+//!   the language workers' problems (squiggles, their message on hover); HTML's
+//!   documentation on hover and its matching tag highlights; and CSS colours;
+//! - the Editor tab: suggestions while typing, the language's (CSS properties, HTML elements,
+//!   attributes, values and entities, JSON keys and values) or else the words of the file and
+//!   of the other open files of its language; none while typing in a comment or a string,
+//!   unless the character typed asks the language's worker.
 
 use std::cell::Cell;
 use std::rc::Rc;
 
 use gpui_kit::component::highlighter::{Diagnostic, DiagnosticSeverity};
 use gpui_kit::component::input::{
-    CompletionProvider, DefinitionProvider, DocumentColorProvider, EditorState, HoverProvider, Rope, RopeExt as _,
-    TextDecoration,
+    CompletionProvider, DefinitionProvider, DocumentColorProvider, EditorState, HoverProvider, RangeDecoration,
+    RangeDecorationCollection, RangeDecorationStyle, Rope, RopeExt as _, TextDecoration,
 };
 use gpui_kit::{App, Entity, Task, Window};
 use lsp_types::{
-    Color, ColorInformation, CompletionContext, CompletionItem, CompletionItemKind, CompletionResponse,
-    CompletionTextEdit, CompletionTriggerKind, Hover, HoverContents, InsertTextFormat, LocationLink, MarkupContent,
-    MarkupKind, Range, ShowDocumentParams, TextEdit, Uri,
+    Color, ColorInformation, Command, CompletionContext, CompletionItem, CompletionItemKind, CompletionResponse,
+    CompletionTextEdit, CompletionTriggerKind, Hover, HoverContents, InsertTextFormat, LocationLink, MarkedString,
+    MarkupContent, MarkupKind, Range, ShowDocumentParams, TextEdit, Uri,
 };
-use treeterm_model::code_intel::{self, Insert, Request, Severity, Suggested, links};
+use treeterm_model::code_intel::{self, Completion, Insert, Request, Severity, Suggested, Then, links};
 use treeterm_model::definition::DefinitionProbe;
 use treeterm_model::words;
 
@@ -123,14 +124,16 @@ pub(crate) enum Follow {
     Link(String),
 }
 
-/// Give `editor` the Cmd/Ctrl+hover underline of `probe`'s file, and of its links. A click
-/// on an underlined word puts the cursor on it and calls `go` with its offset; one on a link
-/// calls `go` with its URL. Either sets `clicked` for the view's mouse-up handler, which
-/// would otherwise take the click as Cmd/Ctrl+click on the cursor (the Kit takes the press
-/// and leaves the cursor where it was). The element around the editor is a
-/// [`definition_frame`], which clears `clicked` at each press.
+/// Give `editor`, a file of Monaco's `language`, the Cmd/Ctrl+hover underline of `probe`'s
+/// file, and of its links, and the hover over them and over what its language worker
+/// documents ([`CodeHover`]). A click on an underlined word puts the cursor on it and calls
+/// `go` with its offset; one on a link calls `go` with its URL. Either sets `clicked` for the
+/// view's mouse-up handler, which would otherwise take the click as Cmd/Ctrl+click on the
+/// cursor (the Kit takes the press and leaves the cursor where it was). The element around
+/// the editor is a [`definition_frame`], which clears `clicked` at each press.
 pub(crate) fn install_definitions(
     editor: &Entity<EditorState>,
+    language: &'static str,
     probe: DefinitionProbe,
     clicked: Rc<Cell<bool>>,
     go: impl Fn(Follow, &mut App) + 'static,
@@ -176,7 +179,7 @@ pub(crate) fn install_definitions(
         let lsp = editor.lsp_mut();
         lsp.definition_provider = Some(Rc::new(GrepDefinitions { probe }));
         lsp.show_document = Some(Rc::new(show));
-        lsp.hover_provider = Some(Rc::new(LinkHover));
+        lsp.hover_provider = Some(Rc::new(CodeHover { language }));
     });
 }
 
@@ -213,19 +216,33 @@ fn link_hover_message(url: &str) -> String {
     format!("[Follow link]({target}) ({click})")
 }
 
-/// The hover over a link.
-struct LinkHover;
+/// The hover in a file of Monaco's `language`: over a link, how to follow it; over what the
+/// language's worker documents (HTML's elements, attributes, values and entities), its
+/// documentation ([`code_intel::hover`]). Both, the link first, where both are.
+struct CodeHover {
+    language: &'static str,
+}
 
-impl HoverProvider for LinkHover {
-    fn hover(&self, text: &Rope, offset: usize, _: &mut Window, _: &mut App) -> Task<gpui_kit::Result<Option<Hover>>> {
+impl HoverProvider for CodeHover {
+    fn hover(&self, text: &Rope, offset: usize, _: &mut Window, cx: &mut App) -> Task<gpui_kit::Result<Option<Hover>>> {
         let row = text.offset_to_point(offset).row;
         let line_start = text.line_start_offset(row);
         let line = text.slice_line(row).to_string();
-        let hover = links::link_at(&line, offset - line_start).map(|link| Hover {
-            contents: HoverContents::Markup(MarkupContent { kind: MarkupKind::Markdown, value: link_hover_message(&link.url) }),
-            range: Some(lsp_range(text, line_start + link.range.start..line_start + link.range.end)),
-        });
-        Task::ready(Ok(hover))
+        let link = links::link_at(&line, offset - line_start)
+            .map(|link| (link_hover_message(&link.url), line_start + link.range.start..line_start + link.range.end));
+        let (text, language) = (text.clone(), self.language);
+        cx.background_executor().spawn(async move {
+            let documented =
+                code_intel::hover(language, &text.to_string(), offset).map(|hover| (hover.contents, hover.range));
+            let range = link.as_ref().or(documented.as_ref()).map(|(_, range)| lsp_range(&text, range.clone()));
+            let mut parts: Vec<String> = link.into_iter().chain(documented).map(|(contents, _)| contents).collect();
+            let contents = match parts.len() {
+                0 => return Ok(None),
+                1 => HoverContents::Markup(MarkupContent { kind: MarkupKind::Markdown, value: parts.remove(0) }),
+                _ => HoverContents::Array(parts.into_iter().map(MarkedString::String).collect()),
+            };
+            Ok(Some(Hover { contents, range }))
+        })
     }
 }
 
@@ -293,6 +310,56 @@ impl ProblemMarks {
     }
 }
 
+/// Monaco's word highlighter in a file of Monaco's `language` whose worker highlights at the
+/// cursor ([`code_intel::highlights`]: HTML's matching tag names), painted behind the text in
+/// vs-dark's `editor.wordHighlightBackground`, again whenever the text or the cursor moves.
+pub(crate) struct CursorHighlights {
+    language: &'static str,
+    painted: RangeDecorationCollection,
+    /// The text and the cursor the highlights are for.
+    at: Option<(Rope, usize)>,
+    /// The pass finding them.
+    _pass: Task<()>,
+}
+
+/// vs-dark's `editor.wordHighlightBackground`, `#575757B8`.
+const WORD_HIGHLIGHT: u32 = 0x5757_57b8;
+
+impl CursorHighlights {
+    pub(crate) fn new(editor: &Entity<EditorState>, language: &'static str, cx: &mut App) -> Self {
+        let painted = editor.update(cx, |editor, cx| editor.create_range_decorations_collection(Vec::new(), cx));
+        Self { language, painted, at: None, _pass: Task::ready(()) }
+    }
+
+    /// Highlight anew if `editor`'s text or cursor moved since: called whenever it changes.
+    pub(crate) fn follow(&mut self, editor: &Entity<EditorState>, cx: &mut App) {
+        if !code_intel::highlights_at_cursor(self.language) {
+            return;
+        }
+        let (text, cursor) = {
+            let editor = editor.read(cx);
+            (editor.text().clone(), editor.cursor())
+        };
+        if self.at.as_ref().is_some_and(|(at_text, at_cursor)| *at_cursor == cursor && *at_text == text) {
+            return;
+        }
+        self.at = Some((text.clone(), cursor));
+        let language = self.language;
+        let found =
+            cx.background_executor().spawn(async move { code_intel::highlights(language, &text.to_string(), cursor) });
+        let painted = self.painted.clone();
+        self._pass = cx.spawn(async move |cx| {
+            let color: gpui_kit::Hsla = gpui_kit::rgba(WORD_HIGHLIGHT).into();
+            let highlights: Vec<RangeDecoration> = found
+                .await
+                .into_iter()
+                .map(|range| RangeDecoration::new(range).with_style(RangeDecorationStyle::Fill).with_color(color))
+                .collect();
+            cx.update(|cx| painted.set(highlights, cx));
+        });
+    }
+}
+
 /// The CSS worker's colours, painted behind their text.
 struct StyleSheetColors {
     language: &'static str,
@@ -324,6 +391,10 @@ pub(crate) fn install_colors(editor: &Entity<EditorState>, language: &'static st
         editor.lsp_mut().document_color_provider = Some(Rc::new(StyleSheetColors { language }));
     });
 }
+
+/// The command of a completion that asks for suggestions again once picked, which GPUI Kit
+/// runs (a TreeTerm patch).
+const TRIGGER_SUGGEST: &str = "editor.action.triggerSuggest";
 
 /// The texts of the other open files of the editor's language, whose words Monaco suggests too.
 pub(crate) type OtherTexts = Rc<dyn Fn(&App) -> Vec<String>>;
@@ -398,31 +469,45 @@ impl CompletionProvider for Suggestions {
         let found = cx.background_executor().spawn(async move {
             let string = text.to_string();
             let in_comment_or_string = || in_comment_or_string(grammar, &string, offset);
-            let (replace, items, kind): (_, Vec<(String, Insert)>, _) =
+            let (items, kind): (Vec<Completion>, _) =
                 match code_intel::suggest(language, &string, &others, offset, asked, in_comment_or_string) {
-                    Suggested::Language(found) => {
-                        let items = found.items.into_iter().map(|item| (item.label, item.insert)).collect();
-                        (found.replace, items, CompletionItemKind::PROPERTY)
-                    }
+                    Suggested::Language(found) => (found, CompletionItemKind::PROPERTY),
                     Suggested::Words(found) => {
-                        let items = found.words.into_iter().map(|word| (word.clone(), Insert::Text(word))).collect();
-                        (found.replace, items, CompletionItemKind::TEXT)
+                        let replace = found.replace;
+                        let items = found
+                            .words
+                            .into_iter()
+                            .map(|word| Completion {
+                                label: word.clone(),
+                                replace: replace.clone(),
+                                insert: Insert::Text(word),
+                                then: Then::Done,
+                            })
+                            .collect();
+                        (items, CompletionItemKind::TEXT)
                     }
                     Suggested::Nothing => return Vec::new(),
                 };
-            let replace = lsp_range(&text, replace);
             items
                 .into_iter()
-                .map(|(label, insert)| {
+                .map(|Completion { label, replace, insert, then }| {
                     let (new_text, format) = match insert {
                         Insert::Text(text) => (text, InsertTextFormat::PLAIN_TEXT),
                         Insert::Snippet(snippet) => (snippet, InsertTextFormat::SNIPPET),
                     };
+                    let command = match then {
+                        Then::Done => None,
+                        Then::Suggest => Some(Command::new("Suggest".to_owned(), TRIGGER_SUGGEST.to_owned(), None)),
+                    };
                     CompletionItem {
                         label,
                         kind: Some(kind),
-                        text_edit: Some(CompletionTextEdit::Edit(TextEdit { range: replace, new_text })),
+                        text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+                            range: lsp_range(&text, replace),
+                            new_text,
+                        })),
                         insert_text_format: Some(format),
+                        command,
                         ..CompletionItem::default()
                     }
                 })
@@ -516,7 +601,7 @@ mod tests {
         cx.update(|_, cx| {
             let probe = DefinitionProbe::new(Arc::new(GrepFindsOne), "/w".into(), "/w/b.rs".into());
             let gone = gone.clone();
-            install_definitions(&editor, probe, clicked.clone(), move |follow, _| gone.borrow_mut().push(follow), cx);
+            install_definitions(&editor, "rust", probe, clicked.clone(), move |follow, _| gone.borrow_mut().push(follow), cx);
         });
         cx.run_until_parked();
         let helper = text.rfind("helper").unwrap();
@@ -599,7 +684,7 @@ mod tests {
         cx.update(|_, cx| {
             let probe = DefinitionProbe::new(Arc::new(GrepFindsOne), "/w".into(), "/w/b.rs".into());
             let gone = gone.clone();
-            install_definitions(&editor, probe, clicked.clone(), move |follow, _| gone.borrow_mut().push(follow), cx);
+            install_definitions(&editor, "rust", probe, clicked.clone(), move |follow, _| gone.borrow_mut().push(follow), cx);
         });
         cx.run_until_parked();
         let secondary = cx.update(|_, cx| Modifiers::secondary_key(cx));
@@ -655,5 +740,92 @@ mod tests {
         assert_eq!(colors.len(), 1);
         assert_eq!((colors[0].range.start.character, colors[0].range.end.character), (11, 18));
         assert_eq!((colors[0].color.red, colors[0].color.green, colors[0].color.alpha), (1., 0., 1.));
+    }
+
+    /// The hover `provider` gives at byte `offset` of `text`.
+    fn hover_at(
+        provider: &CodeHover,
+        text: &str,
+        offset: usize,
+        cx: &mut gpui_kit::VisualTestContext,
+    ) -> Option<Hover> {
+        let found = Rc::new(RefCell::new(None));
+        cx.update(|window, cx| {
+            let hover = provider.hover(&Rope::from(text), offset, window, cx);
+            let found = found.clone();
+            cx.spawn(async move |_| *found.borrow_mut() = Some(hover.await)).detach();
+        });
+        cx.run_until_parked();
+        found.borrow_mut().take().expect("a hover").unwrap()
+    }
+
+    #[gpui_kit::test]
+    fn the_hover_follows_a_link_and_shows_what_the_language_worker_documents(cx: &mut gpui_kit::TestAppContext) {
+        cx.update(gpui_kit::init);
+        let (_, cx) = cx.add_window_view(|window, cx| Host {
+            editor: cx.new(|cx| EditorState::new(window, cx).language("html")),
+            clicked: Rc::new(Cell::new(false)),
+        });
+        let html = CodeHover { language: "html" };
+        let markdown = |hover: Option<Hover>| match hover.map(|hover| hover.contents) {
+            Some(HoverContents::Markup(markup)) => vec![markup.value],
+            Some(HoverContents::Array(parts)) => parts
+                .into_iter()
+                .map(|part| match part {
+                    MarkedString::String(text) => text,
+                    MarkedString::LanguageString(code) => code.value,
+                })
+                .collect(),
+            Some(HoverContents::Scalar(_)) | None => Vec::new(),
+        };
+        // An element's documentation, over its name.
+        let text = "<p>a <b>c</b> http://a.b</p>";
+        let documented = markdown(hover_at(&html, text, 1, cx));
+        assert!(documented.len() == 1 && documented[0].starts_with("The p element represents a paragraph."), "{documented:?}");
+        // A link: how to follow it.
+        let link = markdown(hover_at(&html, text, 16, cx));
+        assert!(link.len() == 1 && link[0].starts_with("[Follow link](http://a.b)"), "{link:?}");
+        assert_eq!(markdown(hover_at(&html, text, 4, cx)), Vec::<String>::new());
+        // A character entity in a link: both, the link first.
+        let text = "<p>http://a.b/?x=1&amp;y=2</p>";
+        let both = markdown(hover_at(&html, text, text.find("amp").unwrap() + 1, cx));
+        assert_eq!(both.len(), 2, "{both:?}");
+        assert!(both[0].starts_with("[Follow link]"), "{both:?}");
+        assert_eq!(both[1], "Character entity representing '&', unicode equivalent 'U+0026'");
+        // Other languages document nothing.
+        let rust = CodeHover { language: "rust" };
+        assert_eq!(markdown(hover_at(&rust, "<p>", 1, cx)), Vec::<String>::new());
+    }
+
+    #[gpui_kit::test]
+    fn matching_tag_names_are_highlighted_where_the_cursor_is(cx: &mut gpui_kit::TestAppContext) {
+        cx.update(gpui_kit::init);
+        let text = "<div><p>a</p></div>";
+        let (host, cx) = cx.add_window_view(|window, cx| Host {
+            editor: cx.new(|cx| EditorState::new(window, cx).language("html").default_value(text)),
+            clicked: Rc::new(Cell::new(false)),
+        });
+        let editor = cx.update(|_, cx| host.read(cx).editor.clone());
+        let mut highlights = cx.update(|_, cx| CursorHighlights::new(&editor, "html", cx));
+        let highlighted = |highlights: &CursorHighlights, cx: &mut gpui_kit::VisualTestContext| {
+            cx.update(|_, cx| highlights.painted.get_ranges(cx))
+        };
+        let place = |at: usize, highlights: &mut CursorHighlights, cx: &mut gpui_kit::VisualTestContext| {
+            cx.update(|_, cx| {
+                editor.update(cx, |editor, cx| editor.set_selected_range(at..at, cx));
+                highlights.follow(&editor, cx);
+            });
+            cx.run_until_parked();
+        };
+        place(2, &mut highlights, cx);
+        assert_eq!(highlighted(&highlights, cx), [1..4, 15..18]);
+        place(6, &mut highlights, cx);
+        assert_eq!(highlighted(&highlights, cx), [6..7, 11..12]);
+        place(8, &mut highlights, cx);
+        assert_eq!(highlighted(&highlights, cx), Vec::<std::ops::Range<usize>>::new());
+        // Only where the language's worker highlights.
+        let mut none = cx.update(|_, cx| CursorHighlights::new(&editor, "rust", cx));
+        place(2, &mut none, cx);
+        assert_eq!(highlighted(&none, cx), Vec::<std::ops::Range<usize>>::new());
     }
 }

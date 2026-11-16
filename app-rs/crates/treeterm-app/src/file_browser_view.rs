@@ -477,6 +477,9 @@ pub struct FileBrowserView {
     links: Option<gpui_kit::component::input::TextDecorationCollection>,
     /// The language worker's problems in the editor's file.
     problems: Option<crate::editor_hooks::ProblemMarks>,
+    /// The editor's highlights at the cursor ([`crate::editor_hooks::CursorHighlights`]),
+    /// followed as it changes.
+    highlights: Option<Subscription>,
     /// The model's last [`treeterm_model::file_browser::Reveal`] applied to the editor.
     revealed: u64,
     /// The search panel's query box, made when the panel first opens (it needs the window).
@@ -644,6 +647,7 @@ impl FileBrowserView {
             brackets: None,
             links: None,
             problems: None,
+            highlights: None,
             revealed: 0,
             search_input: None,
             search_results: crate::search_panel::ResultsList::new(),
@@ -797,6 +801,8 @@ impl FileBrowserView {
         self.problems = Some(problems);
         crate::editor_hooks::install_colors(&editor, monaco_language, cx);
         self.comment_lines = Some(editor.update(cx, |editor, cx| editor.create_range_decorations_collection(Vec::new(), cx)));
+        let mut highlights = crate::editor_hooks::CursorHighlights::new(&editor, monaco_language, cx);
+        self.highlights = Some(cx.observe(&editor, move |_, editor, cx| highlights.follow(&editor, cx)));
         if let Some(probe) = self.model.read(cx).definition_probe() {
             let model = self.model.downgrade();
             let go = move |follow: Follow, cx: &mut App| {
@@ -807,7 +813,8 @@ impl FileBrowserView {
                     });
                 }
             };
-            crate::editor_hooks::install_definitions(&editor, probe, self.definition_clicked.clone(), go, cx);
+            let clicked = self.definition_clicked.clone();
+            crate::editor_hooks::install_definitions(&editor, monaco_language, probe, clicked, go, cx);
         }
         self.marked = (String::new(), Vec::new());
         self.editor = Some((path.to_owned(), read, editor.clone()));

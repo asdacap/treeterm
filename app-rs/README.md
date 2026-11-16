@@ -144,12 +144,15 @@ Done (tested against a real in-process daemon unless noted):
   go to definition, Change All Occurrences (Cmd/Ctrl+F2), Format Document and Format
   Selection for JSON (Shift+Alt+F, Cmd/Ctrl+K Cmd/Ctrl+F), and suggestions while typing
   (Ctrl+Space asks; none in comments and strings; Enter or Tab takes one): CSS, SCSS and
-  Less property names, HTML element, end tag and attribute names, JSON keys and values the
-  file uses elsewhere, else the words of the file and of the workspace's other open files of
-  its language. Both code editors
-  mark problems (their message on hover): JSON's (Monaco's JSON worker, ported), TypeScript
-  and JavaScript syntax errors, and CSS lint warnings (empty rules, unknown and duplicate
-  properties, unknown at-rules, incomplete `@font-face`); they paint CSS, SCSS and Less
+  Less property names; HTML elements, end tags, attributes, attribute values (picking an
+  attribute that has some asks for them) and character entities (Monaco's HTML worker,
+  ported); JSON keys and values the file uses elsewhere; else the words of the file and of
+  the workspace's other open files of its language. Both code editors mark problems (their
+  message on hover): JSON's (Monaco's JSON worker, ported), TypeScript and JavaScript syntax
+  errors, and CSS lint warnings (empty rules, unknown and duplicate properties, unknown
+  at-rules, incomplete `@font-face`); they show the HTML worker's documentation on hover
+  (elements, attributes, attribute values, character entities) and highlight an element's
+  start and end tag names while the cursor is on one; they paint CSS, SCSS and Less
   colours, and underline links ("Follow link (cmd + click)" on hover): Cmd/Ctrl+click opens
   an `http(s)://` link in the browser and a `file://` link in an Editor tab, at the line its
   `#L<n>` names. The Files viewer and the Editor tab save their scroll offset in the tab
@@ -355,6 +358,10 @@ are not ours). Its changes are marked `TreeTerm patch` (`grep -rn "TreeTerm patc
   between its quotes). The Kit inserted the snippet's source, `$1` and all. Only that first
   stop is reached: there is no snippet session, so Tab indents rather than going on to the
   later stops (`$2`, then `$0` or the end).
+- `src/input/popovers/completion_menu.rs`: a completion whose command is
+  `editor.action.triggerSuggest` asks for suggestions again once it is in and the menu is
+  dismissed, as Monaco runs its command (a picked HTML attribute's values show between its
+  quotes). The Kit ignored the command.
 - `src/menu/popup_menu.rs`: a custom element item (`PopupMenuItem::element`) can be
   narrower than its content, so in a menu given a max width its text can ellipsise, as the
   Run menu's long script names do in Electron. The Kit's row grew with its content and the
@@ -447,12 +454,12 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   service (semantic errors such as unresolved imports, IntelliSense, hover types, signature
   help, references, rename, formatting), JSON schemas (validation, completion, hover: a file
   whose root object names a `$schema` gets no JSON completions, where Monaco's completes
-  the keywords of the JSON Schema drafts it has built in), hover documentation, CSS value
-  and selector completion, the CSS parser's errors and value lint, HTML attribute value and
-  entity completion, matching tag highlights and tag rename, and the CSS and HTML formatters
-  are missing. A problem's hover shows its message without the source and code Monaco adds
-  after it (`json(513)`, `(1005)`). Picking an HTML end tag typed on a line of its own does
-  not move it to its start tag's indentation, as Monaco's does. TypeScript and JavaScript
+  the keywords of the JSON Schema drafts it has built in), CSS hover documentation, CSS
+  value and selector completion, the CSS parser's errors and value lint, HTML tag rename
+  (F2), and the CSS and HTML formatters are missing. A problem's hover shows its message
+  without the source and code Monaco adds after it (`json(513)`, `(1005)`). Suggestions have
+  no details pane: Monaco's (its Read More button, or Ctrl+Space while they show) holds the
+  selected one's description and MDN reference. TypeScript and JavaScript
   syntax errors are read from GPUI Kit's tree-sitter grammars, not TypeScript's parser: they
   are marked where the parse fails, as "';' expected."-style messages or "Unexpected
   token.", and a `.tsx` file is read with JSX (Monaco's worker reads it as plain TypeScript

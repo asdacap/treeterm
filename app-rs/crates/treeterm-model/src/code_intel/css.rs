@@ -11,7 +11,7 @@
 use std::ops::Range;
 
 use super::web_data::{CSS_COLORS, CSS_PROPERTIES};
-use super::{Completion, Completions, Insert, Problem, Severity};
+use super::{Completion, Insert, Problem, Severity, Then};
 use crate::words::{self, Trigger};
 
 /// The style sheet languages the CSS worker reads.
@@ -721,7 +721,7 @@ fn statement_at(reader: &Reader, offset: usize) -> Option<(usize, Block)> {
 /// Monaco's `language`: inside a rule, where a property name is being typed (or asked for
 /// with nothing typed, but not right after a `;`). `None` elsewhere, where Monaco's word
 /// suggestions take over.
-pub fn property_completions(language: &str, text: &str, offset: usize, trigger: Trigger) -> Option<Completions> {
+pub fn property_completions(language: &str, text: &str, offset: usize, trigger: Trigger) -> Option<Vec<Completion>> {
     let dialect = Dialect::of(language)?;
     let reader = Reader { text, bytes: text.as_bytes(), dialect };
     let (start, block) = statement_at(&reader, offset)?;
@@ -749,9 +749,14 @@ pub fn property_completions(language: &str, text: &str, offset: usize, trigger: 
     });
     let items = ranked
         .into_iter()
-        .map(|(_, _, name)| Completion { label: name.to_owned(), insert: Insert::Text(format!("{name}{suffix}")) })
+        .map(|(_, _, name)| Completion {
+            label: name.to_owned(),
+            replace: start..end,
+            insert: Insert::Text(format!("{name}{suffix}")),
+            then: Then::Done,
+        })
         .collect();
-    Some(Completions { replace: start..end, items })
+    Some(items)
 }
 
 #[cfg(test)]
@@ -870,8 +875,9 @@ mod tests {
         let offset = text.find('|').expect("a cursor");
         let text = text.replace('|', "");
         let completions = property_completions(language, &text, offset, trigger)?;
-        let (labels, inserts) = completions.items.into_iter().take(3).map(|item| (item.label, item.insert.source().to_owned())).unzip();
-        Some((text[completions.replace].to_owned(), labels, inserts))
+        let replace = completions.first().map_or(String::new(), |item| text[item.replace.clone()].to_owned());
+        let (labels, inserts) = completions.into_iter().take(3).map(|item| (item.label, item.insert.source().to_owned())).unzip();
+        Some((replace, labels, inserts))
     }
 
     #[test]
@@ -886,7 +892,7 @@ mod tests {
         // Asked for with nothing typed: all of them, the most relevant first, vendor-prefixed last.
         let (replace, labels, _) = offered("less", "a { color: red; | }", Trigger::Invoked).expect("properties");
         assert_eq!((replace.as_str(), &labels[..]), ("", &["display", "height", "width"].map(str::to_owned)[..]));
-        let all = property_completions("css", "a {  }", 4, Trigger::Invoked).expect("properties").items;
+        let all = property_completions("css", "a {  }", 4, Trigger::Invoked).expect("properties");
         assert_eq!(all.len(), CSS_PROPERTIES.len());
         assert!(all.last().is_some_and(|item| item.label.starts_with('-')));
     }

@@ -14,7 +14,7 @@ use std::collections::HashSet;
 use std::ops::Range;
 
 use super::{Node, NodeKind, PropertyNode, Scanner, Token, parse, schema_of};
-use crate::code_intel::{Completion, Completions, Insert};
+use crate::code_intel::{Completion, Insert, Then};
 use crate::words::{self, Trigger, fuzzy};
 
 /// The characters that ask the JSON worker for its completions as they are typed.
@@ -240,7 +240,12 @@ fn asks(text: &str, offset: usize) -> bool {
 /// what was typed first (what the proposals replace, up to the cursor), then by label. `None`
 /// where it proposes nothing, and Monaco's word suggestions take over; an empty list where
 /// what was typed matches none of its proposals, which leaves nothing to suggest.
-pub fn completions(text: &str, offset: usize, trigger: Trigger) -> Option<Completions> {
+pub fn completions(text: &str, offset: usize, trigger: Trigger) -> Option<Vec<Completion>> {
+    proposals(text, offset, trigger).map(|(_, items)| items)
+}
+
+/// [`completions`], and the bytes they replace.
+fn proposals(text: &str, offset: usize, trigger: Trigger) -> Option<(Range<usize>, Vec<Completion>)> {
     if trigger == Trigger::Typing && !asks(text, offset) {
         return None;
     }
@@ -383,9 +388,14 @@ pub fn completions(text: &str, offset: usize, trigger: Trigger) -> Option<Comple
     ranked.sort_by(|(score_a, a), (score_b, b)| score_b.cmp(score_a).then_with(|| a.label.cmp(&b.label)));
     let items = ranked
         .into_iter()
-        .map(|(_, proposal)| Completion { label: proposal.label, insert: Insert::Snippet(proposal.snippet) })
+        .map(|(_, proposal)| Completion {
+            label: proposal.label,
+            replace: replace.clone(),
+            insert: Insert::Snippet(proposal.snippet),
+            then: Then::Done,
+        })
         .collect();
-    Some(Completions { replace, items })
+    Some((replace, items))
 }
 
 #[cfg(test)]
@@ -401,16 +411,15 @@ mod tests {
     fn offered_on(text: &str, trigger: Trigger) -> Option<(String, Vec<(String, String)>)> {
         let offset = text.find('|').expect("a cursor");
         let text = text.replace('|', "");
-        let found = completions(&text, offset, trigger)?;
+        let (replace, found) = proposals(&text, offset, trigger)?;
         let items = found
-            .items
             .into_iter()
             .map(|item| match item.insert {
                 Insert::Snippet(snippet) => (item.label, snippet),
                 Insert::Text(text) => panic!("a snippet, not {text}"),
             })
             .collect();
-        Some((text[found.replace].to_owned(), items))
+        Some((text[replace].to_owned(), items))
     }
 
     fn item(label: &str, snippet: &str) -> (String, String) {

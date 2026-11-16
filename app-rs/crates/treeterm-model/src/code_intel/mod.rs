@@ -9,7 +9,8 @@
 //!   grammars GPUI Kit highlights them with.
 //! - CSS, SCSS and Less ([`css`]): colours, property completions, and (CSS) the lint
 //!   warnings about rules and declarations.
-//! - HTML ([`html`]): element and attribute name completions.
+//! - HTML ([`html`]): completions, hover documentation and matching tag highlights, over the
+//!   worker's scanner and parser, ported.
 //! - Every language ([`links`]): the URLs the base editor worker links, and where Monaco's
 //!   opener takes them.
 
@@ -47,8 +48,20 @@ pub struct Problem {
 pub struct Completion {
     /// What the list shows.
     pub label: String,
-    /// What a pick puts in place of [`Completions::replace`].
+    /// The bytes a pick replaces: what was typed, and perhaps more (the rest of the name).
+    pub replace: Range<usize>,
+    /// What a pick puts in their place.
     pub insert: Insert,
+    pub then: Then,
+}
+
+/// What follows picking a completion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Then {
+    Done,
+    /// Suggestions are asked for again where the cursor is left (the worker's
+    /// `editor.action.triggerSuggest` command): an attribute's values between its quotes.
+    Suggest,
 }
 
 /// What a picked completion inserts.
@@ -71,26 +84,52 @@ impl Insert {
     }
 }
 
-/// The completions at the cursor, best matches first.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Completions {
-    /// The bytes a picked completion replaces: what was typed, and the rest of the name.
-    pub replace: Range<usize>,
-    pub items: Vec<Completion>,
-}
-
 /// The completions a language worker of Monaco's `language` offers at byte `offset` of
-/// `text`: CSS, SCSS and Less property names, HTML element and attribute names, JSON keys
-/// and values. `None` where it offers none, and in other languages: Monaco's word suggestions
-/// are offered there ([`crate::words::suggestions`]). Where what was typed matches none of the
-/// JSON worker's proposals the list is empty: Monaco asks no other provider then.
-pub fn completions(language: &str, text: &str, offset: usize, trigger: Trigger) -> Option<Completions> {
-    let offered = |found: &Completions| !found.items.is_empty();
+/// `text`, best matches first: CSS, SCSS and Less property names; HTML elements, end tags,
+/// attributes, attribute values and character entities; JSON keys and values. `None` where it
+/// offers none, and in other languages: Monaco's word suggestions are offered there
+/// ([`crate::words::suggestions`]). Where what was typed matches none of the HTML or JSON
+/// worker's proposals the list is empty: Monaco asks no other provider then.
+pub fn completions(language: &str, text: &str, offset: usize, trigger: Trigger) -> Option<Vec<Completion>> {
     match language {
-        "css" | "scss" | "less" => css::property_completions(language, text, offset, trigger).filter(offered),
-        "html" => html::completions(text, offset, trigger).filter(offered),
+        "css" | "scss" | "less" => {
+            css::property_completions(language, text, offset, trigger).filter(|found| !found.is_empty())
+        }
+        "html" => html::completions(text, offset, trigger),
         "json" => json::completions(text, offset, trigger),
         _ => None,
+    }
+}
+
+/// What a language worker shows on hover: markdown, over the bytes `range`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Hover {
+    pub contents: String,
+    pub range: Range<usize>,
+}
+
+/// What the language worker of Monaco's `language` shows on hover at byte `offset` of `text`:
+/// HTML's documentation of elements, attributes, values and character entities. `None`
+/// elsewhere, and in other languages.
+pub fn hover(language: &str, text: &str, offset: usize) -> Option<Hover> {
+    match language {
+        "html" => html::hover(text, offset),
+        _ => None,
+    }
+}
+
+/// Whether the language worker of Monaco's `language` highlights at the cursor (its document
+/// highlights, which Monaco's word highlighter paints): HTML's matching tag names.
+pub fn highlights_at_cursor(language: &str) -> bool {
+    language == "html"
+}
+
+/// What the language worker of Monaco's `language` highlights with the cursor at byte `offset`
+/// of `text` ([`highlights_at_cursor`]); nothing in other languages.
+pub fn highlights(language: &str, text: &str, offset: usize) -> Vec<Range<usize>> {
+    match language {
+        "html" => html::matching_tags(text, offset),
+        _ => Vec::new(),
     }
 }
 
@@ -165,7 +204,7 @@ fn trigger_characters(language: &str) -> &'static [char] {
     match language {
         "json" => &json::TRIGGER_CHARACTERS,
         "css" | "scss" | "less" => &['/', '-', ':'],
-        "html" => &['.', ':', '<', '"', '=', '/'],
+        "html" => &html::TRIGGER_CHARACTERS,
         _ => &[],
     }
 }
@@ -243,7 +282,7 @@ impl Session {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Suggested {
     /// The language worker's completions.
-    Language(Completions),
+    Language(Vec<Completion>),
     /// Words of the file and of the other open files of its language.
     Words(crate::words::Suggestions),
     Nothing,
@@ -365,9 +404,9 @@ mod tests {
     #[test]
     fn only_languages_with_a_worker_that_completes_have_completions() {
         let found = completions("css", "a { colo }", 8, Trigger::Typing).expect("properties");
-        assert_eq!((found.replace, found.items[0].label.as_str()), (4..8, "color"));
+        assert_eq!((found[0].replace.clone(), found[0].label.as_str()), (4..8, "color"));
         let found = completions("html", "<", 1, Trigger::Typing).expect("elements");
-        assert_eq!(found.replace, 1..1);
+        assert_eq!(found[0].replace, 1..1);
         assert_eq!(completions("rust", "fn colo", 7, Trigger::Typing), None);
         // Where the worker has nothing, none: word suggestions take over.
         assert_eq!(completions("css", "a { color: r }", 12, Trigger::Typing), None);
@@ -415,7 +454,7 @@ mod tests {
         assert_eq!(words_of(suggest("rust", "food fo", &others, 7, Asked::Refined, code)), ["food", "forest"]);
         assert_eq!(words_of(suggest("rust", "food ", &others, 5, Asked::Invoked, code)), ["food", "forest"]);
         match suggest("css", "a { colo }", &others, 8, Asked::Typed, code) {
-            Suggested::Language(found) => assert_eq!(found.items[0].label, "color"),
+            Suggested::Language(found) => assert_eq!(found[0].label, "color"),
             other => panic!("properties, not {other:?}"),
         }
     }

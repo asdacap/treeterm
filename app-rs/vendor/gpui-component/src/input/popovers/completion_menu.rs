@@ -111,6 +111,10 @@ fn expand_snippet(snippet: &str) -> (String, Range<usize>) {
     (text, selection)
 }
 
+/// TreeTerm patch: the command of a completion that asks for suggestions again once picked
+/// (Monaco's `editor.action.triggerSuggest`).
+const TRIGGER_SUGGEST: &str = "editor.action.triggerSuggest";
+
 const MAX_MENU_HEIGHT: Pixels = px(240.);
 const POPOVER_GAP: Pixels = px(4.);
 
@@ -379,6 +383,14 @@ impl CompletionMenu {
     fn select_item(&mut self, item: &CompletionItem, window: &mut Window, cx: &mut Context<Self>) {
         let item = item.clone();
         let range = self.trigger_start_offset.unwrap_or(self.offset)..self.offset;
+        // TreeTerm patch: a completion whose command is `editor.action.triggerSuggest` asks
+        // for suggestions again where it leaves the cursor, once the menu is dismissed, as
+        // Monaco runs its command after inserting it (an HTML attribute's values between its
+        // quotes). The Kit ignored the command.
+        let suggest_again = item
+            .command
+            .as_ref()
+            .is_some_and(|command| command.command == TRIGGER_SUGGEST);
 
         let editor = self.editor.clone();
 
@@ -408,6 +420,13 @@ impl CompletionMenu {
         .detach();
 
         self.dismiss(cx);
+        if suggest_again {
+            let editor = self.editor.clone();
+            cx.spawn_in(window, async move |_, cx| {
+                editor.update_in(cx, |editor, window, cx| editor.show_completions(window, cx))
+            })
+            .detach();
+        }
     }
 
     pub(crate) fn handle_action(
