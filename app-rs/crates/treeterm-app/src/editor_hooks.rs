@@ -6,7 +6,9 @@
 //!   Cmd/Ctrl+click opens a web link in the browser and a `file:` link in an Editor tab);
 //!   the language workers' problems (squiggles, their message on hover); and CSS colours;
 //! - the Editor tab: suggestions while typing, the language's (CSS properties, HTML elements
-//!   and attributes) or else the file's words.
+//!   and attributes) or else the words of the file and of the other open files of its
+//!   language; none while typing in a comment or a string, unless the character typed asks
+//!   the language's worker.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -22,9 +24,9 @@ use lsp_types::{
     CompletionTextEdit, CompletionTriggerKind, Hover, HoverContents, LocationLink, MarkupContent, MarkupKind, Range,
     ShowDocumentParams, TextEdit, Uri,
 };
-use treeterm_model::code_intel::{self, Severity, links};
+use treeterm_model::code_intel::{self, Asked, Severity, Suggested, links};
 use treeterm_model::definition::DefinitionProbe;
-use treeterm_model::words::{self, Trigger};
+use treeterm_model::words;
 
 /// A Cmd/Ctrl+hover target: the byte offset of the word (go to definition) or link there,
 /// which a click looks up (the Kit has no way to say "this word" otherwise).
@@ -323,12 +325,41 @@ pub(crate) fn install_colors(editor: &Entity<EditorState>, language: &'static st
     });
 }
 
-/// Monaco's suggestions in a file of Monaco's `language`: its language worker's (CSS
-/// properties, HTML elements and attributes) where it offers some, else the words of the
-/// file (the base editor worker's `textualSuggest`), as Monaco asks the word-based provider
-/// only when the language's offered nothing.
+/// The texts of the other open files of the editor's language, whose words Monaco suggests too.
+pub(crate) type OtherTexts = Rc<dyn Fn(&App) -> Vec<String>>;
+
+/// Monaco's suggestions in a file of Monaco's `language` ([`code_intel::suggest`]): its
+/// language worker's (CSS properties, HTML elements and attributes) where it offers some,
+/// else the words of the file and of the other open files of its language (the base editor
+/// worker's `textualSuggest`); typing in a comment or a string suggests nothing unless it
+/// asks the worker.
 struct Suggestions {
     language: &'static str,
+    /// The GPUI Kit grammar the editor highlights the file with, which tells comments and
+    /// strings ([`crate::file_browser_view::language_for`]).
+    grammar: &'static str,
+    others: OtherTexts,
+    /// Where the last suggestions offered were asked for. The Kit closes them at every edit
+    /// and asks again, so a character typed right there goes on with them.
+    shown: Rc<Cell<Shown>>,
+}
+
+/// Where suggestions were last offered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Shown {
+    Nothing,
+    /// At this cursor offset.
+    At(usize),
+}
+
+/// Whether the character before byte `offset` of `text` is in a comment or a string, as GPUI
+/// Kit's `grammar` reads it; never in a file it has no grammar for.
+fn in_comment_or_string(grammar: &str, text: &str, offset: usize) -> bool {
+    let registry = gpui_kit::component::highlighter::LanguageRegistry::singleton();
+    registry
+        .language(grammar)
+        .and_then(|config| config.language)
+        .is_some_and(|grammar| code_intel::syntax::in_comment_or_string(&grammar, text, offset))
 }
 
 impl CompletionProvider for Suggestions {
@@ -340,27 +371,36 @@ impl CompletionProvider for Suggestions {
         _: &mut Window,
         cx: &mut App,
     ) -> Task<gpui_kit::Result<CompletionResponse>> {
-        let trigger = match trigger.trigger_kind {
-            CompletionTriggerKind::INVOKED => Trigger::Invoked,
-            _ => Trigger::Typing,
-        };
-        let (text, language) = (text.clone(), self.language);
-        cx.background_executor().spawn(async move {
+        let typed = trigger.trigger_kind != CompletionTriggerKind::INVOKED;
+        let (text, language, grammar, others) = (text.clone(), self.language, self.grammar, (self.others)(cx));
+        let (shown, last_shown) = (self.shown.clone(), self.shown.get());
+        let found = cx.background_executor().spawn(async move {
             let string = text.to_string();
-            let (replace, items, kind): (_, Vec<(String, String)>, _) =
-                match code_intel::completions(language, &string, offset, trigger) {
-                    Some(found) => {
+            let asked = if typed {
+                let before = string.get(..offset).and_then(|before| before.chars().next_back());
+                let typed_at = before.map_or(offset, |typed| offset - typed.len_utf8());
+                if last_shown == Shown::At(typed_at) {
+                    Asked::Refined
+                } else {
+                    Asked::Typed { in_comment_or_string: in_comment_or_string(grammar, &string, offset) }
+                }
+            } else {
+                Asked::Invoked
+            };
+                let (replace, items, kind): (_, Vec<(String, String)>, _) =
+                match code_intel::suggest(language, &string, &others, offset, asked) {
+                    Suggested::Language(found) => {
                         let items = found.items.into_iter().map(|item| (item.label, item.insert)).collect();
                         (found.replace, items, CompletionItemKind::PROPERTY)
                     }
-                    None => {
-                        let found = words::suggestions(&string, offset, trigger, language);
+                    Suggested::Words(found) => {
                         let items = found.words.into_iter().map(|word| (word.clone(), word)).collect();
                         (found.replace, items, CompletionItemKind::TEXT)
                     }
+                    Suggested::Nothing => return Vec::new(),
                 };
             let replace = lsp_range(&text, replace);
-            let items = items
+            items
                 .into_iter()
                 .map(|(label, insert)| CompletionItem {
                     label,
@@ -368,7 +408,11 @@ impl CompletionProvider for Suggestions {
                     text_edit: Some(CompletionTextEdit::Edit(TextEdit { range: replace, new_text: insert })),
                     ..CompletionItem::default()
                 })
-                .collect();
+                .collect::<Vec<_>>()
+        });
+        cx.spawn(async move |_| {
+            let items = found.await;
+            shown.set(if items.is_empty() { Shown::Nothing } else { Shown::At(offset) });
             Ok(CompletionResponse::Array(items))
         })
     }
@@ -381,12 +425,20 @@ impl CompletionProvider for Suggestions {
     }
 }
 
-/// Give `editor`, a file of Monaco's `language`, Monaco's suggestions, their letters that
-/// match what was typed highlighted.
-pub(crate) fn install_suggestions(editor: &Entity<EditorState>, language: &'static str, cx: &mut App) {
+/// Give `editor`, a file at `path` of Monaco's `language`, Monaco's suggestions, their
+/// letters that match what was typed highlighted; `others` are the other open files' texts.
+pub(crate) fn install_suggestions(
+    editor: &Entity<EditorState>,
+    path: &str,
+    language: &'static str,
+    others: OtherTexts,
+    cx: &mut App,
+) {
+    let grammar = crate::file_browser_view::language_for(path);
+    let shown = Rc::new(Cell::new(Shown::Nothing));
     editor.update(cx, |editor, _| {
         let lsp = editor.lsp_mut();
-        lsp.completion_provider = Some(Rc::new(Suggestions { language }));
+        lsp.completion_provider = Some(Rc::new(Suggestions { language, grammar, others, shown }));
         lsp.set_completion_highlighter(Rc::new(|typed: &str, item: &CompletionItem| words::highlights(typed, &item.label)));
     });
 }

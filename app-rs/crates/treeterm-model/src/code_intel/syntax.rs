@@ -97,9 +97,58 @@ pub fn problems(grammar: Grammar, text: &str) -> Vec<Problem> {
     }
 }
 
+/// Whether the character before byte `offset` of `text` (the one just typed) is in a
+/// comment or a string, as `grammar` (one of the tree-sitter grammars GPUI Kit highlights
+/// with) reads it: the token types Monaco's quick suggestions keep quiet in. The code of an
+/// interpolation inside a string (`${…}`, `#{…}`, `$(…)`) is not in the string.
+pub fn in_comment_or_string(grammar: &tree_sitter::Language, text: &str, offset: usize) -> bool {
+    let Some(typed) = text.get(..offset).and_then(|before| before.chars().next_back()) else {
+        return false;
+    };
+    let mut parser = tree_sitter::Parser::new();
+    if let Err(error) = parser.set_language(grammar) {
+        tracing::error!("grammar for quick suggestions: {error}");
+        return false;
+    }
+    let Some(tree) = parser.parse(text, None) else {
+        tracing::error!("tree-sitter parsed nothing");
+        return false;
+    };
+    let start = offset - typed.len_utf8();
+    let mut node = tree.root_node().descendant_for_byte_range(start, offset);
+    while let Some(at) = node {
+        let kind = at.kind();
+        if ["interpolation", "substitution", "expansion"].iter().any(|code| kind.contains(code)) {
+            return false;
+        }
+        if kind.contains("comment") || kind.contains("string") || kind.ends_with("quote_scalar") {
+            return true;
+        }
+        node = at.parent();
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Whether the character before `|` in `text` is in a comment or string.
+    fn quiet_at(grammar: Grammar, text: &str) -> bool {
+        in_comment_or_string(&grammar.language(), &text.replace('|', ""), text.find('|').unwrap())
+    }
+
+    #[test]
+    fn comments_and_strings_are_told_from_code() {
+        for text in ["// a comm|ent\nlet x;", "/* blo|ck */", "let s = 'te|xt';", "let s = \"te|", "let t = `te|xt ${a}`;"] {
+            assert!(quiet_at(Grammar::TypeScript, text), "{text}");
+        }
+        for text in ["let fo|o = 1;", "let t = `a ${fo|o} b`;", "f(\"a\", b|)", "|", "x|"] {
+            assert!(!quiet_at(Grammar::TypeScript, text), "{text}");
+        }
+        assert!(quiet_at(Grammar::JavaScript, "const re = 1; // é|"));
+        assert!(!quiet_at(Grammar::JavaScript, "const é|"));
+    }
 
     /// The problems as `(text marked, message)`, by start.
     fn marked(grammar: Grammar, text: &str) -> Vec<(String, String)> {

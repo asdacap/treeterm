@@ -481,6 +481,16 @@ impl TextEditor {
         workspace.update(cx, |w, cx| w.open_link(url, cx));
     }
 
+    /// The texts of the other files open in the workspace's Editor tabs and Files viewers that
+    /// are of this file's language, whose words are suggested too
+    /// ([`WorkspaceStore::open_texts`]); `me` is this editor's entity.
+    pub fn other_open_texts(&self, me: gpui_kit::EntityId, cx: &gpui_kit::App) -> Vec<String> {
+        match self.workspace.upgrade() {
+            Some(workspace) => workspace.read(cx).open_texts(self.language(), me, cx),
+            None => Vec::new(),
+        }
+    }
+
     /// The Cmd/Ctrl+hover underline for this file.
     pub fn definition_probe(&self) -> DefinitionProbe {
         DefinitionProbe::new(self.exec.clone(), self.root.clone(), self.path.clone())

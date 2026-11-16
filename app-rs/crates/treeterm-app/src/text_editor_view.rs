@@ -7,10 +7,12 @@
 //! under the cursor (holding Cmd/Ctrl over a word with one underlines it); Cmd/Ctrl+F2
 //! puts a cursor on every occurrence of the word or selection (Change All Occurrences);
 //! typing suggests CSS property names or HTML element and attribute names where the
-//! language's worker offers them, else the document's words that have the typed letters in
-//! order, the first at a word start or camelCase hump (Ctrl+Space asks). The language
-//! workers' problems are marked again as the text changes, CSS colours are painted and
-//! links underlined; Cmd/Ctrl+click opens a link ([`crate::editor_hooks`]).
+//! language's worker offers them, else the words of the document and of the other open files
+//! of its language that have the typed letters in order, the first at a word start or
+//! camelCase hump, but nothing while typing in a comment or string (Ctrl+Space asks); Enter
+//! or Tab takes the selected one. The language workers' problems are marked again as the
+//! text changes, CSS colours are painted and links underlined; Cmd/Ctrl+click opens a link
+//! ([`crate::editor_hooks`]).
 //!
 //! Text another window or Electron writes to the tab replaces the editor's, as Monaco's
 //! `value` prop does: undoably, keeping the cursor and the scroll position where they were.
@@ -19,7 +21,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use gpui_kit::component::input::{
-    Copy as CopyText, Cut, Editor, EditorState, InputEvent, Paste, Replace, ShowCompletions,
+    Copy as CopyText, Cut, Editor, EditorState, Enter, IndentInline, InputEvent, Paste, Replace, ShowCompletions,
 };
 use gpui_kit::component::v_flex;
 use gpui_kit::component::h_flex;
@@ -142,7 +144,13 @@ impl TextEditorView {
             }
         };
         crate::editor_hooks::install_definitions(&editor, probe, self.definition_clicked.clone(), go, cx);
-        crate::editor_hooks::install_suggestions(&editor, monaco_language, cx);
+        let model = self.model.downgrade();
+        let others: crate::editor_hooks::OtherTexts = Rc::new(move |cx: &App| match model.upgrade() {
+            Some(model) => model.read(cx).other_open_texts(model.entity_id(), cx),
+            None => Vec::new(),
+        });
+        let path = self.model.read(cx).path().to_owned();
+        crate::editor_hooks::install_suggestions(&editor, &path, monaco_language, others, cx);
         self.editor = Some(editor.clone());
         Some(editor)
     }
@@ -258,6 +266,17 @@ impl TextEditorView {
         });
     }
 
+    /// Tab takes the selected suggestion while suggestions show, as Enter does
+    /// (`acceptSelectedSuggestion`); otherwise it indents.
+    fn on_tab(&mut self, _: &IndentInline, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(editor) = &self.editor else {
+            return;
+        };
+        if accept_suggestion(editor, window, cx) {
+            cx.stop_propagation();
+        }
+    }
+
     /// A failed save is an alert, as in Electron.
     fn alert_failed_save(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let SaveState::Failed(message) = self.model.read(cx).save_state().clone() else {
@@ -270,6 +289,15 @@ impl TextEditorView {
         })
         .detach();
     }
+}
+
+/// Take the suggestion selected in `editor`'s menu, if it shows one: whether it did.
+fn accept_suggestion(editor: &Entity<EditorState>, window: &mut Window, cx: &mut App) -> bool {
+    if !editor.read(cx).completion_menu_state().open {
+        return false;
+    }
+    let enter = Box::new(Enter { secondary: false, shift: false });
+    editor.update(cx, |editor, cx| editor.route_overlay_action(enter, window, cx))
 }
 
 impl Render for TextEditorView {
@@ -374,6 +402,7 @@ impl Render for TextEditorView {
             .on_action(cx.listener(Self::save))
             .on_action(cx.listener(Self::on_go_to_definition))
             .on_action(cx.listener(Self::on_change_all))
+            .capture_action(cx.listener(Self::on_tab))
             .child(
                 h_flex()
                     .flex_shrink_0()
@@ -430,6 +459,107 @@ mod tests {
         fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
             div().key_context(CONTEXT).w(px(400.)).h(px(300.)).child(Editor::new(&self.editor).h_full())
         }
+    }
+
+    fn no_others() -> crate::editor_hooks::OtherTexts {
+        Rc::new(|_| Vec::new())
+    }
+
+    /// A code editor in the Editor tab's key context, Tab taking a suggestion as the tab's does.
+    struct TabHost {
+        editor: Entity<EditorState>,
+    }
+
+    impl Render for TabHost {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .key_context(CONTEXT)
+                .capture_action(cx.listener(|host, _: &IndentInline, window, cx| {
+                    if accept_suggestion(&host.editor, window, cx) {
+                        cx.stop_propagation();
+                    }
+                }))
+                .w(px(400.))
+                .h(px(300.))
+                .child(Editor::new(&self.editor).h_full())
+        }
+    }
+
+    /// The suggestions `editor` shows, if any.
+    fn shown(editor: &Entity<EditorState>, cx: &mut gpui_kit::VisualTestContext) -> Option<Vec<String>> {
+        cx.update(|_, cx| {
+            let menu = editor.read(cx).completion_menu_state();
+            menu.open.then(|| menu.items.iter().map(|item| item.label.clone()).collect())
+        })
+    }
+
+    #[gpui_kit::test]
+    fn tab_takes_the_selected_suggestion_and_otherwise_indents(cx: &mut gpui_kit::TestAppContext) {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            bind_keys(cx);
+        });
+        let text = "fn food() {}
+";
+        let (host, cx) = cx.add_window_view(|window, cx| TabHost {
+            editor: cx.new(|cx| EditorState::new(window, cx).language("rust").default_value(text)),
+        });
+        let editor = cx.update(|_, cx| host.read(cx).editor.clone());
+        cx.update(|window, cx| {
+            crate::editor_hooks::install_suggestions(&editor, "/w/a.rs", "rust", no_others(), cx);
+            editor.update(cx, |editor, cx| {
+                editor.focus(window, cx);
+                editor.set_selected_range(text.len()..text.len(), cx);
+            });
+        });
+        cx.run_until_parked();
+        cx.simulate_keystrokes("f o");
+        cx.run_until_parked();
+        assert_eq!(shown(&editor, cx), Some(vec!["food".to_owned()]));
+        cx.simulate_keystrokes("tab");
+        cx.run_until_parked();
+        assert_eq!(cx.update(|_, cx| editor.read(cx).value().to_string()), "fn food() {}
+food");
+        assert_eq!(shown(&editor, cx), None);
+        // With no suggestions showing, Tab indents.
+        cx.simulate_keystrokes("tab");
+        cx.run_until_parked();
+        assert_ne!(cx.update(|_, cx| editor.read(cx).value().to_string()), "fn food() {}
+food");
+    }
+
+    #[gpui_kit::test]
+    fn typing_in_a_comment_suggests_nothing_but_asking_does(cx: &mut gpui_kit::TestAppContext) {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            bind_keys(cx);
+        });
+        let text = "fn food() {}
+// ";
+        let (host, cx) = cx.add_window_view(|window, cx| Host {
+            editor: cx.new(|cx| EditorState::new(window, cx).language("rust").default_value(text)),
+        });
+        let editor = cx.update(|_, cx| host.read(cx).editor.clone());
+        let others: crate::editor_hooks::OtherTexts = Rc::new(|_| vec!["fn fond() {}".to_owned()]);
+        cx.update(|window, cx| {
+            crate::editor_hooks::install_suggestions(&editor, "/w/a.rs", "rust", others, cx);
+            editor.update(cx, |editor, cx| {
+                editor.focus(window, cx);
+                editor.set_selected_range(text.len()..text.len(), cx);
+            });
+        });
+        cx.run_until_parked();
+        cx.simulate_keystrokes("f o");
+        cx.run_until_parked();
+        assert_eq!(shown(&editor, cx), None);
+        // Ctrl+Space asks: the words of this file and the other open ones.
+        cx.simulate_keystrokes("ctrl-space");
+        cx.run_until_parked();
+        assert_eq!(shown(&editor, cx), Some(vec!["fond".to_owned(), "food".to_owned()]));
+        // Typing goes on refining what shows, in the comment too.
+        cx.simulate_keystrokes("n");
+        cx.run_until_parked();
+        assert_eq!(shown(&editor, cx), Some(vec!["fond".to_owned()]));
     }
 
     /// A code editor in the Editor tab's key context, counting go to definition.
@@ -504,7 +634,7 @@ mod tests {
         });
         let editor = cx.update(|_, cx| host.read(cx).editor.clone());
         cx.update(|window, cx| {
-            crate::editor_hooks::install_suggestions(&editor, "rust", cx);
+            crate::editor_hooks::install_suggestions(&editor, "/w/a.rs", "rust", no_others(), cx);
             editor.update(cx, |editor, cx| {
                 editor.focus(window, cx);
                 editor.set_selected_range(text.len()..text.len(), cx);
@@ -543,7 +673,7 @@ mod tests {
         });
         let editor = cx.update(|_, cx| host.read(cx).editor.clone());
         cx.update(|window, cx| {
-            crate::editor_hooks::install_suggestions(&editor, "rust", cx);
+            crate::editor_hooks::install_suggestions(&editor, "/w/a.rs", "rust", no_others(), cx);
             editor.update(cx, |editor, cx| {
                 editor.focus(window, cx);
                 editor.set_selected_range(text.len()..text.len(), cx);
@@ -580,7 +710,7 @@ mod tests {
         });
         let editor = cx.update(|_, cx| host.read(cx).editor.clone());
         cx.update(|window, cx| {
-            crate::editor_hooks::install_suggestions(&editor, "html", cx);
+            crate::editor_hooks::install_suggestions(&editor, "/w/a.html", "html", no_others(), cx);
             editor.update(cx, |editor, cx| {
                 editor.focus(window, cx);
                 editor.set_selected_range(text.len()..text.len(), cx);
@@ -601,7 +731,7 @@ mod tests {
         // CSS: property names in a rule, inserted with a colon.
         cx.update(|window, cx| {
             editor.update(cx, |editor, cx| editor.set_value("a { }", window, cx));
-            crate::editor_hooks::install_suggestions(&editor, "css", cx);
+            crate::editor_hooks::install_suggestions(&editor, "/w/a.css", "css", no_others(), cx);
             editor.update(cx, |editor, cx| editor.set_selected_range(4..4, cx));
         });
         cx.simulate_keystrokes("c o l o");

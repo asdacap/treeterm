@@ -438,6 +438,41 @@ impl WorkspaceStore {
         &self.workspace.file
     }
 
+    /// The texts of the files open in this workspace's Editor tabs and Files viewers that are
+    /// of Monaco's `language`, but `except`'s: the documents Monaco's word suggestions also
+    /// take words from (`wordBasedSuggestions: 'matchingDocuments'`, the models attached to an
+    /// editor, which are those of the shown workspace's tabs).
+    pub fn open_texts(&self, language: &str, except: gpui_kit::EntityId, cx: &App) -> Vec<String> {
+        use crate::file_browser::FileView;
+        use crate::text_editor::EditorDoc;
+        let text = |tab: &TabRef| match tab {
+            TabRef::Editor { model, .. } if model.entity_id() != except => match model.read(cx).doc() {
+                EditorDoc::Ready { current, .. } => (model.read(cx).language() == language).then(|| current.clone()),
+                EditorDoc::Loading | EditorDoc::Error(_) => None,
+            },
+            TabRef::Files { model, .. } if model.entity_id() != except => match model.read(cx).view() {
+                FileView::Text { path, text } => {
+                    (treeterm_core::files::detect_monaco_language(path) == language).then(|| text.clone())
+                }
+                FileView::Nothing
+                | FileView::Loading(_)
+                | FileView::Image { .. }
+                | FileView::Pdf { .. }
+                | FileView::Model { .. }
+                | FileView::Binary { .. }
+                | FileView::TooLarge { .. }
+                | FileView::Failed { .. } => None,
+            },
+            TabRef::Editor { .. }
+            | TabRef::Files { .. }
+            | TabRef::Terminal(_)
+            | TabRef::Review { .. }
+            | TabRef::Browser { .. }
+            | TabRef::Tool(_) => None,
+        };
+        self.tabs.values().filter_map(text).collect()
+    }
+
     /// What the tab shows; `None` for a tab id the body does not have.
     pub fn tab_content(&self, tab_id: &str) -> Option<TabContent> {
         let tab = self.workspace.file.app_states.get(tab_id)?;

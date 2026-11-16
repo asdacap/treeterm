@@ -451,11 +451,11 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   runs out, a few thousand and about a thousand levels deep). Colours are painted behind
   their text, not as a swatch before it. A completed CSS property is inserted as `name: `
   and an HTML attribute as `name=""` with the cursor after it (Monaco's snippets put it
-  between `:` and `;`, or the quotes). Other suggestions are the file's own words (Monaco
-  also takes words from other open files of the same language, and suggests nothing while
-  typing in comments and strings). The right-click menu has no Go to References, Peek,
-  Format Document or Command Palette. Tab indents while suggestions are open (Enter takes
-  one, as in Monaco).
+  between `:` and `;`, or the quotes). Other suggestions are the words of the file and of
+  the Editor tabs and Files viewers of the workspace with a file of its language open; what
+  is a comment or a string, where typing suggests nothing, is read from GPUI Kit's
+  tree-sitter grammars, not Monaco's tokenizers. The right-click menu has no Go to
+  References, Peek, Format Document or Command Palette.
 - Neither the Files viewer nor the Editor tab has Monaco's Peek Definition (Alt+F12, and
   the Peek submenu of the right-click menu): GPUI Kit's editor has no view zones to show a
   peek in. Open Definition to the Side (Cmd/Ctrl+K F12) goes to the definition as F12

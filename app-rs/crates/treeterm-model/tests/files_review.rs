@@ -709,6 +709,31 @@ fn files_tab(cx: &mut TestAppContext, workspace: &Entity<WorkspaceStore>, state:
     (tab, browser)
 }
 
+#[gpui_kit::test]
+fn an_editor_suggests_words_of_the_workspaces_other_open_files_of_its_language(cx: &mut TestAppContext) {
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let repo = TempRepo::new(&h);
+    repo.write("a.rs", "fn alpha() {}\n");
+    repo.write("b.rs", "fn beta() {}\n");
+    repo.write("c.rs", "fn gamma() {}\n");
+    repo.write("notes.md", "delta\n");
+    repo.commit_all("files");
+    let store = open_store(cx, &h);
+    let workspace = open_repo_workspace(cx, &h, &store, &repo);
+    let a = open_editor(cx, &workspace, &format!("{}/a.rs", repo.root()));
+    let b = open_editor(cx, &workspace, &format!("{}/b.rs", repo.root()));
+    open_editor(cx, &workspace, &format!("{}/notes.md", repo.root()));
+    files_tab(cx, &workspace, serde_json::json!({ "selectedPath": format!("{}/c.rs", repo.root()), "expandedDirs": [] }));
+    // Unsaved edits count: the other editor's text as it is now.
+    b.update(cx, |b, cx| b.set_content("fn beta() { epsilon }\n".into(), cx));
+    let me = a.entity_id();
+    let mut others = a.read_with(cx, |a, cx| a.other_open_texts(me, cx));
+    others.sort();
+    assert_eq!(others, ["fn beta() { epsilon }\n", "fn gamma() {}\n"]);
+}
+
 /// An Editor tab built from `state`, once its file is loaded or failed to load.
 fn editor_tab(cx: &mut TestAppContext, workspace: &Entity<WorkspaceStore>, state: serde_json::Value) -> (String, Entity<TextEditor>) {
     let (tab, TabContent::Editor(editor)) = tab_from(cx, workspace, "editor", state) else {

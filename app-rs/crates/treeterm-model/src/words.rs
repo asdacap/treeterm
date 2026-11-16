@@ -244,12 +244,14 @@ pub struct Suggestions {
     pub words: Vec<String>,
 }
 
-/// The words of `text`, a file of Monaco's `language`, to suggest at byte `offset`: those
-/// [`fuzzy`] matches what was typed of the word at the cursor with (its letters in order,
-/// the first at a word start or a camelCase hump), but never that word itself or a number.
-/// The best matches come first, then in byte order (the label order Monaco breaks ties
-/// with). With nothing typed (asked for), every word, in byte order.
-pub fn suggestions(text: &str, offset: usize, trigger: Trigger, language: &str) -> Suggestions {
+/// The words to suggest at byte `offset` of `text`, a file of Monaco's `language`, from it
+/// and from `others`, the texts of the other open files of that language (Monaco's
+/// `wordBasedSuggestions: 'matchingDocuments'`): those [`fuzzy`] matches what was typed of
+/// the word at the cursor with (its letters in order, the first at a word start or a
+/// camelCase hump), but never that word itself or a number. The best matches come first,
+/// then in byte order (the label order Monaco breaks ties with). With nothing typed (asked
+/// for), every word, in byte order.
+pub fn suggestions(text: &str, others: &[String], offset: usize, trigger: Trigger, language: &str) -> Suggestions {
     let pattern = word_pattern(language);
     let word = pattern_word_around(pattern, text, offset);
     let replace = word.start..offset.max(word.start);
@@ -260,7 +262,8 @@ pub fn suggestions(text: &str, offset: usize, trigger: Trigger, language: &str) 
     let current = &text[word];
     let mut seen = HashSet::new();
     let mut found = Vec::new();
-    for candidate in pattern_words(pattern, text) {
+    let documents = std::iter::once(text).chain(others.iter().map(String::as_str));
+    for candidate in documents.flat_map(|document| pattern_words(pattern, document)) {
         if candidate == current || is_number(candidate) || !seen.insert(candidate) {
             continue;
         }
@@ -360,7 +363,7 @@ mod tests {
 
     /// The suggestions at `cursor` in `text`, a file of Monaco's `language`.
     fn words_in(language: &str, text: &str, cursor: &str, trigger: Trigger) -> Vec<String> {
-        suggestions(&text.replace(cursor, ""), text.find(cursor).unwrap(), trigger, language).words
+        suggestions(&text.replace(cursor, ""), &[], text.find(cursor).unwrap(), trigger, language).words
     }
 
     #[test]
@@ -369,7 +372,7 @@ mod tests {
         assert_eq!(words_at(text, "|", Trigger::Typing), ["fooBar", "foobar", "food", "Football"]);
         // What was typed replaces only the part before the cursor.
         let at = text.find('|').unwrap();
-        assert_eq!(suggestions(&text.replace('|', ""), at, Trigger::Typing, "plaintext").replace, at - 2..at);
+        assert_eq!(suggestions(&text.replace('|', ""), &[], at, Trigger::Typing, "plaintext").replace, at - 2..at);
     }
 
     #[test]
@@ -427,8 +430,8 @@ mod tests {
         // Elsewhere `-`, `$` and `@` end words; a picked word replaces the typed one from its start.
         assert_eq!(typed("rust", "nav-item $name @attr\nna|"), ["name", "nav"]);
         let text = "$name\n$n";
-        assert_eq!(suggestions(text, text.len(), Trigger::Typing, "php").replace, 6..8);
-        assert_eq!(suggestions(text, text.len(), Trigger::Typing, "rust").replace, 7..8);
+        assert_eq!(suggestions(text, &[], text.len(), Trigger::Typing, "php").replace, 6..8);
+        assert_eq!(suggestions(text, &[], text.len(), Trigger::Typing, "rust").replace, 7..8);
     }
 
     #[test]
@@ -441,6 +444,16 @@ mod tests {
         }
         // A CSS word that is a number (`.5`) is not suggested; one with a unit is.
         assert_eq!(words_in("css", "a { margin: 1.5px .5 }\n.|", "|", Trigger::Typing), ["1.5px"]);
+    }
+
+    /// The other open files of the language give their words too, once each, but never the
+    /// word being typed or a number.
+    #[test]
+    fn suggests_the_words_of_the_other_open_files_too() {
+        let others = ["fond food 12 fo".to_owned(), "fox fond".to_owned()];
+        let text = "food\nfo";
+        assert_eq!(suggestions(text, &others, text.len(), Trigger::Typing, "plaintext").words, ["fond", "food", "fox"]);
+        assert_eq!(suggestions("", &others, 0, Trigger::Invoked, "plaintext").words, ["fo", "fond", "food", "fox"]);
     }
 
     #[test]
