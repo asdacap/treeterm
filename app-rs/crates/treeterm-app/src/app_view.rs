@@ -1820,6 +1820,7 @@ fn workspace_header(
         ),
         (None, Some(text)) => description_row
             .child(div().min_w_0().child(text))
+            .children(workspace.read(cx).description_prompt().is_some().then(|| prompt_description_buttons(workspace)))
             .child(edit_button("edit-description", 11., "Edit description", HeaderField::Description, cx)),
         (None, None) => description_row
             .child(div().italic().opacity(0.5).child("no description"))
@@ -1838,6 +1839,65 @@ fn workspace_header(
         .child(top)
         .child(description_row)
         .into_any_element()
+}
+
+/// `PromptDescriptionButton` (`.prompt-description-button`): "Prompt Description" (blue)
+/// and "Skip" (grey) after the description, 4px apart.
+fn prompt_description_buttons(workspace: &Entity<WorkspaceStore>) -> AnyElement {
+    // 10px semibold, 1px 6px padding, a 1px border, radius 3, 90% opaque until hovered.
+    let button = |id: &'static str, label: &'static str, title: &'static str, [bg, border, hover_bg, hover_border]: [u32; 4]| {
+        div()
+            .id(id)
+            .px(px(6.))
+            .py(px(1.))
+            .rounded(px(3.))
+            .border_1()
+            .border_color(gpui_kit::rgb(border))
+            .bg(gpui_kit::rgb(bg))
+            .text_color(gpui_kit::rgb(0xffffff))
+            .text_size(px(10.))
+            .line_height(px(14.))
+            .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+            .whitespace_nowrap()
+            .opacity(0.9)
+            .cursor_pointer()
+            .hover(move |d| d.bg(gpui_kit::rgb(hover_bg)).border_color(gpui_kit::rgb(hover_border)).opacity(1.))
+            .tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(title).build(window, cx))
+            .child(label)
+    };
+    let (prompt, skip) = (workspace.clone(), workspace.clone());
+    h_flex()
+        .ml(px(2.))
+        .gap(px(4.))
+        .flex_shrink_0()
+        .child(
+            button("prompt-description", "Prompt Description", "Send description to AI agent", [0x2472c8, 0x1a5a9e, 0x3b8eea, 0x2472c8])
+                .on_click(move |_, window, cx| {
+                    let task = prompt.update(cx, |w, cx| w.prompt_description(cx));
+                    notify_failure(task, window, cx);
+                }),
+        )
+        .child(
+            button("skip-description-prompt", "Skip", "Skip sending description", [0x6e7681, 0x565c64, 0x8b949e, 0x6e7681])
+                .on_click(move |_, _, cx| skip.update(cx, |w, cx| w.dismiss_description_prompt(cx))),
+        )
+        .into_any_element()
+}
+
+/// Show `task`'s error, if it fails, as a notification in `window`.
+fn notify_failure(task: gpui_kit::Task<Result<(), String>>, window: &Window, cx: &mut App) {
+    let handle = window.window_handle();
+    cx.spawn(async move |cx| {
+        if let Err(error) = task.await {
+            match handle.update(cx, |_, window, cx| {
+                use gpui_kit::component::WindowExt as _;
+                window.push_notification(error, cx);
+            }) {
+                Ok(()) | Err(_) => {} // Err: the window closed
+            }
+        }
+    })
+    .detach();
 }
 
 fn escape_description(cx: &mut Context<AppView>) -> impl Fn(&gpui_kit::KeyDownEvent, &mut Window, &mut App) + 'static {
@@ -2649,18 +2709,7 @@ fn harness_prompt_buttons(session: &Entity<SessionStore>, workspace_id: &str, cx
                 .child(prompt.label())
                 .on_click(move |_, window, cx| {
                     let task = treeterm_model::harness_prompts::send(&prompt, &session, &id, cx);
-                    let handle = window.window_handle();
-                    cx.spawn(async move |cx| {
-                        if let Err(error) = task.await {
-                            match handle.update(cx, |_, window, cx| {
-                                use gpui_kit::component::WindowExt as _;
-                                window.push_notification(error, cx);
-                            }) {
-                                Ok(()) | Err(_) => {} // Err: the window closed
-                            }
-                        }
-                    })
-                    .detach();
+                    notify_failure(task, window, cx);
                 }),
         );
     }

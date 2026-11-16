@@ -272,6 +272,9 @@ pub struct WorkspaceStore {
 /// The metadata key the tab layout is saved under (a flex-layout model as JSON).
 const LAYOUT_MODEL: &str = "layoutModel";
 
+/// The metadata key marking the description as sent to the AI harness or skipped (`"true"`).
+const DESCRIPTION_PROMPTED: &str = "descriptionPrompted";
+
 /// `#rrggbb` → colour; anything else is ignored (the default background is used).
 fn parse_hex_color(text: &str) -> Option<treeterm_term::alacritty_terminal::vte::ansi::Rgb> {
     let hex = text.strip_prefix('#').filter(|h| h.len() == 6)?;
@@ -444,6 +447,38 @@ impl WorkspaceStore {
     /// `findRunningHarness`: an AI-harness tab has a PTY (the prompt buttons show).
     pub fn has_running_harness(&self) -> bool {
         self.running_harness().is_some()
+    }
+
+    /// `showPromptDescriptionButton`: the description the header offers to send to the AI
+    /// harness. Offered while the active tab is an AI-harness tab (when the file names no
+    /// active tab, loading makes it the first tab: Electron's `activeTabId || tabs[0]`), the
+    /// workspace has a description, and it was neither sent nor skipped. The analyzer marks
+    /// a description it wrote itself as sent.
+    pub fn description_prompt(&self) -> Option<&str> {
+        let file = &self.workspace.file;
+        let active = file.app_states.get(file.active_tab_id.as_deref()?)?;
+        let prompted = file.metadata.get(DESCRIPTION_PROMPTED).is_some_and(|value| !value.is_empty());
+        if !active.application_id.starts_with(AI_HARNESS_PREFIX) || prompted {
+            return None;
+        }
+        file.metadata.get("description").map(String::as_str).filter(|description| !description.is_empty())
+    }
+
+    /// "Prompt Description": type the offered description into the AI harness and, as
+    /// Electron does, stop offering it at once, whatever becomes of the write. The task fails
+    /// when no harness runs or the write failed; with nothing offered, nothing is sent.
+    pub fn prompt_description(&mut self, cx: &mut Context<Self>) -> Task<Result<(), String>> {
+        let Some(description) = self.description_prompt().map(str::to_owned) else {
+            return Task::ready(Ok(()));
+        };
+        let write = self.prompt_harness(&description, cx);
+        self.dismiss_description_prompt(cx);
+        write
+    }
+
+    /// "Skip" (`handlePromptDescriptionDismiss`): the description is not offered again.
+    pub fn dismiss_description_prompt(&mut self, cx: &mut Context<Self>) {
+        self.update_metadata(DESCRIPTION_PROMPTED, "true", cx);
     }
 
     /// The cached background writer to `pty_id`, opened anew once spent (`getTtyWriter`).

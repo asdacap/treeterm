@@ -1,5 +1,5 @@
-//! Writes into a running AI harness (prompts and auto-approve) and the auto-approve switch,
-//! against a real in-process daemon.
+//! Writes into a running AI harness (prompts, the workspace description and auto-approve)
+//! and the auto-approve switch, against a real in-process daemon.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -199,6 +199,23 @@ fn finish<T: 'static>(cx: &mut TestAppContext, task: Task<T>) -> T {
     panic!("task did not finish");
 }
 
+fn file_on_disk(h: &Harness, id: &str) -> Value {
+    let bytes = std::fs::read(h.daemon.workspaces_dir().join(format!("{id}.json"))).unwrap();
+    serde_json::from_slice(&bytes).unwrap()
+}
+
+/// Wait for a condition on the workspace file (written from tokio threads).
+fn wait_for_disk(cx: &mut TestAppContext, done: impl Fn() -> bool) {
+    for _ in 0..1000 {
+        cx.run_until_parked();
+        if done() {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    panic!("disk condition not reached");
+}
+
 fn active_tab(cx: &mut TestAppContext, workspace: &Entity<WorkspaceStore>) -> Option<String> {
     workspace.read_with(cx, |w, _| w.file().active_tab_id.clone())
 }
@@ -362,6 +379,201 @@ fn the_comments_tab_marks_a_comment_prompted_once_it_landed(cx: &mut TestAppCont
     );
     assert_eq!(active_tab(cx, &workspace).as_deref(), Some("gone"));
     wait_until(cx, &shell, |t| t.screen_text().contains("fix c1"));
+}
+
+fn description_prompt(
+    cx: &mut TestAppContext,
+    workspace: &Entity<WorkspaceStore>,
+) -> Option<String> {
+    workspace.read_with(cx, |w, _| w.description_prompt().map(str::to_owned))
+}
+
+fn description_prompted(
+    cx: &mut TestAppContext,
+    workspace: &Entity<WorkspaceStore>,
+) -> Option<String> {
+    workspace.read_with(cx, |w, _| {
+        w.file().metadata.get("descriptionPrompted").cloned()
+    })
+}
+
+/// A harness tab, `bot`, whose instance left the settings (so nothing is started for it),
+/// on `pty_id`, and a Comments tab, `list`.
+fn bot_and_list(pty_id: Value) -> Value {
+    json!({
+        "bot": { "applicationId": "aiharness-gone", "title": "Gone", "state": { "ptyId": pty_id, "sandbox": sandbox() } },
+        "list": { "applicationId": "comments", "title": "Comments", "state": {} },
+    })
+}
+
+#[gpui_kit::test]
+fn the_description_is_offered_while_a_harness_tab_is_active_until_prompted(
+    cx: &mut TestAppContext,
+) {
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let store = open_store(cx, &h, Settings::default(), None);
+    let metadata = json!({ "description": "Fix the login bug" });
+    let (_, workspace) = open_workspace(
+        cx,
+        &h,
+        &store,
+        bot_and_list(Value::Null),
+        Some("bot"),
+        metadata,
+    );
+    let offered = Some("Fix the login bug".to_owned());
+    assert_eq!(description_prompt(cx, &workspace), offered);
+
+    workspace.update(cx, |w, cx| w.set_active_tab("list", cx));
+    assert_eq!(
+        description_prompt(cx, &workspace),
+        None,
+        "not on a harness tab"
+    );
+    // Nothing is offered there, so nothing is sent or marked.
+    let task = workspace.update(cx, |w, cx| w.prompt_description(cx));
+    assert_eq!(finish(cx, task), Ok(()));
+    assert_eq!(description_prompted(cx, &workspace), None);
+    workspace.update(cx, |w, cx| w.set_active_tab("bot", cx));
+    assert_eq!(description_prompt(cx, &workspace), offered);
+
+    let set = |cx: &mut TestAppContext, key: &str, value: &str| {
+        workspace.update(cx, |w, cx| w.update_metadata(key, value, cx));
+    };
+    set(cx, "descriptionPrompted", "true");
+    assert_eq!(description_prompt(cx, &workspace), None, "already prompted");
+    set(cx, "descriptionPrompted", "");
+    assert_eq!(
+        description_prompt(cx, &workspace),
+        offered,
+        "empty counts as unset"
+    );
+    set(cx, "description", "");
+    assert_eq!(description_prompt(cx, &workspace), None, "no description");
+}
+
+#[gpui_kit::test]
+fn without_an_active_tab_the_first_tab_decides(cx: &mut TestAppContext) {
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let store = open_store(cx, &h, Settings::default(), None);
+    let metadata = json!({ "description": "Fix the login bug" });
+    let (_, harness_first) = open_workspace(
+        cx,
+        &h,
+        &store,
+        bot_and_list(Value::Null),
+        None,
+        metadata.clone(),
+    );
+    assert_eq!(
+        description_prompt(cx, &harness_first),
+        Some("Fix the login bug".to_owned())
+    );
+
+    let list_first = json!({
+        "list": { "applicationId": "comments", "title": "Comments", "state": {} },
+        "bot": { "applicationId": "aiharness-gone", "title": "Gone", "state": { "ptyId": null, "sandbox": sandbox() } },
+    });
+    let (_, list_first) = open_workspace(cx, &h, &store, list_first, None, metadata);
+    assert_eq!(description_prompt(cx, &list_first), None);
+}
+
+#[gpui_kit::test]
+fn skipping_the_description_marks_it_prompted_on_disk(cx: &mut TestAppContext) {
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let store = open_store(cx, &h, Settings::default(), None);
+    let metadata = json!({ "description": "Fix the login bug" });
+    let (id, workspace) = open_workspace(
+        cx,
+        &h,
+        &store,
+        bot_and_list(Value::Null),
+        Some("bot"),
+        metadata,
+    );
+
+    workspace.update(cx, |w, cx| w.dismiss_description_prompt(cx));
+    assert_eq!(description_prompt(cx, &workspace), None);
+    wait_for_disk(cx, || {
+        file_on_disk(&h, &id)["metadata"]["descriptionPrompted"] == "true"
+    });
+    assert_eq!(
+        file_on_disk(&h, &id)["metadata"]["description"],
+        "Fix the login bug"
+    );
+}
+
+#[gpui_kit::test]
+fn prompting_the_description_types_it_into_the_harness_and_marks_it_prompted(
+    cx: &mut TestAppContext,
+) {
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let pty = spawn_shell(&h);
+    let store = open_store(cx, &h, Settings::default(), None);
+    let metadata = json!({ "description": "echo described-$((40+2))" });
+    let (id, workspace) = open_workspace(
+        cx,
+        &h,
+        &store,
+        bot_and_list(json!(pty)),
+        Some("bot"),
+        metadata,
+    );
+    let shell = viewer(cx, &h, &pty);
+
+    let task = workspace.update(cx, |w, cx| w.prompt_description(cx));
+    // Marked at once, before the write lands.
+    assert_eq!(
+        description_prompted(cx, &workspace).as_deref(),
+        Some("true")
+    );
+    assert_eq!(description_prompt(cx, &workspace), None);
+    assert_eq!(finish(cx, task), Ok(()));
+    wait_until(cx, &shell, |t| t.screen_text().contains("described-42"));
+    wait_for_disk(cx, || {
+        file_on_disk(&h, &id)["metadata"]["descriptionPrompted"] == "true"
+    });
+}
+
+#[gpui_kit::test]
+fn prompting_the_description_without_a_running_harness_still_marks_it_prompted(
+    cx: &mut TestAppContext,
+) {
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let store = open_store(cx, &h, Settings::default(), None);
+    let metadata = json!({ "description": "Fix the login bug" });
+    let (_, workspace) = open_workspace(
+        cx,
+        &h,
+        &store,
+        bot_and_list(Value::Null),
+        Some("bot"),
+        metadata,
+    );
+    assert_eq!(
+        description_prompt(cx, &workspace),
+        Some("Fix the login bug".to_owned())
+    );
+
+    let task = workspace.update(cx, |w, cx| w.prompt_description(cx));
+    assert_eq!(
+        finish(cx, task),
+        Err("No AI harness is running in this workspace".to_owned())
+    );
+    assert_eq!(
+        description_prompted(cx, &workspace).as_deref(),
+        Some("true")
+    );
 }
 
 #[gpui_kit::test]

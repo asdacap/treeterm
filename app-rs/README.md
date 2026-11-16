@@ -126,9 +126,11 @@ Done (tested against a real in-process daemon unless noted):
   the tab's own URL scheme, which fetches it and serves it as text.
 - **Workspace pane:** header with git status, PR link, Pull, ▶ Run (npm/make/just/Taskfile/
   VS Code tasks, custom runners), Review & Merge / Abandon; AI-harness Prompt Commit /
-  Prompt Rebase; activity glyphs on tabs. A workspace being created shows git's output
-  once there is some; one that failed shows why, with Dismiss. A failed operation (merge,
-  removal) shows "Operation failed" with Force Unlock and Cancel in place of the tabs.
+  Prompt Rebase; Prompt Description / Skip beside a description not yet sent to the
+  harness (shown while an AI-harness tab is active); activity glyphs on tabs. A workspace
+  being created shows git's output once there is some; one that failed shows why, with
+  Dismiss. A failed operation (merge, removal) shows "Operation failed" with Force Unlock
+  and Cancel in place of the tabs.
 - **Tree and sidebar:** sessions (dragged into order, kept in `ui-state.json`), favourites,
   drag and drop (reorder / reparent), unread markers, PR badges, collapsible rail,
   title/branch refresh, Auto Open All Recent Worktrees (worktree registry shared with
@@ -339,6 +341,9 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   scrollback (or goes to a program that asked for mouse events).
 - The attention ding is the system bell (Electron synthesised an 880 Hz tone).
 - The analyzer reads the tab's own terminal; Electron attached a second, headless one.
+- A Prompt Description that sends nothing (no harness running yet, or the write failed)
+  shows why in a notification; Electron failed silently. In both, the description is no
+  longer offered.
 - Go to definition moves within the Files viewer or the Editor tab when the definition is in
   the file it shows; Electron opened that file again in a new Editor tab.
 - The code editors colour files Electron shows as plain text: Makefile, Dockerfile,
