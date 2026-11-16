@@ -16,8 +16,6 @@ use treeterm_core::settings::{
 };
 use treeterm_model::apps::AppRegistry;
 
-use super::instance::InstanceForm;
-
 /// The dialog's sections, one shown at a time (Electron's `TabId`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Section {
@@ -270,24 +268,13 @@ impl Lists {
 }
 
 /// The settings "Save" writes: `draft` (the toggles and choices) with the typed text and
-/// the instance lists, or why they are invalid.
+/// the instance lists, or why the text is invalid. An instance's problem is only a warning
+/// under it: the instance is saved as typed.
 pub fn build(draft: &Settings, texts: &Texts, lists: Lists, os: Os) -> Result<Settings, FormError> {
     let mut edited = draft.clone();
     texts.apply(&mut edited, os)?;
-    check(&lists.profiles)?;
-    check(&lists.harnesses)?;
-    check(&lists.runners)?;
-    check(&lists.web_apps)?;
-    check(&lists.browsers)?;
     lists.store_in(&mut edited);
     Ok(edited)
-}
-
-fn check<T: InstanceForm>(instances: &[T]) -> Result<(), FormError> {
-    match instances.iter().find_map(|instance| instance.problem().map(|problem| (instance, problem))) {
-        Some((instance, problem)) => Err(FormError::new(T::SECTION, format!("{}: {problem}", instance.name()))),
-        None => Ok(()),
-    }
 }
 
 /// Write what the dialog edits from `edited` into `current`, keeping the rest of `current`
@@ -554,6 +541,7 @@ pub fn new_id(prefix: &str, now_ms: u128, taken: impl Fn(&str) -> bool) -> Strin
 mod tests {
     use treeterm_core::settings::{ClassifierProvider, CursorStyle, ReasoningEffort, Theme};
 
+    use crate::settings_view::instance::InstanceForm;
     use super::*;
 
     #[test]
@@ -675,19 +663,17 @@ mod tests {
     }
 
     #[test]
-    fn build_refuses_an_instance_with_a_problem() {
+    fn build_keeps_an_instance_with_a_url_problem() {
         let draft = Settings::default();
         let mut lists = lists(&draft);
         let mut grafana = BrowserInstance::added("browser-1".into());
         grafana.name = "Grafana".into();
         grafana.url = "https://grafana.example.com/".into();
-        lists.browsers.push(grafana);
-        let error = build(&draft, &texts(), lists, Os::MacOs).unwrap_err();
-        assert_eq!(error.section, Section::Browsers);
-        assert_eq!(
-            error.message,
-            "Grafana: URL must be http(s)://localhost or 127.0.0.1: https://grafana.example.com/"
-        );
+        assert!(grafana.problem().is_some());
+        lists.browsers.push(grafana.clone());
+        // Electron only shows the problem under the instance; Save still writes it.
+        let edited = build(&draft, &texts(), lists, Os::MacOs).unwrap();
+        assert_eq!(edited.browser.instances, vec![grafana]);
     }
 
     #[test]

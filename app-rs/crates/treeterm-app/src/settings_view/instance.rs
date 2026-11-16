@@ -7,7 +7,7 @@ use treeterm_core::settings::{
 };
 use treeterm_model::apps::parse_local_url;
 
-use super::form::{SandboxSupport, Section};
+use super::form::SandboxSupport;
 
 /// One kind of application variant as the dialog edits it.
 pub trait InstanceForm: Clone + 'static {
@@ -15,7 +15,6 @@ pub trait InstanceForm: Clone + 'static {
     type Field: Copy + 'static;
     type Toggle: Copy + 'static;
 
-    const SECTION: Section;
     /// Electron's id prefix for new instances (`<prefix>-<Date.now()>`).
     const ID_PREFIX: &'static str;
     const INTRO: &'static str;
@@ -29,7 +28,6 @@ pub trait InstanceForm: Clone + 'static {
     /// What Electron's "+ Add" button creates.
     fn added(id: String) -> Self;
     fn id(&self) -> &str;
-    fn name(&self) -> &str;
     fn icon(&self) -> &str;
     fn icon_mut(&mut self) -> &mut String;
     fn text(&self, field: Self::Field) -> &str;
@@ -40,7 +38,7 @@ pub trait InstanceForm: Clone + 'static {
     fn toggle_label(toggle: Self::Toggle) -> &'static str;
     /// Whether the toggle can be changed now.
     fn toggle_enabled(&self, toggle: Self::Toggle, sandbox: SandboxSupport) -> bool;
-    /// What is wrong with the instance: shown under it, and refuses the save.
+    /// What is wrong with the instance: a warning shown under it. Save still writes it.
     fn problem(&self) -> Option<String>;
 }
 
@@ -68,7 +66,6 @@ impl InstanceForm for TerminalInstance {
     type Field = CommandField;
     type Toggle = DefaultToggle;
 
-    const SECTION: Section = Section::TerminalProfiles;
     const ID_PREFIX: &'static str = "term";
     const INTRO: &'static str = "Create custom terminal profiles with startup commands. \
         These appear as separate options in the new tab menu.";
@@ -90,10 +87,6 @@ impl InstanceForm for TerminalInstance {
 
     fn id(&self) -> &str {
         &self.id
-    }
-
-    fn name(&self) -> &str {
-        &self.name
     }
 
     fn icon(&self) -> &str {
@@ -176,7 +169,6 @@ impl InstanceForm for AiHarnessInstance {
     type Field = HarnessField;
     type Toggle = HarnessToggle;
 
-    const SECTION: Section = Section::AiHarness;
     const ID_PREFIX: &'static str = "ai";
     const INTRO: &'static str = "Configure AI tools like Claude, Cline, OpenCode, etc. \
         These appear as separate options in the new tab menu.";
@@ -210,10 +202,6 @@ impl InstanceForm for AiHarnessInstance {
 
     fn id(&self) -> &str {
         &self.id
-    }
-
-    fn name(&self) -> &str {
-        &self.name
     }
 
     fn icon(&self) -> &str {
@@ -297,7 +285,6 @@ impl InstanceForm for CustomRunnerInstance {
     type Field = CommandField;
     type Toggle = DefaultToggle;
 
-    const SECTION: Section = Section::CustomRunners;
     const ID_PREFIX: &'static str = "runner";
     const INTRO: &'static str = "Configure custom runners with template commands. \
         Use {{workspace_path}} in the command to insert the workspace path at runtime. \
@@ -320,10 +307,6 @@ impl InstanceForm for CustomRunnerInstance {
 
     fn id(&self) -> &str {
         &self.id
-    }
-
-    fn name(&self) -> &str {
-        &self.name
     }
 
     fn icon(&self) -> &str {
@@ -396,7 +379,6 @@ impl InstanceForm for WebAppInstance {
     type Field = CommandField;
     type Toggle = WebAppToggle;
 
-    const SECTION: Section = Section::WebApps;
     const ID_PREFIX: &'static str = "webapp";
     const INTRO: &'static str = "Configure web apps such as dev servers. Use $PORT in the command; \
         it is replaced with a free port, and the Browser tab opens that port once the server responds. \
@@ -420,10 +402,6 @@ impl InstanceForm for WebAppInstance {
 
     fn id(&self) -> &str {
         &self.id
-    }
-
-    fn name(&self) -> &str {
-        &self.name
     }
 
     fn icon(&self) -> &str {
@@ -499,7 +477,6 @@ impl InstanceForm for BrowserInstance {
     type Field = BrowserField;
     type Toggle = DefaultToggle;
 
-    const SECTION: Section = Section::Browsers;
     const ID_PREFIX: &'static str = "browser";
     const INTRO: &'static str = "Open a page that is already being served, such as a dashboard. \
         The URL must be on localhost; on remote sessions its port is forwarded over SSH first.";
@@ -521,10 +498,6 @@ impl InstanceForm for BrowserInstance {
 
     fn id(&self) -> &str {
         &self.id
-    }
-
-    fn name(&self) -> &str {
-        &self.name
     }
 
     fn icon(&self) -> &str {
