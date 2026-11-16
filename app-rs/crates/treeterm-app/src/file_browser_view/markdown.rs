@@ -9,13 +9,13 @@
 //!
 //! react-markdown parses CommonMark and GFM, nothing more, and without `rehype-raw` it writes
 //! raw HTML out as text: `<b>x</b>` shows as typed, and an HTML block as a run of text in its
-//! place. Nor does it know math, so `$` is an ordinary character and a `$$` block an ordinary
-//! paragraph. And no image loads: `urlTransform` empties `data:` URLs and the CSP
-//! (`img-src 'self' data: blob:`) blocks the rest, so Chromium draws its broken-image icon and
-//! the `alt` text. GPUI Kit renders HTML, parses math and loads images, so it is given the
-//! source with HTML inside paragraphs and every `$` escaped ([`literal_source`]), and two
-//! plugins draw HTML blocks as text ([`LiteralHtml`]) and every image as a broken one
-//! ([`BrokenImage`]).
+//! place, which the browser runs together with the HTML blocks beside it. Nor does it know
+//! math, so `$` is an ordinary character and a `$$` block an ordinary paragraph. And no image
+//! loads: `urlTransform` empties `data:` URLs and the CSP (`img-src 'self' data: blob:`)
+//! blocks the rest, so Chromium draws its broken-image icon and the `alt` text. GPUI Kit
+//! renders HTML, parses math and loads images, so it is given the source with HTML inside
+//! paragraphs and every `$` escaped ([`literal_source`]), and two plugins draw HTML blocks as
+//! text ([`LiteralHtml`]) and every image as a broken one ([`BrokenImage`]).
 
 use gpui_kit::assets::IconName;
 use gpui_kit::base::{
@@ -169,7 +169,8 @@ fn literal(id: &SharedString, text: String, window: &mut Window, cx: &mut App) -
 /// each `$` of text escaped, so that the Kit (which turns math on) finds no math. `$` stays as
 /// written in code, HTML blocks and autolinks, which take no escapes. HTML blocks stay too:
 /// written out on one line, a block could join the paragraph after it, so [`LiteralHtml`]
-/// draws them.
+/// draws them; but HTML blocks side by side become one, as the browser runs their text
+/// together.
 ///
 /// The document is parsed as react-markdown parses it (GFM, no math), so what counts as HTML
 /// or text is what it counts.
@@ -229,11 +230,44 @@ impl Rewrite<'_> {
                     }
                     _ => Place::Phrasing,
                 };
-                for child in node.children().into_iter().flatten() {
-                    self.node(child, inner);
+                let children = node.children().map_or(&[][..], Vec::as_slice);
+                let mut index = 0;
+                while index < children.len() {
+                    let run = match inner {
+                        Place::Flow => children[index..].iter().take_while(|child| matches!(child, Node::Html(_))).count(),
+                        Place::Phrasing => 0,
+                    };
+                    if run > 1 {
+                        self.html_blocks(&children[index..index + run]);
+                        index += run;
+                    } else {
+                        self.node(&children[index], inner);
+                        index += 1;
+                    }
                 }
             }
         }
+    }
+
+    /// HTML blocks side by side, which react-markdown writes out as text nodes that the
+    /// browser runs together into one line of text: written as one HTML block on one line,
+    /// [`JOINED_HTML`] then each block's text with its whitespace collapsed, joined by a
+    /// space. A comment starts it, so it ends with its line whatever the first block was,
+    /// and what follows parses as it did after the last one.
+    fn html_blocks(&mut self, blocks: &[Node]) {
+        let (Some(first), Some(last)) = (blocks.first().and_then(Node::position), blocks.last().and_then(Node::position))
+        else {
+            return;
+        };
+        let (start, end) = (first.start.offset, last.end.offset);
+        self.copy_to(start);
+        self.out.push_str(JOINED_HTML);
+        let texts = blocks.iter().filter_map(|block| match block {
+            Node::Html(html) => Some(html.value.as_str()),
+            _ => None,
+        });
+        self.out.push_str(&texts.flat_map(str::split_ascii_whitespace).collect::<Vec<_>>().join(" "));
+        self.copied = end;
     }
 
     fn copy_to(&mut self, end: usize) {
@@ -277,9 +311,13 @@ fn escape_dollars(text: &str, out: &mut String) {
 
 const LITERAL_HTML: &str = "literal-html";
 
+/// What starts the one HTML block [`literal_source`] writes for HTML blocks side by side.
+const JOINED_HTML: &str = "<!--treeterm:joined-html-->";
+
 /// An HTML block, which react-markdown writes out as text in its place: each run of
 /// whitespace one space (none at the ends), as a browser lays it out, in the text style
-/// around it, with no margins of its own.
+/// around it, with no margins of its own. HTML blocks side by side are one line of text
+/// ([`Rewrite::html_blocks`]).
 struct LiteralHtml;
 
 impl MarkdownPlugin for LiteralHtml {
@@ -302,7 +340,8 @@ impl MarkdownPlugin for LiteralHtml {
 
 fn literal_html(node: &Node) -> Option<MarkdownNode> {
     let Node::Html(html) = node else { return None };
-    let text = html.value.split_ascii_whitespace().collect::<Vec<_>>().join(" ");
+    let value = html.value.strip_prefix(JOINED_HTML).unwrap_or(&html.value);
+    let text = value.split_ascii_whitespace().collect::<Vec<_>>().join(" ");
     Some(MarkdownNode::new(LITERAL_HTML, ()).text(text))
 }
 
@@ -443,6 +482,41 @@ mod tests {
         let in_item = literal_html(&item.children().expect("a list item")[0]).expect("an HTML block");
         assert_eq!(in_item.as_text(), "<p> z </p>");
         assert!(literal_html(&kit_blocks("text")[0]).is_none());
+    }
+
+    /// The text of each HTML block, as [`LiteralHtml`] shows it, among the blocks GPUI Kit
+    /// parses; the text of any other block.
+    fn block_texts(blocks: &[Node]) -> Vec<String> {
+        blocks.iter().map(|block| literal_html(block).map_or_else(|| block.to_string(), |html| html.as_text().to_owned())).collect()
+    }
+
+    /// HTML blocks side by side, on lines of their own or between blank lines, are one line of
+    /// text joined by spaces, as Chromium runs react-markdown's text nodes together. What
+    /// follows them is parsed as before: a paragraph straight after a comment stays one.
+    #[test]
+    fn html_blocks_side_by_side_are_one_line_of_text() {
+        let markdown = "<p align=\"center\">\n  <img src=\"logo.png\">\n</p>\n\n<h1 align=\"center\">Tree</h1>\n\n\
+                        <!-- note -->\n<!-- more -->\nText *after*.\n\n<div>x</div>";
+        let blocks = kit_blocks(markdown);
+        assert_eq!(block_texts(&blocks), [
+            r#"<p align="center"> <img src="logo.png"> </p> <h1 align="center">Tree</h1> <!-- note --> <!-- more -->"#,
+            "Text after.",
+            "<div>x</div>",
+        ]);
+        // A run that starts with a tag alone on its line (which cannot interrupt a paragraph)
+        // and ends the document.
+        let blocks = kit_blocks("<a href=\"x\">\n\n<b>\nbold\n</b>");
+        assert_eq!(block_texts(&blocks), ["<a href=\"x\"> <b> bold </b>"]);
+    }
+
+    /// In a quote or a list item, the run is joined within it; the item goes on after it.
+    #[test]
+    fn html_blocks_side_by_side_in_a_quote_or_list_item_are_one_line() {
+        let blocks = kit_blocks("> <p>a</p>\n>\n> <p>\n> b\n> </p>\n\n- <p>c</p>\n\n  <p>d</p>\n\n  after\n- <p>e</p>");
+        assert_eq!(block_texts(blocks[0].children().expect("a quote")), ["<p>a</p> <p> b </p>"]);
+        let items = blocks[1].children().expect("a list");
+        assert_eq!(block_texts(items[0].children().expect("an item")), ["<p>c</p> <p>d</p>", "after"]);
+        assert_eq!(block_texts(items[1].children().expect("an item")), ["<p>e</p>"]);
     }
 
     /// react-markdown has no math: a `$$` block is a paragraph, Markdown inside it included.

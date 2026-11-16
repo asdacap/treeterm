@@ -479,11 +479,8 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   AVIF (`avis`) or one stored as a grid of tiles also shows in Review as a broken image with
   its alt text, where Electron shows the picture (animated, for an `avis`), and an AVIF's
   rotation, mirroring and crop (`irot`, `imir`, `clap`) are not applied.
-- The Markdown preview shows raw HTML as its text, as react-markdown does, but each HTML
-  block (`<p align="center">…</p>` and the like) on lines of its own with the paragraph gap
-  between them: Electron's browser runs consecutive HTML blocks together into one paragraph
-  of text. Images show as broken with their alt text, as in Electron (where none loads),
-  with the grey image-off icon in place of Chromium's broken-picture icon.
+- The Markdown preview's images show as broken with their alt text, as in Electron (where
+  none loads), with the grey image-off icon in place of Chromium's broken-picture icon.
 - PDFs show in Chromium's PDF viewer rebuilt on pdf.js (its legacy build, for older
   WebKits): the toolbar's Menu (a sidebar of thumbnails, and the document outline when there
   is one), page box, zoom presets and level, Fit to page / Fit to width, Rotate
