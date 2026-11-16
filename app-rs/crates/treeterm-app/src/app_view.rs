@@ -1546,8 +1546,6 @@ fn open_review(workspace: &Entity<treeterm_model::workspace_store::WorkspaceStor
     });
 }
 
-/// "▶ Run" (`RunActionDropdown`): the workspace's detected actions by source, then the
-/// custom runners.
 /// The workspace's terminal download rate (`WorkspaceTrafficBadge`).
 fn traffic_badge(
     connected: &mut Connected,
@@ -1563,14 +1561,16 @@ fn traffic_badge(
         .clone()
 }
 
+/// "▶ Run" (`RunActionDropdown`): the workspace's detected actions by source, then the
+/// custom runners.
 fn run_menu(
     connected: &mut Connected,
     workspace: &Entity<treeterm_model::workspace_store::WorkspaceStore>,
     workspace_id: &str,
     cx: &mut Context<AppView>,
 ) -> AnyElement {
-    use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
-    use treeterm_model::run_actions::{Detection, RunActions};
+    use gpui_kit::component::menu::DropdownMenu as _;
+    use treeterm_model::run_actions::RunActions;
     let conn = connected.session.read(cx).connection().clone();
     let model = connected
         .run_actions
@@ -1593,69 +1593,109 @@ fn run_menu(
         .child(
             crate::ui::Trigger::new(
                 crate::ui::action_button(SharedString::from(format!("run-{workspace_id}")), cx)
-                    .tooltip(|window, cx| gpui_kit::component::tooltip::Tooltip::new("Run an action").build(window, cx))
+                    .tooltip(|window, cx| gpui_kit::component::tooltip::Tooltip::new("Run action").build(window, cx))
                     .child("▶ Run")
                     .child(crate::ui::icon(IconName::ChevronDown, 12., fg)),
             )
-                .dropdown_menu_with_anchor(gpui_kit::Anchor::TopRight, move |menu, _window, cx| {
-                    // `.run-action-menu`: uppercase 11px group headers, 13px items, a rule
-                    // between groups; detection runs once, as in Electron.
-                    let secondary = colors(cx).text_secondary;
-                    let note = move |text: &'static str| {
-                        PopupMenuItem::element(move |_, _| div().px(px(0.)).py(px(2.)).text_size(px(12.)).text_color(secondary).child(text))
-                    };
-                    let header = move |text: String| {
-                        PopupMenuItem::element(move |_, _| div().text_size(px(11.)).text_color(secondary).child(text.to_uppercase()))
-                    };
-                    let item = |text: SharedString| {
-                        PopupMenuItem::element(move |_, _| div().py(px(2.)).text_size(px(13.)).whitespace_nowrap().child(text.clone()))
-                    };
-                    let mut menu = menu;
-                    let detection = menu_model.read(cx).detection().clone();
-                    let mut groups = 0;
-                    match detection {
-                        Detection::Detecting => return menu.item(note("Loading...")),
-                        Detection::Done(actions) => {
-                            if actions.is_empty() && runners.is_empty() {
-                                return menu.item(note("No actions found"));
-                            }
-                            let mut source = None;
-                            for action in actions {
-                                if source != Some(action.source) {
-                                    source = Some(action.source);
-                                    if groups > 0 {
-                                        menu = menu.separator();
-                                    }
-                                    groups += 1;
-                                    menu = menu.item(header(action.source.as_str().to_owned()));
-                                }
-                                let (model, label) = (menu_model.clone(), SharedString::from(action.name.clone()));
-                                menu = menu.item(item(label).on_click(move |_, _, cx| {
-                                    model.update(cx, |m, cx| m.run(&action, cx));
-                                }));
-                            }
-                        }
-                    }
-                    if !runners.is_empty() {
-                        if groups > 0 {
-                            menu = menu.separator();
-                        }
-                        menu = menu.item(header("Custom Runners".to_owned()));
-                        for (app_id, name, icon) in &runners {
-                            let (workspace, app_id) = (menu_workspace.clone(), app_id.clone());
-                            let label = SharedString::from(format!("{icon}\u{2009}\u{2009}{name}"));
-                            menu = menu.item(item(label).on_click(move |_, _, cx| {
-                                workspace.update(cx, |w, cx| {
-                                    w.add_tab(&app_id, cx);
-                                });
-                            }));
-                        }
-                    }
+                .dropdown_menu_with_anchor(gpui_kit::Anchor::TopRight, move |menu, window, cx| {
+                    // The open menu follows the model, as the React component re-renders: it
+                    // turns from "Loading..." into the actions when detection finishes. The
+                    // observation goes with the menu.
+                    let menu = fill_run_menu(menu, &menu_model, &menu_workspace, &runners, cx);
+                    let (model, workspace, runners) = (menu_model.clone(), menu_workspace.clone(), runners.clone());
+                    cx.observe_in(&menu_model, window, move |menu, _, window, cx| {
+                        menu.rebuild(window, cx, |menu, _, cx| fill_run_menu(menu, &model, &workspace, &runners, cx));
+                    })
+                    .detach();
                     menu
                 }),
         )
         .when_some(error, |d, error| d.child(div().text_xs().text_color(colors(cx).error).child(error)))
         .into_any_element()
+}
+
+/// The Run menu's items (`.run-action-menu`): "Loading..." while detecting, then each source's
+/// actions under its uppercase 11px header; the custom runners whenever there are any, while
+/// detecting too; a rule between groups.
+fn fill_run_menu(
+    menu: gpui_kit::component::menu::PopupMenu,
+    model: &Entity<treeterm_model::run_actions::RunActions>,
+    workspace: &Entity<WorkspaceStore>,
+    runners: &[(String, String, String)],
+    cx: &mut Context<gpui_kit::component::menu::PopupMenu>,
+) -> gpui_kit::component::menu::PopupMenu {
+    use gpui_kit::component::menu::PopupMenuItem;
+    use gpui_kit::component::tooltip::Tooltip;
+    use treeterm_model::run_actions::Detection;
+    let secondary = colors(cx).text_secondary;
+    // Headers and notes are plain text, as Electron's divs: disabled items are neither
+    // highlighted, selected by the arrow keys, nor clickable.
+    let note = move |text: &'static str| {
+        PopupMenuItem::element(move |_, _| div().px(px(0.)).py(px(2.)).text_size(px(12.)).text_color(secondary).child(text))
+            .disabled(true)
+    };
+    let header = move |text: String| {
+        PopupMenuItem::element(move |_, _| div().text_size(px(11.)).text_color(secondary).child(text.to_uppercase()))
+            .disabled(true)
+    };
+    // `.run-action-menu-item`: 13px, one line, ellipsised; `title` shows its description.
+    let item = |text: SharedString, title: SharedString| {
+        PopupMenuItem::element(move |_, _| {
+            let title = title.clone();
+            div()
+                .id("run-action-item")
+                .flex_1()
+                .min_w_0()
+                .py(px(2.))
+                .text_size(px(13.))
+                .truncate()
+                .child(text.clone())
+                .when(!title.is_empty(), |d| d.tooltip(move |window, cx| Tooltip::new(title.clone()).build(window, cx)))
+        })
+    };
+    // `.run-action-menu`: 200 to 320px wide, at most 400px high, scrolling.
+    let mut menu = menu.min_w(px(200.)).max_w(px(320.)).max_h(px(400.)).scrollable(true);
+    let mut groups = 0;
+    match model.read(cx).detection().clone() {
+        Detection::Detecting => menu = menu.item(note("Loading...")),
+        Detection::Done(actions) => {
+            if actions.is_empty() && runners.is_empty() {
+                return menu.item(note("No actions found"));
+            }
+            let mut source = None;
+            for action in actions {
+                if source != Some(action.source) {
+                    source = Some(action.source);
+                    if groups > 0 {
+                        menu = menu.separator();
+                    }
+                    groups += 1;
+                    menu = menu.item(header(action.source.as_str().to_owned()));
+                }
+                let model = model.clone();
+                let (label, title) = (SharedString::from(action.name.clone()), SharedString::from(action.description.clone()));
+                menu = menu.item(item(label, title).on_click(move |_, _, cx| {
+                    model.update(cx, |m, cx| m.run(&action, cx));
+                }));
+            }
+        }
+    }
+    if !runners.is_empty() {
+        if groups > 0 {
+            menu = menu.separator();
+        }
+        menu = menu.item(header("Custom Runners".to_owned()));
+        for (app_id, name, icon) in runners {
+            let (workspace, app_id) = (workspace.clone(), app_id.clone());
+            let label = SharedString::from(format!("{icon}\u{2009}\u{2009}{name}"));
+            menu = menu.item(item(label, SharedString::default()).on_click(move |_, _, cx| {
+                workspace.update(cx, |w, cx| {
+                    w.add_tab(&app_id, cx);
+                });
+            }));
+        }
+    }
+    menu
 }
 
 /// The header's git buttons: status (`GitStatusButton`), pull (`GitPullButton`) and, for a

@@ -260,6 +260,10 @@ are not ours). Its changes are marked `TreeTerm patch` (`grep -rn "TreeTerm patc
   Escape, Up, Down) stops there, as in Monaco's suggest widget. The Kit let it propagate,
   so the window went on to type it: Enter took the Editor tab's suggestion and also typed a
   newline.
+- `src/menu/popup_menu.rs`: a custom element item (`PopupMenuItem::element`) can be
+  narrower than its content, so in a menu given a max width its text can ellipsise, as the
+  Run menu's long script names do in Electron. The Kit's row grew with its content and the
+  menu cut it off at its edge.
 
 When `gpui-kit` is upgraded, copy the new `gpui-component` over this directory and re-apply
 the marked changes (or drop the patch if the Kit gained the option).

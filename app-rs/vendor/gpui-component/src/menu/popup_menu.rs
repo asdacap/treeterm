@@ -1403,6 +1403,9 @@ impl PopupMenu {
                 .child(
                     h_flex()
                         .flex_1()
+                        // TreeTerm patch: no wider than the menu, so a custom element can
+                        // ellipsise its text in a menu given a max width.
+                        .min_w_0()
                         .min_h(item_height)
                         .items_center()
                         .gap_x_1()
