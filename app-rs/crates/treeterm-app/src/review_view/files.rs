@@ -272,13 +272,12 @@ fn rows(
                 .border_color(border)
                 .cursor_pointer()
                 .when(selected, |d| d.bg(active_bg))
-                // `.viewed` fades the row, a little less while hovered.
+                // `.viewed` fades the row, a little less while hovered, selected or not (a
+                // selected row keeps its fill).
                 .when(is_viewed && staging.is_none(), |d| d.opacity(0.6))
-                .when(!selected, |d| {
-                    d.hover(move |d| {
-                        let d = d.bg(hover);
-                        if is_viewed && staging.is_none() { d.opacity(0.8) } else { d }
-                    })
+                .hover(move |d| {
+                    let d = if selected { d } else { d.bg(hover) };
+                    if is_viewed && staging.is_none() { d.opacity(0.8) } else { d }
                 })
                 .child(status_badge(file.status))
                 .child(div().flex_1().min_w_0().truncate().child(name.clone()))

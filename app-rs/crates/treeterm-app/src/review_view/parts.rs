@@ -95,7 +95,8 @@ pub fn branch_pill(cx: &App) -> Div {
 }
 
 /// `.pierre-diff-btn`: a 24×24 icon button whose `tip` is its only label, secondary until
-/// hovered; `active` tints it accent on the hover fill; disabled fades to 30%.
+/// hovered; `active` tints it accent on the hover fill, yet hovering still brightens it
+/// (`:hover:not(:disabled)` outranks `.active`); disabled fades to 30%.
 pub fn toolbar_button(
     id: impl Into<ElementId>,
     name: IconName,
@@ -117,7 +118,7 @@ pub fn toolbar_button(
         .text_color(if active { accent } else { secondary })
         .when(active, |d| d.bg(hover))
         .when(!enabled, |d| d.opacity(0.3))
-        .when(enabled, |d| d.cursor_pointer().hover(move |d| d.bg(hover).text_color(if active { accent } else { primary })))
+        .when(enabled, |d| d.cursor_pointer().hover(move |d| d.bg(hover).text_color(primary)))
         .child(plain_icon(name, 14.))
         .tooltip(title(tip))
 }
