@@ -2677,14 +2677,58 @@ fn web_app_on_port_1(
 
 /// What a Web App tab's Shell sub-tab shows.
 fn server_terminal(cx: &mut TestAppContext, workspace: &Entity<WorkspaceStore>, tab: &str) -> String {
+    shell_shows(workspace.read_with(cx, |w, _| w.tab_content(tab)))
+}
+
+/// What the Shell sub-tab of a tab with `content` shows.
+fn shell_shows(content: Option<TabContent>) -> String {
     use treeterm_model::workspace_store::ServerTerminal;
-    match workspace.read_with(cx, |w, _| w.tab_content(tab)) {
+    match content {
         Some(TabContent::WebApp { server: ServerTerminal::Starting, .. }) => "starting".to_owned(),
         Some(TabContent::WebApp { server: ServerTerminal::Attached(_), .. }) => "attached".to_owned(),
         Some(TabContent::WebApp { server: ServerTerminal::Failed(error), .. }) => format!("failed: {error}"),
         Some(_) => "not a web app".to_owned(),
         None => "gone".to_owned(),
     }
+}
+
+/// The terminal a Web App tab's Shell sub-tab shows; it must be attached.
+fn attached_server_terminal(
+    cx: &mut TestAppContext,
+    workspace: &Entity<WorkspaceStore>,
+    tab: &str,
+) -> Entity<treeterm_model::terminal::TerminalModel> {
+    use treeterm_model::workspace_store::ServerTerminal;
+    match workspace.read_with(cx, |w, _| w.tab_content(tab)) {
+        Some(TabContent::WebApp { server: ServerTerminal::Attached(terminal), .. }) => terminal,
+        other => panic!("the server's terminal is not attached: {}", shell_shows(other)),
+    }
+}
+
+/// The ids of the PTYs the daemon runs.
+fn pty_ids(h: &Harness) -> Vec<String> {
+    let sessions = futures::executor::block_on(h.conn.list_pty_sessions()).unwrap().unwrap();
+    sessions.into_iter().map(|session| session.id).collect()
+}
+
+/// What the Shell sub-tab showed each time `app`'s start-up asked for its server's terminal
+/// (the store's own handler has run by then).
+fn server_terminal_requests(
+    cx: &mut TestAppContext,
+    workspace: &Entity<WorkspaceStore>,
+    tab: &str,
+    app: &Entity<treeterm_model::web_app::WebAppModel>,
+) -> (std::rc::Rc<std::cell::RefCell<Vec<String>>>, gpui_kit::Subscription) {
+    use treeterm_model::web_app::WebAppEvent;
+    let requests = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let (seen, workspace, tab) = (requests.clone(), workspace.clone(), tab.to_owned());
+    let subscription = cx.update(|cx| {
+        cx.subscribe(app, move |_, event: &WebAppEvent, cx| match event {
+            WebAppEvent::ServerPtyNeeded(_) => seen.borrow_mut().push(shell_shows(workspace.read(cx).tab_content(&tab))),
+            WebAppEvent::PortAssigned(_) | WebAppEvent::LocalPortAssigned(_) => {}
+        })
+    });
+    (requests, subscription)
 }
 
 #[gpui_kit::test]
@@ -2740,6 +2784,53 @@ fn a_web_app_with_its_port_waits_for_its_server_terminal_before_its_server(cx: &
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
     panic!("the server's terminal never started");
+}
+
+#[gpui_kit::test]
+fn a_reopened_web_app_and_its_retry_go_on_with_the_server_terminal_already_running(cx: &mut TestAppContext) {
+    use treeterm_core::pty::CreatePty;
+    use treeterm_model::web_app::WebAppPhase;
+    cx.executor().allow_parking();
+    let h = harness();
+    let (_session, workspace) = web_app_workspace(cx, &h, h.conn.clone(), "sleep 300");
+    // The server an earlier run of the app started, still running (a reopened session).
+    let handle = "web-app-server";
+    let pty_id = futures::executor::block_on(h.conn.create_pty(CreatePty {
+        cwd: h.daemon.root().to_string_lossy().into_owned(),
+        startup_command: Some("sleep 300".to_owned()),
+        handle: Some(handle.to_owned()),
+        ..CreatePty::default()
+    }))
+    .unwrap()
+    .unwrap();
+    let state = serde_json::json!({
+        "port": { "status": "assigned", "port": 1 }, "ptyId": pty_id, "ptyHandle": handle
+    });
+    let tab = workspace.update(cx, |w, cx| w.add_tab_with("webapp-py", state, cx)).unwrap();
+    let Some(TabContent::WebApp { app, .. }) = workspace.read_with(cx, |w, _| w.tab_content(&tab)) else {
+        panic!("not a web app tab");
+    };
+    let (requests, _requests) = server_terminal_requests(cx, &workspace, &tab, &app);
+    let phase = |cx: &mut TestAppContext| app.read_with(cx, |a, _| a.phase().clone());
+    // Its terminal shows at once; the start-up still begins in "Finding a free port…".
+    let terminal = attached_server_terminal(cx, &workspace, &tab);
+    assert_eq!(phase(cx), WebAppPhase::AllocatingPort);
+
+    // The start-up asks for the terminal and is answered at once with the one attached.
+    wait_until(cx, &app, |a| *a.phase() == WebAppPhase::WaitingForServer { port: 1 });
+    assert_eq!(*requests.borrow(), ["attached"]);
+    assert_eq!(attached_server_terminal(cx, &workspace, &tab).entity_id(), terminal.entity_id());
+    assert_eq!(pty_ids(&h), [pty_id.as_str()]);
+
+    // Retry (and Restart on the Port Forward sub-tab) runs the start-up again, with it too.
+    app.update(cx, |a, cx| a.retry(cx));
+    assert_eq!(phase(cx), WebAppPhase::AllocatingPort);
+    wait_until(cx, &app, |a| *a.phase() == WebAppPhase::WaitingForServer { port: 1 });
+    assert_eq!(*requests.borrow(), ["attached", "attached"]);
+    assert_eq!(attached_server_terminal(cx, &workspace, &tab).entity_id(), terminal.entity_id());
+    let state = workspace.read_with(cx, |w, _| w.file().app_states[&tab].state.clone());
+    assert_eq!(state["ptyId"], pty_id.as_str());
+    assert_eq!(pty_ids(&h), [pty_id]);
 }
 
 #[gpui_kit::test]
@@ -2820,6 +2911,51 @@ fn retry_starts_a_web_apps_server_terminal_again_after_it_failed_to_start(cx: &m
     wait_until(cx, &app, |a| !matches!(a.phase(), WebAppPhase::AllocatingPort));
     assert_eq!(app.read_with(cx, |a, _| a.phase().clone()), WebAppPhase::Error(error.clone()));
     assert_eq!(server_terminal(cx, &workspace, &tab), format!("failed: Failed to start terminal: {error}"));
+}
+
+#[gpui_kit::test]
+fn retry_while_a_web_apps_server_terminal_is_being_created_waits_for_that_terminal(cx: &mut TestAppContext) {
+    use std::cell::{Cell, RefCell};
+    use std::rc::Rc;
+    use treeterm_model::web_app::{WebAppEvent, WebAppPhase};
+    cx.executor().allow_parking();
+    let h = harness();
+    let (_session, workspace) = web_app_workspace(cx, &h, h.conn.clone(), "sleep 300");
+    let (tab, app) = web_app_on_port_1(cx, &workspace);
+    let (requests, _requests) = server_terminal_requests(cx, &workspace, &tab, &app);
+    // Retried once the store is creating the terminal (its handler runs first), from a task
+    // of its own as a click is, not from within the start-up it replaces.
+    let retried = Rc::new(Cell::new(false));
+    let (once, retrying) = (retried.clone(), app.downgrade());
+    let _retry = cx.update(|cx| {
+        cx.subscribe(&app, move |_, event: &WebAppEvent, cx| match event {
+            WebAppEvent::ServerPtyNeeded(_) if !once.replace(true) => {
+                let app = retrying.clone();
+                cx.spawn(async move |cx| app.update(cx, |a, cx| a.retry(cx)).expect("the web app is open")).detach();
+            }
+            WebAppEvent::ServerPtyNeeded(_) | WebAppEvent::PortAssigned(_) | WebAppEvent::LocalPortAssigned(_) => {}
+        })
+    });
+    // The server goes on in the terminal it was creating; it is waited for only once that
+    // terminal is attached.
+    let shell_when_waiting = Rc::new(RefCell::new(None));
+    let (seen, reading, owned_tab) = (shell_when_waiting.clone(), workspace.clone(), tab.clone());
+    let _waiting = cx.update(|cx| {
+        cx.observe(&app, move |app, cx| {
+            if *app.read(cx).phase() == (WebAppPhase::WaitingForServer { port: 1 }) && seen.borrow().is_none() {
+                *seen.borrow_mut() = Some(shell_shows(reading.read(cx).tab_content(&owned_tab)));
+            }
+        })
+    });
+
+    wait_until(cx, &app, |a| *a.phase() == WebAppPhase::WaitingForServer { port: 1 });
+    assert!(retried.get());
+    // The second start-up found the terminal still being created.
+    assert_eq!(*requests.borrow(), ["starting", "starting"]);
+    assert_eq!(shell_when_waiting.borrow().as_deref(), Some("attached"));
+    let state = workspace.read_with(cx, |w, _| w.file().app_states[&tab].state.clone());
+    let pty_id = state["ptyId"].as_str().expect("the terminal's id is kept").to_owned();
+    assert_eq!(pty_ids(&h), [pty_id]);
 }
 
 #[gpui_kit::test]
