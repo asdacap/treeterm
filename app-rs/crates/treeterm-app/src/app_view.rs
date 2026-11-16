@@ -1208,14 +1208,10 @@ impl Render for AppView {
 }
 
 impl AppView {
-    /// Whether the window may close now; when child workspaces are unmerged, asks first
-    /// (and quits if the user confirms).
+    /// Whether the window may close now; when child workspaces of any connection are
+    /// unmerged, asks first (and quits if the user confirms).
     pub fn request_close(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
-        let unmerged: Vec<(String, Option<String>)> = self
-            .sessions
-            .values()
-            .flat_map(|connected| connected.session.read(cx).unmerged_sub_workspaces(cx))
-            .collect();
+        let unmerged = self.store.read(cx).unmerged_sub_workspaces(cx);
         if unmerged.is_empty() {
             return true;
         }

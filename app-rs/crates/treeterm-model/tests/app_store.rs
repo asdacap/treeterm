@@ -191,17 +191,22 @@ fn body(name: &str) -> String {
 
 /// Workspaces `a` and `b` in `h`'s session.
 fn publish_a_and_b(h: &Harness) {
+    publish(h, &[("a", body("a")), ("b", body("b"))]);
+}
+
+/// These workspaces, as `(id, body)`, in `h`'s session.
+fn publish(h: &Harness, workspaces: &[(&str, String)]) {
     let path = h.daemon.root().to_string_lossy().into_owned();
-    let refs = ["a", "b"]
-        .into_iter()
-        .map(|id| {
+    let refs = workspaces
+        .iter()
+        .map(|(id, body)| {
             std::fs::write(
                 h.daemon.workspaces_dir().join(format!("{id}.json")),
-                body(id),
+                body,
             )
             .unwrap();
             WorkspaceRef {
-                id: id.into(),
+                id: (*id).into(),
                 path: path.clone(),
             }
         })
@@ -538,6 +543,56 @@ fn with_no_session_shown_the_window_shows_the_start_up_until_the_local_session_l
 
     app.app.update(cx, |a, cx| a.disconnect(&id, cx));
     assert_eq!(idle(cx, &app), IdlePane::SelectWorkspace, "no connection left");
+}
+
+fn unmerged(cx: &mut TestAppContext, app: &App) -> Vec<(String, Option<String>)> {
+    app.app.read_with(cx, |a, cx| a.unmerged_sub_workspaces(cx))
+}
+
+/// Closing the app asks about the active worktrees of every connection's session, also of a
+/// connection that is down: while it reconnects, while its next generation's session loads
+/// and once reconnecting is stopped, as Electron's `onCloseConfirm` walks every session store.
+/// Disconnected, they go with it.
+#[gpui_kit::test]
+fn the_unmerged_worktrees_of_a_lost_connection_count_until_it_is_disconnected(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    isolated_home();
+    let h = harness();
+    let mut kid: serde_json::Value = serde_json::from_str(&body("kid")).unwrap();
+    kid["isWorktree"] = true.into();
+    kid["parentId"] = "root".into();
+    kid["gitBranch"] = "kid-branch".into();
+    publish(&h, &[("root", body("root")), ("kid", kid.to_string())]);
+    let dir = tempfile::Builder::new()
+        .prefix("tt")
+        .tempdir_in("/tmp")
+        .unwrap();
+    let socket = dir.path().join("p.sock");
+    let proxy = DaemonProxy::start(&socket, h.daemon.socket_path());
+    let app = app(cx, &h, Some(&socket));
+    let id = local_id(cx, &app.app);
+    let kid = vec![("kid".to_owned(), Some("kid-branch".to_owned()))];
+    wait_until_app(cx, &app.app, |a, cx| !a.unmerged_sub_workspaces(cx).is_empty());
+    assert_eq!(unmerged(cx, &app), kid);
+
+    drop(proxy);
+    wait_for_local(cx, &app, |state| matches!(state, ConnState::Reconnecting { .. }));
+    assert_eq!(unmerged(cx, &app), kid, "reconnecting");
+
+    // The next generation connects, but its daemon does not answer: its store waits for the
+    // session, and the last one still stands for the connection.
+    let silent = DaemonProxy::silent(&socket, h.daemon.socket_path());
+    wait_until(cx, &app.app, |a| a.local_session().is_some());
+    assert_eq!(unmerged(cx, &app), kid, "while the next session loads");
+
+    drop(silent);
+    wait_for_local(cx, &app, |state| matches!(state, ConnState::Reconnecting { .. }));
+    app.app.read_with(cx, |a, _| a.cancel_reconnect(&id));
+    wait_for_local(cx, &app, |state| matches!(state, ConnState::Failed { .. }));
+    assert_eq!(unmerged(cx, &app), kid, "reconnecting stopped");
+
+    app.app.update(cx, |a, cx| a.disconnect(&id, cx));
+    assert_eq!(unmerged(cx, &app), vec![], "disconnected");
 }
 
 /// Exit and Kill Daemon reaches the local daemon through a client of its own, also while the

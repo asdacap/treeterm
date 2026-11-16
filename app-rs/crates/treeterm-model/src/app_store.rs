@@ -140,13 +140,14 @@ impl SessionSlot {
         }
     }
 
-    /// The connection's session has loaded: the connected generation's, or the last one's,
-    /// kept while the connection is down or until its replacement has loaded.
-    fn has_loaded(&self, cx: &App) -> bool {
+    /// The session store whose session has loaded: the connected generation's, else the last
+    /// one's, kept while the connection is down or until its replacement has loaded (Electron
+    /// keeps a connection's store until the next one's session has loaded).
+    fn loaded_session(&self, cx: &App) -> Option<&Entity<SessionStore>> {
         self.session()
             .into_iter()
             .chain(self.previous_session())
-            .any(|session| matches!(session.read(cx).state(), SessionState::Live))
+            .find(|session| matches!(session.read(cx).state(), SessionState::Live))
     }
 }
 
@@ -296,7 +297,7 @@ impl AppStore {
         let Some(slot) = self.sessions.values().next() else {
             return IdlePane::SelectWorkspace; // every connection was disconnected
         };
-        if slot.has_loaded(cx) {
+        if slot.loaded_session(cx).is_some() {
             return IdlePane::SelectWorkspace;
         }
         match &slot.state {
@@ -713,6 +714,17 @@ impl AppStore {
     /// the local connection is down or failed (`quitAndKillDaemon`'s temporary client).
     pub fn shutdown_daemon(&self) -> Fut<Result<(), ShutdownError>> {
         treeterm_core::daemon::shutdown_daemon(&self.rt, &self.local_socket)
+    }
+
+    /// The active worktree workspaces of every connection's session, as `(name, branch)`:
+    /// closing the app asks first when there are any (`onCloseConfirm` walks every session
+    /// store). A lost connection's are read from its session kept while it is down.
+    pub fn unmerged_sub_workspaces(&self, cx: &App) -> Vec<(String, Option<String>)> {
+        self.sessions
+            .values()
+            .filter_map(|slot| slot.loaded_session(cx))
+            .flat_map(|session| session.read(cx).unmerged_sub_workspaces(cx))
+            .collect()
     }
 }
 
