@@ -1746,11 +1746,22 @@ impl WorkspaceStore {
     }
 }
 
+/// The merge output's last line for a failure: `Merge failed: <error>`, as Electron's Review
+/// writes every failure. An error that already says how the merge went is kept as it is
+/// (Electron doubled git's own "Merge failed: ").
+fn merge_failure_line(error: &str) -> String {
+    if error.starts_with("Merge failed: ") || error.starts_with("Merge succeeded but cleanup failed: ") {
+        error.to_owned()
+    } else {
+        format!("Merge failed: {error}")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
 
-    use super::is_ai_harness_state;
+    use super::{is_ai_harness_state, merge_failure_line};
 
     #[test]
     fn a_harness_state_has_a_pty_id_or_null_and_an_object_typed_sandbox() {
@@ -1768,22 +1779,6 @@ mod tests {
         assert!(!is_ai_harness_state(&json!(null)));
         assert!(!is_ai_harness_state(&json!(["p1"])));
     }
-}
-
-/// The merge output's last line for a failure: `Merge failed: <error>`, as Electron's Review
-/// writes every failure. An error that already says how the merge went is kept as it is
-/// (Electron doubled git's own "Merge failed: ").
-fn merge_failure_line(error: &str) -> String {
-    if error.starts_with("Merge failed: ") || error.starts_with("Merge succeeded but cleanup failed: ") {
-        error.to_owned()
-    } else {
-        format!("Merge failed: {error}")
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::merge_failure_line;
 
     #[test]
     fn a_merge_failure_says_merge_failed_once() {

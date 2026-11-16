@@ -302,7 +302,10 @@ mod tests {
     fn a_save_fails_in_electrons_words() {
         assert_eq!(save_error_text(&FsError::Daemon("Permission denied".into())), "Failed to save: Permission denied");
         let deadline = treeterm_core::daemon::ApiError::DeadlineExceeded(Duration::from_secs(30));
-        assert_eq!(save_error_text(&FsError::Api(deadline)), "Error saving file: daemon did not answer within 30s");
+        assert_eq!(
+            save_error_text(&FsError::Api(deadline)),
+            "Error saving file: 4 DEADLINE_EXCEEDED: Deadline exceeded after 30.000s"
+        );
     }
 
     #[test]
