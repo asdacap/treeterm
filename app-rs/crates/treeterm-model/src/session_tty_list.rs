@@ -9,7 +9,9 @@
 use gpui_kit::{App, AppContext as _, Context, Entity, Subscription};
 use treeterm_core::connection::ConnectionId;
 
-use crate::active_processes::{ActiveProcesses, ProcessList, PtyGroup, group_by_workspace};
+use crate::active_processes::{
+    ActiveProcesses, ProcessList, PtyGroup, group_by_workspace, workspace_labels,
+};
 use crate::app_store::{AppStore, SessionSlot};
 use crate::session_store::SessionStore;
 use crate::terminal::TerminalModel;
@@ -99,7 +101,7 @@ impl SessionTtyList {
             ProcessList::Failed(message) => TtyListBody::Failed(message.clone()),
             ProcessList::Loaded(sessions) => TtyListBody::Loaded(group_by_workspace(
                 sessions,
-                &loaded_workspaces(session.read(cx), cx),
+                &workspace_labels(session.read(cx), cx),
             )),
         }
     }
@@ -143,17 +145,4 @@ impl SessionTtyList {
             Shown::NotConnected => {}
         }
     }
-}
-
-/// `(path, name)` of the session's loaded workspaces, in session order (`loadedWorkspaces`:
-/// loaded, or loaded with an operation error).
-fn loaded_workspaces(session: &SessionStore, cx: &App) -> Vec<(String, String)> {
-    session
-        .workspace_ids()
-        .filter_map(|id| session.workspace_store(id))
-        .map(|store| {
-            let workspace = store.read(cx).workspace();
-            (workspace.path.clone(), workspace.file.name.clone())
-        })
-        .collect()
 }
