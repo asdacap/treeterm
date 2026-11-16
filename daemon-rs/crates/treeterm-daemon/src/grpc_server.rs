@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use tokio::sync::mpsc;
+use tokio::sync::{broadcast, mpsc};
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status, Streaming};
 use treeterm_proto::treeterm::*;
@@ -43,6 +43,61 @@ fn replay_messages(events: Vec<BufferEvent>) -> Vec<PtyOutput> {
         },
     });
     std::iter::once(start).chain(body).chain(std::iter::once(end)).collect()
+}
+
+fn exit_output(exit_code: i32, signal: Option<i32>) -> PtyOutput {
+    PtyOutput {
+        output: Some(pty_output::Output::Exit(PtyExit { exit_code, signal })),
+    }
+}
+
+/// Forward a PTY's live output, size changes and exit to its stream until the PTY exits, its
+/// subscriber is dropped, or the client goes away.
+async fn forward_live_events(
+    mut data_rx: mpsc::Receiver<Vec<u8>>,
+    mut exit_rx: broadcast::Receiver<(i32, Option<i32>)>,
+    mut resize_rx: broadcast::Receiver<(i32, i32)>,
+    tx: mpsc::Sender<Result<PtyOutput, Status>>,
+) {
+    loop {
+        tokio::select! {
+            result = data_rx.recv() => {
+                match result {
+                    Some(data) => {
+                        let msg = PtyOutput {
+                            output: Some(pty_output::Output::Data(PtyData { data })),
+                        };
+                        if tx.send(Ok(msg)).await.is_err() { break; }
+                    }
+                    None => {
+                        // The subscriber's senders are gone: the read loop dropped it because
+                        // its buffer filled (try_send failed), or the session itself was
+                        // dropped after a kill. The waitpid task broadcasts the exit before it
+                        // drops its reference to the session, so a killed PTY's exit is here
+                        // already, and the select may have picked this branch over it.
+                        let last = match exit_rx.try_recv() {
+                            Ok((exit_code, signal)) => Ok(exit_output(exit_code, signal)),
+                            Err(_still_running) => Err(Status::resource_exhausted(
+                                "Stream buffer overflow: terminal output exceeded buffer capacity",
+                            )),
+                        };
+                        let _ = tx.send(last).await;
+                        break;
+                    }
+                }
+            }
+            Ok((exit_code, signal)) = exit_rx.recv() => {
+                let _ = tx.send(Ok(exit_output(exit_code, signal))).await;
+                break;
+            }
+            Ok((cols, rows)) = resize_rx.recv() => {
+                let _ = tx.send(Ok(PtyOutput {
+                    output: Some(pty_output::Output::Resize(PtyResizeData { cols, rows })),
+                })).await;
+            }
+            else => break,
+        }
+    }
 }
 
 pub struct DaemonService {
@@ -116,7 +171,7 @@ impl TreeTermDaemon for DaemonService {
 
             // Atomically subscribe + snapshot initial state under one lock.
             // This prevents data loss between get_initial_state() and subscribe_data().
-            let (initial_events, mut data_rx) = match pty_mgr.subscribe_with_initial_state(&session_id).await {
+            let (initial_events, data_rx) = match pty_mgr.subscribe_with_initial_state(&session_id).await {
                 Ok(result) => result,
                 Err(_) => return,
             };
@@ -130,21 +185,14 @@ impl TreeTermDaemon for DaemonService {
 
             // Check if already exited
             if let Ok(Some(exit_code)) = pty_mgr.get_exit_code(&session_id).await {
-                let _ = tx
-                    .send(Ok(PtyOutput {
-                        output: Some(pty_output::Output::Exit(PtyExit {
-                            exit_code,
-                            signal: None,
-                        })),
-                    }))
-                    .await;
+                let _ = tx.send(Ok(exit_output(exit_code, None))).await;
                 return;
             }
-            let mut exit_rx = match pty_mgr.subscribe_exit(&session_id).await {
+            let exit_rx = match pty_mgr.subscribe_exit(&session_id).await {
                 Ok(rx) => rx,
                 Err(_) => return,
             };
-            let mut resize_rx = match pty_mgr.subscribe_resize(&session_id).await {
+            let resize_rx = match pty_mgr.subscribe_resize(&session_id).await {
                 Ok(rx) => rx,
                 Err(_) => return,
             };
@@ -193,41 +241,7 @@ impl TreeTermDaemon for DaemonService {
                 pty_mgr2.release(&sid, attachment).await;
             });
 
-            // Forward live events to client
-            loop {
-                tokio::select! {
-                    result = data_rx.recv() => {
-                        match result {
-                            Some(data) => {
-                                let msg = PtyOutput {
-                                    output: Some(pty_output::Output::Data(PtyData { data })),
-                                };
-                                if tx.send(Ok(msg)).await.is_err() { break; }
-                            }
-                            None => {
-                                // Subscriber was dropped because its buffer
-                                // filled (try_send failed in the read loop).
-                                let _ = tx.send(Err(Status::resource_exhausted(
-                                    "Stream buffer overflow: terminal output exceeded buffer capacity",
-                                ))).await;
-                                break;
-                            }
-                        }
-                    }
-                    Ok((exit_code, signal)) = exit_rx.recv() => {
-                        let _ = tx.send(Ok(PtyOutput {
-                            output: Some(pty_output::Output::Exit(PtyExit { exit_code, signal })),
-                        })).await;
-                        break;
-                    }
-                    Ok((cols, rows)) = resize_rx.recv() => {
-                        let _ = tx.send(Ok(PtyOutput {
-                            output: Some(pty_output::Output::Resize(PtyResizeData { cols, rows })),
-                        })).await;
-                    }
-                    else => break,
-                }
-            }
+            forward_live_events(data_rx, exit_rx, resize_rx, tx).await;
         });
 
         Ok(Response::new(ReceiverStream::new(rx)))
@@ -547,6 +561,7 @@ impl TreeTermDaemon for DaemonService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pty_manager::PtyManager;
 
     #[test]
     fn replay_messages_brackets_the_initial_state() {
@@ -577,6 +592,103 @@ mod tests {
                 Some(pty_output::Output::ReplayStart(Empty {})),
                 Some(pty_output::Output::ReplayEnd(Empty {})),
             ]
+        );
+    }
+
+    type Sent = Result<Option<pty_output::Output>, (tonic::Code, String)>;
+
+    const OVERFLOW: &str = "Stream buffer overflow: terminal output exceeded buffer capacity";
+
+    /// What `forward_live_events` sends until it returns.
+    async fn forwarded(
+        data_rx: mpsc::Receiver<Vec<u8>>,
+        exit_rx: broadcast::Receiver<(i32, Option<i32>)>,
+        resize_rx: broadcast::Receiver<(i32, i32)>,
+    ) -> Vec<Sent> {
+        let (tx, mut rx) = mpsc::channel(4);
+        let forwarding = tokio::spawn(forward_live_events(data_rx, exit_rx, resize_rx, tx));
+        let mut sent = Vec::new();
+        while let Some(message) = rx.recv().await {
+            sent.push(
+                message
+                    .map(|output| output.output)
+                    .map_err(|status| (status.code(), status.message().to_owned())),
+            );
+        }
+        forwarding.await.unwrap();
+        sent
+    }
+
+    fn exit(exit_code: i32, signal: Option<i32>) -> Sent {
+        Ok(Some(pty_output::Output::Exit(PtyExit { exit_code, signal })))
+    }
+
+    #[tokio::test]
+    async fn a_killed_ptys_stream_ends_with_its_exit_although_its_output_closes_with_it() {
+        // A kill drops the session (and with it the output's senders) right after its exit
+        // is broadcast, so both are ready at once; the select takes either, at random.
+        for _ in 0..64 {
+            let (data_tx, data_rx) = mpsc::channel(4);
+            let (exit_tx, exit_rx) = broadcast::channel(4);
+            let (resize_tx, resize_rx) = broadcast::channel(4);
+            exit_tx.send((-1, Some(libc::SIGHUP))).unwrap();
+            drop((data_tx, exit_tx, resize_tx));
+            assert_eq!(
+                forwarded(data_rx, exit_rx, resize_rx).await,
+                vec![exit(-1, Some(libc::SIGHUP))]
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_running_ptys_dropped_subscriber_ends_its_stream_with_an_overflow() {
+        let (data_tx, data_rx) = mpsc::channel(4);
+        let (exit_tx, exit_rx) = broadcast::channel(4);
+        let (resize_tx, resize_rx) = broadcast::channel(4);
+        data_tx.send(b"out".to_vec()).await.unwrap();
+        // The read loop drops a subscriber whose buffer is full; the PTY runs on.
+        drop(data_tx);
+        assert_eq!(
+            forwarded(data_rx, exit_rx, resize_rx).await,
+            vec![
+                Ok(Some(pty_output::Output::Data(PtyData {
+                    data: b"out".to_vec()
+                }))),
+                Err((tonic::Code::ResourceExhausted, OVERFLOW.to_owned())),
+            ]
+        );
+        drop((exit_tx, resize_tx));
+    }
+
+    #[tokio::test]
+    async fn a_pty_that_exits_ends_its_stream_with_its_exit() {
+        let (data_tx, data_rx) = mpsc::channel(4);
+        let (exit_tx, exit_rx) = broadcast::channel(4);
+        let (resize_tx, resize_rx) = broadcast::channel(4);
+        // The session lives on after its child exits: its output stays open.
+        exit_tx.send((3, None)).unwrap();
+        assert_eq!(
+            forwarded(data_rx, exit_rx, resize_rx).await,
+            vec![exit(3, None)]
+        );
+        drop((data_tx, exit_tx, resize_tx));
+    }
+
+    #[tokio::test]
+    async fn a_killed_ptys_stream_ends_with_its_exit() {
+        let mgr = PtyManager::new();
+        let id = mgr
+            .create_pty("/tmp".into(), HashMap::new(), 80, 24, None, None)
+            .await
+            .unwrap();
+        let (_initial, data_rx) = mgr.subscribe_with_initial_state(&id).await.unwrap();
+        let exit_rx = mgr.subscribe_exit(&id).await.unwrap();
+        let resize_rx = mgr.subscribe_resize(&id).await.unwrap();
+        mgr.kill(&id).await;
+        let sent = forwarded(data_rx, exit_rx, resize_rx).await;
+        assert!(
+            matches!(sent.last(), Some(Ok(Some(pty_output::Output::Exit(_))))),
+            "{sent:?}"
         );
     }
 }
