@@ -42,10 +42,28 @@ fn child_path(parent: &str, key: &str) -> String {
     format!("{parent}/{}", key.replace('~', "~0").replace('/', "~1"))
 }
 
+/// The DOM's `white-space: normal` on the inline key and string spans: each run of spaces,
+/// tabs, line feeds and carriage returns shows as one space, so a multi-line string stays on
+/// one line. Anything else (a no-break space too) is kept.
+fn collapse_whitespace(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut in_run = false;
+    for ch in text.chars() {
+        let space = matches!(ch, ' ' | '\t' | '\n' | '\r');
+        if !space {
+            out.push(ch);
+        } else if !in_run {
+            out.push(' ');
+        }
+        in_run = space;
+    }
+    out
+}
+
 fn node(value: &Value, path: String, depth: usize, toggled: &HashSet<String>) -> Node {
     let children: Vec<(Key, String, &Value)> = match value {
         Value::Null => return Node::Null,
-        Value::String(text) => return Node::Str(text.clone()),
+        Value::String(text) => return Node::Str(collapse_whitespace(text)),
         Value::Number(number) => return Node::Num(number.to_string()),
         Value::Bool(flag) => return Node::Bool(*flag),
         Value::Array(items) => items
@@ -55,7 +73,7 @@ fn node(value: &Value, path: String, depth: usize, toggled: &HashSet<String>) ->
             .collect(),
         Value::Object(map) => map
             .iter()
-            .map(|(name, item)| (Key::Name(name.clone()), child_path(&path, name), item))
+            .map(|(name, item)| (Key::Name(collapse_whitespace(name)), child_path(&path, name), item))
             .collect(),
     };
     let brackets = match value {
@@ -291,5 +309,18 @@ mod tests {
     #[test]
     fn a_scalar_root_is_one_line() {
         assert_eq!(lines(&tree(&json!("hi"), &HashSet::new())), ["\"hi\""]);
+    }
+
+    #[test]
+    fn whitespace_runs_in_strings_and_keys_show_as_one_space() {
+        assert_eq!(lines(&tree(&json!("a\n\n  b\tc\r\nd"), &HashSet::new())), ["\"a b c d\""]);
+        // Not trimmed: the quotes sit right against it. A no-break space is not collapsed.
+        assert_eq!(lines(&tree(&json!("  x \u{a0}\u{a0}y\n"), &HashSet::new())), ["\" x \u{a0}\u{a0}y \""]);
+        let value = json!({ "two\n  lines": { "x": 1 } });
+        let shown = tree(&value, &HashSet::new());
+        assert_eq!(lines(&shown), ["{", "  two lines: folded(1)", "}"]);
+        // The path still names the key as it is.
+        let Node::Open { children, .. } = shown else { panic!("root folded") };
+        assert!(matches!(&children[0].1, Node::Folded { path, .. } if path == "/two\n  lines"));
     }
 }
