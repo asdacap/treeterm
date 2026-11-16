@@ -5,12 +5,17 @@
 //! `originalContent`, `currentContent`, `language`, `isDirty`, `viewMode`), so an editor tab
 //! opened in either app shows the same unsaved edits in the other.
 //!
+//! Every edit goes into the tab state at once, as Electron's `handleEditorChange` writes
+//! it, and the editor follows the state other windows and Electron write
+//! ([`TextEditor::follow_state`]), as Monaco follows `value={state.currentContent}`.
+//!
 //! Go to definition searches the text as it is, unsaved edits included
 //! ([`crate::definition`]); a definition in another file opens in a new Editor tab at its
 //! line (`openFileAtLine`).
 
+use std::collections::VecDeque;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use gpui_kit::{Context, EventEmitter, Task, WeakEntity};
 use serde_json::{Value, json};
@@ -22,8 +27,12 @@ use crate::definition::{Begin, DefinitionLookup, DefinitionProbe, Settled};
 use crate::file_browser::{fs_error_text, fs_outcome};
 use crate::workspace_store::WorkspaceStore;
 
-/// Edits are persisted to the tab state this long after the last keystroke.
-const PERSIST_DEBOUNCE: Duration = Duration::from_millis(800);
+/// How many of the texts it last wrote the editor remembers ([`TextEditor::follow_state`]).
+const WRITTEN_KEPT: usize = 8;
+
+/// For how long after the editor wrote over a text of its own another writer's copy of that
+/// text counts as a stale copy rather than an edit ([`TextEditor::follow_state`]).
+const STALE_COPY_WINDOW: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum EditorDoc {
@@ -68,6 +77,24 @@ pub fn tab_title_of_state(state: &Value) -> Option<String> {
     Some(tab_title(path, dirty))
 }
 
+/// The document of a `status: "ready"` editor state, which has its text; `None` for any other.
+fn ready_doc(state: &Value) -> Option<EditorDoc> {
+    let text = |key: &str| state.get(key).and_then(Value::as_str);
+    match (text("status"), text("originalContent"), text("currentContent")) {
+        (Some("ready"), Some(original), Some(current)) => Some(EditorDoc::Ready {
+            original: original.to_owned(),
+            current: current.to_owned(),
+            language: text("language").unwrap_or("plaintext").to_owned(),
+        }),
+        _ => None,
+    }
+}
+
+/// An editor state's `viewMode`, the editor when it has none.
+fn view_mode_of(state: &Value) -> &str {
+    state.get("viewMode").and_then(Value::as_str).unwrap_or(VIEW_MODE_EDITOR)
+}
+
 pub struct TextEditor {
     fs: FsClient,
     exec: Arc<dyn ExecApi>,
@@ -81,9 +108,12 @@ pub struct TextEditor {
     /// Where to move once the text is shown (go to definition), until the view has.
     scroll_to_line: Option<usize>,
     definition: DefinitionLookup,
+    /// The texts this editor last wrote to the tab state, newest last, each with when.
+    written: VecDeque<(String, Instant)>,
+    /// Bumped whenever the text is replaced by another writer's, so the view takes it.
+    external_revision: u64,
     _load: Option<Task<()>>,
     _save: Option<Task<()>>,
-    _persist: Option<Task<()>>,
     _definition: Option<Task<()>>,
 }
 
@@ -98,8 +128,7 @@ impl TextEditor {
         state: &Value,
         cx: &mut Context<Self>,
     ) -> Self {
-        let text = |key: &str| state.get(key).and_then(Value::as_str).map(str::to_owned);
-        let path = text("filePath").unwrap_or_default();
+        let path = state.get("filePath").and_then(Value::as_str).unwrap_or_default().to_owned();
         let mut editor = Self {
             fs,
             exec,
@@ -108,26 +137,70 @@ impl TextEditor {
             path,
             doc: EditorDoc::Loading,
             save: SaveState::Idle,
-            view_mode: text("viewMode").unwrap_or_else(|| VIEW_MODE_EDITOR.to_owned()),
+            view_mode: view_mode_of(state).to_owned(),
             scroll_to_line: state.get("scrollToLine").and_then(Value::as_u64).map(|line| line as usize),
             definition: DefinitionLookup::Idle,
+            written: VecDeque::new(),
+            external_revision: 0,
             _load: None,
             _save: None,
-            _persist: None,
             _definition: None,
         };
-        match (text("status").as_deref(), text("originalContent"), text("currentContent")) {
-            (Some("ready"), Some(original), Some(current)) => {
-                editor.doc = EditorDoc::Ready {
-                    original,
-                    current,
-                    language: text("language").unwrap_or_else(|| "plaintext".to_owned()),
-                };
-            }
-            _ if editor.path.is_empty() => editor.doc = EditorDoc::Error("Invalid tab".to_owned()),
-            _ => editor.load(cx),
+        match ready_doc(state) {
+            Some(doc) => editor.doc = doc,
+            None if editor.path.is_empty() => editor.doc = EditorDoc::Error("Invalid tab".to_owned()),
+            None => editor.load(cx),
         }
         editor
+    }
+
+    /// The tab's state as another window or Electron wrote it: its text, unsaved mark and
+    /// view mode replace this editor's, as Monaco takes `value={state.currentContent}`.
+    /// States still loading or failed are left to the window that wrote them, which goes on
+    /// to write the text. A save under way still finishes.
+    ///
+    /// A writer that changed something else (an unread marker, a terminal) and won the race
+    /// to save the workspace over this editor's newest write can bring back a text this
+    /// editor wrote moments before: then the text typed since is kept and written again.
+    pub fn follow_state(&mut self, state: &Value, cx: &mut Context<Self>) {
+        let Some(doc) = ready_doc(state) else {
+            return;
+        };
+        let view_mode = view_mode_of(state);
+        if doc == self.doc && view_mode == self.view_mode {
+            return;
+        }
+        if let EditorDoc::Ready { current, .. } = &doc
+            && self.is_stale_copy(current, cx.background_executor().now())
+        {
+            self.persist_now(cx);
+            return;
+        }
+        self.doc = doc;
+        self.view_mode = view_mode.to_owned();
+        // Texts written before are history now: the other writer's edits start from this one.
+        self.written.clear();
+        self._load = None;
+        self.external_revision += 1;
+        cx.notify();
+    }
+
+    /// `current` is a text this editor wrote and, moments ago, wrote over: another writer's
+    /// copy of an older state, not an edit of its own.
+    fn is_stale_copy(&self, current: &str, now: Instant) -> bool {
+        let Some((newest, _)) = self.written.back() else {
+            return false;
+        };
+        let mut replaced = self.written.iter().zip(self.written.iter().skip(1));
+        newest != current
+            && replaced.any(|((text, _), (_, replaced_at))| {
+                text == current && now.saturating_duration_since(*replaced_at) < STALE_COPY_WINDOW
+            })
+    }
+
+    /// Bumped whenever another writer's text replaced this editor's ([`Self::follow_state`]).
+    pub fn external_revision(&self) -> u64 {
+        self.external_revision
     }
 
     pub fn path(&self) -> &str {
@@ -232,23 +305,8 @@ impl TextEditor {
         if *current == text {
             return;
         }
-        let was_dirty = self.is_dirty();
-        if let EditorDoc::Ready { current, .. } = &mut self.doc {
-            *current = text;
-        }
-        // The tab title marks unsaved edits as soon as there are some.
-        if self.is_dirty() != was_dirty {
-            self.persist_now(cx);
-            cx.notify();
-            return;
-        }
-        let executor = cx.background_executor().clone();
-        self._persist = Some(cx.spawn(async move |this, cx| {
-            executor.timer(PERSIST_DEBOUNCE).await;
-            match this.update(cx, |editor, cx| editor.persist_now(cx)) {
-                Ok(()) | Err(_) => {}
-            }
-        }));
+        *current = text;
+        self.persist_now(cx);
         cx.notify();
     }
 
@@ -387,7 +445,14 @@ impl TextEditor {
     }
 
     fn persist_now(&mut self, cx: &mut Context<Self>) {
-        self._persist = None;
+        if let EditorDoc::Ready { current, .. } = &self.doc
+            && self.written.back().is_none_or(|(text, _)| text != current)
+        {
+            if self.written.len() == WRITTEN_KEPT {
+                self.written.pop_front();
+            }
+            self.written.push_back((current.clone(), cx.background_executor().now()));
+        }
         let state = match &self.doc {
             EditorDoc::Loading => json!({ "status": "loading", "filePath": self.path }),
             EditorDoc::Error(error) => json!({ "status": "error", "filePath": self.path, "error": error }),

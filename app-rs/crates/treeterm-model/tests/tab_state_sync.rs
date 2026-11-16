@@ -1,6 +1,7 @@
 //! Open tabs follow the tab state another window (or Electron) writes, as Electron's
 //! components read it live: the Files tab's selection, expanded directories and
-//! `scrollToLine`. Two windows on one workspace of a real in-process daemon.
+//! `scrollToLine`, and the Editor tab's text, unsaved mark and view mode. Two windows on one
+//! workspace of a real in-process daemon.
 
 use std::time::Duration;
 
@@ -10,6 +11,7 @@ use treeterm_core::wire::stable_json::sha256_hex;
 use treeterm_model::file_browser::{FileBrowser, FileView, Listing};
 use treeterm_model::session_store::{SessionState, SessionStore, WorkspaceEntry};
 use treeterm_model::settings_store::SettingsStore;
+use treeterm_model::text_editor::{EditorDoc, TextEditor};
 use treeterm_model::traffic::ConnectionTraffic;
 use treeterm_model::workspace_store::{TabContent, WorkspaceStore};
 use treeterm_proto::treeterm::WorkspaceRef;
@@ -182,8 +184,26 @@ fn files_of(
     }
 }
 
+fn editor_of(
+    cx: &mut TestAppContext,
+    workspace: &Entity<WorkspaceStore>,
+    tab: &str,
+) -> Entity<TextEditor> {
+    match workspace.read_with(cx, |w, _| w.tab_content(tab)) {
+        Some(TabContent::Editor(editor)) => editor,
+        _ => panic!("not an Editor tab"),
+    }
+}
+
 fn shows(browser: &FileBrowser, path: &str) -> bool {
     matches!(browser.view(), FileView::Text { path: shown, .. } if shown == path)
+}
+
+fn current(editor: &TextEditor) -> Option<&str> {
+    match editor.doc() {
+        EditorDoc::Ready { current, .. } => Some(current),
+        EditorDoc::Loading | EditorDoc::Error(_) => None,
+    }
 }
 
 #[gpui_kit::test]
@@ -356,4 +376,154 @@ fn a_scroll_to_line_from_another_window_is_revealed_and_cleared(cx: &mut TestApp
             .get("scrollToLine")
             .is_none()
     });
+}
+
+#[gpui_kit::test]
+fn the_editor_follows_another_windows_unsaved_edits_and_saves_them(cx: &mut TestAppContext) {
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let w = open_windows(cx, &[("notes.md", "# One\n")]);
+    let notes = w.path("notes.md");
+    let tab = w.add_tab(
+        cx,
+        "editor",
+        json!({ "status": "loading", "filePath": notes }),
+    );
+    let (mine, theirs) = (editor_of(cx, &w.a, &tab), editor_of(cx, &w.b, &tab));
+    wait_until(cx, &mine, |e| current(e) == Some("# One\n"));
+    wait_until(cx, &theirs, |e| current(e) == Some("# One\n"));
+    w.quiet(cx);
+    assert!(
+        mine.read_with(cx, |e, _| e.is_preview()),
+        "markdown opens on its preview"
+    );
+    let revision = mine.read_with(cx, |e, _| e.external_revision());
+
+    // The other window switches to the editor.
+    theirs.update(cx, |e, cx| e.toggle_view_mode(cx));
+    wait_until(cx, &mine, |e| !e.is_preview());
+
+    // It types (Electron's `handleEditorChange` writes the text and the unsaved mark).
+    w.quiet(cx);
+    let before = sha256_hex(&w.raw());
+    w.b_writes(cx, &tab, |state| {
+        state["currentContent"] = json!("# Two\n");
+        state["isDirty"] = json!(true);
+    });
+    wait_until(cx, &mine, |e| current(e) == Some("# Two\n"));
+    assert!(mine.read_with(cx, |e, _| e.is_dirty()));
+    assert!(mine.read_with(cx, |e, _| e.external_revision()) > revision);
+    // Taking it writes nothing back: the last body on disk is still the other window's,
+    // written over the one before.
+    w.quiet(cx);
+    assert_eq!(w.disk()["parentHash"], json!(before));
+
+    // Saved here, the file has the other window's text, and both windows are clean.
+    mine.update(cx, |e, cx| e.save(cx));
+    wait_until(cx, &mine, |e| !e.is_dirty());
+    assert_eq!(std::fs::read_to_string(&notes).unwrap(), "# Two\n");
+    wait_until(cx, &theirs, |e| {
+        current(e) == Some("# Two\n") && !e.is_dirty()
+    });
+    w.wait_for_disk(cx, |disk| {
+        disk["appStates"][&tab]["state"]["isDirty"] == json!(false)
+    });
+
+    // Typed in the other window's editor: here too, the tab marked unsaved.
+    theirs.update(cx, |e, cx| e.set_content("# Three\n".to_owned(), cx));
+    wait_until(cx, &mine, |e| {
+        current(e) == Some("# Three\n") && e.is_dirty()
+    });
+    assert_eq!(
+        w.a.read_with(cx, |w, _| w.file().app_states[&tab].title.clone()),
+        "notes.md \u{2022}"
+    );
+}
+
+#[gpui_kit::test]
+fn an_editor_edit_reaches_the_tab_state_at_once(cx: &mut TestAppContext) {
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let w = open_windows(cx, &[("a.txt", "a\n")]);
+    let tab = w.add_tab(
+        cx,
+        "editor",
+        json!({ "status": "loading", "filePath": w.path("a.txt") }),
+    );
+    let mine = editor_of(cx, &w.a, &tab);
+    wait_until(cx, &mine, |e| current(e) == Some("a\n"));
+    w.quiet(cx);
+
+    // An edit that keeps the file dirty goes into the body with no pause, and to disk with
+    // no clock advanced.
+    mine.update(cx, |e, cx| e.set_content("ab\n".to_owned(), cx));
+    mine.update(cx, |e, cx| e.set_content("abc\n".to_owned(), cx));
+    let state =
+        w.a.read_with(cx, |w, _| w.file().app_states[&tab].state.clone());
+    assert_eq!(
+        (state["currentContent"].clone(), state["isDirty"].clone()),
+        (json!("abc\n"), json!(true))
+    );
+    w.wait_for_disk(cx, |disk| {
+        disk["appStates"][&tab]["state"]["currentContent"] == json!("abc\n")
+    });
+    let theirs = editor_of(cx, &w.b, &tab);
+    wait_until(cx, &theirs, |e| current(e) == Some("abc\n"));
+}
+
+#[gpui_kit::test]
+fn a_stale_copy_of_the_editors_own_text_is_not_taken(cx: &mut TestAppContext) {
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let w = open_windows(cx, &[("a.txt", "base\n")]);
+    let tab = w.add_tab(
+        cx,
+        "editor",
+        json!({ "status": "loading", "filePath": w.path("a.txt") }),
+    );
+    let mine = editor_of(cx, &w.a, &tab);
+    wait_until(cx, &mine, |e| current(e) == Some("base\n"));
+    mine.update(cx, |e, cx| e.set_content("a".to_owned(), cx));
+    mine.update(cx, |e, cx| e.set_content("ab".to_owned(), cx));
+    w.wait_for_disk(cx, |disk| {
+        disk["appStates"][&tab]["state"]["currentContent"] == json!("ab")
+    });
+    w.quiet(cx);
+
+    // Another writer brings back the text this window wrote just before its last (it won the
+    // race to save the workspace): the text typed since stays, and is written again.
+    w.b_writes(cx, &tab, |state| state["currentContent"] = json!("a"));
+    wait_until(cx, &w.b, |w| {
+        w.file().app_states[&tab].state["currentContent"] == json!("ab")
+    });
+    w.quiet(cx);
+    assert_eq!(
+        mine.read_with(cx, |e, _| current(e).map(str::to_owned)),
+        Some("ab".to_owned())
+    );
+    assert_eq!(w.disk_state(&tab)["currentContent"], json!("ab"));
+
+    // The other window's own edits are taken, also one going back to a text this window
+    // wrote moments ago: once another writer's text is taken, this window's are history.
+    let theirs = editor_of(cx, &w.b, &tab);
+    wait_until(cx, &theirs, |e| current(e) == Some("ab"));
+    theirs.update(cx, |e, cx| e.set_content("abX".to_owned(), cx));
+    wait_until(cx, &mine, |e| current(e) == Some("abX"));
+    theirs.update(cx, |e, cx| e.set_content("a".to_owned(), cx));
+    wait_until(cx, &mine, |e| current(e) == Some("a"));
+    w.quiet(cx);
+    assert_eq!(w.disk_state(&tab)["currentContent"], json!("a"));
+
+    // Long after this window wrote over a text, that text from another writer is an edit.
+    mine.update(cx, |e, cx| e.set_content("ay".to_owned(), cx));
+    mine.update(cx, |e, cx| e.set_content("ayz".to_owned(), cx));
+    w.wait_for_disk(cx, |disk| {
+        disk["appStates"][&tab]["state"]["currentContent"] == json!("ayz")
+    });
+    w.quiet(cx);
+    cx.executor().advance_clock(Duration::from_secs(6));
+    w.b_writes(cx, &tab, |state| state["currentContent"] = json!("ay"));
+    wait_until(cx, &mine, |e| current(e) == Some("ay"));
+    w.quiet(cx);
+    assert_eq!(w.disk_state(&tab)["currentContent"], json!("ay"));
 }

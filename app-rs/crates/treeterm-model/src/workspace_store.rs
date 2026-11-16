@@ -922,21 +922,19 @@ impl WorkspaceStore {
     }
 
     /// Tabs whose components read their state live in Electron follow it as another writer
-    /// left it: the Files tab (`FilesystemBrowser`) and System Prompt Debuggers (`bufferText`,
-    /// which SystemPromptDebugger re-reads on every store change).
+    /// left it: the Files tab (`FilesystemBrowser`), the Editor tab (`FileEditor`) and System
+    /// Prompt Debuggers (`bufferText`, which SystemPromptDebugger re-reads on every store
+    /// change).
     fn follow_tab_states(&self, cx: &mut Context<Self>) {
         for (tab_id, tab) in &self.tabs {
             let state = &self.workspace.file.app_states[tab_id].state;
             match tab {
                 TabRef::Files { model, .. } => model.update(cx, |model, cx| model.follow_state(state, cx)),
+                TabRef::Editor { model, .. } => model.update(cx, |model, cx| model.follow_state(state, cx)),
                 TabRef::Tool(crate::tool_tabs::ToolTab::PromptDebugger { model, .. }) => {
                     model.update(cx, |model, cx| model.follow_state(state, cx));
                 }
-                TabRef::Terminal(_)
-                | TabRef::Editor { .. }
-                | TabRef::Review { .. }
-                | TabRef::Browser { .. }
-                | TabRef::Tool(_) => {}
+                TabRef::Terminal(_) | TabRef::Review { .. } | TabRef::Browser { .. } | TabRef::Tool(_) => {}
             }
         }
     }
@@ -2044,8 +2042,9 @@ impl WorkspaceStore {
 
     /// A body written elsewhere, with hash `sha`, replaces ours (`applyWorkspaceFile`): tabs
     /// it dropped are detached, new tabs initialised, a terminal whose tab now names
-    /// another PTY re-attaches, the others take their tab's width limit, and Files and
-    /// debugger tabs follow their tab's state. Emits no change: the body is already on disk.
+    /// another PTY re-attaches, the others take their tab's width limit, and Files, Editor
+    /// and debugger tabs follow their tab's state. Emits no change: the body is already on
+    /// disk.
     pub fn apply_external(&mut self, mut file: WorkspaceFile, sha: &str, cx: &mut Context<Self>) {
         let removed: Vec<String> = self
             .workspace

@@ -447,6 +447,11 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   the late answer).
 - Go to definition moves within the Files viewer or the Editor tab when the definition is in
   the file it shows; Electron opened that file again in a new Editor tab.
+- An Editor tab keeps what was typed in it when another window, saving something else at the
+  same moment, wins the race to write the workspace with the tab's text from a moment before
+  (up to 5 s): the typed text stays and is written again. Electron's editor took the older
+  text, losing the keystrokes typed meanwhile. Text another window or Electron types is taken
+  as it arrives, as in Electron.
 - The code editors colour files Electron shows as plain text: Makefile, Dockerfile,
   CMakeLists.txt, `.toml`, `.markdown`, `.mjs`/`.cjs`/`.mts`/`.cts`, `.jsonc`,
   `.cc`/`.cxx`/`.hh`, `.zig`, `.ex`/`.exs`, `.proto` and `.diff`/`.patch`.

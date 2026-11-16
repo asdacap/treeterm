@@ -11,6 +11,9 @@
 //! order, the first at a word start or camelCase hump (Ctrl+Space asks). The language
 //! workers' problems are marked again as the text changes, CSS colours are painted and
 //! links underlined; Cmd/Ctrl+click opens a link ([`crate::editor_hooks`]).
+//!
+//! Text another window or Electron writes to the tab replaces the editor's, as Monaco's
+//! `value` prop does: undoably, keeping the cursor and the scroll position where they were.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -63,6 +66,8 @@ pub fn bind_keys(cx: &mut gpui_kit::App) {
 pub struct TextEditorView {
     model: Entity<TextEditor>,
     editor: Option<Entity<EditorState>>,
+    /// The model's [`TextEditor::external_revision`] the editor's text is from.
+    revision: u64,
     /// The editor's glyph margin (Monaco's gutter width).
     gutter: Option<gpui_kit::component::input::GutterDecorationCollection>,
     /// The pointer is over the editor ([`crate::file_browser_view::pointer_over`]).
@@ -82,6 +87,7 @@ impl TextEditorView {
         Self {
             model,
             editor: None,
+            revision: 0,
             gutter: None,
             pointer_over: PointerOver::default(),
             definition_clicked: Rc::new(Cell::new(false)),
@@ -99,6 +105,7 @@ impl TextEditorView {
         let EditorDoc::Ready { current, .. } = self.model.read(cx).doc().clone() else {
             return None;
         };
+        self.revision = self.model.read(cx).external_revision();
         let language = language_for(self.model.read(cx).path());
         let monaco_language = self.model.read(cx).language();
         let brackets = crate::file_browser_view::bracket_colors(&current, monaco_language);
@@ -135,6 +142,31 @@ impl TextEditorView {
         crate::editor_hooks::install_suggestions(&editor, monaco_language, cx);
         self.editor = Some(editor.clone());
         Some(editor)
+    }
+
+    /// Another writer's text replaced the model's: the editor takes it as one undoable edit
+    /// (whose change event finds the model's text already equal), the cursor and the view
+    /// staying where they were.
+    fn follow_model_text(&mut self, editor: &Entity<EditorState>, window: &mut Window, cx: &mut Context<Self>) {
+        let model = self.model.read(cx);
+        if model.external_revision() == self.revision {
+            return;
+        }
+        self.revision = model.external_revision();
+        let EditorDoc::Ready { current, .. } = model.doc() else {
+            return;
+        };
+        if *editor.read(cx).text() == *current {
+            return;
+        }
+        let current = current.clone();
+        editor.update(cx, |editor, cx| {
+            let (selected, scroll) = (editor.selected_range(), editor.scroll_offset());
+            editor.replace_all(current, window, cx);
+            let len = editor.text().len();
+            editor.set_selected_range(selected.start.min(len)..selected.end.min(len), cx);
+            editor.set_scroll_offset(scroll, cx);
+        });
     }
 
     /// Go to definition opened this tab at a line, or found the definition in this file:
@@ -248,6 +280,7 @@ impl Render for TextEditorView {
         } else {
             match self.editor(window, cx) {
                 Some(editor) => {
+                    self.follow_model_text(&editor, window, cx);
                     self.reveal_line(&editor, window, cx);
                     let overlay = crate::file_browser_view::definition_overlay(
                         definition,
