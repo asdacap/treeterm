@@ -171,6 +171,29 @@ fn the_debug_json_shows_each_entry_with_its_status(cx: &mut TestAppContext) {
     assert!(root["error"].as_str().is_some_and(|e| e.starts_with("Invalid workspace file: ")), "{root}");
 }
 
+/// `TabContentPortals` mounts the tabs of the active workspace while it is loaded, and also
+/// while an operation's failure shows over them; not those of one that failed to load.
+#[gpui_kit::test]
+fn the_active_workspace_has_its_tabs_mounted_unless_it_failed_to_load(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    std::fs::write(h.daemon.workspaces_dir().join("root.json"), body("root", None)).unwrap();
+    publish(&h, &["root", "broken"]);
+    let store = open_store(cx, &h, "client-a");
+    wait_until(cx, &store, |s| loaded(s, "root") && matches!(s.entry("broken"), Some(WorkspaceEntry::Error { .. })));
+    let mounted = |cx: &mut TestAppContext| store.read_with(cx, |s, _| s.mounted_workspace().map(|w| w.entity_id()));
+    let root = store.read_with(cx, |s, _| ws(s, "root").entity_id());
+
+    store.update(cx, |s, cx| s.set_active_workspace("root".into(), cx));
+    assert_eq!(mounted(cx), Some(root));
+    std::fs::write(h.daemon.workspaces_dir().join("root.json"), "{").unwrap();
+    wait_until(cx, &store, |s| matches!(s.entry("root"), Some(WorkspaceEntry::OperationError { .. })));
+    assert_eq!(mounted(cx), Some(root));
+
+    store.update(cx, |s, cx| s.set_active_workspace("broken".into(), cx));
+    assert_eq!(mounted(cx), None);
+}
+
 /// How many `Restored` the store emits.
 fn record_restores(cx: &mut TestAppContext, store: &Entity<SessionStore>) -> std::rc::Rc<std::cell::Cell<usize>> {
     let restored = std::rc::Rc::new(std::cell::Cell::new(0));

@@ -440,7 +440,8 @@ pub struct FileBrowserView {
     /// The webview page. Dropped when anything else is shown ([`shows_page`]), and while the
     /// tab is unmounted ([`Self::set_mounted`]).
     page: Option<ShownPage>,
-    /// The tab's workspace is shown ([`Self::set_mounted`]).
+    /// The tab is mounted: a tab of the workspace shown, or hidden under its session pane
+    /// or an operation's failure ([`Self::set_mounted`]).
     mounted: bool,
     /// The markdown file showing its preview (`viewMode`); a file opens on its source.
     markdown_preview: Option<String>,
@@ -682,12 +683,13 @@ impl FileBrowserView {
     }
 
     /// Whether the Files tab is mounted: Electron mounts every tab of the workspace shown,
-    /// shown or not (flex-layout renders them all, `tabEnableRenderOnDemand: false`), and
-    /// unmounts those of other workspaces and sessions (`TabContentPortals`). Unmounted, the
-    /// webview page is dropped, as `ModelViewer` disposes its stage and WebGL context; mounted
-    /// again, a file shown in a page is read again, as `FileViewer` reads its file on mount, so
-    /// it shows as it is now on a fresh page (a model framed afresh, Wireframe off, a PDF on
-    /// its first page). A tab switch within the workspace keeps the page.
+    /// shown or not (flex-layout renders them all, `tabEnableRenderOnDemand: false`), also
+    /// while its session pane or an operation's failure hides them, and unmounts those of
+    /// other workspaces and sessions (`TabContentPortals`). Unmounted, the webview page is
+    /// dropped, as `ModelViewer` disposes its stage and WebGL context; mounted again, a file
+    /// shown in a page is read again, as `FileViewer` reads its file on mount, so it shows as
+    /// it is now on a fresh page (a model framed afresh, Wireframe off, a PDF on its first
+    /// page). A tab switch within the workspace, or the session pane and back, keeps the page.
     pub fn set_mounted(&mut self, mounted: bool, cx: &mut Context<Self>) {
         let was = std::mem::replace(&mut self.mounted, mounted);
         if !mounted {

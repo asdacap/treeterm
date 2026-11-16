@@ -1120,17 +1120,20 @@ impl Render for AppView {
         // Native webviews draw above GPUI: hide those of every workspace pane not on screen
         // (the shown one manages its own in `workspace_pane`).
         let on_screen = if info.is_none() { self.active.clone() } else { None };
-        for (_, connected) in self.sessions.iter().filter(|(id, _)| on_screen.as_ref() != Some(*id)) {
-            hide_tab_views(connected, cx);
-        }
-        // Electron keeps the workspace pane of the session it shows mounted, behind that
-        // session's pane too, and in it only the active workspace's tabs.
-        let mounted = match &info {
+        // Electron renders the workspace pane of `activeView`'s session, hidden while its
+        // session pane is shown (`display: none`): its active workspace's tabs stay mounted.
+        let rendered = match &info {
             Some(info) => Some(info.read(cx).connection(cx)),
             None => self.active.clone(),
         };
+        for (id, connected) in self.sessions.iter().filter(|(id, _)| on_screen.as_ref() != Some(*id)) {
+            let mounted = if rendered.as_ref() == Some(id) { mounted_tabs(connected, cx) } else { HashSet::new() };
+            hide_tab_views(connected, &mounted, cx);
+        }
+        // Electron keeps the workspace pane of the session it shows mounted, behind that
+        // session's pane too, and in it only the active workspace's tabs.
         for (id, connected) in &self.sessions {
-            unmount_hidden_reviews(connected, mounted.as_ref() == Some(id), cx);
+            unmount_hidden_reviews(connected, rendered.as_ref() == Some(id), cx);
         }
         // A session off screen shows no terminal: its terminals are shown again (fit again,
         // the active tab's takes focus) when it returns.
@@ -2357,20 +2360,44 @@ fn unmount_hidden_reviews(connected: &Connected, session_shown: bool, cx: &mut C
     }
 }
 
+/// The Files and Review tabs (their models) mounted while `connected`'s workspace pane is
+/// rendered, on screen or hidden under its session pane: every tab of its active workspace,
+/// shown or not (`TabContentPortals`; flex-layout renders them all,
+/// `tabEnableRenderOnDemand: false`), also under an operation's failure.
+fn mounted_tabs(connected: &Connected, cx: &App) -> HashSet<EntityId> {
+    let Some(workspace) = connected.session.read(cx).mounted_workspace() else {
+        return HashSet::new();
+    };
+    let workspace = workspace.read(cx);
+    workspace
+        .file()
+        .app_states
+        .keys()
+        .filter_map(|tab| match workspace.tab_content(tab) {
+            Some(TabContent::Files(model)) => Some(model.entity_id()),
+            Some(TabContent::Review(model)) => Some(model.entity_id()),
+            Some(_) | None => None,
+        })
+        .collect()
+}
+
 /// No workspace's tabs are on screen (none picked, or the one picked was removed, is loading,
-/// failed or shows an operation's failure): the session's native webviews are hidden, and
-/// its Review and Files views too, so they refresh (Files read `HEAD`) when shown again; Files
-/// and Editor tabs save their scroll offset. Files and Review tabs are unmounted, as Electron
-/// unmounts the tabs of a workspace not shown: their PDF / model webviews are dropped.
-fn hide_tab_views(connected: &Connected, cx: &mut Context<AppView>) {
+/// failed or shows an operation's failure, or a session pane is up): the session's native
+/// webviews are hidden, and its Review and Files views too, so Files read `HEAD` when shown
+/// again; Files and Editor tabs save their scroll offset. The Files and Review tabs not in
+/// `mounted` ([`mounted_tabs`]) are unmounted, as Electron unmounts the tabs of a workspace
+/// not rendered: their PDF / model webviews are dropped, and Review refreshes when mounted
+/// again. Those in it stay mounted, their pages kept.
+fn hide_tab_views(connected: &Connected, mounted: &HashSet<EntityId>, cx: &mut Context<AppView>) {
     let browsers: Vec<Entity<crate::browser_view::BrowserView>> = connected.browser_views.values().map(|(_, view)| view.clone()).collect();
     for view in browsers {
         view.update(cx, |v, cx| v.set_shown(false, cx));
     }
-    let files: Vec<Entity<crate::file_browser_view::FileBrowserView>> = connected.file_views.values().cloned().collect();
-    for view in files {
+    let files: Vec<(EntityId, Entity<crate::file_browser_view::FileBrowserView>)> =
+        connected.file_views.iter().map(|(k, v)| (*k, v.clone())).collect();
+    for (model_id, view) in files {
         view.update(cx, |v, cx| {
-            v.set_mounted(false, cx);
+            v.set_mounted(mounted.contains(&model_id), cx);
             v.set_shown(false, cx);
             v.set_visible(false, cx);
         });
@@ -2379,11 +2406,12 @@ fn hide_tab_views(connected: &Connected, cx: &mut Context<AppView>) {
     for view in editors {
         view.update(cx, |v, cx| v.set_visible(false, cx));
     }
-    let reviews: Vec<Entity<crate::review_view::ReviewView>> = connected.review_views.values().cloned().collect();
-    for view in reviews {
+    let reviews: Vec<(EntityId, Entity<crate::review_view::ReviewView>)> =
+        connected.review_views.iter().map(|(k, v)| (*k, v.clone())).collect();
+    for (model_id, view) in reviews {
         view.update(cx, |v, cx| {
             v.set_shown(false, cx);
-            v.set_visible(false, cx);
+            v.set_visible(mounted.contains(&model_id), cx);
         });
     }
 }
@@ -2487,12 +2515,14 @@ fn workspace_pane(
         connected.header_edit = None;
     }
     let Some(id) = active else {
-        hide_tab_views(connected, cx);
+        hide_tab_views(connected, &HashSet::new(), cx);
         return workspace_empty(cx);
     };
-    // `.workspace-terminal` shows only for a Loaded entry.
+    // `.workspace-terminal` shows only for a Loaded entry; under an operation's failure the
+    // workspace's tabs stay mounted, hidden.
     if !matches!(connected.session.read(cx).entry(&id), Some(WorkspaceEntry::Loaded(_))) {
-        hide_tab_views(connected, cx);
+        let mounted = mounted_tabs(connected, cx);
+        hide_tab_views(connected, &mounted, cx);
     }
     let workspace = match connected.session.read(cx).entry(&id) {
         // An active workspace with no entry is shown as none (`!activeWorkspace`).
@@ -2605,22 +2635,9 @@ fn workspace_pane(
         view.update(cx, |v, cx| v.set_shown(shown, cx));
     }
     let contents: Vec<TabContent> = shown.iter().filter_map(|tab| workspace.read(cx).tab_content(tab)).collect();
-    // Electron keeps every tab of the workspace shown mounted, shown or not (flex-layout
-    // renders them all, `tabEnableRenderOnDemand: false`), and unmounts those of the other
-    // workspaces (`TabContentPortals`): the Files and Review tabs mounted.
-    let mounted: HashSet<EntityId> = {
-        let workspace = workspace.read(cx);
-        workspace
-            .file()
-            .app_states
-            .keys()
-            .filter_map(|tab| match workspace.tab_content(tab) {
-                Some(TabContent::Files(model)) => Some(model.entity_id()),
-                Some(TabContent::Review(model)) => Some(model.entity_id()),
-                Some(_) | None => None,
-            })
-            .collect()
-    };
+    // Electron keeps every tab of the workspace shown mounted, shown or not, and unmounts
+    // those of the other workspaces.
+    let mounted = mounted_tabs(connected, cx);
     let shown_files: HashSet<EntityId> = contents
         .iter()
         .filter_map(|content| if let TabContent::Files(model) = content { Some(model.entity_id()) } else { None })

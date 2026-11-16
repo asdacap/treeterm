@@ -579,6 +579,14 @@ impl SessionStore {
         self.active.as_deref().filter(|_| self.shown)
     }
 
+    /// The workspace whose tabs are mounted while the session's workspace pane is rendered,
+    /// on screen or hidden under the session pane (`TabContentPortals`): the active one,
+    /// loaded or showing an operation's failure over its tabs. One loading or failed to load
+    /// has none mounted.
+    pub fn mounted_workspace(&self) -> Option<&Entity<WorkspaceStore>> {
+        self.active.as_deref().and_then(|id| self.workspace_store(id))
+    }
+
     pub fn workspace_store(&self, id: &str) -> Option<&Entity<WorkspaceStore>> {
         self.entries.get(id).and_then(WorkspaceEntry::store)
     }
