@@ -7,6 +7,7 @@
 pub mod active_processes;
 pub mod analyzer;
 pub mod app_store;
+pub mod auto_open;
 pub mod bracket_pairs;
 pub mod browser_page;
 pub mod apps;
