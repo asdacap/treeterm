@@ -2632,8 +2632,24 @@ impl AppView {
                 json!({ "id": slot.id.as_str(), "name": self.names.read(cx).name(&slot.target), "state": state })
             })
             .collect();
+        // The dialogs GPUI Kit shows, and which of this view's own are up.
+        let dialogs = {
+            use gpui_kit::component::WindowExt as _;
+            let active_processes = match &self.processes_dialog {
+                ProcessesDialog::Closed => "closed",
+                ProcessesDialog::Pending => "pending",
+                ProcessesDialog::Open(view) if view.upgrade().is_some() => "open",
+                ProcessesDialog::Open(_) => "closed",
+            };
+            json!({
+                "open": window.active_dialog_count(cx),
+                "settings": self.settings_dialog.upgrade().is_some(),
+                "activeProcesses": active_processes,
+                "closeConfirm": self.close_confirm.strong_count() > 0,
+            })
+        };
         match self.current() {
-            None => json!({ "body": "starting", "sessions": sessions }),
+            None => json!({ "body": "starting", "sessions": sessions, "dialogs": dialogs }),
             Some(connected) => {
                 let session = connected.session.read(cx);
                 let workspaces: Vec<_> = session
@@ -2687,6 +2703,7 @@ impl AppView {
                     "workspaces": workspaces,
                     "active": active,
                     "terminals": terminals,
+                    "dialogs": dialogs,
                 })
             }
         }
@@ -2762,5 +2779,61 @@ impl AppView {
         {
             store.update(cx, |w, cx| w.remove_tab(tab, cx));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui_kit::component::WindowExt as _;
+    use gpui_kit::{TestAppContext, VisualTestContext, WindowOptions};
+    use treeterm_model::settings_store::SettingsStore;
+
+    use super::*;
+
+    struct Empty;
+
+    impl Render for Empty {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+        }
+    }
+
+    fn window(cx: &mut TestAppContext) -> &mut VisualTestContext {
+        let window = cx.update(|cx| {
+            gpui_kit::init(cx);
+            crate::theme::install(cx);
+            gpui_kit::open_window(WindowOptions::default(), cx, |_, cx| cx.new(|_| Empty)).expect("open a window").0
+        });
+        VisualTestContext::from_window(window, cx).into_mut()
+    }
+
+    /// `AppView` opens Settings, and the close confirmation, only while its handle to the
+    /// last one is dead: the handle must live exactly as long as the dialog.
+    #[gpui_kit::test]
+    fn the_settings_handle_lives_while_its_dialog_is_open(cx: &mut TestAppContext) {
+        let cx = window(cx);
+        let store = cx.update(|_, cx| cx.new(|_| SettingsStore::in_memory(Default::default())));
+        let settings = cx.update(|window, cx| crate::settings_view::open(store, window, cx).downgrade());
+        cx.run_until_parked();
+        assert!(settings.upgrade().is_some(), "open");
+
+        cx.simulate_keystrokes("escape");
+        cx.run_until_parked();
+        assert!(!cx.update(|window, cx| window.has_active_dialog(cx)));
+        assert!(settings.upgrade().is_none(), "closed with Escape");
+    }
+
+    #[gpui_kit::test]
+    fn the_close_confirmation_handle_lives_while_its_dialog_is_open(cx: &mut TestAppContext) {
+        let cx = window(cx);
+        let unmerged = vec![("child".to_owned(), Some("child".to_owned()))];
+        let confirm = cx.update(|window, cx| crate::active_processes_view::confirm_close(unmerged, window, cx));
+        cx.run_until_parked();
+        assert_eq!(confirm.strong_count(), 1, "open");
+
+        // What its Cancel button does.
+        cx.update(|window, cx| window.close_dialog(cx));
+        cx.run_until_parked();
+        assert_eq!(confirm.strong_count(), 0, "closed");
     }
 }

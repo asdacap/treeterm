@@ -336,3 +336,68 @@ fn reset_input_gives_the_terminal_focus_back() {
     app.wait_for("typed text after Reset Input", |state| screen(state).matches("still-typing").count() == 2);
     app.quit();
 }
+
+/// How many dialogs the window shows.
+fn dialogs(state: &Value) -> u64 {
+    state["dialogs"]["open"].as_u64().unwrap_or_else(|| panic!("no dialog count in {state}"))
+}
+
+/// The platform's Quit shortcut.
+const QUIT: &str = if cfg!(target_os = "macos") { "key cmd-q" } else { "key ctrl-q" };
+
+#[test]
+#[ignore = "opens the app window; run with --ignored"]
+fn settings_and_active_processes_open_once_each() {
+    let sandbox = Sandbox::new();
+    let app = sandbox.launch();
+    // Asked for twice, each opens once (Electron's `isSettingsOpen` and
+    // `isActiveProcessesOpen`), and Active Processes opens over Settings.
+    for action in ["OpenSettings", "OpenSettings", "ActiveProcesses", "ActiveProcesses"] {
+        app.command(&format!("action treeterm::{action}"));
+    }
+    let state = app.wait_for("Settings and Active Processes", |state| {
+        state["dialogs"]["settings"] == true && state["dialogs"]["activeProcesses"] == "open"
+    });
+    assert_eq!(dialogs(&state), 2, "{state}");
+    app.quit();
+}
+
+#[test]
+#[ignore = "opens the app window; run with --ignored"]
+fn quit_asks_about_unmerged_workspaces_once_while_a_dialog_has_focus() {
+    let sandbox = Sandbox::new();
+    let mut app = sandbox.launch();
+    let root = app.command("state")["active"].as_str().expect("the open workspace").to_owned();
+    app.command(&format!("fork {root}"));
+    app.wait_for("the forked workspace", |state| {
+        state["workspaces"]
+            .as_array()
+            .is_some_and(|workspaces| workspaces.iter().filter(|w| w["entry"]["name"].is_string()).count() == 2)
+    });
+    app.command("action treeterm::OpenSettings");
+    app.wait_for("Settings", |state| state["dialogs"]["settings"] == true);
+
+    // Settings has focus: Quit still asks first, over it.
+    app.command(QUIT);
+    let state = app.wait_for("the Unmerged Workspaces confirmation", |state| state["dialogs"]["closeConfirm"] == true);
+    assert_eq!(dialogs(&state), 2, "{state}");
+    assert!(app.child.try_wait().expect("the app's status").is_none(), "the app quit without asking");
+
+    // Quit or Close Window again while it is up: no second confirmation.
+    app.command(QUIT);
+    app.command("action treeterm::CloseWindow");
+    let state = app.command("state");
+    assert_eq!(dialogs(&state), 2, "{state}");
+
+    // Once dismissed, it asks again.
+    app.command("key escape");
+    app.wait_for("the confirmation to close", |state| {
+        state["dialogs"]["closeConfirm"] == false && dialogs(state) == 1
+    });
+    app.command(QUIT);
+    app.wait_for("the confirmation again", |state| {
+        state["dialogs"]["closeConfirm"] == true && dialogs(state) == 2
+    });
+    assert!(app.child.try_wait().expect("the app's status").is_none(), "the app quit without asking");
+    app.quit();
+}

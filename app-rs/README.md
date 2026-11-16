@@ -179,6 +179,9 @@ are not ours). Its changes are marked `TreeTerm patch` (`grep -rn "TreeTerm patc
   dialogs, as the Kit's other popups do; they painted under them. Off macOS the app draws
   its menu bar above dialogs (Electron's GTK bar stays usable while a page modal is open),
   so its menus must show there too.
+- `src/window_ext.rs`: `WindowExt::active_dialog_count`, how many dialogs are open, which
+  the automation socket's `state` reports for the end-to-end tests (the Kit only says
+  whether any is).
 - `src/highlighter/highlighter.rs`: captures that no theme can colour (`@spell`,
   `@local.reference`, `@_name`, …) are dropped before captures of one range are merged.
   The merge keeps the first name, so Scala's `(comment) @spell @comment` left comments

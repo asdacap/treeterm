@@ -3,11 +3,12 @@
 //! Enabled with the `automation` cargo feature and `TREETERM_AUTOMATION_SOCKET=<path>`.
 //! One command per line, one JSON reply per line:
 //!
-//! - `state` — what the window shows (workspaces, selection, terminal screens)
+//! - `state` — what the window shows (workspaces, selection, terminal screens, dialogs)
 //! - `select <workspace-id>` / `tab <workspace-id> <tab-id>`
 //! - `newtab <workspace-id>` / `closetab <workspace-id> <tab-id>`
 //! - `open <directory>` — open a directory as a workspace (no folder picker)
 //! - `workspacedialog` — the current session's "+" (the Open Workspace dialog)
+//! - `fork <workspace-id>` — a quick fork of the workspace (its tree row's Fork button)
 //! - `type <text>` — type text as keystrokes; `key <keystroke>` — e.g. `enter`, `ctrl-c`
 //! - `scroll <x> <y> <dy>` — a wheel scroll of `dy` points over (x, y), in window points
 //! - `screenshot <path.png>` — render the last frame offscreen (no screen-capture permission)
@@ -129,6 +130,13 @@ fn handle(line: &str, window: AnyWindowHandle, view: &Entity<AppView>, cx: &mut 
                 let session = view.read(cx).automation_session().ok_or("not connected")?;
                 let on_created: crate::child_dialog::OnCreated = std::rc::Rc::new(|_, _, _| {});
                 crate::child_dialog::open(session, rest.to_owned(), "parent".into(), on_created, window, cx);
+                Ok(json!({ "ok": true }))
+            }
+            "fork" => {
+                // `fork <workspace-id>`: the tree row's Fork button, a child workspace on a
+                // new branch.
+                let session = view.read(cx).automation_session().ok_or("not connected")?;
+                session.update(cx, |session, cx| session.quick_fork(rest, cx))?;
                 Ok(json!({ "ok": true }))
             }
             "fileopen" => {

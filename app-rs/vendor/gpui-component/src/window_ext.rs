@@ -108,6 +108,10 @@ pub trait WindowExt: Sized {
     /// accepts no input and will unmount when the transition finishes.
     fn has_active_dialog(&mut self, cx: &mut App) -> bool;
 
+    /// TreeTerm patch: how many Dialogs are active (open and not playing their exit
+    /// transition), for TreeTerm's automation state.
+    fn active_dialog_count(&self, cx: &App) -> usize;
+
     /// Closes the last active Dialog.
     fn close_dialog(&mut self, cx: &mut App);
 
@@ -198,6 +202,16 @@ impl WindowExt for Window {
             .active_dialogs
             .iter()
             .any(|dialog| !dialog.closing)
+    }
+
+    // TreeTerm patch: see the trait.
+    #[inline]
+    fn active_dialog_count(&self, cx: &App) -> usize {
+        WindowState::read(self, cx)
+            .active_dialogs
+            .iter()
+            .filter(|dialog| !dialog.closing)
+            .count()
     }
 
     #[inline]
