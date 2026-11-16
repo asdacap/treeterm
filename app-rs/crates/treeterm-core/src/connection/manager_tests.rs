@@ -928,6 +928,14 @@ mod port_forwarding {
             .unwrap();
         assert_eq!(started.len(), 1);
         assert_eq!(started[0].config.persistence, Persistence::Saved);
+        // Once per connection: they are running already.
+        assert!(
+            harness
+                .manager
+                .start_saved_port_forwards(&remote_id())
+                .unwrap()
+                .is_empty()
+        );
         harness
             .manager
             .add_port_forward(PortForwardConfig {
@@ -1063,6 +1071,68 @@ mod port_forwards_across_reconnect {
         let bootstraps = harness.spawned(SpawnKind::Bootstrap).len();
         advance(Duration::from_secs(30)).await;
         assert_eq!(harness.spawned(SpawnKind::Bootstrap).len(), bootstraps);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn saved_forwards_start_once_per_connection_and_again_on_its_replacement() {
+        let (mut harness, _) = Harness::with_local().await;
+        let config = SshConnectionConfig {
+            port_forwards: vec![pf_config("x", 9000).spec, pf_config("y", 9001).spec],
+            ..remote_config()
+        };
+        harness
+            .manager
+            .connect_remote(config.clone(), OutdatedDaemon::Report)
+            .await
+            .unwrap();
+        let first: Vec<PortForwardId> = harness
+            .manager
+            .start_saved_port_forwards(&remote_id())
+            .unwrap()
+            .into_iter()
+            .map(|info| info.config.id)
+            .collect();
+        assert_eq!(first.len(), 2);
+        flush().await;
+
+        // A reconnect keeps the connection, which restarts its own forwards: none is added.
+        harness.manager.force_reconnect(&remote_id()).unwrap();
+        advance(Duration::from_secs(1)).await;
+        assert_eq!(status_of(&harness, &remote_id()), StatusKind::Connected);
+        assert!(
+            harness
+                .manager
+                .start_saved_port_forwards(&remote_id())
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(harness.manager.list_port_forwards(&remote_id()).len(), 2);
+
+        // Lost and the reconnect loop stopped; "Retry" replaces the connection, and its
+        // forwards go with it.
+        harness.latest(SpawnKind::Tunnel).exit(255);
+        flush().await;
+        harness.manager.cancel_reconnect(&remote_id());
+        harness
+            .manager
+            .connect_remote(config, OutdatedDaemon::Report)
+            .await
+            .unwrap();
+        assert!(harness.manager.list_port_forwards(&remote_id()).is_empty());
+
+        let again = harness
+            .manager
+            .start_saved_port_forwards(&remote_id())
+            .unwrap();
+        assert_eq!(again.len(), 2);
+        assert!(again.iter().all(|info| !first.contains(&info.config.id)));
+        let ports: Vec<u16> = harness
+            .manager
+            .list_port_forwards(&remote_id())
+            .into_iter()
+            .map(|info| info.config.spec.local_port)
+            .collect();
+        assert_eq!(ports, vec![9000, 9001]);
     }
 }
 

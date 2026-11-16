@@ -730,6 +730,77 @@ fn a_remote_whose_session_does_not_load_stops_at_electrons_error_without_a_sessi
     assert_eq!(forwards[0].config.spec.local_port, 18080);
 }
 
+/// The remote connection's forwards, as `(id, local port)`.
+fn forwards(cx: &mut TestAppContext, app: &App) -> Vec<(String, u16)> {
+    app.app.read_with(cx, |a, _| {
+        a.manager()
+            .list_port_forwards(&remote_id())
+            .into_iter()
+            .map(|info| (info.config.id.as_str().to_owned(), info.config.spec.local_port))
+            .collect()
+    })
+}
+
+/// Wait for a session store other than `old` to be restored on the remote connection.
+fn restored_anew(cx: &mut TestAppContext, app: &App, old: &Entity<SessionStore>) -> Entity<SessionStore> {
+    wait_until_app(cx, &app.app, |a, cx| {
+        remote(a)
+            .and_then(SessionSlot::session)
+            .is_some_and(|s| s != old && matches!(s.read(cx).state(), SessionState::Live))
+    });
+    app.restored(cx)
+}
+
+#[gpui_kit::test]
+fn a_retry_after_the_reconnects_were_stopped_starts_the_saved_forwards_again(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    isolated_home();
+    let h = harness();
+    let app = app(cx, &h, None);
+    app.app.update(cx, |a, cx| {
+        a.connect_remote(config_with_a_forward(), OutdatedDaemon::Report, cx)
+    });
+    let first = app.restored(cx);
+    let started = forwards(cx, &app);
+    assert_eq!(started.len(), 1);
+    assert_eq!(started[0].1, 18080);
+
+    // A reconnect keeps the connection, which restarts its own forwards: none is added.
+    let forced = app.app.read_with(cx, |a, _| a.manager().force_reconnect(&remote_id()));
+    forced.unwrap();
+    let second = restored_anew(cx, &app, &first);
+    settle(cx);
+    assert_eq!(forwards(cx, &app), started);
+
+    // Lost, the host refuses, and the reconnect loop is stopped.
+    app.refuse.store(true, Ordering::SeqCst);
+    let forced = app.app.read_with(cx, |a, _| a.manager().force_reconnect(&remote_id()));
+    forced.unwrap();
+    app.app.read_with(cx, |a, _| a.reconnect_now(&remote_id()));
+    wait_until(cx, &app.app, |a| {
+        matches!(
+            remote(a).map(|slot| &slot.state),
+            Some(ConnState::Reconnecting { error, .. }) if error.starts_with("SSH bootstrap failed")
+        )
+    });
+    app.app.read_with(cx, |a, _| a.cancel_reconnect(&remote_id()));
+    wait_until(cx, &app.app, |a| {
+        matches!(remote(a).map(|slot| &slot.state), Some(ConnState::Failed { .. }))
+    });
+
+    // The session pane's Retry: a new connect replaces the connection, and its forwards
+    // with it. They start again once its session has loaded (Electron's `ssh:connect`).
+    app.refuse.store(false, Ordering::SeqCst);
+    app.app.update(cx, |a, cx| {
+        a.reconnect_outdated(&remote_id(), OutdatedDaemon::Report, cx)
+    });
+    restored_anew(cx, &app, &second);
+    let again = forwards(cx, &app);
+    assert_eq!(again.len(), 1, "{again:?}");
+    assert_eq!(again[0].1, 18080);
+    assert_ne!(again[0].0, started[0].0, "a new forward");
+}
+
 #[gpui_kit::test]
 fn the_sidebars_reconnect_after_a_session_that_did_not_load_stops_at_the_error_again(
     cx: &mut TestAppContext,

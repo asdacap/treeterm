@@ -103,8 +103,19 @@ impl<C> Future for Settled<C> {
 
 struct Entry<C> {
     shared: Arc<Shared<C>>,
+    saved_forwards: SavedForwards,
     /// Aborts the driver (and everything it owns) when the entry is dropped.
     _driver: Fut<()>,
+}
+
+/// Whether a connection's saved forwards were started
+/// ([`ConnectionManager::start_saved_port_forwards`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SavedForwards {
+    /// Not on this connection yet (a new one, or one put in place of a stale one).
+    NotStarted,
+    /// Started; the connection restarts them itself after each reconnect.
+    Started,
 }
 
 /// All connections (local + remotes), each with its reconnect loop and port forwards.
@@ -175,6 +186,7 @@ impl<D: Dialer> ConnectionManager<D> {
             id,
             Entry {
                 shared,
+                saved_forwards: SavedForwards::NotStarted,
                 _driver: driver,
             },
         ));
@@ -317,20 +329,26 @@ impl<D: Dialer> ConnectionManager<D> {
     }
 
     /// Start the connection's saved forwards (Electron's `autoStartPortForwards`), each with
-    /// a new id.
+    /// a new id. Once per connection: its reconnects restart them, so later calls start none;
+    /// a connection [`Self::connect_remote`] puts in place of a stale one (whose forwards
+    /// went with it) starts them again.
     pub fn start_saved_port_forwards(
-        &self,
+        &mut self,
         id: &ConnectionId,
     ) -> Result<Vec<PortForwardInfo>, NotRemoteConnection> {
         let entry = self
             .connections
-            .get(id)
+            .get_mut(id)
             .ok_or_else(|| NotRemoteConnection(id.clone()))?;
         let ConnectionTarget::Remote(config) =
             entry.shared.read(|machine| machine.target().clone())
         else {
             return Err(NotRemoteConnection(id.clone()));
         };
+        match std::mem::replace(&mut entry.saved_forwards, SavedForwards::Started) {
+            SavedForwards::Started => return Ok(Vec::new()),
+            SavedForwards::NotStarted => {}
+        }
         config
             .port_forwards
             .iter()

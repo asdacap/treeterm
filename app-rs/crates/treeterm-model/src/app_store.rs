@@ -57,9 +57,6 @@ pub struct SessionSlot {
     /// connection was lost with.
     pub state: ConnState,
     previous: Previous,
-    /// The saved port forwards were started (once per connection, once its session loaded;
-    /// the manager restarts them after reconnects).
-    forwards_started: bool,
     /// Where the window goes once the session is restored.
     landing: Landing,
     /// The connection's download meters: they outlive its generations, and a failed
@@ -276,7 +273,6 @@ impl AppStore {
             target,
             state: ConnState::Connecting(ConnectPhase::Daemon),
             previous: Previous::Nothing,
-            forwards_started: false,
             landing: Landing::Stay,
             traffic: cx.new(ConnectionTraffic::new),
             _events: None,
@@ -593,12 +589,13 @@ impl AppStore {
             Previous::Replacing(replaced) => replaced.update(cx, |s, cx| s.dispose(cx)),
             other => slot.previous = other,
         }
-        // `autoStartPortForwards`: once, after the first connect's session loaded.
-        if !slot.forwards_started && !slot.is_local() {
-            slot.forwards_started = true;
-            if let Err(error) = self.manager.start_saved_port_forwards(id) {
-                tracing::error!(%error, "cannot start saved port forwards");
-            }
+        // `autoStartPortForwards`, after each connect's session loaded: the manager starts
+        // them once per connection (its reconnects restart them), so a connect that replaced
+        // a stale connection, and its forwards with it, starts them again.
+        if !slot.is_local()
+            && let Err(error) = self.manager.start_saved_port_forwards(id)
+        {
+            tracing::error!(%error, "cannot start saved port forwards");
         }
         self.land(id, session, cx);
     }
