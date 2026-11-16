@@ -39,6 +39,17 @@ pub struct Workspace {
     pub file: WorkspaceFile,
 }
 
+impl Workspace {
+    /// Its tree row's tooltip (`TreeItemView`'s `title`): the path, then a blank line and
+    /// the description when there is one.
+    pub fn row_tooltip(&self) -> String {
+        match self.file.metadata.get("description") {
+            Some(description) if !description.is_empty() => format!("{}\n\n{description}", self.path),
+            Some(_) | None => self.path.clone(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WorkspaceEvent {
     /// The body changed locally and must be persisted.
@@ -2154,7 +2165,29 @@ fn merge_failure_line(error: &str) -> String {
 mod tests {
     use serde_json::json;
 
-    use super::{is_ai_harness_state, merge_failure_line};
+    use super::{Workspace, is_ai_harness_state, merge_failure_line};
+
+    fn workspace(metadata: serde_json::Value) -> Workspace {
+        let file = json!({
+            "name": "w", "status": "active", "isGitRepo": true, "isWorktree": false,
+            "appStates": {}, "metadata": metadata, "createdAt": 1, "lastActivity": 1, "parentHash": ""
+        });
+        Workspace {
+            id: "ws".to_owned(),
+            path: "/repo/w".to_owned(),
+            file: treeterm_core::wire::workspace_file::parse_workspace_file(file.to_string().as_bytes()).unwrap(),
+        }
+    }
+
+    #[test]
+    fn a_row_tooltip_is_the_path_then_a_blank_line_and_the_description() {
+        assert_eq!(workspace(json!({})).row_tooltip(), "/repo/w");
+        assert_eq!(workspace(json!({ "description": "" })).row_tooltip(), "/repo/w", "a blank description");
+        assert_eq!(
+            workspace(json!({ "description": "Fix the login page" })).row_tooltip(),
+            "/repo/w\n\nFix the login page"
+        );
+    }
 
     #[test]
     fn a_harness_state_has_a_pty_id_or_null_and_an_object_typed_sandbox() {

@@ -617,12 +617,14 @@ impl TreePane {
         let c = colors(cx);
         let (secondary, primary) = (c.text_secondary, c.text_primary);
         // `WorkspaceIcon`: spinner while loading, alert on error, the activity glyph while
-        // busy, else a branch (worktree) or folder.
-        let (icon, label): (AnyElement, SharedString) = match label {
-            Label::Name(name) if busy => (ui::activity_glyph(activity, 14., secondary), name),
-            Label::Name(name) => (
+        // busy, else a branch (worktree) or folder. Only a loaded row has a tooltip
+        // (`title={… ws?.path}`).
+        let (icon, label, tooltip): (AnyElement, SharedString, Option<SharedString>) = match label {
+            Label::Name { name, tooltip } if busy => (ui::activity_glyph(activity, 14., secondary), name, Some(tooltip)),
+            Label::Name { name, tooltip } => (
                 ui::icon(if is_worktree { IconName::GitBranch } else { IconName::Folder }, 16., secondary).into_any_element(),
                 name,
+                Some(tooltip),
             ),
             Label::Loading(name) => (
                 gpui_kit::component::spinner::Spinner::new()
@@ -631,8 +633,9 @@ impl TreePane {
                     .color(secondary)
                     .into_any_element(),
                 name,
+                None,
             ),
-            Label::Error(name) => (ui::icon(IconName::CircleAlert, 16., c.error).into_any_element(), name),
+            Label::Error(name) => (ui::icon(IconName::CircleAlert, 16., c.error).into_any_element(), name, None),
         };
         let selected = session.read(cx).viewed_workspace() == Some(id.as_str());
         // Workspace focus mode (prefix + w) moves this cursor with the arrow keys.
@@ -670,6 +673,14 @@ impl TreePane {
             .cursor_pointer()
             .when(selected, |row| row.bg(c.bg_active))
             .when(!selected, |row| row.hover(|row| row.bg(c.bg_hover)))
+            // Wrapped, as the system draws a long `title`.
+            .when_some(tooltip, |row, tooltip| {
+                row.tooltip(move |window, cx| {
+                    let text = tooltip.clone();
+                    gpui_kit::component::tooltip::Tooltip::element(move |_, _| div().max_w(px(400.)).child(text.clone()))
+                        .build(window, cx)
+                })
+            })
             .when(focus_cursor, |row| row.border_2().border_color(c.accent))
             // `.workspace-unread`: a 2px accent rule on the left.
             .when(unread && !focus_cursor, |row| row.border_l(px(2.)).border_color(c.accent))
@@ -902,7 +913,8 @@ struct RowData {
 /// A row's name and what its icon shows (`WorkspaceTreeItem`): a placeholder or failed
 /// workspace is named too; why it failed shows in the main pane.
 enum Label {
-    Name(SharedString),
+    /// A loaded workspace, with its path and description on hover.
+    Name { name: SharedString, tooltip: SharedString },
     Loading(SharedString),
     Error(SharedString),
 }
@@ -911,7 +923,11 @@ impl Label {
     fn of(entry: &WorkspaceEntry, cx: &gpui_kit::App) -> Self {
         match entry {
             WorkspaceEntry::Loaded(store) | WorkspaceEntry::OperationError { store, .. } => {
-                Label::Name(store.read(cx).file().display_name().to_owned().into())
+                let workspace = store.read(cx).workspace();
+                Label::Name {
+                    name: workspace.file.display_name().to_owned().into(),
+                    tooltip: workspace.row_tooltip().into(),
+                }
             }
             WorkspaceEntry::Loading { name, .. } => Label::Loading(name.clone().into()),
             WorkspaceEntry::Error { name, .. } => Label::Error(name.clone().into()),
