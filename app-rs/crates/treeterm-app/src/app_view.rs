@@ -1210,7 +1210,7 @@ impl Render for AppView {
         }
         let menu_bar = match &self.menu_bar {
             MenuBar::System => None,
-            MenuBar::InWindow(bar) => Some(crate::menus::in_window_bar(bar, cx)),
+            MenuBar::InWindow(bar) => Some(crate::menus::in_window_bar(bar, window, cx)),
         };
         div()
             .size_full()

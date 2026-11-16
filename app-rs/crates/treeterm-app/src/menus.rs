@@ -24,6 +24,7 @@ use crate::active_processes_view::CloseAnyway;
 use crate::app_view::AppView;
 use crate::terminal_view;
 use crate::theme::colors;
+use crate::ui::RemScope;
 use crate::webview_native::EditCommand;
 
 actions!(
@@ -373,20 +374,25 @@ fn set_menus(mac: bool, cx: &mut App) {
 /// The menu bar drawn in the window off macOS, as a row above its content (Electron's Linux
 /// window shows its menu bar). GTK draws that bar outside the page, so it stays usable while
 /// a dialog is open: this row and its menus paint above GPUI Kit's dialogs, as the Kit's
-/// own popups do, and take the pointer from them.
-pub fn in_window_bar(bar: &Entity<AppMenuBar>, cx: &App) -> AnyElement {
+/// own popups do, and take the pointer from them. Nor does the page's zoom (View > Zoom In
+/// and Zoom Out) scale it: the window's zoom scales everything it draws, so the row's pixels
+/// and the rem its menus are sized in are divided by the zoom.
+pub fn in_window_bar(bar: &Entity<AppMenuBar>, window: &Window, cx: &App) -> AnyElement {
     let c = colors(cx);
-    deferred(
+    let zoom = window.zoom();
+    deferred(RemScope::new(
+        window.rem_size() / zoom,
         div()
+            .debug_selector(|| "in-window-menu-bar".to_owned())
             .flex_shrink_0()
-            .h(px(28.))
+            .h(px(28. / zoom))
             .px_1()
             .bg(c.bg_secondary)
-            .border_b_1()
+            .border_b(px(1. / zoom))
             .border_color(c.border)
             .occlude()
             .child(bar.clone()),
-    )
+    ))
     .with_priority(gpui_kit::base::POPUP_PRIORITY)
     .into_any_element()
 }
@@ -708,8 +714,8 @@ mod tests {
     struct WithMenuBar(Entity<AppMenuBar>);
 
     impl Render for WithMenuBar {
-        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-            div().size_full().flex().flex_col().child(in_window_bar(&self.0, cx)).child(div().flex_1())
+        fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            div().size_full().flex().flex_col().child(in_window_bar(&self.0, window, cx)).child(div().flex_1())
         }
     }
 
@@ -740,6 +746,51 @@ mod tests {
         cx.run_until_parked();
         assert_eq!(settings.get(), 1, "File > Settings ran");
         assert!(cx.update(|window, cx| window.has_active_dialog(cx)), "the dialog stays open");
+    }
+
+    /// GTK draws Electron's Linux menu bar outside the page, so the page's zoom leaves it and
+    /// its menus as they are: on the screen, the bar's row, the File button and the File menu
+    /// keep their size in a zoomed window.
+    #[gpui_kit::test]
+    fn the_zoom_leaves_the_in_window_menu_bar_as_it_is(cx: &mut TestAppContext) {
+        use gpui_kit::test::TestWindowExt as _;
+
+        let window = cx.update(|cx| {
+            gpui_kit::init(cx);
+            crate::theme::install(cx);
+            set_menus(false, cx);
+            gpui_kit::open_window(WindowOptions::default(), cx, |_, cx| cx.new(|cx| WithMenuBar(AppMenuBar::new(cx))))
+                .expect("open a window")
+                .0
+        });
+        let cx = VisualTestContext::from_window(window, cx).into_mut();
+        cx.update(|window, cx| window.within("app-menu-bar").within(0usize).click("menu", cx));
+        cx.run_until_parked();
+        // The bar's row, the File button and the File menu, in the screen's pixels: the
+        // window's times its zoom.
+        let on_screen = |cx: &mut VisualTestContext| {
+            let (zoom, file, menu) = cx.update(|window, cx| {
+                window.render_frame(cx);
+                // The bar's buttons, from the left (the open menu's items take index 0 too).
+                (window.zoom(), window.find_all("menu")[0].bounds(), window.find("popup-menu").bounds())
+            });
+            let row = cx.debug_bounds("in-window-menu-bar").expect("the bar is drawn");
+            [row, file, menu].map(|bounds| bounds.size.map(|length| length * zoom))
+        };
+        let unzoomed = on_screen(cx);
+        assert_eq!(unzoomed[0].height, px(28.));
+
+        // Within a pixel (text is shaped at another size); the menu's separators are drawn in
+        // pixels, which the zoom still scales (2px each).
+        let leeway = [px(1.), px(1.), px(4.)];
+        for zoom in [2., 0.5] {
+            cx.update(|window, cx| window.set_zoom(zoom, cx));
+            let parts = ["bar", "File", "menu"].into_iter().zip(on_screen(cx).into_iter().zip(unzoomed).zip(leeway));
+            for (part, ((zoomed, unzoomed), leeway)) in parts {
+                let off = (zoomed.width - unzoomed.width).abs().max((zoomed.height - unzoomed.height).abs());
+                assert!(off <= leeway, "the {part}, zoomed {zoom} times: {zoomed:?}, unzoomed {unzoomed:?}");
+            }
+        }
     }
 
     /// A focused terminal: the keys that reach it and the menu commands that ran instead.
@@ -955,12 +1006,12 @@ mod tests {
     }
 
     impl Render for FieldWithMenuBar {
-        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
             div()
                 .size_full()
                 .flex()
                 .flex_col()
-                .child(in_window_bar(&self.bar, cx))
+                .child(in_window_bar(&self.bar, window, cx))
                 .child(input::Input::new(&self.field))
         }
     }

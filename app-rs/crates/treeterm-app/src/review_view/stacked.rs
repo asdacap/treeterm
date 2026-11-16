@@ -18,7 +18,7 @@ use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    AnyElement, App, Bounds, ClickEvent, Context, Element, ElementId, GlobalElementId, InspectorElementId, LayoutId, Pixels, Entity, MouseButton, SharedString, Subscription,
+    AnyElement, App, Bounds, ClickEvent, Context, ElementId, Pixels, Entity, MouseButton, SharedString, Subscription,
     WeakEntity, Window, div, px, rgb,
 };
 use treeterm_core::files::image_format;
@@ -29,7 +29,7 @@ use treeterm_model::review_patch::{DiffSize, FileDiff, FileDiffs, Placeholder, S
 
 use super::ReviewView;
 use crate::comment_ui::{CommentActions, Placement, comment_display, comment_input};
-use crate::ui::ReadingOrder;
+use crate::ui::{ReadingOrder, RemScope};
 use super::parts::{change_stats, checkbox, disabled_checkbox, outline_button, plain_icon, spinner, spinning_icon, status_badge, title};
 use crate::file_browser_view::{ImageDrawing, image_drawing, language_for};
 use crate::theme::colors;
@@ -751,7 +751,7 @@ impl ReviewView {
             .into_any_element();
         // `--diffs-font-size: 12px` (the theme's mono size is 13px): the diff is laid out at
         // a rem that makes its code 12px.
-        RemScope { rem: px(16. * 12. / 13.), child: diff }.into_any_element()
+        RemScope::new(px(16. * 12. / 13.), diff).into_any_element()
     }
 }
 
@@ -778,73 +778,6 @@ fn file_headers(order: &[ListedFile]) -> Vec<(usize, Vec<Staging>)> {
 const DIFF_BG: u32 = 0x070707;
 const DELETED_ROW: u32 = 0x351b17;
 const ADDED_ROW: u32 = 0x192919;
-
-/// Lays its child out and paints it at another rem size (GPUI Kit's `Diff` sizes its code
-/// from the theme's mono size in rems).
-struct RemScope {
-    rem: Pixels,
-    child: AnyElement,
-}
-
-impl IntoElement for RemScope {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
-    }
-}
-
-impl Element for RemScope {
-    type RequestLayoutState = ();
-    type PrepaintState = ();
-
-    fn id(&self) -> Option<ElementId> {
-        None
-    }
-
-    fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
-        None
-    }
-
-    fn request_layout(
-        &mut self,
-        _id: Option<&GlobalElementId>,
-        _inspector_id: Option<&InspectorElementId>,
-        window: &mut Window,
-        cx: &mut App,
-    ) -> (LayoutId, Self::RequestLayoutState) {
-        let child = &mut self.child;
-        let layout = window.with_rem_size(Some(self.rem), |window| child.request_layout(window, cx));
-        (layout, ())
-    }
-
-    fn prepaint(
-        &mut self,
-        _id: Option<&GlobalElementId>,
-        _inspector_id: Option<&InspectorElementId>,
-        _bounds: Bounds<Pixels>,
-        _request_layout: &mut Self::RequestLayoutState,
-        window: &mut Window,
-        cx: &mut App,
-    ) -> Self::PrepaintState {
-        let child = &mut self.child;
-        window.with_rem_size(Some(self.rem), |window| child.prepaint(window, cx));
-    }
-
-    fn paint(
-        &mut self,
-        _id: Option<&GlobalElementId>,
-        _inspector_id: Option<&InspectorElementId>,
-        _bounds: Bounds<Pixels>,
-        _request_layout: &mut Self::RequestLayoutState,
-        _prepaint: &mut Self::PrepaintState,
-        window: &mut Window,
-        cx: &mut App,
-    ) {
-        let child = &mut self.child;
-        window.with_rem_size(Some(self.rem), |window| child.paint(window, cx));
-    }
-}
 
 /// A file's header in the diff (an annotation of its first row), with the body the view
 /// draws under it when open: its diff loading or failed, an image file's sides or a binary

@@ -479,6 +479,79 @@ impl gpui_kit::Element for EllipsizedText {
     }
 }
 
+/// Lays its child out and paints it at another rem size: GPUI Kit sizes its components (the
+/// `Diff`'s code, buttons, menus) in rems.
+pub struct RemScope {
+    rem: Pixels,
+    child: gpui_kit::AnyElement,
+}
+
+impl RemScope {
+    pub fn new(rem: Pixels, child: impl IntoElement) -> Self {
+        Self { rem, child: child.into_any_element() }
+    }
+}
+
+impl IntoElement for RemScope {
+    type Element = Self;
+
+    fn into_element(self) -> Self::Element {
+        self
+    }
+}
+
+impl gpui_kit::Element for RemScope {
+    type RequestLayoutState = ();
+    type PrepaintState = ();
+
+    fn id(&self) -> Option<ElementId> {
+        None
+    }
+
+    fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _: Option<&gpui_kit::GlobalElementId>,
+        _: Option<&gpui_kit::InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (gpui_kit::LayoutId, ()) {
+        let child = &mut self.child;
+        let layout = window.with_rem_size(Some(self.rem), |window| child.request_layout(window, cx));
+        (layout, ())
+    }
+
+    fn prepaint(
+        &mut self,
+        _: Option<&gpui_kit::GlobalElementId>,
+        _: Option<&gpui_kit::InspectorElementId>,
+        _: Bounds<Pixels>,
+        _: &mut (),
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let child = &mut self.child;
+        window.with_rem_size(Some(self.rem), |window| child.prepaint(window, cx));
+    }
+
+    fn paint(
+        &mut self,
+        _: Option<&gpui_kit::GlobalElementId>,
+        _: Option<&gpui_kit::InspectorElementId>,
+        _: Bounds<Pixels>,
+        _: &mut (),
+        _: &mut (),
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let child = &mut self.child;
+        window.with_rem_size(Some(self.rem), |window| child.paint(window, cx));
+    }
+}
+
 /// The 12px spinner after the unread marker while an unread-marker edit is not yet saved
 /// (`Loader2` "Saving workspace attention"), in the row's text colour.
 pub fn attention_saving(color: impl Into<Hsla>) -> gpui_kit::AnyElement {

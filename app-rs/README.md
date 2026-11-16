@@ -416,9 +416,11 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   overlay does not blur what is behind it; GPUI has no animated scrolling, so the Chat tab
   jumps to its last message where Electron's smooth-scrolls there. Off
   macOS the menu bar is GPUI Kit's, drawn in the window (not GTK's), above dialogs so that it
-  stays usable while one is open, as GTK's is. On macOS GPUI greys out a
-  Cut, Copy, Paste or Select All that nothing focused can do (Cut in a terminal, Paste with no
-  input focused); Electron's stay enabled and do nothing there. Off macOS the Edit menu acts on a
+  stays usable while one is open, as GTK's is; it keeps its size, as GTK's does, when View →
+  Zoom In or Zoom Out zooms the window, save for the few lengths GPUI Kit gives in pixels
+  (its menus' 2px separators, rounded corners and shadows), which follow the zoom. On macOS
+  GPUI greys out a Cut, Copy, Paste or Select All that nothing focused can do (Cut in a
+  terminal, Paste with no input focused); Electron's stay enabled and do nothing there. Off macOS the Edit menu acts on a
   web page (Browser and Web App tabs) once the page has been clicked, not when it has the
   keyboard otherwise (an `autofocus` field).
 - The Comments tab's code and generated prompt, and the Settings tab's Raw Workspace JSON,
