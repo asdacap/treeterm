@@ -749,6 +749,7 @@ impl SshConnector {
         };
         let mut tunnel = Tunnel {
             process,
+            ssh: TunnelSsh::Running,
             local_socket,
             stderr: Vec::new(),
             log: self.log.clone(),
@@ -812,13 +813,23 @@ pub async fn upload_file(
 
 // === tunnel ==================================================================================
 
-/// A running `ssh -L` socket tunnel. Dropping it kills ssh and removes the local socket.
+/// A running `ssh -L` socket tunnel. Dropping it kills ssh (logging that it closed) and
+/// removes the local socket.
 #[must_use = "dropping a Tunnel closes it"]
 pub struct Tunnel {
     process: Process,
+    ssh: TunnelSsh,
     local_socket: PathBuf,
     stderr: Vec<String>,
     log: Arc<dyn LogSink>,
+}
+
+/// Whether the tunnel's ssh has reported its end.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TunnelSsh {
+    Running,
+    /// Its end is logged.
+    Ended,
 }
 
 impl Tunnel {
@@ -882,6 +893,7 @@ impl Tunnel {
             None => TunnelEnd::Failed("ssh output ended without an exit status".to_owned()),
         };
         self.log(end.to_string());
+        self.ssh = TunnelSsh::Ended;
         Some(end)
     }
 
@@ -894,6 +906,21 @@ impl Tunnel {
 
 impl Drop for Tunnel {
     fn drop(&mut self) {
+        match self.ssh {
+            // Dropping the process kills ssh, and nothing reads how it ended any more. Electron's
+            // `disconnect()` killed it too, after which its close handler logged the end, so a
+            // reconnect, a failed attempt (socket timeout, gRPC dial) and a disconnect all end
+            // the Tunnel log with it. The kill is tokio's `kill_on_drop` SIGKILL (Node reported
+            // the killed ssh's exit code as `null`).
+            TunnelSsh::Running => {
+                let end = TunnelEnd::Closed {
+                    exit: ExitStatus::Signal(libc::SIGKILL),
+                    stderr: std::mem::take(&mut self.stderr),
+                };
+                self.log(end.to_string());
+            }
+            TunnelSsh::Ended => {}
+        }
         match std::fs::remove_file(&self.local_socket) {
             Ok(()) => {}
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}

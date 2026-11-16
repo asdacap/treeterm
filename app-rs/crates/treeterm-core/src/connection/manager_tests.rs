@@ -285,14 +285,25 @@ mod watch_bootstrap_output {
         advance(Duration::from_secs(1)).await;
         assert_eq!(status_of(&harness, &remote_id()), StatusKind::Connected);
 
-        // Cleared, then exactly the new tunnel's lines.
-        for (kind, events) in [
-            (OutputKind::Bootstrap, bootstrap.updates.drain_ready()),
-            (OutputKind::Tunnel, tunnel.updates.drain_ready()),
+        // The old tunnel's ssh was killed (Electron's close handler logged it), then the logs
+        // are cleared and get exactly the new tunnel's lines.
+        let closed = LogEvent::Line("SSH tunnel closed (exit signal 9)".to_owned());
+        for (kind, events, ended) in [
+            (
+                OutputKind::Bootstrap,
+                bootstrap.updates.drain_ready(),
+                vec![],
+            ),
+            (
+                OutputKind::Tunnel,
+                tunnel.updates.drain_ready(),
+                vec![closed],
+            ),
         ] {
             let scrollback = watch(kind).initial;
             assert!(!scrollback.is_empty(), "{kind:?}");
-            let mut expected = vec![LogEvent::Cleared];
+            let mut expected = ended;
+            expected.push(LogEvent::Cleared);
             expected.extend(scrollback.into_iter().map(LogEvent::Line));
             assert_eq!(events, expected, "{kind:?}");
         }
@@ -647,6 +658,10 @@ mod disconnect {
         harness.connect_remote().await;
         let daemon = daemon_of(&harness, &remote_id());
         assert_eq!(harness.manager.list_connections().len(), 2);
+        let mut tunnel_log = harness
+            .manager
+            .watch_output(&remote_id(), OutputKind::Tunnel)
+            .unwrap();
 
         harness.manager.disconnect(&remote_id());
         flush().await;
@@ -657,6 +672,13 @@ mod disconnect {
         assert!(tunnel.is_killed());
         assert!(!forwarded_socket(tunnel.command()).exists());
         assert!(harness.dialer.watch_dropped(&daemon));
+        // Electron's close handler logged the killed ssh's end for those still watching.
+        assert_eq!(
+            tunnel_log.updates.drain_ready(),
+            [LogEvent::Line(
+                "SSH tunnel closed (exit signal 9)".to_owned()
+            )]
+        );
     }
 
     #[tokio::test(start_paused = true)]

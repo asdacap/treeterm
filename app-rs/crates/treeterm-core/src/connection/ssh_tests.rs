@@ -148,6 +148,57 @@ mod disconnect {
         assert!(!harness.local_socket().exists());
     }
 
+    /// Electron's close handler logged the killed ssh's end to the Tunnel log, with what it
+    /// printed to stderr.
+    #[tokio::test]
+    async fn logs_that_the_killed_ssh_closed() {
+        let harness = Harness::new();
+        harness.spawner.respond(tunnel_creates_socket);
+        let mut tunnel = harness
+            .connector(OutdatedDaemon::Report)
+            .open_tunnel(harness.local_socket(), "/tmp/remote.sock")
+            .await
+            .unwrap();
+        harness
+            .spawner
+            .process(0)
+            .await
+            .stderr("Warning: Permanently added 'example.com'\n");
+        // The tunnel reads the line; ssh still runs.
+        assert_eq!(futures::FutureExt::now_or_never(tunnel.closed()), None);
+
+        drop(tunnel);
+
+        assert_eq!(
+            harness.sink.lines(OutputKind::Tunnel).last().unwrap(),
+            "SSH tunnel closed (exit signal 9): Warning: Permanently added 'example.com'"
+        );
+    }
+
+    /// A tunnel whose ssh ended has logged that end; dropping it adds nothing.
+    #[tokio::test]
+    async fn logs_the_end_of_an_ssh_that_exited_once() {
+        let harness = Harness::new();
+        harness.spawner.respond(tunnel_creates_socket);
+        let mut tunnel = harness
+            .connector(OutdatedDaemon::Report)
+            .open_tunnel(harness.local_socket(), "/tmp/remote.sock")
+            .await
+            .unwrap();
+        harness.spawner.process(0).await.exit(255);
+        let end = tunnel.closed().await;
+
+        drop(tunnel);
+
+        let log = harness.sink.lines(OutputKind::Tunnel);
+        assert_eq!(log.last().unwrap(), "SSH tunnel closed (exit 255)");
+        assert_eq!(
+            log.iter().filter(|line| **line == end.to_string()).count(),
+            1
+        );
+        assert!(!log.iter().any(|line| line.contains("signal")), "{log:?}");
+    }
+
     #[test]
     fn handles_disconnect_when_not_connected() {
         let harness = Harness::new();
@@ -1060,6 +1111,10 @@ mod wait_for_socket {
         );
         assert!(started.elapsed() >= SOCKET_WAIT);
         assert!(harness.spawner.processes()[0].is_killed());
+        assert_eq!(
+            harness.sink.lines(OutputKind::Tunnel).last().unwrap(),
+            "SSH tunnel closed (exit signal 9)"
+        );
     }
 
     #[tokio::test]
