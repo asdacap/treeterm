@@ -1,17 +1,20 @@
 //! What Monaco's CSS worker (vscode-css-languageservice) adds to CSS, SCSS and Less files,
 //! without its parser: the colours it finds in declaration values (`findDocumentColors`),
-//! property names to complete inside a rule, and the warnings of its lint that read rules
-//! and declarations (CSS files only, with Monaco's default lint settings).
+//! property names to complete inside a rule, the documentation of a declaration's property
+//! on hover ([`data`]), and the warnings of its lint that read rules and declarations (CSS
+//! files only, with Monaco's default lint settings).
 //!
 //! The file is read as a tree of rules (`selector { … }`), at-rules and declarations
 //! (`property: value`), split at `{`, `}` and `;` outside strings, comments and brackets.
 //! The worker's parse errors, and the lint rules that need its parse of values and
 //! selectors, are not reported.
 
+mod data;
+
 use std::ops::Range;
 
 use super::web_data::{CSS_COLORS, CSS_PROPERTIES};
-use super::{Completion, Insert, Problem, Severity, Then};
+use super::{Completion, Hover, Insert, Problem, Severity, Then};
 use crate::words::{self, Trigger};
 
 /// The style sheet languages the CSS worker reads.
@@ -680,6 +683,37 @@ pub fn problems(text: &str) -> Vec<Problem> {
     found
 }
 
+/// The declaration in a rule or an at-rule's block of `items` whose property or value holds
+/// byte `offset`, its ends included.
+fn declaration_at(items: &[Item], offset: usize) -> Option<&Declaration> {
+    items.iter().find_map(|item| match item {
+        Item::Rule { body, .. } | Item::AtRule { body: Some(body), .. } => {
+            body.iter().find_map(|item| match item {
+                Item::Declaration(declaration) => {
+                    let range = declaration.range();
+                    (range.start <= offset && offset <= range.end).then_some(declaration)
+                }
+                Item::Rule { .. } | Item::AtRule { .. } => None,
+            })
+            .or_else(|| declaration_at(body, offset))
+        }
+        Item::Declaration(_) | Item::AtRule { body: None, .. } => None,
+    })
+}
+
+/// What the CSS worker shows on hover at byte `offset` of `text`, a style sheet of Monaco's
+/// `language` (`doHover`), over a declaration with a value: its property's description,
+/// status, browsers, syntax and MDN reference, over the whole declaration. `None` elsewhere,
+/// and for a property the worker does not document (a custom property, a name in another
+/// case). Selectors (their specificity), at-rules and pseudo-classes are not documented here.
+pub fn hover(language: &str, text: &str, offset: usize) -> Option<Hover> {
+    let dialect = Dialect::of(language)?;
+    let items = read(text, dialect).ok()?;
+    let declaration = declaration_at(&items, offset).filter(|declaration| !declaration.value.is_empty())?;
+    let contents = data::property(&text[declaration.property.clone()])?.documentation()?;
+    Some(Hover { contents, range: declaration.range() })
+}
+
 /// What a block holds, for completing in it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Block {
@@ -992,5 +1026,37 @@ mod tests {
         let (replace, labels, _) = offered("scss", "// 注释\n.a\\é { b: \"é\"; colo| }", Trigger::Typing).expect("properties");
         assert_eq!((replace.as_str(), labels[0].as_str()), ("colo", "color"));
         assert_eq!(offered("css", "a { font-family: 微软|雅黑 }", Trigger::Invoked), None);
+    }
+
+    /// The hover at `|` in `text`: the start of its markdown and the text it is over.
+    fn hovered(language: &str, text: &str) -> Option<(String, String)> {
+        let offset = text.find('|').expect("a cursor");
+        let text = text.replace('|', "");
+        let found = hover(language, &text, offset)?;
+        let first_line = found.contents.lines().next().unwrap_or("").to_owned();
+        Some((first_line, text[found.range].to_owned()))
+    }
+
+    /// As Monaco's CSS worker shows it (checked against vscode-css-languageservice).
+    #[test]
+    fn a_declarations_property_is_documented_on_hover_over_it_or_its_value() {
+        let color = |over: &str| Some(("Sets the color of an element's text".to_owned(), over.to_owned()));
+        for text in ["a { |color: red; }", "a { color|: red; }", "a { color:| red; }", "a { color: red|; }"] {
+            assert_eq!(hovered("css", text), color("color: red"), "{text}");
+        }
+        assert_eq!(hovered("css", "a { color: red !impor|tant; }"), color("color: red !important"));
+        assert_eq!(hovered("css", "a { col|or : red; }"), color("color : red"));
+        assert_eq!(hovered("css", "@media screen { a { col|or: red } }"), color("color: red"));
+        assert_eq!(hovered("scss", "a { b { col|or: red; } }"), color("color: red"));
+        assert_eq!(hovered("less", "a { col|or: red; }"), color("color: red"));
+        let font = hovered("css", "@font-face { font-fam|ily: x; }").expect("font-family");
+        assert!(font.0.starts_with("Specifies a prioritized list of font family names"), "{font:?}");
+        // Past the declaration, without a value, a custom property, another case: nothing.
+        for text in ["a { color: red;| }", "a { color: |}", "a { --x|: 1; }", "a { COL|OR: red; }"] {
+            assert_eq!(hovered("css", text), None, "{text}");
+        }
+        // Outside a rule it is a selector, whose specificity the worker shows: not here.
+        assert_eq!(hovered("css", "col|or: red;"), None);
+        assert_eq!(hovered("rust", "a { col|or: red; }"), None);
     }
 }

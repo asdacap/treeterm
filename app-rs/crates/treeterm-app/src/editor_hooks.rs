@@ -792,6 +792,10 @@ mod tests {
         assert_eq!(both.len(), 2, "{both:?}");
         assert!(both[0].starts_with("[Follow link]"), "{both:?}");
         assert_eq!(both[1], "Character entity representing '&', unicode equivalent 'U+0026'");
+        // A CSS declaration: its property's documentation.
+        let css = CodeHover { language: "css" };
+        let documented = markdown(hover_at(&css, "a { color: red; }", 5, cx));
+        assert!(documented.len() == 1 && documented[0].starts_with("Sets the color of an element's text"), "{documented:?}");
         // Other languages document nothing.
         let rust = CodeHover { language: "rust" };
         assert_eq!(markdown(hover_at(&rust, "<p>", 1, cx)), Vec::<String>::new());

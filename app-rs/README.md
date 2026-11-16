@@ -151,8 +151,9 @@ Done (tested against a real in-process daemon unless noted):
   message on hover): JSON's (Monaco's JSON worker, ported), TypeScript and JavaScript syntax
   errors, and CSS lint warnings (empty rules, unknown and duplicate properties, unknown
   at-rules, incomplete `@font-face`); they show the HTML worker's documentation on hover
-  (elements, attributes, attribute values, character entities) and highlight an element's
-  start and end tag names while the cursor is on one; they paint CSS, SCSS and Less
+  (elements, attributes, attribute values, character entities) and the CSS worker's (a
+  declaration's property), and highlight an element's start and end tag names while the
+  cursor is on one; they paint CSS, SCSS and Less
   colours, and underline links ("Follow link (cmd + click)" on hover): Cmd/Ctrl+click opens
   an `http(s)://` link in the browser and a `file://` link in an Editor tab, at the line its
   `#L<n>` names. The Files viewer and the Editor tab save their scroll offset in the tab
@@ -454,8 +455,9 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   service (semantic errors such as unresolved imports, IntelliSense, hover types, signature
   help, references, rename, formatting), JSON schemas (validation, completion, hover: a file
   whose root object names a `$schema` gets no JSON completions, where Monaco's completes
-  the keywords of the JSON Schema drafts it has built in), CSS hover documentation, CSS
-  value and selector completion, the CSS parser's errors and value lint, HTML tag rename
+  the keywords of the JSON Schema drafts it has built in), the CSS worker's hover over
+  selectors (their specificity), at-rules and pseudo-classes, CSS value and selector
+  completion, the CSS parser's errors and value lint, HTML tag rename
   (F2), and the CSS and HTML formatters are missing. A problem's hover shows its message
   without the source and code Monaco adds after it (`json(513)`, `(1005)`). Suggestions have
   no details pane: Monaco's (its Read More button, or Ctrl+Space while they show) holds the

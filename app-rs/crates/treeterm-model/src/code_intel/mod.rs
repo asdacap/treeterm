@@ -7,8 +7,8 @@
 //!   ported.
 //! - TypeScript and JavaScript ([`syntax`]): syntax errors, read from the tree-sitter
 //!   grammars GPUI Kit highlights them with.
-//! - CSS, SCSS and Less ([`css`]): colours, property completions, and (CSS) the lint
-//!   warnings about rules and declarations.
+//! - CSS, SCSS and Less ([`css`]): colours, property completions, a declaration's property
+//!   documented on hover, and (CSS) the lint warnings about rules and declarations.
 //! - HTML ([`html`]): completions, hover documentation and matching tag highlights, over the
 //!   worker's scanner and parser, ported.
 //! - Every language ([`links`]): the URLs the base editor worker links, and where Monaco's
@@ -107,11 +107,12 @@ pub struct Hover {
 }
 
 /// What the language worker of Monaco's `language` shows on hover at byte `offset` of `text`:
-/// HTML's documentation of elements, attributes, values and character entities. `None`
-/// elsewhere, and in other languages.
+/// HTML's documentation of elements, attributes, values and character entities; CSS's of a
+/// declaration's property. `None` elsewhere, and in other languages.
 pub fn hover(language: &str, text: &str, offset: usize) -> Option<Hover> {
     match language {
         "html" => html::hover(text, offset),
+        "css" | "scss" | "less" => css::hover(language, text, offset),
         _ => None,
     }
 }
