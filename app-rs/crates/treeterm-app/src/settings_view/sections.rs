@@ -186,6 +186,12 @@ impl SettingsView {
                 cx.notify();
             }),
         );
+        // `rows={4}` and `rows={3}`, `resize: vertical`.
+        let system_prompt = ui::text_area(&self.inputs.analyzer_system_prompt, cx);
+        let system_prompt = ui::tabbing_text_area(ui::rows_text_area("system-prompt", system_prompt, 4, window, cx));
+        let title_system_prompt = ui::text_area(&self.inputs.title_system_prompt, cx);
+        let title_system_prompt =
+            ui::tabbing_text_area(ui::rows_text_area("title-system-prompt", title_system_prompt, 3, window, cx));
         section()
             .child(group(
                 "Base URL",
@@ -225,7 +231,7 @@ impl SettingsView {
             .child(
                 group(
                     "System Prompt",
-                    ui::tabbing_text_area(ui::text_area(&self.inputs.analyzer_system_prompt, cx)),
+                    system_prompt,
                     Some(
                         "Context and policy for the analyzer. Supports {{cwd}} and {{safe_paths}} template \
                          variables. Do not list the states here: Chat Completions appends the output format and \
@@ -245,7 +251,7 @@ impl SettingsView {
             .child(
                 group(
                     "Title System Prompt",
-                    ui::tabbing_text_area(ui::text_area(&self.inputs.title_system_prompt, cx)),
+                    title_system_prompt,
                     Some("System prompt for auto-generating workspace titles from terminal output."),
                     cx,
                 )
@@ -326,7 +332,9 @@ impl SettingsView {
                 move |window, cx| area.update(cx, |input, cx| input.focus(window, cx)),
                 cx,
             );
+            // `rows={2}`, `resize: vertical`.
             let area = ui::text_area(input, cx).aria_label(format!("{} criterion", state.as_str()));
+            let area = ui::rows_text_area(("criterion", index), area, 2, window, cx);
             // `.settings-criterion`: 8px 0 4px margins, the reset button at its own width.
             list = list.child(
                 div()

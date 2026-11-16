@@ -136,13 +136,11 @@ impl Inputs {
         let prefix_timeout = line(texts.prefix_timeout, "", false);
         let action_keys = texts.action_keys.map(|key| line(key, "", false));
         let github_pat = line(texts.github_pat, "ghp_...", true);
-        // `rows`: 4, 2 and 3 lines, growing as Electron's `resize: vertical` lets one drag.
-        let mut area = |text: String, rows: usize| {
-            cx.new(|cx| TextareaState::new(window, cx).auto_grow(rows, 12).default_value(text))
-        };
-        let analyzer_system_prompt = area(texts.analyzer_system_prompt, 4);
-        let criteria = texts.criteria.map(|text| area(text, 2));
-        let title_system_prompt = area(texts.title_system_prompt, 3);
+        // Shown `rows` lines tall, and resizable (`render_llm`).
+        let mut area = |text: String| cx.new(|cx| TextareaState::new(window, cx).default_value(text));
+        let analyzer_system_prompt = area(texts.analyzer_system_prompt);
+        let criteria = texts.criteria.map(&mut area);
+        let title_system_prompt = area(texts.title_system_prompt);
         let _criteria_changes = criteria
             .iter()
             .map(|state| {
@@ -975,6 +973,48 @@ mod tests {
         click("classifier-provider-label", cx);
         assert!(cx.update(|window, cx| view.read(cx).provider_focus.is_focused(window)));
         assert!(!menu_open(cx));
+    }
+
+    /// The analyzer's textareas are Electron's `rows` tall (System Prompt 4 lines, each
+    /// criterion 2, Title System Prompt 3) and resize from their corner. Electron mounts a
+    /// section afresh each time it is shown, so one shown again is back to its rows.
+    #[gpui_kit::test]
+    fn the_analyzer_textareas_show_their_rows_and_resize_until_the_section_changes(cx: &mut TestAppContext) {
+        use gpui_kit::{Modifiers, MouseButton, point};
+        let tall = gpui_kit::Bounds::new(point(px(0.), px(0.)), gpui_kit::size(px(1000.), px(4000.)));
+        let options = WindowOptions { window_bounds: Some(gpui_kit::WindowBounds::Windowed(tall)), ..Default::default() };
+        let (cx, _, view) = dialog_in(options, cx);
+        show(Section::Llm, cx, &view);
+        let draw = |cx: &mut VisualTestContext| {
+            // The dialog takes the section's height, measured as it is drawn.
+            for _ in 0..2 {
+                cx.update(|window, cx| window.draw(cx).clear(cx));
+                cx.run_until_parked();
+            }
+        };
+        let bounds = |selector: &'static str, cx: &mut VisualTestContext| {
+            draw(cx);
+            cx.debug_bounds(selector).unwrap_or_else(|| panic!("{selector} is drawn"))
+        };
+        let height = |selector: &'static str, cx: &mut VisualTestContext| f32::from(bounds(selector, cx).size.height);
+        assert_eq!(height("system-prompt", cx), 78.);
+        assert_eq!(height("criterion-0", cx), 48.);
+        assert_eq!(height("criterion-6", cx), 48.);
+        assert_eq!(height("title-system-prompt", cx), 63.);
+
+        let from = bounds("system-prompt", cx).bottom_right() - point(px(5.), px(5.));
+        cx.simulate_mouse_down(from, MouseButton::Left, Modifiers::none());
+        cx.simulate_mouse_move(from + point(px(0.), px(10.)), MouseButton::Left, Modifiers::none());
+        cx.simulate_mouse_move(from + point(px(0.), px(40.)), MouseButton::Left, Modifiers::none());
+        cx.simulate_mouse_up(from + point(px(0.), px(40.)), MouseButton::Left, Modifiers::none());
+        assert_eq!(height("system-prompt", cx), 118.);
+        assert_eq!(height("criterion-0", cx), 48.);
+
+        show(Section::General, cx, &view);
+        draw(cx);
+        assert!(cx.debug_bounds("system-prompt").is_none(), "the LLM section is not drawn");
+        show(Section::Llm, cx, &view);
+        assert_eq!(height("system-prompt", cx), 78.);
     }
 
     /// The analyzer's controls carry Electron's accessible names: its `aria-label`s and the

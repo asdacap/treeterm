@@ -333,7 +333,9 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   the editor has no minimap and cannot open space between lines, so the Files viewer lists
   its file's review comments (and the comment box) in a panel under the editor instead of
   Monaco's view zones; selects open a Kit menu, not the native popup (a focused one has no
-  type-ahead); textareas have no resize grip; GPUI has no backdrop filter, so the prefix-mode
+  type-ahead); the comment box and the Workspace Settings description have no resize grip,
+  and Settings' and Add Child's textareas resize down to one line, where Chromium's go down
+  to none; GPUI has no backdrop filter, so the prefix-mode
   overlay does not blur what is behind it; GPUI has no animated scrolling, so the Chat tab
   jumps to its last message where Electron's smooth-scrolls there; GPUI does not scroll a
   focused control into view, so Tab can focus a Settings field below the panel's fold. Off

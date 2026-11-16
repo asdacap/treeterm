@@ -564,6 +564,10 @@ pub fn text_input(state: &Entity<InputState>, cx: &App) -> Input {
         .rounded(px(4.))
 }
 
+/// The lines of a [`text_area`]: Chromium sets a `<textarea>`'s 13px text in `normal` lines
+/// 15px high (an `<input>`'s line is 15.5px).
+const TEXT_AREA_LINE: f32 = 15.;
+
 /// `<textarea class="settings-input">`: as [`text_input`], several lines tall.
 pub fn text_area(state: &Entity<TextareaState>, cx: &App) -> Textarea {
     let c = colors(cx);
@@ -572,10 +576,31 @@ pub fn text_area(state: &Entity<TextareaState>, cx: &App) -> Textarea {
         .with_size(Size::Medium)
         .px(px(2.))
         .text_size(px(BODY))
-        .line_height(px(15.5))
+        .line_height(px(TEXT_AREA_LINE))
         .bg(c.bg_tertiary)
         .border_color(c.border)
         .rounded(px(4.))
+}
+
+/// The height of a [`text_area`] showing `rows` lines: 8px of padding above and below them,
+/// and the border.
+pub fn text_area_height(rows: usize) -> f32 {
+    rows as f32 * TEXT_AREA_LINE + 18.
+}
+
+/// `<textarea rows={rows} style={{ resize: 'vertical' }}>`: `textarea` (a [`text_area`])
+/// `rows` lines tall, [`resizable`] down to one line (Chromium's goes down to none). The
+/// height it is dragged to lasts while it is shown, as a mounted element's does.
+pub fn rows_text_area(
+    id: impl Into<ElementId>,
+    textarea: Textarea,
+    rows: usize,
+    window: &mut Window,
+    cx: &mut App,
+) -> Div {
+    let id: ElementId = id.into();
+    let height = window.use_keyed_state((id.clone(), "height"), cx, |_, _| TextareaHeight::new(text_area_height(rows)));
+    resizable(id, textarea, &height, text_area_height(1), cx)
 }
 
 /// A native (Chromium, macOS) checkbox: white with a #767676 border, #0075ff with a white
@@ -908,6 +933,118 @@ pub fn pane_text_area(
         .text_size(px(style.size))
         .line_height(normal_line(style.size))
         .when(style.mono, |d| d.font_family(MONO))
+}
+
+/// Chromium's resizer: the square inside a textarea's bottom-right border corner that a
+/// drag resizes it from.
+const RESIZER: f32 = 15.;
+
+/// A [`resizable`] textarea's height, and how its resizer was last pressed.
+pub struct TextareaHeight {
+    height: f32,
+    /// Where the pointer pressed the resizer (its y).
+    pressed: f32,
+    /// How far below the pointer the drag from that press holds the bottom edge.
+    below: f32,
+}
+
+impl TextareaHeight {
+    pub fn new(height: f32) -> Self {
+        Self { height, pressed: 0., below: 0. }
+    }
+}
+
+/// Dragging the resizer of the [`resizable`] textarea whose height this is.
+#[derive(Clone)]
+struct TextareaResize(Entity<TextareaHeight>);
+
+impl gpui_kit::Render for TextareaResize {
+    fn render(&mut self, _: &mut Window, _: &mut gpui_kit::Context<Self>) -> impl IntoElement {
+        gpui_kit::Empty
+    }
+}
+
+/// A `<textarea>` with `resize: vertical`: `textarea` as tall as `height` holds (its text
+/// scrolls inside), with Chromium's resizer in its bottom-right corner. A drag from the
+/// resizer keeps the bottom edge where it was under the pointer at the press, wherever the
+/// textarea moves meanwhile (a centred dialog grows both ways), down to `min`, under an
+/// up-down cursor. The resizer takes the mouse from what is under it, so a press on it
+/// neither selects text nor moves the focus. `id` names the textarea among those shown
+/// with it.
+pub fn resizable(
+    id: impl Into<ElementId>,
+    textarea: Textarea,
+    height: &Entity<TextareaHeight>,
+    min: f32,
+    cx: &App,
+) -> Div {
+    use gpui_kit::{CursorStyle, DragMoveEvent, MouseButton};
+    let id: ElementId = id.into();
+    let selector = format!("{id}");
+    let (pressed, resized) = (height.clone(), height.clone());
+    div()
+        .relative()
+        .w_full()
+        .debug_selector(move || selector)
+        // The textarea's own bounds, as last laid out.
+        .on_drag_move(move |event: &DragMoveEvent<TextareaResize>, window, cx| {
+            if event.drag(cx).0 != resized {
+                return;
+            }
+            let (y, top) = (f32::from(event.event.position.y), f32::from(event.bounds.top()));
+            resized.update(cx, |area, _| area.height = (y - top + area.below).max(min));
+            window.refresh();
+        })
+        .child(textarea.h(px(height.read(cx).height)))
+        .child(
+            div()
+                .id((id, "resizer"))
+                .absolute()
+                .right(px(1.))
+                .bottom(px(1.))
+                .size(px(RESIZER))
+                .cursor(CursorStyle::ResizeUpDown)
+                // A wheel over it still scrolls the text, as in Chromium.
+                .block_mouse_except_scroll()
+                .on_mouse_down(MouseButton::Left, move |event, _, cx| {
+                    let y = f32::from(event.position.y);
+                    pressed.update(cx, |area, _| area.pressed = y);
+                })
+                // The drag starts a few pixels past the press, before anything has moved: the
+                // resizer is `offset` above the pointer, on the 1px bottom border.
+                .on_drag(TextareaResize(height.clone()), |drag, offset, window, cx| {
+                    let bottom = f32::from(window.mouse_position().y - offset.y) + RESIZER + 1.;
+                    drag.0.update(cx, |area, _| area.below = bottom - area.pressed);
+                    cx.new(|_| drag.clone())
+                })
+                .child(resizer_glyph()),
+        )
+}
+
+/// Chromium's resizer glyph (`DrawPlatformResizerImage`): two diagonal strokes in the
+/// corner's bottom-right 8px, each black at 60% with a white twin at 60% a pixel lower, so
+/// that it shows on any background.
+fn resizer_glyph() -> impl IntoElement {
+    use gpui_kit::{PathBuilder, point};
+    gpui_kit::canvas(
+        |_, _, _| {},
+        |bounds, (), window, _| {
+            let corner = bounds.bottom_right();
+            let at = |left: f32, up: f32| point(corner.x - px(left), corner.y - px(up));
+            for (lower, color) in [(0., gpui_kit::black().opacity(0.6)), (1., gpui_kit::white().opacity(0.6))] {
+                let mut strokes = PathBuilder::stroke(px(1.));
+                strokes.move_to(at(1.5, 7.5 - lower));
+                strokes.line_to(at(8. - lower, 1.));
+                strokes.move_to(at(1.5, 4. - lower));
+                strokes.line_to(at(4. - lower, 1.));
+                match strokes.build() {
+                    Ok(path) => window.paint_path(path, color),
+                    Err(error) => tracing::error!(%error, "cannot draw a textarea's resizer"),
+                }
+            }
+        },
+    )
+    .size_full()
 }
 
 /// A `<select>` drawn as its CSS (background, border, padding) with Chromium's chevron;
@@ -1858,5 +1995,112 @@ mod tests {
         assert_eq!(Rc::strong_count(&fills), 1, "and the observation with it");
         assert_eq!(fills.get(), 1);
         drop(menu);
+    }
+
+    /// A [`rows_text_area`] four lines tall, shown while `rows_shown`, above a [`resizable`]
+    /// one at least 120 high whose height the view keeps.
+    struct Areas {
+        rows: Entity<TextareaState>,
+        kept: Entity<TextareaState>,
+        kept_height: Entity<TextareaHeight>,
+        rows_shown: bool,
+    }
+
+    impl Render for Areas {
+        fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            let rows = self.rows_shown.then(|| rows_text_area("rows", text_area(&self.rows, cx), 4, window, cx));
+            let kept = resizable("kept", text_area(&self.kept, cx), &self.kept_height, 120., cx);
+            div().w(px(300.)).p(px(20.)).flex().flex_col().gap(px(10.)).children(rows).child(kept)
+        }
+    }
+
+    fn areas(cx: &mut TestAppContext) -> (Entity<Areas>, &mut VisualTestContext) {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            crate::theme::install(cx);
+        });
+        let (view, cx) = cx.add_window_view(|window, cx| Areas {
+            rows: cx.new(|cx| TextareaState::new(window, cx)),
+            kept: cx.new(|cx| TextareaState::new(window, cx)),
+            kept_height: cx.new(|_| TextareaHeight::new(120.)),
+            rows_shown: true,
+        });
+        (view, cx)
+    }
+
+    /// The bounds of the textarea `selector` names, drawn afresh.
+    fn area(selector: &'static str, cx: &mut VisualTestContext) -> gpui_kit::Bounds<gpui_kit::Pixels> {
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.debug_bounds(selector).unwrap_or_else(|| panic!("{selector} is drawn"))
+    }
+
+    /// Press the resizer of the textarea `selector` names 5px inside its corner and drag it
+    /// `dy` down (GPUI starts the drag 10px on): the textarea's height after.
+    fn drag_resizer(selector: &'static str, dy: f32, cx: &mut VisualTestContext) -> f32 {
+        use gpui_kit::{Modifiers, MouseButton, point};
+        let from = area(selector, cx).bottom_right() - point(px(5.), px(5.));
+        let to = |dy: f32| from + point(px(0.), px(dy));
+        cx.simulate_mouse_down(from, MouseButton::Left, Modifiers::none());
+        cx.simulate_mouse_move(to(10. * dy.signum()), MouseButton::Left, Modifiers::none());
+        cx.simulate_mouse_move(to(dy), MouseButton::Left, Modifiers::none());
+        cx.simulate_mouse_up(to(dy), MouseButton::Left, Modifiers::none());
+        f32::from(area(selector, cx).size.height)
+    }
+
+    /// Electron's `resize: vertical`: the bottom edge follows a drag from the resizer, no
+    /// higher than the minimum; the other textarea keeps its height.
+    #[gpui_kit::test]
+    fn a_resizable_textarea_follows_a_drag_of_its_resizer_down_to_its_minimum(cx: &mut TestAppContext) {
+        let (_, cx) = areas(cx);
+        assert_eq!(f32::from(area("rows", cx).size.height), 78., "four 15px lines, the padding and the border");
+        assert_eq!(f32::from(area("kept", cx).size.height), 120.);
+
+        assert_eq!(drag_resizer("rows", 100., cx), 178.);
+        assert_eq!(f32::from(area("kept", cx).size.height), 120.);
+        assert_eq!(drag_resizer("rows", -500., cx), text_area_height(1), "one line");
+        assert_eq!(drag_resizer("kept", 50., cx), 170.);
+        assert_eq!(drag_resizer("kept", -500., cx), 120.);
+        assert_eq!(f32::from(area("rows", cx).size.height), text_area_height(1));
+    }
+
+    /// A press on the resizer, as in Chromium, neither focuses its textarea nor takes the
+    /// focus from another.
+    #[gpui_kit::test]
+    fn a_press_on_the_resizer_leaves_the_focus_alone(cx: &mut TestAppContext) {
+        let (view, cx) = areas(cx);
+        let focused = |state: &Entity<TextareaState>, cx: &mut VisualTestContext| {
+            cx.update(|window, cx| gpui_kit::Focusable::focus_handle(state.read(cx), cx).is_focused(window))
+        };
+        let (rows, kept) = cx.update(|_, cx| (view.read(cx).rows.clone(), view.read(cx).kept.clone()));
+        drag_resizer("rows", 30., cx);
+        assert!(!focused(&rows, cx));
+
+        let inside = area("kept", cx).center();
+        cx.simulate_click(inside, gpui_kit::Modifiers::none());
+        assert!(focused(&kept, cx));
+        drag_resizer("rows", 30., cx);
+        assert!(focused(&kept, cx), "still focused");
+        assert!(!focused(&rows, cx));
+    }
+
+    /// A [`rows_text_area`] is dragged to a height that lasts while it is shown, and is back
+    /// to its rows once shown again, as Electron's is when it mounts again.
+    #[gpui_kit::test]
+    fn a_rows_text_area_is_back_to_its_rows_once_shown_again(cx: &mut TestAppContext) {
+        let (view, cx) = areas(cx);
+        assert_eq!(drag_resizer("rows", 40., cx), 118.);
+        assert_eq!(f32::from(area("rows", cx).size.height), 118., "kept while shown");
+
+        let show = |shown: bool, cx: &mut VisualTestContext| {
+            view.update(cx, |view, cx| {
+                view.rows_shown = shown;
+                cx.notify();
+            });
+        };
+        show(false, cx);
+        assert!(area("kept", cx).size.height > px(0.));
+        assert!(cx.debug_bounds("rows").is_none());
+        show(true, cx);
+        assert_eq!(f32::from(area("rows", cx).size.height), 78.);
     }
 }

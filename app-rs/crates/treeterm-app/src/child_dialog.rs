@@ -47,8 +47,7 @@ impl ChildDialog {
         let model = cx.new(|cx| ChildDialogModel::new(session, parent_id, ChildTab::Branch, cx));
         let name = cx.new(|cx| InputState::new(window, cx).placeholder("Workspace name..."));
         let search = cx.new(|cx| InputState::new(window, cx).placeholder("Search branches..."));
-        let description =
-            cx.new(|cx| TextareaState::new(window, cx).auto_grow(2, 12).placeholder("Optional description..."));
+        let description = cx.new(|cx| TextareaState::new(window, cx).placeholder("Optional description..."));
         // Enter goes to the whole dialog: `enter`.
         let on_input = |_: &mut Self, event: &InputEvent, cx: &mut Context<Self>| match event {
             InputEvent::Change => cx.notify(),
@@ -479,12 +478,10 @@ impl Render for ChildDialog {
             ChildTab::Recent => vec![Self::field("Name", name_input(), cx).into_any_element(), self.list(cx)],
             ChildTab::Branch | ChildTab::Remote | ChildTab::Pr => vec![search().into_any_element(), self.list(cx)],
         };
+        // `rows={2}` and `resize: vertical`: resizable even while disabled, as in Chromium.
         let description = (tab != ChildTab::Pr).then(|| {
-            Self::field(
-                "Description",
-                ui::text_area(&self.description, cx).bg(bg_primary).disabled(busy),
-                cx,
-            )
+            let area = ui::text_area(&self.description, cx).bg(bg_primary).disabled(busy);
+            Self::field("Description", ui::rows_text_area("child-description", area, 2, window, cx), cx)
         });
         // `.create-child-detached-checkbox`: a 14px checkbox, secondary label; its 12px top
         // margin collapses into the 16px above it. Space toggles it; Enter is the dialog's

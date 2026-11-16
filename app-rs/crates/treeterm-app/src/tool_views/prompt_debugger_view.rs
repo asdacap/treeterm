@@ -10,13 +10,17 @@ use treeterm_core::settings::ClassifierProvider;
 use treeterm_model::settings_store::SettingsStore;
 use treeterm_model::tool_tabs::prompt_debugger::{DebugMode, PromptDebugger, PromptDebuggerEvent, REASONING_CHOICES};
 
-use crate::ui::{FieldStyle, MONO, field, normal_line, pane_select_box, pane_text_area, text_button};
+use crate::ui::{
+    FieldStyle, MONO, TextareaHeight, field, normal_line, pane_select_box, pane_text_area, resizable, text_button,
+};
 
 /// The inline-styled controls' colours (`#1e1e1e` fields, `#333` borders, `#aaa` labels).
 const FIELD_BG: u32 = 0x1e1e1e;
 const FIELD_BORDER: u32 = 0x333333;
 const FIELD_TEXT: u32 = 0xd4d4d4;
 const LABEL: u32 = 0xaaaaaa;
+/// The textareas' `minHeight`.
+const MIN_HEIGHT: f32 = 120.;
 
 /// The editable fields of one mode.
 struct ModeInputs {
@@ -30,6 +34,11 @@ pub struct PromptDebuggerView {
     analyzer: ModeInputs,
     title: ModeInputs,
     buffer: Entity<TextareaState>,
+    /// The System Prompt textarea's height, shared by both modes (Electron's is one element
+    /// whose text changes with the mode), and the Buffer's: `minHeight: 120` and
+    /// `resize: vertical`.
+    prompt_height: Entity<TextareaHeight>,
+    buffer_height: Entity<TextareaHeight>,
     /// The pane's own focus. A mouse-down anywhere in the pane but a field moves focus here
     /// (Electron: a mousedown on non-editable content blurs the textarea), so after a drag
     /// over the output Cmd/Ctrl+C reaches the Kit root's Copy rather than the field, whose
@@ -47,7 +56,7 @@ impl PromptDebuggerView {
                 (debugger.model_for(mode).to_owned(), debugger.prompt(mode).to_owned())
             };
             let model_input = cx.new(|cx| InputState::new(window, cx).default_value(model_text));
-            let prompt = cx.new(|cx| TextareaState::new(window, cx).rows(8).default_value(prompt_text));
+            let prompt = cx.new(|cx| TextareaState::new(window, cx).default_value(prompt_text));
             let debugger = model.clone();
             subscriptions.push(cx.subscribe(&model_input, move |_, input, event: &InputEvent, cx| {
                 if let InputEvent::Change = event {
@@ -68,7 +77,7 @@ impl PromptDebuggerView {
         let title = inputs(DebugMode::Title, window, cx);
         let buffer_text = model.read(cx).buffer().to_owned();
         let buffer = cx.new(|cx| {
-            TextareaState::new(window, cx).rows(8).placeholder("Paste terminal buffer lines here...").default_value(buffer_text)
+            TextareaState::new(window, cx).placeholder("Paste terminal buffer lines here...").default_value(buffer_text)
         });
         let debugger = model.clone();
         subscriptions.push(cx.subscribe(&buffer, move |_, input, event: &InputEvent, cx| {
@@ -84,7 +93,17 @@ impl PromptDebuggerView {
             }
             PromptDebuggerEvent::SetActivity { .. } => {}
         }));
-        Self { model, settings, analyzer, title, buffer, focus: cx.focus_handle(), _subscriptions: subscriptions }
+        Self {
+            model,
+            settings,
+            analyzer,
+            title,
+            buffer,
+            prompt_height: cx.new(|_| TextareaHeight::new(MIN_HEIGHT)),
+            buffer_height: cx.new(|_| TextareaHeight::new(MIN_HEIGHT)),
+            focus: cx.focus_handle(),
+            _subscriptions: subscriptions,
+        }
     }
 
     fn inputs(&self, mode: DebugMode) -> &ModeInputs {
@@ -161,6 +180,10 @@ impl Render for PromptDebuggerView {
                 .child(text)
                 .child(control)
         };
+        // `minHeight: 120`, `resize: vertical`.
+        let area_style = field_style(MIN_HEIGHT, (8., 8.));
+        let prompt_area = pane_text_area(&prompt_input, area_style, window, cx).text_color(rgb(FIELD_TEXT));
+        let buffer_area = pane_text_area(&self.buffer, area_style, window, cx).text_color(rgb(FIELD_TEXT));
         v_flex()
             .id("prompt-debugger")
             .track_focus(&self.focus)
@@ -214,9 +237,9 @@ impl Render for PromptDebuggerView {
                             })),
                     ),
             )
-            .child(pane_text_area(&prompt_input, field_style(120., (8., 8.)), window, cx).text_color(rgb(FIELD_TEXT)))
+            .child(resizable("debugger-prompt", prompt_area, &self.prompt_height, MIN_HEIGHT, cx))
             .child(label("Buffer (paste from debug console)".into()))
-            .child(pane_text_area(&self.buffer, field_style(120., (8., 8.)), window, cx).text_color(rgb(FIELD_TEXT)))
+            .child(resizable("debugger-buffer", buffer_area, &self.buffer_height, MIN_HEIGHT, cx))
             .child(
                 h_flex()
                     .gap(px(12.))
@@ -310,11 +333,10 @@ mod tests {
         cx.update(|window, cx| view.read(cx).buffer.read(cx).focus_handle(cx).is_focused(window))
     }
 
-    /// Electron: a mousedown on the output blurs the textarea, so Cmd/Ctrl+C copies the
-    /// selected output. Here a field's own Copy takes the keystroke while it has focus,
-    /// even with nothing selected.
-    #[gpui_kit::test]
-    fn a_drag_over_the_output_takes_focus_from_the_fields_so_copy_copies_it(cx: &mut TestAppContext) {
+    /// A debugger with default settings, its view in a window, drawn.
+    fn debugger_window(
+        cx: &mut TestAppContext,
+    ) -> (Entity<PromptDebugger>, Entity<PromptDebuggerView>, &mut VisualTestContext) {
         let (debugger, window, view) = cx.update(|cx| {
             gpui_kit::init(cx);
             crate::theme::install(cx);
@@ -330,6 +352,49 @@ mod tests {
         });
         let cx = VisualTestContext::from_window(window, cx).into_mut();
         draw(cx);
+        (debugger, view, cx)
+    }
+
+    /// Electron's System Prompt and Buffer textareas (`minHeight: 120`, `resize: vertical`):
+    /// each resizes from its corner, not below 120; the System Prompt is one textarea whose
+    /// text changes with the mode, so its height outlasts a mode switch.
+    #[gpui_kit::test]
+    fn the_textareas_resize_down_to_120_and_the_prompt_keeps_its_height_across_modes(cx: &mut TestAppContext) {
+        let (debugger, _view, cx) = debugger_window(cx);
+        let bounds = |selector: &'static str, cx: &mut VisualTestContext| {
+            draw(cx);
+            cx.debug_bounds(selector).unwrap_or_else(|| panic!("{selector} is drawn"))
+        };
+        let height = |selector: &'static str, cx: &mut VisualTestContext| f32::from(bounds(selector, cx).size.height);
+        let drag = |selector: &'static str, dy: f32, cx: &mut VisualTestContext| {
+            let from = bounds(selector, cx).bottom_right() - point(px(5.), px(5.));
+            let to = |dy: f32| from + point(px(0.), px(dy));
+            cx.simulate_mouse_down(from, MouseButton::Left, Modifiers::none());
+            cx.simulate_mouse_move(to(10. * dy.signum()), MouseButton::Left, Modifiers::none());
+            cx.simulate_mouse_move(to(dy), MouseButton::Left, Modifiers::none());
+            cx.simulate_mouse_up(to(dy), MouseButton::Left, Modifiers::none());
+        };
+        assert_eq!((height("debugger-prompt", cx), height("debugger-buffer", cx)), (120., 120.));
+
+        drag("debugger-prompt", 100., cx);
+        assert_eq!((height("debugger-prompt", cx), height("debugger-buffer", cx)), (220., 120.));
+        cx.update(|_, cx| debugger.update(cx, |d, cx| d.set_mode(DebugMode::Title, cx)));
+        assert_eq!(height("debugger-prompt", cx), 220., "the Title prompt is as tall");
+        drag("debugger-prompt", -300., cx);
+        assert_eq!(height("debugger-prompt", cx), 120.);
+
+        drag("debugger-buffer", 60., cx);
+        assert_eq!((height("debugger-prompt", cx), height("debugger-buffer", cx)), (120., 180.));
+        drag("debugger-buffer", -300., cx);
+        assert_eq!(height("debugger-buffer", cx), 120.);
+    }
+
+    /// Electron: a mousedown on the output blurs the textarea, so Cmd/Ctrl+C copies the
+    /// selected output. Here a field's own Copy takes the keystroke while it has focus,
+    /// even with nothing selected.
+    #[gpui_kit::test]
+    fn a_drag_over_the_output_takes_focus_from_the_fields_so_copy_copies_it(cx: &mut TestAppContext) {
+        let (debugger, view, cx) = debugger_window(cx);
         let buffer = cx.update(|window, _| {
             window
                 .elements()
