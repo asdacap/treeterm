@@ -72,7 +72,8 @@ impl DefinitionProvider for GrepDefinitions {
 /// Give `editor` the Cmd/Ctrl+hover underline of `probe`'s file. A click on the underlined
 /// word puts the cursor on it and calls `go` with its offset, and sets `clicked` for the
 /// view's mouse-up handler, which would otherwise take the click as Cmd/Ctrl+click on the
-/// cursor (the Kit takes the press and leaves the cursor where it was).
+/// cursor (the Kit takes the press and leaves the cursor where it was). The element around
+/// the editor is a [`definition_frame`], which clears `clicked` at each press.
 pub(crate) fn install_definitions(
     editor: &Entity<EditorState>,
     probe: DefinitionProbe,
@@ -104,15 +105,22 @@ pub(crate) fn install_definitions(
     });
 }
 
-/// The element around `editor` drops the underline as soon as Cmd/Ctrl is released, as
-/// Monaco does (the Kit waits for the pointer to move).
-pub(crate) fn drop_underline_on_release(
+/// The element around `editor` (given [`install_definitions`] with `clicked`):
+/// - each press starts with `clicked` cleared, before the editor can take it as a click on
+///   the underline, so the flag tells about this press only. The mouse-up that reads it
+///   does not always come: the button may be released outside the element, or after go to
+///   definition switched to another tab.
+/// - the underline drops as soon as Cmd/Ctrl is released, as Monaco does (the Kit waits for
+///   the pointer to move).
+pub(crate) fn definition_frame(
     frame: gpui_kit::Stateful<gpui_kit::Div>,
     editor: &Entity<EditorState>,
+    clicked: &Rc<Cell<bool>>,
 ) -> gpui_kit::Stateful<gpui_kit::Div> {
     use gpui_kit::InteractiveElement as _;
     let editor = editor.downgrade();
-    frame.on_modifiers_changed(move |event, _, cx| {
+    let clicked = clicked.clone();
+    frame.capture_any_mouse_down(move |_, _, _| clicked.set(false)).on_modifiers_changed(move |event, _, cx| {
         if event.modifiers.secondary(cx) {
             return;
         }
@@ -173,7 +181,77 @@ pub(crate) fn install_word_suggestions(editor: &Entity<EditorState>, cx: &mut Ap
 
 #[cfg(test)]
 mod tests {
+    use std::cell::RefCell;
+    use std::sync::Arc;
+
+    use futures::StreamExt as _;
+    use futures::stream::BoxStream;
+    use gpui_kit::component::input::Editor;
+    use gpui_kit::prelude::*;
+    use gpui_kit::{Context, Modifiers, MouseButton, div, px};
+    use treeterm_core::exec::{ExecApi, ExecError, ExecEvent, ExecRequest};
+
     use super::*;
+
+    /// grep finds one definition, whatever is searched for.
+    struct GrepFindsOne;
+
+    impl ExecApi for GrepFindsOne {
+        fn start(&self, _: ExecRequest) -> BoxStream<'static, Result<ExecEvent, ExecError>> {
+            let found = ExecEvent::Stdout(b"./a.rs:1:fn helper() {}\n".to_vec());
+            futures::stream::iter([Ok(found), Ok(ExecEvent::Exit { code: 0 })]).boxed()
+        }
+    }
+
+    /// A code editor in its definition frame.
+    struct Host {
+        editor: Entity<EditorState>,
+        clicked: Rc<Cell<bool>>,
+    }
+
+    impl Render for Host {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            definition_frame(div().id("frame"), &self.editor, &self.clicked)
+                .w(px(400.))
+                .h(px(300.))
+                .child(Editor::new(&self.editor).h_full())
+        }
+    }
+
+    #[gpui_kit::test]
+    fn each_press_tells_only_whether_it_went_to_the_underline(cx: &mut gpui_kit::TestAppContext) {
+        cx.update(gpui_kit::init);
+        let text = "use a::helper;\nfn main() { helper() }\n";
+        let clicked = Rc::new(Cell::new(false));
+        let (host, cx) = cx.add_window_view(|window, cx| Host {
+            editor: cx.new(|cx| EditorState::new(window, cx).language("rust").default_value(text)),
+            clicked: clicked.clone(),
+        });
+        let editor = cx.update(|_, cx| host.read(cx).editor.clone());
+        let gone = Rc::new(RefCell::new(Vec::new()));
+        cx.update(|_, cx| {
+            let probe = DefinitionProbe::new(Arc::new(GrepFindsOne), "/w".into(), "/w/b.rs".into());
+            let gone = gone.clone();
+            install_definitions(&editor, probe, clicked.clone(), move |offset, _| gone.borrow_mut().push(offset), cx);
+        });
+        cx.run_until_parked();
+        let helper = text.rfind("helper").unwrap();
+        let word = cx.update(|_, cx| editor.read(cx).range_to_bounds(&(helper..helper + 6))).expect("laid out").center();
+
+        // A press on the underline was released outside the editor: no mouse-up read the flag.
+        clicked.set(true);
+        cx.simulate_mouse_down(word, MouseButton::Left, Modifiers::none());
+        assert!(!clicked.get(), "a plain press is not a click on the underline");
+        cx.simulate_mouse_up(word, MouseButton::Left, Modifiers::none());
+
+        // Holding Cmd/Ctrl over the word underlines it; a press there follows it.
+        let secondary = cx.update(|_, cx| Modifiers::secondary_key(cx));
+        cx.simulate_mouse_move(word, None, secondary);
+        cx.run_until_parked();
+        cx.simulate_mouse_down(word, MouseButton::Left, secondary);
+        assert!(clicked.get(), "the press went to the underline");
+        assert_eq!(*gone.borrow(), [helper]);
+    }
 
     #[test]
     fn a_definition_target_names_the_words_offset() {

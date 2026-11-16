@@ -448,7 +448,7 @@ pub struct FileBrowserView {
     editor_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
     /// The pointer is over the editor ([`pointer_over`]).
     pointer_over: PointerOver,
-    /// The last press went to an underlined definition ([`crate::editor_hooks`]).
+    /// The current press went to an underlined definition ([`crate::editor_hooks::definition_frame`]).
     definition_clicked: Rc<Cell<bool>>,
     draft_input: Option<DraftInput>,
     comments_scroll: gpui_kit::ScrollHandle,
@@ -1534,9 +1534,10 @@ impl FileBrowserView {
                     .on_action(cx.listener(Self::on_search_word))
                     .children(overlay)
                     .child(
-                        crate::editor_hooks::drop_underline_on_release(
+                        crate::editor_hooks::definition_frame(
                             pointer_over(div().id("file-viewer-editor"), &self.pointer_over),
                             &editor,
+                            &self.definition_clicked,
                         )
                         .relative()
                         .flex_1()

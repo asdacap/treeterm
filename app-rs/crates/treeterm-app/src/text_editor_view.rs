@@ -64,7 +64,7 @@ pub struct TextEditorView {
     gutter: Option<gpui_kit::component::input::GutterDecorationCollection>,
     /// The pointer is over the editor ([`crate::file_browser_view::pointer_over`]).
     pointer_over: PointerOver,
-    /// The last press went to an underlined definition ([`crate::editor_hooks`]).
+    /// The current press went to an underlined definition ([`crate::editor_hooks::definition_frame`]).
     definition_clicked: Rc<Cell<bool>>,
     preview_scroll: gpui_kit::ScrollHandle,
     _subscriptions: Vec<Subscription>,
@@ -262,9 +262,10 @@ impl Render for TextEditorView {
                         .size_full()
                         .children(overlay)
                         .child(
-                            crate::editor_hooks::drop_underline_on_release(
+                            crate::editor_hooks::definition_frame(
                                 crate::file_browser_view::pointer_over(div().id("text-editor"), &self.pointer_over),
                                 &editor,
+                                &self.definition_clicked,
                             )
                             .relative()
                             .flex_1()

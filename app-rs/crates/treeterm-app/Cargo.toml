@@ -44,5 +44,7 @@ workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+# A scripted `ExecApi` for the editor hooks' tests.
+futures.workspace = true
 # `TestAppContext`, to lay out views in tests.
 gpui-kit = { workspace = true, features = ["test-support"] }
