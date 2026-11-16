@@ -348,6 +348,135 @@ impl ReadingOrder {
         self.0 += 1;
         gpui_kit::base::SelectableText::new(id, text).document_order(self.0)
     }
+
+    /// One line of text to be cut short by its parent's `truncate()` (see [`EllipsizedText`]).
+    pub fn ellipsized(&mut self, id: impl Into<ElementId>, text: impl Into<SharedString>) -> EllipsizedText {
+        self.0 += 1;
+        let text = text.into();
+        EllipsizedText { id: id.into(), shown: gpui_kit::StyledText::new(text.clone()), text, order: self.0 }
+    }
+}
+
+/// The ellipsis `Styled::truncate` ends a line it cuts short with.
+const ELLIPSIS: &str = "…";
+
+/// What a selection of `range` in `shown`, `text` as laid out, copies: `shown` is `text`, or
+/// a start of it and the [`ELLIPSIS`] standing for the rest, which a selection taking in the
+/// ellipsis copies too, as Chromium's does.
+fn ellipsized_copy(text: &str, shown: &str, range: std::ops::Range<usize>) -> String {
+    let kept = if shown == text { text.len() } else { shown.len() - ELLIPSIS.len() };
+    let end = if range.end > kept { text.len() } else { range.end };
+    text[range.start.min(kept)..end].to_owned()
+}
+
+/// One line of text, in a [`ReadingOrder`], cut short with an ellipsis where it does not fit
+/// (`text-overflow: ellipsis`: a parent's `truncate()`), that can still be selected and
+/// copied, as in Chromium: the part shown is selected as laid out, and a selection reaching
+/// the ellipsis copies the rest of the line too. GPUI Kit's `SelectableText` takes no
+/// selection once cut short.
+pub struct EllipsizedText {
+    id: ElementId,
+    text: SharedString,
+    /// The text as laid out, cut short.
+    shown: gpui_kit::StyledText,
+    order: u64,
+}
+
+/// What an [`EllipsizedText`] keeps between frames: its part in the window's selection, and
+/// what that part copies, as last painted.
+#[derive(Clone)]
+pub struct EllipsizedState {
+    handle: gpui_kit::base::TextSelectionHandle,
+    copied: std::rc::Rc<std::cell::RefCell<String>>,
+}
+
+impl IntoElement for EllipsizedText {
+    type Element = Self;
+
+    fn into_element(self) -> Self::Element {
+        self
+    }
+}
+
+impl gpui_kit::Element for EllipsizedText {
+    type RequestLayoutState = EllipsizedState;
+    type PrepaintState = gpui_kit::Hitbox;
+
+    fn id(&self) -> Option<ElementId> {
+        Some(self.id.clone())
+    }
+
+    fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        global_id: Option<&gpui_kit::GlobalElementId>,
+        inspector_id: Option<&gpui_kit::InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (gpui_kit::LayoutId, EllipsizedState) {
+        let text = self.text.clone();
+        let state = window.with_element_state(global_id.expect("an EllipsizedText has an id"), |kept, _| {
+            let state = kept.unwrap_or_else(|| {
+                let copied = std::rc::Rc::new(std::cell::RefCell::new(String::new()));
+                let handle = gpui_kit::base::TextSelectionHandle::new(text, cx);
+                let copy = copied.clone();
+                handle.copy_with(move |_| copy.borrow().clone(), cx);
+                EllipsizedState { handle, copied }
+            });
+            (state.clone(), state)
+        });
+        let (layout_id, ()) = self.shown.request_layout(global_id, inspector_id, window, cx);
+        (layout_id, state)
+    }
+
+    fn prepaint(
+        &mut self,
+        global_id: Option<&gpui_kit::GlobalElementId>,
+        inspector_id: Option<&gpui_kit::InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        state: &mut EllipsizedState,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> gpui_kit::Hitbox {
+        use gpui_kit::base::TextSelectionRegistration;
+        self.shown.prepaint(global_id, inspector_id, bounds, &mut (), window, cx);
+        let hitbox = window.insert_hitbox(bounds, gpui_kit::HitboxBehavior::Normal);
+        let registration = TextSelectionRegistration::new(hitbox.clone(), bounds)
+            .with_document_order(self.order)
+            .with_text_bounds(vec![bounds])
+            .with_rendered_element(&state.handle, window, cx);
+        state.handle.register(registration, window, cx);
+        hitbox
+    }
+
+    fn paint(
+        &mut self,
+        global_id: Option<&gpui_kit::GlobalElementId>,
+        inspector_id: Option<&gpui_kit::InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        state: &mut EllipsizedState,
+        _: &mut gpui_kit::Hitbox,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let layout = self.shown.layout().clone();
+        let shown = SharedString::from(layout.text());
+        let run = gpui_kit::base::TextSelectionRun::new(shown.clone(), layout.clone(), bounds).with_document_order(self.order);
+        let selected = state.handle.update_runs(&[run], cx).ranges().first().cloned().flatten();
+        let copied = selected.clone().map_or_else(String::new, |range| ellipsized_copy(&self.text, &shown, range));
+        *state.copied.borrow_mut() = copied;
+        if let Some(range) = selected
+            && let (Some(start), Some(end)) = (layout.position_for_index(range.start), layout.position_for_index(range.end))
+        {
+            let color = gpui_kit::base::Theme::global(cx).tokens.colors.selection;
+            let end = gpui_kit::point(end.x, end.y + layout.line_height());
+            window.paint_quad(gpui_kit::fill(Bounds::from_corners(start, end), color));
+        }
+        self.shown.paint(global_id, inspector_id, bounds, &mut (), &mut (), window, cx);
+    }
 }
 
 /// The 12px spinner after the unread marker while an unread-marker edit is not yet saved
@@ -1933,6 +2062,21 @@ pub fn viewer_error(child: impl IntoElement) -> Div {
         .child(child)
 }
 
+/// The window drawn, then the frames it asks for after, as the platform draws them: a
+/// [`scrollbar`] shows in the frame after the one that first lays its content out.
+#[cfg(test)]
+pub fn draw_settled(cx: &mut gpui_kit::VisualTestContext) {
+    cx.update(|window, cx| window.draw(cx).clear(cx));
+    for _ in 0..5 {
+        let asked = cx.update(|window, cx| window.simulate_next_frame(cx) > 0);
+        if !asked {
+            return;
+        }
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+    }
+    panic!("the window keeps asking for frames");
+}
+
 #[cfg(test)]
 mod tests {
     use std::cell::Cell;
@@ -2474,6 +2618,20 @@ mod tests {
         assert_eq!(f32::from(area("rows", cx).size.height), 78.);
     }
 
+    /// A selection in a line cut short copies what it takes in of the part shown, and the
+    /// rest of the line too once it takes in the ellipsis; a line shown whole copies as
+    /// selected.
+    #[test]
+    fn a_selection_taking_in_the_ellipsis_copies_the_rest_of_the_line() {
+        let text = "src/components/list.rs";
+        let shown = "src/compo…";
+        assert_eq!(ellipsized_copy(text, shown, 0..4), "src/");
+        assert_eq!(ellipsized_copy(text, shown, 4..9), "compo");
+        assert_eq!(ellipsized_copy(text, shown, 4..shown.len()), "components/list.rs");
+        assert_eq!(ellipsized_copy(text, shown, 9..shown.len()), "nents/list.rs", "the ellipsis alone");
+        assert_eq!(ellipsized_copy(text, text, 4..14), "components");
+    }
+
     /// A 100×100 box scrolling 1000px of content along `axis`, with its [`scrollbar`]: the
     /// thumb is 20px long (the shortest), travels 80px over the 900px scrolled, and a page is
     /// 87px.
@@ -2502,19 +2660,6 @@ mod tests {
                 Axis::Horizontal => scrollbar("scrolled", axis, handle, cx),
             })
         }
-    }
-
-    /// The window drawn, and the frames it asks for after (the bar shows in the second).
-    fn draw_settled(cx: &mut VisualTestContext) {
-        cx.update(|window, cx| window.draw(cx).clear(cx));
-        for _ in 0..5 {
-            let asked = cx.update(|window, cx| window.simulate_next_frame(cx) > 0);
-            if !asked {
-                return;
-            }
-            cx.update(|window, cx| window.draw(cx).clear(cx));
-        }
-        panic!("the scrollbar keeps asking for frames");
     }
 
     fn scrolled(axis: Axis, cx: &mut TestAppContext) -> (Entity<Scrolled>, &mut VisualTestContext) {

@@ -397,10 +397,9 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   input focused); Electron's stay enabled and do nothing there. Off macOS the Edit menu acts on a
   web page (Browser and Web App tabs) once the page has been clicked, not when it has the
   keyboard otherwise (an `autofocus` field).
-- The Comments tab's text (paths, code, comments, the generated prompt) is selected as GPUI
-  Kit selects text: a selection over several lines copies a blank line as nothing, and a
-  path cut short by its ellipsis cannot be selected (its tooltip shows it whole). A long
-  code line scrolls sideways with the wheel or trackpad, but without Chromium's scrollbar.
+- The Comments tab's code and generated prompt are each one run of GPUI Kit text: a drag
+  past the end of a line copies the line break too, where Chromium's selection stops at
+  the end of the line.
 - In the Review diff, a review comment's text and the diff's code are selected apart: a
   selection running from a comment into the code (or back) copies the comment text only,
   not the code it spans, where Electron copies both, in reading order.
