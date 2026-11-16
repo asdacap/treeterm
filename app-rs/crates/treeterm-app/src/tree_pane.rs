@@ -1,7 +1,5 @@
 //! Left pane: the session's workspace tree (read-only so far).
 
-use std::collections::HashSet;
-
 use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::{Sizable as _, WindowExt as _, h_flex, v_flex};
@@ -12,6 +10,7 @@ use treeterm_model::app_store::{AppStore, ConnState};
 use treeterm_model::keybinding_store::KeybindingStore;
 use treeterm_core::tree::DropPosition;
 use treeterm_model::session_store::{RemoveMode, SessionState, SessionStore, WorkspaceEntry};
+use treeterm_model::tree_view_state::TreeViewState;
 
 use crate::app_view::{BannerAction, BannerKind, SessionIcon, connect_phase_label, connection_banner, session_icon};
 use crate::theme::colors;
@@ -40,7 +39,7 @@ pub struct TreePane {
     /// Where a workspace being dragged would land.
     drop_hint: Option<(String, DropPosition)>,
     /// Per-window view state: which workspaces have their children hidden.
-    collapsed: HashSet<String>,
+    view: TreeViewState,
     selected: Selection,
     /// Bytes per second received from this connection's daemon.
     traffic: Entity<crate::traffic_badge::TrafficBadge>,
@@ -100,13 +99,20 @@ impl TreePane {
         target: treeterm_core::connection::ConnectionTarget,
         cx: &mut Context<Self>,
     ) -> Self {
-        cx.observe(&session, |_, _, cx| cx.notify()).detach();
+        // A collapsed workspace opens when it gains a child, whoever added it.
+        cx.observe(&session, |pane, session, cx| {
+            let edges = session.read(cx).child_edges(cx);
+            pane.view.observe(edges);
+            cx.notify();
+        })
+        .detach();
         cx.observe(&app, |_, _, cx| cx.notify()).detach();
         cx.observe(&keybindings, |_, _, cx| cx.notify()).detach();
         cx.observe(&names, |_, _, cx| cx.notify()).detach();
         let meter = session.read(cx).traffic().clone();
         let traffic = cx.new(|cx| crate::traffic_badge::TrafficBadge::new(meter, "connection-traffic", cx));
         let remote = matches!(target, treeterm_core::connection::ConnectionTarget::Remote(_));
+        let view = TreeViewState::new(session.read(cx).child_edges(cx));
         Self {
             traffic,
             session,
@@ -119,7 +125,7 @@ impl TreePane {
             remote,
             folded: false,
             drop_hint: None,
-            collapsed: HashSet::new(),
+            view,
             selected: Selection::Nothing,
         }
     }
@@ -144,9 +150,7 @@ impl TreePane {
     }
 
     fn toggle(&mut self, id: &str, cx: &mut Context<Self>) {
-        if !self.collapsed.remove(id) {
-            self.collapsed.insert(id.to_owned());
-        }
+        self.view.toggle(id);
         cx.notify();
     }
 
@@ -203,7 +207,7 @@ impl Render for TreePane {
             SessionState::Waiting => Err(status_line("Loading session…", text_secondary)),
             SessionState::Failed(reason) => Err(status_line(reason.clone(), error)),
             SessionState::Live => Ok(session
-                .tree_rows(&self.collapsed, cx)
+                .tree_rows(self.view.collapsed(), cx)
                 .into_iter()
                 .filter_map(|row| Some(RowData {
                     activity: session
@@ -466,7 +470,7 @@ impl TreePane {
         let selected = self.selected == Selection::Workspace(id.clone());
         // Workspace focus mode (prefix + w) moves this cursor with the arrow keys.
         let focus_cursor = self.keybindings.read(cx).machine().focused_workspace() == Some(id.as_str());
-        let expand = match (has_children, self.collapsed.contains(&id)) {
+        let expand = match (has_children, self.view.is_collapsed(&id)) {
             (false, _) => None,
             (true, false) => Some(IconName::ChevronDown),
             (true, true) => Some(IconName::ChevronRight),
@@ -528,7 +532,7 @@ impl TreePane {
                 let (drag, target) = (dragged.id.clone(), drop_id.clone());
                 pane.session.update(cx, |s, cx| s.move_workspace(&drag, &target, position, cx));
                 if position == DropPosition::Onto {
-                    pane.collapsed.remove(&target);
+                    pane.view.expand(&target);
                 }
                 cx.notify();
             }))

@@ -38,6 +38,7 @@ use treeterm_proto::treeterm::file_watch_event::State as FileState;
 use treeterm_proto::treeterm::{FileWatchEvent, Session, SessionLock, SessionWatchEvent, WorkspaceRef};
 
 use crate::apps::AppRegistry;
+use crate::tree_view_state::ChildEdge;
 use crate::workspace_store::{Workspace, WorkspaceEvent, WorkspaceStore};
 
 /// Consecutive rejected ref syncs before unpublished workspaces are surfaced as errors.
@@ -582,6 +583,20 @@ impl SessionStore {
             })
             .collect();
         tree::flatten(&nodes, collapsed)
+    }
+
+    /// Every loaded workspace shown under another of this session, with that parent
+    /// (`getChildren`): a tree view expands a parent when it gains one.
+    pub fn child_edges(&self, cx: &App) -> HashSet<ChildEdge> {
+        self.entries
+            .iter()
+            .filter_map(|(id, entry)| {
+                let parent = entry.store()?.read(cx).file().parent_id.clone()?;
+                self.entries
+                    .contains_key(&parent)
+                    .then(|| ChildEdge { child: id.clone(), parent })
+            })
+            .collect()
     }
 
     // ---- session watch ------------------------------------------------------------------

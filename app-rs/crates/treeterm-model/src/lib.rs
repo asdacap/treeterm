@@ -35,5 +35,6 @@ pub mod terminal;
 pub mod text_editor;
 pub mod tool_tabs;
 pub mod traffic;
+pub mod tree_view_state;
 pub mod web_app;
 pub mod workspace_store;

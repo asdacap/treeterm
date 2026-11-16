@@ -8,6 +8,7 @@ use treeterm_core::wire::workspace_file::{WorkspaceFile, WorkspaceStatus, Worktr
 use treeterm_model::review::{Processing, ReviewEvent};
 use treeterm_model::session_store::{AdoptOptions, RemoveMode, SessionState, SessionStore, WorkspaceEntry};
 use treeterm_model::settings_store::SettingsStore;
+use treeterm_model::tree_view_state::ChildEdge;
 use treeterm_model::workspace_store::{MergeState, TabContent, Workspace, WorkspaceStore};
 use treeterm_proto::treeterm::WorkspaceRef;
 
@@ -1120,6 +1121,32 @@ fn a_child_can_check_out_an_existing_branch(cx: &mut TestAppContext) {
     assert_eq!(disk["name"], "feature-y");
     assert_eq!(disk["gitBranch"], "team/feature-y");
     assert_eq!(disk["metadata"]["branchIsUserDefined"], "true");
+}
+
+fn edge(child: &str, parent: &str) -> ChildEdge {
+    ChildEdge { child: child.to_owned(), parent: parent.to_owned() }
+}
+
+#[gpui_kit::test]
+fn child_edges_link_loaded_workspaces_to_parents_in_the_session(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    let dir = h.daemon.workspaces_dir();
+    std::fs::write(dir.join("root.json"), body("root", None)).unwrap();
+    std::fs::write(dir.join("child.json"), body("child", Some("root"))).unwrap();
+    std::fs::write(dir.join("stray.json"), body("stray", Some("gone"))).unwrap();
+    std::fs::write(dir.join("kept.json"), body("kept", Some("broken"))).unwrap();
+    publish(&h, &["root", "child", "stray", "kept", "broken"]);
+    let store = open_store(cx, &h, "client-a");
+    wait_until(cx, &store, |s| {
+        ["root", "child", "stray", "kept"].iter().all(|id| loaded(s, id))
+            && matches!(s.entry("broken"), Some(WorkspaceEntry::Error { .. }))
+    });
+
+    // A parent that is not in the session has no children (the child shows as a root); a
+    // failed parent still has its loaded children.
+    let edges = cx.read(|cx| store.read(cx).child_edges(cx));
+    assert_eq!(edges, HashSet::from([edge("child", "root"), edge("kept", "broken")]));
 }
 
 /// Adopt `worktree` under `parent`; resolves with the child's id.

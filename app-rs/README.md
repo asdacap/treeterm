@@ -258,6 +258,8 @@ The chrome was matched to Electron's computed styles, measured side by side on o
 - A stale local daemon socket is replaced at once (Electron waited up to 5 s for it to
   answer). Connections to use still wait up to 5 s for the daemon, as in Electron.
 - Placeholders for refs another window removed are dropped with the ref.
+- A collapsed workspace stays collapsed until it gains a child or is expanded (Electron
+  re-expanded every parent whenever any workspace changed).
 - A replayed OSC 52 copy or bell is ignored (it already happened when it first ran).
 - Corrupt `settings.json` is an error (logged; defaults used) instead of being overwritten.
 - Merge-and-remove stages untracked files before its WIP commit (Electron's `commit -am`
