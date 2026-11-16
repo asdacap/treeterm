@@ -319,7 +319,10 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   macOS the menu bar is GPUI Kit's, drawn in the window (not GTK's), above dialogs so that it
   stays usable while one is open, as GTK's is. On macOS GPUI greys out an
   Edit item that nothing focused can do (Undo, Redo or Cut in a terminal, Paste with no input
-  focused); Electron's stay enabled and do nothing there.
+  focused); Electron's stay enabled and do nothing there. Electron's Edit items also act on a
+  focused web page (Browser and Web App tabs); here Undo, Redo, Paste and Match Style and
+  Delete do not: on macOS only Cut, Copy, Paste and Select All reach the page, through
+  AppKit, and off macOS none do, as the menu bar drawn in the window sends them to the app.
 - The Comments tab's text (paths, code, comments, the generated prompt) is selected as GPUI
   Kit selects text: a selection over several lines copies a blank line as nothing, and a
   path cut short by its ellipsis cannot be selected (its tooltip shows it whole). A long
