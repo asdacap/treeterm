@@ -217,8 +217,9 @@ struct Connected {
     editor_views: HashMap<EntityId, Entity<crate::text_editor_view::TextEditorView>>,
     /// Views of Review tabs, by model.
     review_views: HashMap<EntityId, Entity<crate::review_view::ReviewView>>,
-    /// Browser views by (workspace, tab): they own native webviews, hidden when not shown.
-    browser_views: HashMap<(String, String), Entity<crate::browser_view::BrowserView>>,
+    /// Browser views by (workspace, tab), with the opening of the page each shows: they own
+    /// native webviews, hidden when not shown.
+    browser_views: HashMap<(String, String), (PageMount, Entity<crate::browser_view::BrowserView>)>,
     /// Each shown workspace's Run menu actions, by workspace id.
     run_actions: HashMap<String, Entity<treeterm_model::run_actions::RunActions>>,
     /// Each shown workspace's download badge, by workspace id.
@@ -2291,7 +2292,7 @@ fn tabset_strip(
 /// its Review and Files views too, so they refresh (Files read `HEAD`) when shown again; Files
 /// and Editor tabs save their scroll offset.
 fn hide_tab_views(connected: &Connected, cx: &mut Context<AppView>) {
-    let browsers: Vec<Entity<crate::browser_view::BrowserView>> = connected.browser_views.values().cloned().collect();
+    let browsers: Vec<Entity<crate::browser_view::BrowserView>> = connected.browser_views.values().map(|(_, view)| view.clone()).collect();
     for view in browsers {
         view.update(cx, |v, cx| v.set_shown(false, cx));
     }
@@ -2520,7 +2521,7 @@ fn workspace_pane(
         .filter(|key| connected.page_subtabs.get(key).is_none_or(|sub| *sub == PageSubTab::Browser))
         .collect();
     let views: Vec<((String, String), Entity<crate::browser_view::BrowserView>)> =
-        connected.browser_views.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+        connected.browser_views.iter().map(|(k, (_, v))| (k.clone(), v.clone())).collect();
     for (key, view) in views {
         let shown = !dialog_open && shown_pages.contains(&key);
         view.update(cx, |v, cx| v.set_shown(shown, cx));
@@ -2808,26 +2809,37 @@ fn page_error(message: String, retry: impl Fn(&mut App) + 'static, links: Vec<gp
         .into_any_element()
 }
 
-/// The page's view once it is ready: made when the page's URL changes (a new forward).
-fn page_view(connected: &mut Connected, key: (String, String), url: String, memory: Option<(WeakEntity<WorkspaceStore>, String)>, home: String, cx: &mut Context<AppView>) -> AnyElement {
-    let stale = connected.browser_views.get(&key).is_some_and(|view| view.read(cx).url() != home);
-    if stale {
-        connected.browser_views.remove(&key);
+/// Which opening of a Web App's or Browser tab's page a view shows: the page model, and its
+/// `page_mount`.
+type PageMount = (EntityId, u64);
+
+/// The page of a Web App or Browser tab once it is ready (`WebView`, mounted in Ready only):
+/// a fresh view each time the page opens anew (`mount`), on the page the tab remembers on top
+/// of the start page `home` (page memory).
+fn page_view(connected: &mut Connected, key: (String, String), workspace: &Entity<WorkspaceStore>, home: String, mount: PageMount, cx: &mut Context<AppView>) -> AnyElement {
+    if let Some((opened, view)) = connected.browser_views.get(&key)
+        && *opened == mount
+    {
+        return div().size_full().child(view.clone()).into_any_element();
     }
-    let view = connected
-        .browser_views
-        .entry(key)
-        .or_insert_with(|| {
-            cx.new(|_| {
-                let view = crate::browser_view::BrowserView::new(url);
-                match memory {
-                    Some((workspace, tab)) => view.remember_pages_in(workspace, tab, home),
-                    None => view,
-                }
-            })
-        })
-        .clone();
+    let tab_id = key.1.clone();
+    let url = match workspace.read(cx).page_url(&tab_id, &home) {
+        Ok(url) => url,
+        Err(message) => {
+            connected.browser_views.remove(&key);
+            return div().p_4().text_color(colors(cx).error).child(message).into_any_element();
+        }
+    };
+    let workspace = workspace.downgrade();
+    let view = cx.new(|_| crate::browser_view::BrowserView::new(url, home, workspace, tab_id));
+    connected.browser_views.insert(key, (mount, view.clone()));
     div().size_full().child(view).into_any_element()
+}
+
+/// Outside Ready the page is closed (`WebView` unmounts): the native view would draw over
+/// the waiting or error view shown instead. It opens anew once ready.
+fn close_page(connected: &mut Connected, key: &(String, String)) {
+    connected.browser_views.remove(key);
 }
 
 /// `PortForwardView`: the tab's forward (`localhost:L → host:R (status)`, Restart once it
@@ -2926,10 +2938,14 @@ fn browser_tab(
         PageHost::Local => Vec::new(),
         PageHost::Remote(_) => vec![page_link(&key, PageSubTab::PortForward, "View port forward", cx)],
     };
-    let browser = match page.read(cx).phase().clone() {
-        // Page memory: the tab reopens on the page it last showed (`path`).
-        BrowserPhase::Ready { url, home } => {
-            page_view(connected, key.clone(), url, Some((workspace.downgrade(), tab_id.to_owned())), home, cx)
+    let phase = page.read(cx).phase().clone();
+    if !matches!(phase, BrowserPhase::Ready { .. }) {
+        close_page(connected, &key);
+    }
+    let browser = match phase {
+        BrowserPhase::Ready { home } => {
+            let mount = (page.entity_id(), page.read(cx).page_mount());
+            page_view(connected, key.clone(), workspace, home, mount, cx)
         }
         BrowserPhase::Forwarding { port } => page_waiting(format!("Starting port forward for port {port}…"), links(cx), cx),
         BrowserPhase::Error(message) => {
@@ -3005,8 +3021,15 @@ fn web_app_tab(
             ServerTerminal::Failed(message) => div().p(px(16.)).text_color(error).child(message).into_any_element(),
         }
     } else {
-        match app.read(cx).phase().clone() {
-            WebAppPhase::Ready { url } => page_view(connected, key.clone(), url.clone(), None, url, cx),
+        let phase = app.read(cx).phase().clone();
+        if !matches!(phase, WebAppPhase::Ready { .. }) {
+            close_page(connected, &key);
+        }
+        match phase {
+            WebAppPhase::Ready { home } => {
+                let mount = (app.entity_id(), app.read(cx).page_mount());
+                page_view(connected, key.clone(), workspace, home, mount, cx)
+            }
             WebAppPhase::AllocatingPort => waiting("Finding a free port…".to_owned(), view_shell(cx), cx),
             WebAppPhase::WaitingForServer { port } => waiting(format!("Waiting for server on port {port}…"), view_shell(cx), cx),
             WebAppPhase::Forwarding { port } => waiting(format!("Starting port forward for port {port}…"), view_shell(cx), cx),

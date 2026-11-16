@@ -322,10 +322,12 @@ pub fn resolve_address(input: &str, page_url: &str) -> Result<String, String> {
     Ok(typed.into())
 }
 
-/// The page a browser tab opens: its start page with the path it remembers (`pageUrl`).
-pub fn page_url(home: &str, path: &str) -> String {
-    let separator = if path.is_empty() || path.starts_with('/') { "" } else { "/" };
-    format!("{}{separator}{path}", home.trim_end_matches('/'))
+/// The page a Browser or Web App tab opens (`pageUrl`): the path it remembers resolved
+/// against its start page, as `new URL(path, home)` does (an empty path is the start page
+/// without its fragment; a path from the root replaces the start page's own path and query).
+pub fn page_url(home: &str, path: &str) -> Result<String, String> {
+    let home = url::Url::parse(home).map_err(|_| format!("Invalid page URL: {home}"))?;
+    home.join(path).map(String::from).map_err(|e| format!("Invalid page path {path}: {e}"))
 }
 
 /// `targetPort`: the port a page is served on (the scheme's default without one).
@@ -343,8 +345,8 @@ pub fn forwarded_url(url: &str, local_port: u16) -> Result<String, String> {
     Ok(page.into())
 }
 
-/// The path, query and fragment of `url` when it is on `home`'s origin: what a browser tab
-/// remembers as its page (`rememberPage`).
+/// The path, query and fragment of `url` when it is on `home`'s origin: what a Browser or
+/// Web App tab remembers as its page (`rememberPage`).
 pub fn page_path(home: &str, url: &str) -> Option<String> {
     match (url::Url::parse(home), url::Url::parse(url)) {
         (Ok(home), Ok(page)) if home.origin() == page.origin() => Some(page[url::Position::BeforePath..].to_owned()),
@@ -647,10 +649,22 @@ mod tests {
     }
 
     #[test]
-    fn browser_pages_join_their_path_and_move_to_the_forward() {
-        assert_eq!(page_url("http://localhost:3000", "/docs?x=1"), "http://localhost:3000/docs?x=1");
-        assert_eq!(page_url("http://localhost:3000/", "docs"), "http://localhost:3000/docs");
-        assert_eq!(page_url("http://localhost:3000/", ""), "http://localhost:3000");
+    fn browser_pages_resolve_their_path_against_the_start_page_and_move_to_the_forward() {
+        let page = |home: &str, path: &str| page_url(home, path).unwrap();
+        assert_eq!(page("http://localhost:3000", "/docs?x=1"), "http://localhost:3000/docs?x=1");
+        assert_eq!(page("http://localhost:3000/", "docs"), "http://localhost:3000/docs");
+        assert_eq!(page("http://localhost:3000", ""), "http://localhost:3000/");
+        // A start page with a path: the path remembered from it is not added twice.
+        assert_eq!(page("http://localhost:3000/app/", "/app/"), "http://localhost:3000/app/");
+        assert_eq!(page("http://localhost:3000/app/", ""), "http://localhost:3000/app/");
+        assert_eq!(page("http://localhost:3000/app/", "docs"), "http://localhost:3000/app/docs");
+        assert_eq!(page("http://localhost:3000/app/x", "?q"), "http://localhost:3000/app/x?q");
+        // The start page's query and fragment give way to the path's.
+        assert_eq!(page("http://localhost:3000/?a=1", "/x"), "http://localhost:3000/x");
+        assert_eq!(page("http://localhost:3000/a#top", ""), "http://localhost:3000/a");
+        assert_eq!(page("http://localhost:3000/a?b#top", "#end"), "http://localhost:3000/a?b#end");
+        assert_eq!(page_url("not a url", "/x"), Err("Invalid page URL: not a url".to_owned()));
+        assert_eq!(page_url("http://localhost:3000/", "http://[").map_err(|e| e.starts_with("Invalid page path http://[: ")), Err(true));
         let port = |url: &str| target_port(&parse_local_url(url).unwrap());
         assert_eq!(port("http://localhost:3000/a"), 3000);
         assert_eq!(port("http://127.0.0.1/"), 80);

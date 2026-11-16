@@ -2837,10 +2837,47 @@ fn a_web_app_gets_a_free_port_starts_its_server_and_is_ready(cx: &mut TestAppCon
         }
     }
     let port = app.read_with(cx, |a, _| a.port()).expect("a port was assigned");
-    assert_eq!(phase, WebAppPhase::Ready { url: format!("http://localhost:{port}/") });
+    let home = format!("http://localhost:{port}/");
+    assert_eq!(phase, WebAppPhase::Ready { home: home.clone() });
     assert!((20000..45000).contains(&port));
     wait_for_disk(cx, || file_on_disk(&h, "a")["appStates"][&tab]["state"]["port"]["port"] == port);
     assert_eq!(server_terminal(cx, &workspace, &tab), "attached");
+
+    // The page opens for the first time, on the start page: the tab remembers none yet.
+    assert_eq!(app.read_with(cx, |a, _| a.page_mount()), 1);
+    let page_url = |cx: &mut TestAppContext| workspace.read_with(cx, |w, _| w.page_url(&tab, &home));
+    assert_eq!(page_url(cx), Ok(home.clone()));
+    // Each page it goes to on the server is remembered (`rememberPage`), in the tab's state.
+    workspace.update(cx, |w, cx| w.remember_page(&tab, &home, &format!("{home}docs/?q=1#intro"), cx));
+    wait_for_disk(cx, || file_on_disk(&h, "a")["appStates"][&tab]["state"]["path"] == "/docs/?q=1#intro");
+    assert_eq!(page_url(cx), Ok(format!("{home}docs/?q=1#intro")));
+    // Retry runs the start-up again, through "Finding a free port…": the page opens anew,
+    // on the page remembered.
+    app.update(cx, |a, cx| a.retry(cx));
+    assert_eq!(app.read_with(cx, |a, _| a.phase().clone()), WebAppPhase::AllocatingPort);
+    wait_until(cx, &app, |a| matches!(a.phase(), WebAppPhase::Ready { .. }));
+    assert_eq!(app.read_with(cx, |a, _| (a.phase().clone(), a.page_mount())), (WebAppPhase::Ready { home: home.clone() }, 2));
+    assert_eq!(page_url(cx), Ok(format!("{home}docs/?q=1#intro")));
+}
+
+#[gpui_kit::test]
+fn a_web_app_tab_reopens_on_the_page_it_remembers(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    let (_session, workspace) = web_app_workspace(cx, &h, h.conn.clone(), "sleep 300");
+    // A path remembered by an earlier run (or by Electron), on the page's origin this time.
+    let state = serde_json::json!({ "port": { "status": "assigned", "port": 1 }, "path": "/x?y#z" });
+    let tab = workspace.update(cx, |w, cx| w.add_tab_with("webapp-py", state, cx)).unwrap();
+    let page_url = |cx: &mut TestAppContext, home: &str| workspace.read_with(cx, |w, _| w.page_url(&tab, home));
+    assert_eq!(page_url(cx, "http://localhost:24567/"), Ok("http://localhost:24567/x?y#z".to_owned()));
+    // A page on another origin is not remembered: it could not be opened on top of the start page.
+    workspace.update(cx, |w, cx| w.remember_page(&tab, "http://localhost:24567/", "http://localhost:4000/a", cx));
+    assert_eq!(page_url(cx, "http://localhost:24567/"), Ok("http://localhost:24567/x?y#z".to_owned()));
+    workspace.update(cx, |w, cx| w.remember_page(&tab, "http://localhost:24567/", "http://localhost:24567/", cx));
+    assert_eq!(page_url(cx, "http://localhost:31000/"), Ok("http://localhost:31000/".to_owned()));
+    // Tabs saved before the path was remembered have none: the start page.
+    let old = workspace.update(cx, |w, cx| w.add_tab_with("webapp-py", serde_json::json!({ "port": { "status": "assigned", "port": 1 } }), cx)).unwrap();
+    assert_eq!(workspace.read_with(cx, |w, _| w.page_url(&old, "http://localhost:24567/")), Ok("http://localhost:24567/".to_owned()));
 }
 
 #[gpui_kit::test]
@@ -3103,20 +3140,24 @@ fn a_local_browser_tab_opens_its_remembered_page_directly(cx: &mut TestAppContex
     };
     // No forward on this machine: the page is ready at once, on the page the tab remembers.
     assert!(matches!(forward, PageHost::Local));
-    let ready = BrowserPhase::Ready { url: "http://localhost:3000/guide?x=1".into(), home: "http://localhost:3000/".into() };
-    assert_eq!(page.read_with(cx, |p, _| p.phase().clone()), ready);
+    let ready = BrowserPhase::Ready { home: "http://localhost:3000/".into() };
+    assert_eq!(page.read_with(cx, |p, _| (p.phase().clone(), p.page_mount())), (ready.clone(), 1));
+    let page_url = |cx: &mut TestAppContext| workspace.read_with(cx, |w, _| w.page_url(&tab, "http://localhost:3000/"));
+    assert_eq!(page_url(cx), Ok("http://localhost:3000/guide?x=1".to_owned()));
+    // Ready again keeps the page open where it is.
     page.update(cx, |p, cx| p.restart_forward(cx));
     page.update(cx, |p, cx| p.retry(cx));
-    assert_eq!(page.read_with(cx, |p, _| p.phase().clone()), ready);
+    assert_eq!(page.read_with(cx, |p, _| (p.phase().clone(), p.page_mount())), (ready, 1));
     workspace.update(cx, |w, cx| w.remove_tab(&tab, cx));
     assert!(workspace.read_with(cx, |w, _| w.tab_content(&tab)).is_none());
 }
 
-/// A new tab of a Browser instance opening `url`, on a loaded local workspace: its page.
+/// A new tab of a Browser instance opening `url`, on a loaded local workspace: its
+/// workspace, its id and its page.
 fn local_browser_page(
     cx: &mut TestAppContext,
     url: &str,
-) -> (Harness, Entity<SessionStore>, Entity<treeterm_model::browser_page::BrowserPageModel>) {
+) -> (Harness, Entity<SessionStore>, Entity<WorkspaceStore>, String, Entity<treeterm_model::browser_page::BrowserPageModel>) {
     let h = harness();
     std::fs::write(h.daemon.workspaces_dir().join("a.json"), body("a", None)).unwrap();
     publish(&h, &["a"]);
@@ -3132,28 +3173,53 @@ fn local_browser_page(
     let Some(TabContent::Browser { page, .. }) = workspace.read_with(cx, |w, _| w.tab_content(&tab)) else {
         panic!("not a browser tab");
     };
-    (h, store, page)
+    (h, store, workspace, tab, page)
 }
 
 #[gpui_kit::test]
 fn a_browser_start_page_off_localhost_is_an_error_with_retry_on_this_machine_too(cx: &mut TestAppContext) {
     use treeterm_model::browser_page::BrowserPhase;
     cx.executor().allow_parking();
-    let (_h, _store, page) = local_browser_page(cx, "ftp://localhost/");
+    let (_h, _store, _workspace, _tab, page) = local_browser_page(cx, "ftp://localhost/");
     let error = BrowserPhase::Error("URL must be http(s)://localhost or 127.0.0.1: ftp://localhost/".into());
     assert_eq!(page.read_with(cx, |p, _| p.phase().clone()), error);
     page.update(cx, |p, cx| p.retry(cx));
-    assert_eq!(page.read_with(cx, |p, _| p.phase().clone()), error);
+    // No page is ever opened.
+    assert_eq!(page.read_with(cx, |p, _| (p.phase().clone(), p.page_mount())), (error, 0));
 }
 
 #[gpui_kit::test]
 fn a_browser_start_page_opens_as_whatwg_url_reads_it(cx: &mut TestAppContext) {
     use treeterm_model::browser_page::BrowserPhase;
     cx.executor().allow_parking();
-    let (_h, _store, page) = local_browser_page(cx, " HTTP://LOCALHOST:3000/grafana ");
+    let (_h, _store, workspace, tab, page) = local_browser_page(cx, " HTTP://LOCALHOST:3000/grafana ");
     let home = "http://localhost:3000/grafana";
-    let ready = BrowserPhase::Ready { url: home.into(), home: home.into() };
-    assert_eq!(page.read_with(cx, |p, _| p.phase().clone()), ready);
+    assert_eq!(page.read_with(cx, |p, _| p.phase().clone()), BrowserPhase::Ready { home: home.into() });
+    assert_eq!(workspace.read_with(cx, |w, _| w.page_url(&tab, home)), Ok(home.to_owned()));
+}
+
+#[gpui_kit::test]
+fn a_browser_start_page_with_a_path_reopens_on_the_page_remembered_from_it(cx: &mut TestAppContext) {
+    use treeterm_model::browser_page::BrowserPhase;
+    cx.executor().allow_parking();
+    let (h, _store, workspace, tab, page) = local_browser_page(cx, "http://localhost:3000/app/");
+    let home = "http://localhost:3000/app/";
+    assert_eq!(page.read_with(cx, |p, _| p.phase().clone()), BrowserPhase::Ready { home: home.into() });
+    let page_url = |cx: &mut TestAppContext| workspace.read_with(cx, |w, _| w.page_url(&tab, home));
+    let remember = |cx: &mut TestAppContext, url: &str| workspace.update(cx, |w, cx| w.remember_page(&tab, home, url, cx));
+    assert_eq!(page_url(cx), Ok(home.to_owned()));
+    // The start page itself is remembered by its path, which reopens it (not `/app/app/`).
+    remember(cx, home);
+    assert_eq!(page_url(cx), Ok(home.to_owned()));
+    remember(cx, "http://localhost:3000/app/x?y#z");
+    wait_for_disk(cx, || file_on_disk(&h, "a")["appStates"][&tab]["state"]["path"] == "/app/x?y#z");
+    assert_eq!(page_url(cx), Ok("http://localhost:3000/app/x?y#z".to_owned()));
+    // Another origin is not remembered.
+    remember(cx, "http://localhost:4000/");
+    assert_eq!(page_url(cx), Ok("http://localhost:3000/app/x?y#z".to_owned()));
+    // A path whose page cannot be read is an error, not a blank page.
+    workspace.update(cx, |w, cx| w.update_tab_state(&tab, |state| state["path"] = "http://[".into(), cx));
+    assert!(page_url(cx).is_err_and(|error| error.starts_with("Invalid page path http://[: ")));
 }
 
 #[gpui_kit::test]

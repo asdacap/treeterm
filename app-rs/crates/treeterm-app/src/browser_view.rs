@@ -26,7 +26,7 @@ use gpui_kit::{
 use gpui_webview::WebView;
 use treeterm_model::apps::{
     MarkdownLink, PAGE_PROBE_SCRIPT, PageContent, is_allowed_webview_url, is_markdown_page, markdown_link, page_content,
-    page_path, proxied_url, resolve_address, unproxied_url,
+    proxied_url, resolve_address, unproxied_url,
 };
 use treeterm_model::workspace_store::WorkspaceStore;
 
@@ -76,8 +76,8 @@ pub struct BrowserView {
     pending: Pending,
     address: Option<Entity<InputState>>,
     draft: Draft,
-    /// Where the page last shown is remembered (the tab's `path`), when set.
-    memory: Option<(WeakEntity<WorkspaceStore>, String)>,
+    /// The tab whose state remembers the page shown (`path`): its workspace and id.
+    memory: (WeakEntity<WorkspaceStore>, String),
     /// The page as last probed; the previous one stays until the next load is probed.
     content: PageContent,
     markdown_scroll: gpui_kit::ScrollHandle,
@@ -98,11 +98,13 @@ fn open_externally(url: &str) {
 }
 
 impl BrowserView {
-    pub fn new(url: String) -> Self {
+    /// A page opening `url`, under Home going to `home`. Each page it shows is remembered in
+    /// the state of the tab `tab_id` (Electron's page memory), so the tab reopens there.
+    pub fn new(url: String, home: String, workspace: WeakEntity<WorkspaceStore>, tab_id: String) -> Self {
         Self {
             // As a URL reads back (`http://localhost:8765/`); an address it cannot read stays as given.
-            current: resolve_address(&url, &url).unwrap_or_else(|_| url.clone()),
-            url,
+            current: resolve_address(&url, &url).unwrap_or(url),
+            url: home,
             page: Page::NotBuilt,
             shown: true,
             loading: false,
@@ -111,7 +113,7 @@ impl BrowserView {
             pending: Pending::None,
             address: None,
             draft: Draft::Idle,
-            memory: None,
+            memory: (workspace, tab_id),
             content: PageContent::Web,
             markdown_scroll: gpui_kit::ScrollHandle::new(),
             probes: None,
@@ -123,18 +125,6 @@ impl BrowserView {
             _events: None,
             _address: Vec::new(),
         }
-    }
-
-    /// Remember the page shown in the tab's state (`path`), as Electron's page memory does,
-    /// so the tab reopens there. `home` is the start page Home goes back to.
-    pub fn remember_pages_in(mut self, workspace: WeakEntity<WorkspaceStore>, tab_id: String, home: String) -> Self {
-        self.memory = Some((workspace, tab_id));
-        self.url = home;
-        self
-    }
-
-    pub fn url(&self) -> &str {
-        &self.url
     }
 
     /// Show or hide the native view (tab switched away, dialog open).
@@ -290,13 +280,9 @@ impl BrowserView {
                 return;
             }
         }
-        if let Some((workspace, tab)) = &self.memory
-            && let Some(path) = page_path(&self.url, &self.current)
-            && let Some(workspace) = workspace.upgrade()
-        {
-            workspace.update(cx, |w, cx| {
-                w.update_tab_state(tab, |state| state["path"] = serde_json::Value::String(path), cx);
-            });
+        // No workspace: the tab went with it, so there is nothing to remember the page in.
+        if let Some(workspace) = self.memory.0.upgrade() {
+            workspace.update(cx, |w, cx| w.remember_page(&self.memory.1, &self.url, &self.current, cx));
         }
         cx.notify();
     }

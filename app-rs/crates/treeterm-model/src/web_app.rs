@@ -51,7 +51,9 @@ pub enum WebAppPhase {
     AllocatingPort,
     WaitingForServer { port: u16 },
     Forwarding { port: u16 },
-    Ready { url: String },
+    /// `home` is the server's start page (Home), through the forward on an ssh session. The
+    /// page opens on the one the tab remembers (`WorkspaceStore::page_url`).
+    Ready { home: String },
     Error(String),
 }
 
@@ -84,6 +86,9 @@ pub struct WebAppModel {
     local_port: Option<u16>,
     remote: Option<RemoteHost>,
     phase: WebAppPhase,
+    /// Bumped each time the page becomes Ready from another phase: Electron mounts its
+    /// `WebView` only while Ready, so the page opens anew then.
+    mount: u64,
     /// The start-up waiting for its server's terminal: the PTY's error, if it failed.
     pty_waiter: Option<oneshot::Sender<Result<(), String>>>,
     _run: Option<Task<()>>,
@@ -126,6 +131,7 @@ impl WebAppModel {
             local_port,
             remote,
             phase: WebAppPhase::AllocatingPort,
+            mount: 0,
             pty_waiter: None,
             _run: None,
         };
@@ -139,6 +145,11 @@ impl WebAppModel {
 
     pub fn port(&self) -> Option<u16> {
         self.port
+    }
+
+    /// Which opening of the page this is: a new number wants a fresh page.
+    pub fn page_mount(&self) -> u64 {
+        self.mount
     }
 
     /// Run the whole start-up again (after an error): the port if it has none, the server's
@@ -180,6 +191,9 @@ impl WebAppModel {
     }
 
     fn set_phase(&mut self, phase: WebAppPhase, cx: &mut Context<Self>) {
+        if matches!(phase, WebAppPhase::Ready { .. }) && !matches!(self.phase, WebAppPhase::Ready { .. }) {
+            self.mount += 1;
+        }
         self.phase = phase;
         cx.notify();
     }
@@ -229,7 +243,7 @@ impl WebAppModel {
                 while probe(&exec, port).await? != 0 {
                     executor.timer(POLL_INTERVAL).await;
                 }
-                let url = match &remote {
+                let home = match &remote {
                     None => format!("http://localhost:{port}/"),
                     Some(remote) => {
                         this.update(cx, |model, cx| model.set_phase(WebAppPhase::Forwarding { port }, cx))
@@ -243,7 +257,7 @@ impl WebAppModel {
                         format!("http://localhost:{local}/")
                     }
                 };
-                this.update(cx, |model, cx| model.set_phase(WebAppPhase::Ready { url }, cx))
+                this.update(cx, |model, cx| model.set_phase(WebAppPhase::Ready { home }, cx))
                     .map_err(|_| "closed".to_owned())
             }
             .await;

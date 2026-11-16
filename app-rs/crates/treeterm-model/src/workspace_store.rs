@@ -1077,7 +1077,6 @@ impl WorkspaceStore {
                 self.tabs.insert(tab_id.to_owned(), TabRef::Files { model, _events: events });
             }
             AppKind::Browser { url } => {
-                let path = tab.state.get("path").and_then(Value::as_str).unwrap_or_default().to_owned();
                 let local_port = tab
                     .state
                     .get("localPort")
@@ -1085,7 +1084,7 @@ impl WorkspaceStore {
                     .and_then(|port| port.get("port").and_then(Value::as_u64))
                     .and_then(|port| u16::try_from(port).ok());
                 let (home, owned, remote) = (url.clone(), tab_id.to_owned(), self.remote.clone());
-                let page = cx.new(|cx| crate::browser_page::BrowserPageModel::new(home, path, owned, local_port, remote, cx));
+                let page = cx.new(|cx| crate::browser_page::BrowserPageModel::new(home, owned, local_port, remote, cx));
                 let owned_tab = tab_id.to_owned();
                 let events = cx.subscribe(&page, move |store, _, event: &crate::web_app::WebAppEvent, cx| {
                     store.on_web_app_event(&owned_tab, *event, cx);
@@ -1932,6 +1931,34 @@ impl WorkspaceStore {
         };
         update(&mut tab.state);
         self.changed(cx);
+    }
+
+    /// The page a Browser or Web App tab opens each time its page opens anew (`pageUrl`):
+    /// the page it remembers (`path`) on top of its start page `home`, read now, so the last
+    /// page shown is opened on whatever origin the page has this time (a new forward).
+    /// Tabs saved before the path was remembered have none: the start page.
+    pub fn page_url(&self, tab_id: &str, home: &str) -> Result<String, String> {
+        let state = self.workspace.file.app_states.get(tab_id).map(|tab| &tab.state);
+        let path = state.and_then(|state| state.get("path")).and_then(Value::as_str).unwrap_or_default();
+        crate::apps::page_url(home, path)
+    }
+
+    /// A Browser or Web App tab's page went to `url` (`rememberPage`): it is remembered in
+    /// the tab's state (`path`), unless it is on another origin than the start page `home`,
+    /// as it could not be opened on top of it.
+    pub fn remember_page(&mut self, tab_id: &str, home: &str, url: &str, cx: &mut Context<Self>) {
+        let Some(path) = crate::apps::page_path(home, url) else {
+            return;
+        };
+        self.update_tab_state(
+            tab_id,
+            |state| {
+                if let Value::Object(state) = state {
+                    state.insert("path".into(), Value::String(path));
+                }
+            },
+            cx,
+        );
     }
 
     // ---- metadata ----------------------------------------------------------------------

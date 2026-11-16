@@ -18,6 +18,7 @@ use treeterm_core::local_daemon::LocalDaemonSpec;
 use treeterm_core::settings::{Extra, PortForwardSpec, SshConnectionConfig};
 use treeterm_core::traffic::TrafficRate;
 use treeterm_model::app_store::{AppEvent, AppStore, ConnState, IdlePane, SessionSlot};
+use treeterm_model::browser_page::{BrowserPageModel, BrowserPhase};
 use treeterm_model::session_info::SessionInfo;
 use treeterm_model::session_store::{SessionState, SessionStore, WorkspaceEntry};
 use treeterm_model::settings_store::SettingsStore;
@@ -1168,4 +1169,74 @@ fn a_failed_connection_reads_error_in_the_monitor_and_upload(cx: &mut TestAppCon
     poll_again(cx, &monitor, |m| {
         failed_with(m, "Connection not found: remote-1")
     });
+}
+
+/// Real time for the forward to settle (the ssh forward is Active after its stabilization),
+/// the executor's clock for the page's polls of it.
+fn wait_for_page(
+    cx: &mut TestAppContext,
+    page: &Entity<BrowserPageModel>,
+    done: impl Fn(&BrowserPhase) -> bool,
+) -> BrowserPhase {
+    for _ in 0..500 {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        cx.executor()
+            .advance_clock(std::time::Duration::from_millis(500));
+        cx.run_until_parked();
+        let phase = page.read_with(cx, |p, _| p.phase().clone());
+        if done(&phase) {
+            return phase;
+        }
+    }
+    panic!("the page never got there");
+}
+
+#[gpui_kit::test]
+fn a_remote_browser_page_opens_anew_on_its_forward_after_a_restart(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    isolated_home();
+    let h = harness();
+    let app = app(cx, &h, None);
+    app.connect(cx);
+    app.restored(cx);
+    let remote = RemoteHost {
+        app: app.app.downgrade(),
+        connection: remote_id(),
+    };
+    let home = "http://localhost:3000/app/".to_owned();
+    let page = cx.new(|cx| BrowserPageModel::new(home, "tab-1".to_owned(), None, Some(remote), cx));
+    let mount = |cx: &mut TestAppContext| page.read_with(cx, |p, _| p.page_mount());
+    assert_eq!(
+        page.read_with(cx, |p, _| p.phase().clone()),
+        BrowserPhase::Forwarding { port: 3000 }
+    );
+    assert_eq!(mount(cx), 0);
+
+    // Ready on the forward's local end: the page opens for the first time.
+    let ready = wait_for_page(cx, &page, |phase| matches!(phase, BrowserPhase::Ready { .. }));
+    let forwards = app
+        .app
+        .read_with(cx, |a, _| a.manager().list_port_forwards(&remote_id()));
+    let local = forwards[0].config.spec.local_port;
+    assert_eq!(
+        ready,
+        BrowserPhase::Ready {
+            home: format!("http://localhost:{local}/app/")
+        }
+    );
+    assert_eq!(mount(cx), 1);
+
+    // Restart goes through "Starting port forward…": the page closes, and opens anew once
+    // the new forward is up (on the same local port, which it prefers).
+    page.update(cx, |p, cx| p.restart_forward(cx));
+    assert_eq!(
+        page.read_with(cx, |p, _| p.phase().clone()),
+        BrowserPhase::Forwarding { port: 3000 }
+    );
+    assert_eq!(
+        wait_for_page(cx, &page, |phase| matches!(phase, BrowserPhase::Ready { .. })),
+        ready
+    );
+    assert_eq!(mount(cx), 2);
+    page.update(cx, |p, cx| p.close(cx));
 }
