@@ -745,4 +745,22 @@ mod tests {
         );
         assert!(page.contains("padding: 16px"), "{page}");
     }
+
+    #[test]
+    fn the_model_page_has_every_element_its_script_shows() {
+        let html = std::str::from_utf8(MODEL_VIEWER_HTML).unwrap();
+        let script = include_str!("../assets/model-viewer/viewer.src.js");
+        let ids: Vec<&str> = ["element('", "show('", "showError('"]
+            .iter()
+            .flat_map(|call| script.split(call).skip(1).filter_map(|rest| rest.split('\'').next()))
+            .collect();
+        for id in ["loading", "parsing", "parse-error", "stage-error", "stats", "hint", "warning", "toolbar"] {
+            assert!(ids.contains(&id), "{id} not used: {ids:?}");
+        }
+        for id in ids {
+            assert!(html.contains(&format!("id=\"{id}\"")), "no #{id} in index.html");
+        }
+        // Until the script runs, the page says what FileViewer's Suspense fallback says.
+        assert!(html.contains("<div id=\"loading\" class=\"placeholder\">Loading 3D viewer…</div>"));
+    }
 }

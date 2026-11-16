@@ -228,13 +228,23 @@ function report(message) {
   if (window.ipc) window.ipc.postMessage(message)
 }
 
-function showError(text) {
-  document.getElementById('status').textContent = text
-  document.getElementById('status').className = 'error'
+const element = (id) => document.getElementById(id)
+
+function show(id, text) {
+  if (text !== undefined) element(id).textContent = text
+  element(id).hidden = false
+}
+
+/** `#parse-error` (`.file-viewer-error` in place of the model) or `#stage-error` (over it). */
+function showError(id, text) {
+  show(id, text)
   report(`error ${text}`)
 }
 
 async function main() {
+  // The script has loaded (FileViewer's "Loading 3D viewer…"); now the model is read.
+  element('loading').hidden = true
+  show('parsing')
   const format = new URLSearchParams(window.location.search).get('format') ?? ''
   let model
   try {
@@ -242,38 +252,39 @@ async function main() {
     if (!response.ok) throw new Error(`HTTP ${response.status}`)
     model = await parseModel(format, await response.arrayBuffer())
   } catch (err) {
-    showError(`Could not read model: ${errorMessage(err)}`)
+    element('parsing').hidden = true
+    showError('parse-error', `Could not read model: ${errorMessage(err)}`)
     return
   }
-  document.getElementById('status').remove()
-  let stage
-  try {
-    stage = createModelStage(document.getElementById('canvas'), model)
-  } catch (err) {
-    showError(`3D view unavailable: ${errorMessage(err)}`)
-    return
-  }
+  element('parsing').hidden = true
+  // The warning, stats and hint show whether or not the 3D view starts (ModelScene).
   const { triangles, points, size } = measureModel(model.object)
   const counts = [
     triangles > 0 ? `${formatCount(triangles)} triangles` : '',
     points > 0 ? `${formatCount(points)} points` : '',
   ].filter(Boolean).join(' · ')
-  document.getElementById('stats').textContent =
-    `${counts} · ${formatLength(size.x)} × ${formatLength(size.y)} × ${formatLength(size.z)}`
-  report(`ready ${document.getElementById('stats').textContent}`)
+  const stats = `${counts} · ${formatLength(size.x)} × ${formatLength(size.y)} × ${formatLength(size.z)}`
+  show('stats', stats)
+  show('hint')
   if (model.skippedFiles.length > 0) {
-    const warning = document.getElementById('warning')
-    warning.textContent = `Shown without the separate files it references: ${model.skippedFiles.join(', ')}`
-    warning.hidden = false
+    show('warning', `Shown without the separate files it references: ${model.skippedFiles.join(', ')}`)
   }
+  let stage
+  try {
+    stage = createModelStage(element('canvas'), model)
+  } catch (err) {
+    showError('stage-error', `3D view unavailable: ${errorMessage(err)}`)
+    return
+  }
+  report(`ready ${stats}`)
   let wireframe = false
-  const toolbar = document.getElementById('toolbar')
-  toolbar.hidden = false
-  document.getElementById('reset').addEventListener('click', () => stage.resetView())
-  document.getElementById('wireframe').addEventListener('click', (event) => {
+  show('toolbar')
+  element('reset').addEventListener('click', () => stage.resetView())
+  element('wireframe').addEventListener('click', (event) => {
     wireframe = !wireframe
     stage.setWireframe(wireframe)
     event.currentTarget.classList.toggle('active', wireframe)
+    event.currentTarget.setAttribute('aria-pressed', String(wireframe))
   })
 }
 
