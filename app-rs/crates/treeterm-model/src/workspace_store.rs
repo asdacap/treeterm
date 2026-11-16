@@ -253,7 +253,7 @@ pub struct WorkspaceStore {
     ancestor_favourite_paths: Vec<String>,
     /// Per-tab activity and its transitions; runtime only (`activityState` store).
     activity: ActivityStates,
-    /// Bumped whenever a tab's activity changes; attention compares it.
+    /// Bumped whenever a tab's activity is set (the same state again included) or removed.
     activity_version: u64,
     /// Unread-marker edits not yet seen in a watched body; re-applied over bodies from
     /// other writers until they are (`AttentionSyncState`).
@@ -658,13 +658,13 @@ impl WorkspaceStore {
         self.activity.get(tab_id).unwrap_or_default()
     }
 
+    /// Every call is logged, the same state again included (each classification, with its
+    /// reason, is a row of Activity History).
     fn set_activity(&mut self, tab_id: &str, state: ActivityState, detail: TransitionDetail, cx: &mut Context<Self>) {
-        if self.activity.get(tab_id) != Some(state) {
-            self.activity.set_tab_state(tab_id, state, detail, std::time::SystemTime::now());
-            self.activity_version += 1;
-            self.observe_attention(true, cx);
-            cx.notify();
-        }
+        self.activity.set_tab_state(tab_id, state, detail, std::time::SystemTime::now());
+        self.activity_version += 1;
+        self.observe_attention(true, cx);
+        cx.notify();
     }
 
     /// The window starts or stops showing this workspace; shown, it is marked read.

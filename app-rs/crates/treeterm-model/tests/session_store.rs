@@ -2122,6 +2122,80 @@ fn a_classifier_configuration_change_or_a_resize_marks_an_ai_harness_working_the
 }
 
 #[gpui_kit::test]
+fn every_classification_is_logged_also_when_the_state_stays_the_same(cx: &mut TestAppContext) {
+    use std::sync::Arc;
+    use treeterm_core::activity::TransitionDetail;
+    use treeterm_core::llm::FakeLlm;
+    use treeterm_core::settings::ClassifierProvider;
+    use treeterm_model::analyzer::LlmService;
+    use treeterm_model::workspace_store::ActivityState;
+    cx.executor().allow_parking();
+    let h = harness();
+    std::fs::write(h.daemon.workspaces_dir().join("a.json"), body("a", None)).unwrap();
+    publish(&h, &["a"]);
+
+    let mut settings = treeterm_core::settings::from_value(serde_json::json!({
+        "aiHarness": { "instances": [{
+            "id": "bot", "name": "Bot", "icon": "B",
+            "command": "sh -c 'echo one; sleep 1; echo two; sleep 60'",
+            "isDefault": false, "enableSandbox": false, "allowNetwork": true,
+            "backgroundColor": "#1a1a24", "disableScrollbar": false, "keepOnExit": true
+        }]}
+    }))
+    .unwrap();
+    settings.llm.api_key = "test-key".into();
+    settings.llm.base_url = "http://localhost".into();
+    settings.terminal_analyzer.provider = ClassifierProvider::ChatCompletions;
+    settings.terminal_analyzer.model = "test-model".into();
+    settings.terminal_analyzer.idle_debounce = std::time::Duration::from_millis(300);
+    let fake = FakeLlm::default();
+    fake.on_complete_chat(|_, _| Ok(r#"{"state":"idle","reason":"nothing to do"}"#.into()));
+    let llm = LlmService::new(Arc::new(fake.clone()), h.rt.clone());
+    let conn = h.conn.clone();
+    let settings_store = cx.new(|_| SettingsStore::in_memory(settings));
+    let store = cx.new(|cx| SessionStore::new(conn, "client-a".into(), settings_store, Some(llm), cx.new(ConnectionTraffic::new), cx));
+    wait_until(cx, &store, |s| loaded(s, "a"));
+    let workspace = store.read_with(cx, |s, _| ws(s, "a"));
+
+    let tab = workspace.update(cx, |w, cx| w.add_tab("aiharness-bot", cx)).unwrap();
+    // Output no longer marks the tab Working: classification follows classification.
+    workspace.update(cx, |w, cx| w.set_idle_detector_enabled(&tab, false, cx));
+    wait_until_app(cx, &workspace, |w, _| w.analyzer(&tab).is_some());
+    let is_classified = |detail: &TransitionDetail| {
+        matches!(detail, TransitionDetail::Classification { reason, .. } if reason == "nothing to do")
+    };
+    let classified = |cx: &mut TestAppContext| {
+        workspace.read_with(cx, |w, _| {
+            let log = w.activity_states().transitions(&tab);
+            log.iter().filter(|t| is_classified(&t.detail)).cloned().collect::<Vec<_>>()
+        })
+    };
+    // Each screen that settles (`one`, then `two` a second later) is classified Idle again.
+    for _ in 0..1000 {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        cx.executor().advance_clock(std::time::Duration::from_millis(100));
+        cx.run_until_parked();
+        if classified(cx).len() >= 2 {
+            break;
+        }
+    }
+    let classifications = classified(cx);
+    assert!(classifications.len() >= 2, "{} logged, {} calls", classifications.len(), fake.chat_calls().len());
+    for transition in &classifications {
+        assert_eq!((transition.from, transition.to), (ActivityState::Idle, ActivityState::Idle));
+    }
+
+    // Activity History lists (and counts) every one of them.
+    let history_tab = workspace.update(cx, |w, cx| w.open_activity_history(&tab, cx)).unwrap();
+    let Some(TabContent::AnalyzerHistory(history)) = workspace.read_with(cx, |w, _| w.tab_content(&history_tab)) else {
+        panic!("not a history tab")
+    };
+    let listed = history.read_with(cx, |h, cx| h.transitions(cx));
+    assert_eq!(listed.len(), workspace.read_with(cx, |w, _| w.activity_states().transitions(&tab).len()));
+    assert!(listed.iter().filter(|t| is_classified(&t.detail)).count() >= 2);
+}
+
+#[gpui_kit::test]
 fn finished_work_in_an_unviewed_workspace_is_marked_unread_until_viewed(cx: &mut TestAppContext) {
     use treeterm_model::workspace_store::ActivityState;
     cx.executor().allow_parking();
