@@ -683,6 +683,33 @@ enum PageCommand {
     Failed(String),
 }
 
+/// What a page posts to the app (`window.ipc.postMessage`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PageMessage<'a> {
+    /// The PDF viewer's Print, its pages laid out for print: open the print panel.
+    Print,
+    /// The PDF viewer's Print failed in the page (pdf.js could not draw a page for print):
+    /// `print-failed <reason>`.
+    PrintFailed(&'a str),
+    /// The PDF viewer's Download.
+    Download,
+    /// `ready …` and `error …` from every page, for the log.
+    Report(&'a str),
+}
+
+impl<'a> PageMessage<'a> {
+    fn parse(message: &'a str) -> Self {
+        match message {
+            "print" => PageMessage::Print,
+            "download" => PageMessage::Download,
+            _ => match message.strip_prefix("print-failed ") {
+                Some(reason) => PageMessage::PrintFailed(reason),
+                None => PageMessage::Report(message),
+            },
+        }
+    }
+}
+
 /// What a page asks of its owner.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AssetPageEvent {
@@ -750,13 +777,19 @@ impl AssetPageView {
             Page::Live(webview) => webview.read(cx).raw().print().map_err(|error| error.to_string()),
             Page::NotBuilt | Page::Failed(_) => Err(format!("{} is not shown", self.what)),
         };
-        self.command = match result {
-            Ok(()) => PageCommand::Done,
-            Err(error) => {
-                tracing::error!(page = self.what, %error, "Cannot print");
-                PageCommand::Failed(format!("Cannot print: {error}"))
+        match result {
+            Ok(()) => {
+                self.command = PageCommand::Done;
+                cx.notify();
             }
-        };
+            Err(error) => self.print_failed(&error, cx),
+        }
+    }
+
+    /// A print that failed, in the page or opening the print panel: shown above the page.
+    fn print_failed(&mut self, error: &str, cx: &mut Context<Self>) {
+        tracing::error!(page = self.what, %error, "Cannot print");
+        self.command = PageCommand::Failed(format!("Cannot print: {error}"));
         cx.notify();
     }
 
@@ -771,13 +804,13 @@ impl AssetPageView {
         }
     }
 
-    /// What the page asks (`window.ipc.postMessage`): `print` and `download` from the PDF
-    /// viewer; `ready …` and `error …` from every page, for the log.
+    /// What the page asks ([`PageMessage`]).
     fn on_message(&mut self, message: &str, cx: &mut Context<Self>) {
-        match message {
-            "print" => self.print(cx),
-            "download" => cx.emit(AssetPageEvent::Download),
-            _ => tracing::info!(page = self.what, %message, "asset page"),
+        match PageMessage::parse(message) {
+            PageMessage::Print => self.print(cx),
+            PageMessage::PrintFailed(reason) => self.print_failed(reason, cx),
+            PageMessage::Download => cx.emit(AssetPageEvent::Download),
+            PageMessage::Report(message) => tracing::info!(page = self.what, %message, "asset page"),
         }
     }
 
@@ -989,7 +1022,14 @@ mod tests {
         for file in ["viewer.js", "viewer.css"] {
             assert!(html.contains(&format!("\"{file}\"")), "{file} not loaded");
         }
-        for asked in ["fetch('name')", "fetch('document.pdf')", "workerSrc = 'pdf.worker.mjs'", "report('print')", "report('download')"] {
+        for asked in [
+            "fetch('name')",
+            "fetch('document.pdf')",
+            "workerSrc = 'pdf.worker.mjs'",
+            "report('print')",
+            "report(`print-failed ${",
+            "report('download')",
+        ] {
             assert!(script.contains(asked), "{asked} not in the script");
         }
     }
@@ -1008,5 +1048,42 @@ mod tests {
         for path in ["index.html", "viewer.js", "viewer.css", "pdf.worker.mjs"] {
             assert!(!file(path).1.is_empty(), "{path} is empty");
         }
+    }
+
+    #[test]
+    fn a_pages_messages_are_told_apart() {
+        assert_eq!(PageMessage::parse("print"), PageMessage::Print);
+        assert_eq!(PageMessage::parse("download"), PageMessage::Download);
+        assert_eq!(
+            PageMessage::parse("print-failed Bad page: 2 of 3"),
+            PageMessage::PrintFailed("Bad page: 2 of 3")
+        );
+        assert_eq!(PageMessage::parse("ready 3 pages"), PageMessage::Report("ready 3 pages"));
+        assert_eq!(PageMessage::parse("error Invalid PDF"), PageMessage::Report("error Invalid PDF"));
+        assert_eq!(PageMessage::parse("printed"), PageMessage::Report("printed"));
+    }
+
+    /// A print the PDF viewer could not lay out shows above the page, as one whose print panel
+    /// cannot open does.
+    #[gpui_kit::test]
+    fn a_print_that_fails_in_the_page_shows_above_it(cx: &mut gpui_kit::TestAppContext) {
+        use gpui_kit::AppContext as _;
+        let view = cx.new(|_| AssetPageView::pdf(std::sync::Arc::new(b"%PDF-1.4".to_vec()), "a.pdf"));
+        let notified = std::rc::Rc::new(std::cell::Cell::new(0));
+        cx.update(|cx| {
+            let notified = notified.clone();
+            cx.observe(&view, move |_, _| notified.set(notified.get() + 1)).detach();
+        });
+        let command = |cx: &mut gpui_kit::TestAppContext| view.read_with(cx, |page, _| page.command.clone());
+        view.update(cx, |page, cx| page.on_message("print-failed Bad page: 2 of 3", cx));
+        cx.run_until_parked();
+        assert_eq!(command(cx), PageCommand::Failed("Cannot print: Bad page: 2 of 3".into()));
+        assert_eq!(notified.get(), 1);
+        // Not built (no window in tests), the page cannot open the print panel either; what
+        // the page only reports leaves the failure shown.
+        view.update(cx, |page, cx| page.on_message("print", cx));
+        assert_eq!(command(cx), PageCommand::Failed("Cannot print: the PDF is not shown".into()));
+        view.update(cx, |page, cx| page.on_message("ready 1 pages", cx));
+        assert_eq!(command(cx), PageCommand::Failed("Cannot print: the PDF is not shown".into()));
     }
 }

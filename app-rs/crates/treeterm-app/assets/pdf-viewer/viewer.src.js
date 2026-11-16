@@ -1,8 +1,8 @@
 // The PDF viewer page: Chromium's PDF viewer (which Electron's PdfViewer shows a PDF in) on
 // pdf.js — its page box, zoom, fit, rotate, download and print, and the sidebar of thumbnails
 // and the document outline. Bundled with pdf.js into viewer.js by build.sh; the app serves it
-// with the PDF's bytes (`document.pdf`) and its file name (`name`), and does what the page
-// asks of it (`print`, `download`).
+// with the PDF's bytes (`document.pdf`) and its file name (`name`), does what the page asks
+// of it (`print`, `download`) and shows a print that failed here (`print-failed <reason>`).
 
 import './pdfjs-global.js'
 import 'pdfjs-dist/legacy/web/pdf_viewer.css'
@@ -171,7 +171,8 @@ async function main() {
       await preparePrint(pdf, viewer.pagesRotation)
       report('print')
     } catch (err) {
-      report(`error Cannot print: ${errorMessage(err)}`)
+      // The app shows it above the page, as it shows a print panel that cannot open.
+      report(`print-failed ${errorMessage(err)}`)
     } finally {
       element('print').disabled = false
     }
