@@ -22,6 +22,7 @@ mod keybinding_overlay;
 #[cfg(target_os = "macos")]
 mod macos;
 mod menus;
+mod number_field;
 mod review_view;
 mod search_panel;
 mod tab_layout_view;

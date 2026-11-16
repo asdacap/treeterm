@@ -11,11 +11,9 @@ use treeterm_core::settings::{
 
 use super::widgets::{divider, group, heading, hint, label, reset_button, section, select, select_menu, toggle, unlabeled};
 use super::{Recording, SettingsView, form};
+use crate::number_field::NumberField;
 use crate::theme::colors;
 use crate::ui;
-
-/// `input[type=number].settings-input`: 100px wide.
-const NUMBER_WIDTH: f32 = 100.;
 
 const CURSOR_STYLES: &[(CursorStyle, &str)] =
     &[(CursorStyle::Block, "Block"), (CursorStyle::Underline, "Underline"), (CursorStyle::Bar, "Bar")];
@@ -330,7 +328,7 @@ impl SettingsView {
             ))
             .child(group(
                 "Timeout (ms)",
-                number(&self.inputs.prefix_timeout, cx),
+                NumberField::new(&self.inputs.prefix_timeout, form::PREFIX_TIMEOUT),
                 Some("How long to wait for action key after pressing prefix (500-5000ms)"),
                 cx,
             ))
@@ -403,7 +401,7 @@ impl SettingsView {
 
 /// `input[type=number].settings-input`.
 fn number(state: &Entity<InputState>, cx: &gpui_kit::App) -> impl IntoElement + use<> {
-    div().w(px(NUMBER_WIDTH)).child(ui::text_input(state, cx))
+    div().w(px(crate::number_field::WIDTH)).child(ui::text_input(state, cx))
 }
 
 /// `formatKeybindingLabel`: Electron names five actions and shows the sixth by its key.

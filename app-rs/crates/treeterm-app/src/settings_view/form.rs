@@ -16,6 +16,8 @@ use treeterm_core::settings::{
 };
 use treeterm_model::apps::AppRegistry;
 
+use crate::number_field::{NumberSpec, number_value};
+
 /// The dialog's sections, one shown at a time (Electron's `TabId`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Section {
@@ -157,9 +159,6 @@ impl Texts {
         let idle_debounce_unread = whole_number::<u64>(&self.idle_debounce_unread, 0).ok_or_else(|| {
             FormError::new(Section::Llm, "Idle debounce when unread must be a whole number of milliseconds")
         })?;
-        let timeout = whole_number::<u64>(&self.prefix_timeout, 1).ok_or_else(|| {
-            FormError::new(Section::Keybindings, "Prefix timeout must be a positive whole number of milliseconds")
-        })?;
 
         let terminal = &mut settings.terminal;
         terminal.font_size = font_size;
@@ -183,7 +182,8 @@ impl Texts {
         // The keys as recorded, a Space action key (` `) included: one that matches no key
         // press only disables itself (`KeybindingSettings`), as in Electron.
         settings.prefix_mode.prefix_key = self.prefix_key.clone();
-        settings.prefix_mode.timeout = Duration::from_millis(timeout);
+        // A pasted negative timeout (Electron stores it, and prefix mode ends at once) is 0.
+        settings.prefix_mode.timeout = Duration::from_millis(prefix_timeout_ms(&self.prefix_timeout).max(0.) as u64);
         for (action, key) in PrefixAction::ALL.iter().zip(&self.action_keys) {
             *action_key_mut(&mut settings.keybindings, *action) = key.clone();
         }
@@ -198,6 +198,49 @@ fn whole_number<T: FromStr + PartialOrd>(text: &str, min: T) -> Option<T> {
         Ok(value) if value >= min => Some(value),
         Ok(_) | Err(_) => None,
     }
+}
+
+/// The prefix Timeout field (`<input type="number" min=500 max=5000 step=100>`).
+pub const PREFIX_TIMEOUT: NumberSpec = NumberSpec { min: 500., max: 5000., step: 100. };
+
+/// The timeout the Timeout field holds for `text`: Electron's `parseInt(value) || 1500`,
+/// where `value` is empty unless `text` is a valid number. Whole milliseconds, never 0;
+/// negative when a negative one is pasted (`-5`), as in Electron.
+pub fn prefix_timeout_ms(text: &str) -> f64 {
+    let parsed = match number_value(text) {
+        Some(_) => parse_int(text),
+        None => None,
+    };
+    match parsed {
+        // `0 || 1500`, `-0 || 1500` and `NaN || 1500`.
+        Some(ms) if ms != 0. => ms,
+        Some(_) | None => 1500.,
+    }
+}
+
+/// What React writes back into the Timeout field once `text` is typed into it: the timeout
+/// it holds ([`prefix_timeout_ms`]), unless the field's value is that number already
+/// (`node.value != value`, the empty value counting as 0). So an emptied field shows
+/// `1500`, and `1500.7` turns into `1500`.
+pub fn prefix_timeout_field(text: &str) -> Option<String> {
+    let ms = prefix_timeout_ms(text);
+    if number_value(text).unwrap_or(0.) == ms { None } else { Some(ms.to_string()) }
+}
+
+/// JavaScript's `parseInt` of a valid number: its sign and leading digits (`1e3` is 1,
+/// `12.9` is 12), or `None` (NaN) when it starts with neither (`.5`).
+fn parse_int(text: &str) -> Option<f64> {
+    let (sign, unsigned) = match text.strip_prefix('-') {
+        Some(rest) => (-1., rest),
+        None => (1., text),
+    };
+    let end = unsigned.find(|c: char| !c.is_ascii_digit()).unwrap_or(unsigned.len());
+    let digits = &unsigned[..end];
+    if digits.is_empty() {
+        return None;
+    }
+    // As a float, as JavaScript holds it: any run of digits is one.
+    Some(sign * digits.parse::<f64>().expect("ASCII digits parse as a float"))
 }
 
 /// Electron's safe-paths field: comma-separated, trimmed, empty entries dropped.
@@ -597,12 +640,64 @@ mod tests {
         assert_eq!(settings.prefix_mode.prefix_key, "");
     }
 
+    /// `parseInt(e.target.value) || 1500` over what `<input type="number">` reports.
+    #[test]
+    fn the_prefix_timeout_is_read_as_electron_reads_it() {
+        for (text, ms) in [
+            ("800", 800.),
+            ("", 1500.),
+            ("0", 1500.),
+            ("-0", 1500.),
+            ("1500.7", 1500.),
+            ("1e3", 1.),
+            ("-5", -5.),
+            (".5", 1500.),
+            ("abc", 1500.),
+            ("5.", 1500.),
+            ("+5", 1500.),
+            ("99999999999999999999", 1e20),
+        ] {
+            assert_eq!(prefix_timeout_ms(text), ms, "{text:?}");
+        }
+    }
+
+    /// React rewrites the controlled field whenever its value is not the stored number.
+    #[test]
+    fn the_prefix_timeout_field_shows_what_is_stored() {
+        for (text, shown) in [
+            ("800", None),
+            ("1500", None),
+            ("-5", None),
+            ("0800", None),
+            ("", Some("1500")),
+            ("0", Some("1500")),
+            ("-", Some("1500")),
+            ("1500.", Some("1500")),
+            ("1500.7", Some("1500")),
+            ("1e3", Some("1")),
+        ] {
+            assert_eq!(prefix_timeout_field(text).as_deref(), shown, "{text:?}");
+        }
+    }
+
+    /// Save never refuses the timeout; a pasted negative one ends prefix mode at once.
+    #[test]
+    fn the_prefix_timeout_is_saved_as_electron_stores_it() {
+        let mut settings = Settings::default();
+        for (text, ms) in [("", 1500), ("0", 1500), ("1500.7", 1500), ("5", 5), ("-5", 0), ("9000", 9000)] {
+            let mut texts = texts();
+            texts.prefix_timeout = text.into();
+            texts.apply(&mut settings).unwrap();
+            assert_eq!(settings.prefix_mode.timeout, Duration::from_millis(ms), "{text:?}");
+        }
+    }
+
     /// An edit to the texts, the section it belongs to, and how the error starts.
     type InvalidCase = (fn(&mut Texts), Section, &'static str);
 
     #[test]
     fn invalid_text_names_the_field_and_its_section_and_writes_nothing() {
-        let cases: [InvalidCase; 7] = [
+        let cases: [InvalidCase; 6] = [
             (|t| t.font_size = "big".into(), Section::Terminal, "Font size must be a positive number"),
             (|t| t.font_size = "0".into(), Section::Terminal, "Font size must be a positive number"),
             (|t| t.max_cols = "1".into(), Section::Terminal, "Max columns must be a whole number of at least 2"),
@@ -612,11 +707,6 @@ mod tests {
                 |t| t.idle_debounce_unread = "1.5".into(),
                 Section::Llm,
                 "Idle debounce when unread must be a whole number of milliseconds",
-            ),
-            (
-                |t| t.prefix_timeout = "0".into(),
-                Section::Keybindings,
-                "Prefix timeout must be a positive whole number of milliseconds",
             ),
         ];
         for (edit, section, message) in cases {

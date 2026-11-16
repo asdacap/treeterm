@@ -102,6 +102,8 @@ struct Inputs {
     github_pat: Entity<InputState>,
     /// Re-render on typing a criterion, for its "Reset to default".
     _criteria_changes: Vec<Subscription>,
+    /// Writes the stored timeout back into its field ([`form::prefix_timeout_field`]).
+    _prefix_timeout_changes: Subscription,
 }
 
 impl Inputs {
@@ -141,6 +143,17 @@ impl Inputs {
                 })
             })
             .collect();
+        let _prefix_timeout_changes = cx.subscribe_in(&prefix_timeout, window, |_, state, event: &InputEvent, window, cx| {
+            match event {
+                // The field is React-controlled: what it holds is written back at once.
+                InputEvent::Change => {
+                    if let Some(stored) = form::prefix_timeout_field(&state.read(cx).value()) {
+                        state.update(cx, |input, cx| input.set_value(stored, window, cx));
+                    }
+                }
+                InputEvent::PressEnter { .. } | InputEvent::Focus | InputEvent::Blur => {}
+            }
+        });
         Self {
             font_size,
             max_cols,
@@ -162,6 +175,7 @@ impl Inputs {
             action_keys,
             github_pat,
             _criteria_changes,
+            _prefix_timeout_changes,
         }
     }
 
@@ -545,6 +559,44 @@ mod tests {
         assert_eq!(mode(cx, &keybindings), PrefixMode::Idle);
         assert_eq!(recording(cx, &view), None);
         assert_eq!(texts(cx, &view).prefix_key, "CommandOrControl+B");
+    }
+
+    /// `<input type="number" min=500 max=5000 step=100>` under React: ArrowUp/ArrowDown step
+    /// it within its bounds, and whatever is typed is replaced by the timeout it holds.
+    #[gpui_kit::test]
+    fn the_prefix_timeout_steps_and_shows_what_it_holds(cx: &mut TestAppContext) {
+        let (cx, _, view) = dialog(cx);
+        cx.update(|_, cx| {
+            view.update(cx, |view, cx| {
+                view.section = Section::Keybindings;
+                cx.notify();
+            })
+        });
+        cx.run_until_parked();
+        let field = cx.update(|_, cx| view.read(cx).inputs.prefix_timeout.clone());
+        cx.update(|window, cx| field.update(cx, |input, cx| input.focus(window, cx)));
+        let text = |cx: &mut VisualTestContext| cx.update(|_, cx| field.read(cx).value().to_string());
+
+        cx.simulate_keystrokes("up");
+        assert_eq!(text(cx), "1600");
+        cx.simulate_keystrokes("down down");
+        assert_eq!(text(cx), "1400");
+
+        // Emptied, it shows the 1500 it then holds; a fraction is cut to whole milliseconds.
+        cx.update(|window, cx| field.update(cx, |input, cx| input.replace_all("", window, cx)));
+        cx.run_until_parked();
+        assert_eq!(text(cx), "1500");
+        cx.update(|window, cx| field.update(cx, |input, cx| input.replace_all("1500.7", window, cx)));
+        cx.run_until_parked();
+        assert_eq!(text(cx), "1500");
+        // Typed values are not clamped; stepping brings them back in range.
+        cx.update(|window, cx| field.update(cx, |input, cx| input.replace_all("100", window, cx)));
+        cx.run_until_parked();
+        assert_eq!(text(cx), "100");
+        cx.simulate_keystrokes("down");
+        assert_eq!(text(cx), "100");
+        cx.simulate_keystrokes("up");
+        assert_eq!(text(cx), "500");
     }
 
     /// An action key in prefix mode runs its action, not the recorder; Cmd/Ctrl+1–9 (only
