@@ -4,11 +4,12 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
 
+use treeterm_core::daemon::DaemonConnection;
 use treeterm_core::exec::ExecClient;
 use treeterm_core::fs::FsClient;
 use treeterm_core::git::{
     BranchDisposal, FileChangeStats, FileChangeStatus, FileDiffContents, GitApi, GitInfo, LogScope,
-    Progress, Staging, WorktreeBase,
+    Progress, Staging, UncommittedChanges, WorktreeBase,
 };
 use treeterm_core::rt::Rt;
 use treeterm_core::transport::{connect_unix, daemon_client};
@@ -242,6 +243,52 @@ async fn uncommitted_changes_are_reviewed_staged_and_committed() {
             ("src/new.txt", FileChangeStatus::Added)
         ]
     );
+}
+
+// Electron has one git client per session, so two Review tabs on one repo refreshing at
+// once share a single follow-up scan; every git client of one connection does here.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn git_clients_of_one_connection_share_their_uncommitted_changes_scans() {
+    let daemon = TestDaemon::start();
+    let repo = init_repo(&daemon);
+    std::fs::write(repo.join("new.txt"), "a\n").unwrap();
+    let repo = path_str(&repo);
+    let rt = Rt::new(tokio::runtime::Handle::current());
+    let connection = DaemonConnection::connect(rt, daemon.socket_path().to_owned())
+        .await
+        .unwrap();
+
+    let first = connection.git().get_uncommitted_changes(repo);
+    let second = connection.git().get_uncommitted_changes(repo);
+    let third = connection.clone().git().get_uncommitted_changes(repo);
+    assert!(second.ptr_eq(&third));
+    let (first, second, third) = futures::future::join3(first, second, third).await;
+    let changed = |changes: &UncommittedChanges| -> Vec<String> {
+        changes
+            .files
+            .iter()
+            .map(|file| file.entry.path.clone())
+            .collect()
+    };
+    assert_eq!(changed(&first.unwrap()), vec!["new.txt"]);
+    assert_eq!(changed(&second.unwrap()), vec!["new.txt"]);
+    assert_eq!(changed(&third.unwrap()), vec!["new.txt"]);
+
+    // Another connection scans on its own.
+    let other = DaemonConnection::connect(
+        Rt::new(tokio::runtime::Handle::current()),
+        daemon.socket_path().to_owned(),
+    )
+    .await
+    .unwrap();
+    let mine = connection.git().get_uncommitted_changes(repo);
+    let queued = connection.git().get_uncommitted_changes(repo);
+    let theirs = other.git().get_uncommitted_changes(repo);
+    assert!(!queued.ptr_eq(&theirs));
+    let (mine, queued, theirs) = futures::future::join3(mine, queued, theirs).await;
+    assert_eq!(changed(&mine.unwrap()), vec!["new.txt"]);
+    assert_eq!(changed(&queued.unwrap()), vec!["new.txt"]);
+    assert_eq!(changed(&theirs.unwrap()), vec!["new.txt"]);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

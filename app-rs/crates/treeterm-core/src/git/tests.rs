@@ -1101,6 +1101,50 @@ mod get_uncommitted_changes {
         assert_eq!(r3.unwrap(), r2);
     }
 
+    // Electron has one git client per session, so its Review tabs on one repo share the
+    // follow-up scan; the native app shares the scans per connection.
+    #[test]
+    fn clients_built_on_the_same_scans_share_one_follow_up_scan() {
+        let exec = FakeExec::new(vec![
+            out("M  a.ts"),
+            out("1\t0\ta.ts"),
+            out(""),
+            out("M  a.ts"),
+            out("2\t0\ta.ts"),
+            out(""),
+        ]);
+        let scans = UncommittedScans::default();
+        let one = GitApi::with_scans(exec.clone(), FakeFs::missing(), scans.clone());
+        let other = GitApi::with_scans(exec.clone(), FakeFs::missing(), scans);
+        let first = one.get_uncommitted_changes("/repo");
+        let second = other.get_uncommitted_changes("/repo");
+        let third = one.get_uncommitted_changes("/repo");
+        assert!(second.ptr_eq(&third));
+        let (r1, r2, r3) = run(futures::future::join3(first, second, third));
+        assert_eq!(exec.calls().len(), 6);
+        assert_eq!(r1.unwrap().total_additions, 1);
+        let r2 = r2.unwrap();
+        assert_eq!(r2.total_additions, 2);
+        assert_eq!(r3.unwrap(), r2);
+    }
+
+    #[test]
+    fn clients_built_apart_scan_on_their_own() {
+        let scan = [out("M  a.ts"), out("1\t0\ta.ts"), out("")];
+        let exec = FakeExec::new(scan.iter().cycle().take(9).cloned().collect());
+        let one = api(&exec, FakeFs::missing());
+        let other = api(&exec, FakeFs::missing());
+        let first = one.get_uncommitted_changes("/repo");
+        let second = other.get_uncommitted_changes("/repo");
+        let third = one.get_uncommitted_changes("/repo");
+        assert!(!second.ptr_eq(&third));
+        // One after the other, so the scripted answers are not shared out between scans.
+        for scan in [first, second, third] {
+            assert_eq!(run(scan).unwrap().total_additions, 1);
+        }
+        assert_eq!(exec.calls().len(), 9);
+    }
+
     #[test]
     fn counts_a_binary_untracked_file_as_zero_changed_lines() {
         let exec = FakeExec::new(vec![

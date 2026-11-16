@@ -70,13 +70,21 @@ macro_rules! owned {
     ($($arg:expr),* $(,)?) => { vec![$(String::from($arg)),*] };
 }
 
-/// Git operations against one daemon. Cheap to clone; clones share the coalescing of
+/// Git operations against one daemon. Cheap to clone; clones, and every client built
+/// [`GitApi::with_scans`] on the same [`UncommittedScans`], share the coalescing of
 /// [`Self::get_uncommitted_changes`].
 #[derive(Clone)]
 pub struct GitApi {
     runner: Runner,
-    uncommitted: Arc<CoalesceByKey<Result<UncommittedChanges, GitError>>>,
+    uncommitted: UncommittedScans,
 }
+
+/// The coalescing of [`GitApi::get_uncommitted_changes`] (Electron's
+/// `coalesceByKey(loadUncommittedChanges)`), to share between the git clients of one daemon
+/// connection as Electron shares one git client per session: Review tabs on the same repo
+/// then join one follow-up scan instead of each running its own. Clones share it.
+#[derive(Clone, Default)]
+pub struct UncommittedScans(Arc<CoalesceByKey<Result<UncommittedChanges, GitError>>>);
 
 /// Runs commands and reads files; everything that does I/O goes through here.
 #[derive(Clone)]
@@ -677,10 +685,21 @@ impl WhenKilled {
 }
 
 impl GitApi {
+    /// A client whose uncommitted-changes scans coalesce only with its own clones'.
     pub fn new(exec: Arc<dyn ExecApi>, filesystem: Arc<dyn FilesystemApi>) -> Self {
+        Self::with_scans(exec, filesystem, UncommittedScans::default())
+    }
+
+    /// A client whose uncommitted-changes scans coalesce with those of every client built
+    /// on `scans`.
+    pub fn with_scans(
+        exec: Arc<dyn ExecApi>,
+        filesystem: Arc<dyn FilesystemApi>,
+        scans: UncommittedScans,
+    ) -> Self {
         Self {
             runner: Runner { exec, filesystem },
-            uncommitted: Arc::new(CoalesceByKey::new()),
+            uncommitted: scans,
         }
     }
 
@@ -1171,15 +1190,16 @@ impl GitApi {
 
     /// Every staged, unstaged and untracked change with its size. Review refreshes on
     /// mount, on focus and after every stage/commit; a slow repo must not accumulate
-    /// overlapping scans, so concurrent requests for the same repo share one follow-up run
-    /// (see [`CoalesceByKey`]). The run is decided now, not when the future is first polled.
+    /// overlapping scans, so concurrent requests for the same repo, from every client sharing
+    /// this one's [`UncommittedScans`], share one follow-up run (see [`CoalesceByKey`]). The
+    /// run is decided now, not when the future is first polled.
     pub fn get_uncommitted_changes(
         &self,
         repo_path: &str,
     ) -> SharedRun<Result<UncommittedChanges, GitError>> {
         let runner = self.runner.clone();
         let repo = repo_path.to_owned();
-        self.uncommitted.call(repo_path, move || {
+        self.uncommitted.0.call(repo_path, move || {
             async move { runner.load_uncommitted_changes(&repo).await }.boxed()
         })
     }

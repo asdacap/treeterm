@@ -115,6 +115,10 @@ pub struct DaemonConnection {
     received: ByteCounter,
     /// Set once the connection manager gives this generation up; its execs then fail.
     lost: Arc<watch::Sender<Option<ConnectionId>>>,
+    /// Shared by every [`Self::git`] client of this generation and its clones, so the Review
+    /// tabs on one repo share their uncommitted-changes scans (Electron: one git client per
+    /// session store).
+    uncommitted_scans: crate::git::UncommittedScans,
 }
 
 impl DaemonConnection {
@@ -132,6 +136,7 @@ impl DaemonConnection {
             session: daemon_client(session),
             received,
             lost: Arc::new(watch::Sender::new(None)),
+            uncommitted_scans: crate::git::UncommittedScans::default(),
         })
     }
 
@@ -256,9 +261,14 @@ impl DaemonConnection {
         crate::fs::FsClient::new(self.rt.clone(), self.main.clone())
     }
 
-    /// Git on the daemon's host, through its exec and file clients.
+    /// Git on the daemon's host, through its exec and file clients. Every client of this
+    /// connection shares its uncommitted-changes scans.
     pub fn git(&self) -> crate::git::GitApi {
-        crate::git::GitApi::new(std::sync::Arc::new(self.exec_client()), std::sync::Arc::new(self.fs_client()))
+        crate::git::GitApi::with_scans(
+            Arc::new(self.exec_client()),
+            Arc::new(self.fs_client()),
+            self.uncommitted_scans.clone(),
+        )
     }
 
     /// Attach to a PTY. See [`crate::pty`].
