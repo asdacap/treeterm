@@ -51,6 +51,8 @@ struct DialerState {
     /// Applied when `plans` is empty.
     always_fail: Option<String>,
     watches: Vec<Watch>,
+    /// `connection_lost` calls, in order.
+    losses: Vec<(FakeDaemon, ConnectionId)>,
 }
 
 pub(crate) const LOCAL_SOCKET: &str = "/fake/local.sock";
@@ -111,6 +113,11 @@ impl FakeDialer {
             .expect("a heartbeat watch on this daemon")
             .tx
             .is_closed()
+    }
+
+    /// The daemons whose running commands were failed as lost, and for which connection.
+    pub(crate) fn losses(&self) -> Vec<(FakeDaemon, ConnectionId)> {
+        self.state().losses.clone()
     }
 
     pub(crate) fn has_watch(&self, daemon: &FakeDaemon) -> bool {
@@ -186,6 +193,12 @@ impl Dialer for FakeDialer {
             tx,
         });
         rx.boxed()
+    }
+
+    fn connection_lost(&self, daemon: &FakeDaemon, connection: &ConnectionId) {
+        self.state()
+            .losses
+            .push((daemon.clone(), connection.clone()));
     }
 }
 

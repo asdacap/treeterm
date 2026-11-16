@@ -4,6 +4,8 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use futures::StreamExt;
+use treeterm_core::connection::ConnectionId;
+use treeterm_core::daemon::DaemonConnection;
 use treeterm_core::exec::{
     CommandOutput, ExecClient, ExecError, ExecEvent, ExecRequest, ExecTimeout, collect_output,
 };
@@ -181,4 +183,47 @@ async fn input_fails_once_the_command_is_done() {
         }
     });
     closed.await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_lost_connection_fails_its_commands_and_the_daemon_kills_them() {
+    let daemon = TestDaemon::start();
+    let conn = DaemonConnection::open(&rt(), daemon.socket_path())
+        .await
+        .unwrap()
+        .unwrap();
+    let exec = conn.exec_client();
+    let marker = daemon.root().join("marker");
+    let script = format!("echo started; sleep 1; touch '{}'", marker.display());
+    let mut process = exec.exec(request(&daemon, "sh", &["-c", &script]));
+    let first = within(process.events.next()).await.unwrap().unwrap();
+    assert_eq!(first, ExecEvent::Stdout(b"started\n".to_vec()));
+
+    conn.fail_running_execs(ConnectionId::new("local-1"));
+    let lost = tokio::time::timeout(Duration::from_secs(1), process.events.next())
+        .await
+        .expect("the loss settles the command at once");
+    match lost {
+        Some(Err(error @ ExecError::ConnectionLost(_))) => assert_eq!(
+            error.to_string(),
+            "connection local-1 lost while command was running"
+        ),
+        other => panic!("expected the loss, got {other:?}"),
+    }
+    assert!(within(process.events.next()).await.is_none());
+
+    // Commands started on the lost connection fail without reaching the daemon.
+    let started = Instant::now();
+    let late = within(conn.exec_client().run(request(&daemon, "true", &[]))).await;
+    assert!(
+        matches!(&late, Err(ExecError::ConnectionLost(id)) if id.as_str() == "local-1"),
+        "{late:?}"
+    );
+    assert!(started.elapsed() < Duration::from_millis(500));
+
+    tokio::time::sleep(Duration::from_millis(2000)).await;
+    assert!(
+        !marker.exists(),
+        "the command ran on after its connection was lost"
+    );
 }

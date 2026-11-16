@@ -5,6 +5,7 @@
 //! Remote connections run against a fake ssh (no ssh in tests) whose "tunnel" is such a
 //! proxy from the forwarded local socket to the daemon.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -22,6 +23,7 @@ use treeterm_core::connection::{
     SshEnvironment, StatusKind,
 };
 use treeterm_core::daemon::DaemonConnection;
+use treeterm_core::exec::{ExecError, ExecRequest, ExecTimeout};
 use treeterm_core::local_daemon::LocalDaemonSpec;
 use treeterm_core::pty::CreatePty;
 use treeterm_core::rt::Rt;
@@ -231,6 +233,69 @@ async fn force_reconnect_hands_out_a_new_generation() {
         manager.connection(&first.id).unwrap().status.kind(),
         StatusKind::Connected
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_reconnect_fails_the_commands_running_on_the_lost_generation() {
+    let daemon = TestDaemon::start();
+    let dir = tempfile::Builder::new()
+        .prefix("tt")
+        .tempdir_in("/tmp")
+        .unwrap();
+    let spec = LocalDaemonSpec {
+        socket_path: daemon.socket_path().to_owned(),
+        binary: dir.path().join("never-spawned"),
+        log_path: dir.path().join("daemon.log"),
+        pid_file: dir.path().join("daemon.pid"),
+    };
+    let mut manager = ConnectionManager::new(
+        rt(),
+        GrpcDialer::new(rt(), spec),
+        Arc::new(TokioSpawner),
+        ssh_env(dir.path()),
+    );
+    let info = manager.connect_local().await.unwrap();
+    let id = info.id.clone();
+    let mut watch = manager.watch_connection_status(&id).unwrap();
+    let first = connected_daemon(info);
+    let sleep = ExecRequest {
+        cwd: daemon.root().to_string_lossy().into_owned(),
+        command: "sleep".to_owned(),
+        args: vec!["30".to_owned()],
+        env: HashMap::new(),
+        timeout: ExecTimeout::After(Duration::from_secs(60)),
+    };
+    let running = first.exec_client().run(sleep);
+
+    // The daemon is healthy and its socket stays open: only the loss settles the command.
+    manager.force_reconnect(&id).unwrap();
+    let result = tokio::time::timeout(Duration::from_secs(2), running)
+        .await
+        .expect("the lost command is settled at once");
+    match result {
+        Err(error @ ExecError::ConnectionLost(_)) => assert_eq!(
+            error.to_string(),
+            format!("connection {id} lost while command was running")
+        ),
+        other => panic!("expected the loss, got {other:?}"),
+    }
+
+    // The next generation runs commands as usual.
+    let second = connected_daemon(
+        wait_for(&mut watch.updates, |info| {
+            info.status.kind() == StatusKind::Connected
+        })
+        .await,
+    );
+    let echo = ExecRequest {
+        cwd: daemon.root().to_string_lossy().into_owned(),
+        command: "echo".to_owned(),
+        args: vec!["again".to_owned()],
+        env: HashMap::new(),
+        timeout: ExecTimeout::After(Duration::from_secs(10)),
+    };
+    let output = second.exec_client().run(echo).await.unwrap();
+    assert_eq!(output.stdout, b"again\n");
 }
 
 /// A fake ssh host whose daemon is `daemon` and whose tunnels are proxies to it.

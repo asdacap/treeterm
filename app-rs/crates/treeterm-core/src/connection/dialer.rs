@@ -11,7 +11,7 @@ use crate::daemon::DaemonConnection;
 use crate::local_daemon::{LocalDaemonSpec, ensure_running};
 use crate::rt::Rt;
 
-use super::types::DialFailure;
+use super::types::{ConnectionId, DialFailure};
 
 /// Opens daemon connections and watches their liveness.
 pub trait Dialer: Send + Sync + 'static {
@@ -31,6 +31,10 @@ pub trait Dialer: Send + Sync + 'static {
         daemon: &Self::Daemon,
         listener_id: &str,
     ) -> BoxStream<'static, Result<(), String>>;
+
+    /// `connection` lost `daemon` (it went from connected to reconnecting): fail the
+    /// commands still running on it.
+    fn connection_lost(&self, daemon: &Self::Daemon, connection: &ConnectionId);
 }
 
 /// The daemon over gRPC: [`ensure_running`] + [`DaemonConnection::connect`] locally,
@@ -80,5 +84,9 @@ impl Dialer for GrpcDialer {
             .watch_session(listener_id)
             .map(|event| event.map(|_| ()).map_err(|error| error.to_string()))
             .boxed()
+    }
+
+    fn connection_lost(&self, daemon: &DaemonConnection, connection: &ConnectionId) {
+        daemon.fail_running_execs(connection.clone());
     }
 }

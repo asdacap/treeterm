@@ -206,6 +206,11 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   Review and can be pushed to GitHub. Comments with Electron's absolute paths still show in
   the Files viewer and the Comments tab; Electron's Files tab does not show the relative ones.
 
+- When a connection goes to reconnecting, the commands its session was running (a git
+  operation in progress, say) are cancelled with the session, which is rebuilt on the new
+  connection, instead of failing with "connection … lost while command was running"
+  (Electron kept the old session until the reconnect). Other commands on the lost
+  connection fail with that error, as in Electron.
 - Placeholders for refs another window removed are dropped with the ref.
 - A replayed OSC 52 copy or bell is ignored (it already happened when it first ran).
 - Corrupt `settings.json` is an error (logged; defaults used) instead of being overwritten.

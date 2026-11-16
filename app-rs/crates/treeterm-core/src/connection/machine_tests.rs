@@ -212,7 +212,11 @@ fn fifty_seconds_of_silence_starts_reconnecting() {
         error.to_string(),
         "Connection lost (no heartbeat from daemon)"
     );
-    assert_eq!(effects(&mut machine), vec![Effect::DropTransport]);
+    // The commands still running on the lost transport fail before it is dropped.
+    assert_eq!(
+        effects(&mut machine),
+        vec![Effect::ConnectionLost, Effect::DropTransport]
+    );
     assert_eq!(machine.poll_timeout(), Some(t0 + secs(51)));
 }
 
@@ -225,7 +229,10 @@ fn a_failed_session_watch_starts_reconnecting() {
         machine.status().error().unwrap().to_string(),
         "gRPC connection lost: transport error"
     );
-    assert_eq!(effects(&mut machine), vec![Effect::DropTransport]);
+    assert_eq!(
+        effects(&mut machine),
+        vec![Effect::ConnectionLost, Effect::DropTransport]
+    );
 }
 
 #[test]
@@ -243,6 +250,40 @@ fn a_closed_tunnel_starts_reconnecting() {
         machine.status().error().unwrap().to_string(),
         "SSH tunnel closed (exit 255): Broken pipe"
     );
+    assert_eq!(
+        effects(&mut machine),
+        vec![Effect::ConnectionLost, Effect::DropTransport]
+    );
+}
+
+#[test]
+fn only_leaving_a_connected_transport_fails_its_commands() {
+    let t0 = Instant::now();
+    // From the first connect: no transport yet.
+    let mut machine = local();
+    effects(&mut machine);
+    machine.force_reconnect(t0);
+    assert_eq!(
+        effects(&mut machine),
+        vec![Effect::CancelAttempt, Effect::DropTransport]
+    );
+
+    // From the error state: the failed attempt left no transport.
+    let mut machine = local();
+    let plan = started_attempt(&mut machine);
+    let failed = machine.attempt_finished(plan.id, Err(ConnectionError::HeartbeatLost), t0);
+    assert_eq!(failed, AttemptVerdict::Applied);
+    machine.reconnect(t0);
+    assert_eq!(effects(&mut machine), vec![Effect::DropTransport]);
+
+    // While reconnecting the loss is not reported again.
+    let mut machine = connected(t0);
+    machine.heartbeat_failed("gone".to_owned(), t0);
+    effects(&mut machine);
+    machine.handle_timeout(t0 + HEARTBEAT_TIMEOUT);
+    machine.tunnel_closed(TunnelEnd::Failed("late".to_owned()), t0);
+    machine.force_reconnect(t0);
+    assert!(!effects(&mut machine).contains(&Effect::ConnectionLost));
 }
 
 #[test]
@@ -464,7 +505,10 @@ fn force_reconnect_from_connected_drops_the_transport_and_waits_a_second() {
     let t0 = Instant::now();
     let mut machine = connected(t0);
     machine.force_reconnect(t0);
-    assert_eq!(effects(&mut machine), vec![Effect::DropTransport]);
+    assert_eq!(
+        effects(&mut machine),
+        vec![Effect::ConnectionLost, Effect::DropTransport]
+    );
     assert_eq!(attempt_of(&machine), 0);
     machine.handle_timeout(t0 + secs(1));
     assert_eq!(started_attempt(&mut machine).target, AttemptTarget::Local);

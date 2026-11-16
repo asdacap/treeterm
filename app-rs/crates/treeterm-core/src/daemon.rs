@@ -1,15 +1,18 @@
 //! Typed access to one daemon over gRPC.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
 use futures::{Stream, StreamExt, TryFutureExt};
+use tokio::sync::watch;
 use treeterm_proto::treeterm::{
     CreatePtyRequest, Empty, FileWatchEvent, ForceUnlockSessionRequest, KillPtyRequest,
     LockSessionRequest, PtySessionInfo, Session, SessionWatchEvent, SessionWatchRequest,
     UnlockSessionRequest, UpdateSessionRequest, WatchFileRequest, WorkspaceRef,
 };
 
+use crate::connection::ConnectionId;
 use crate::pty::{AttachKind, CreatePty, PtyAttachment};
 use crate::rt::{Fut, Rt, Sub, TaskLost};
 use crate::traffic::ByteCounter;
@@ -102,6 +105,8 @@ pub struct DaemonConnection {
     session: DaemonClient,
     /// Every byte received over both connections.
     received: ByteCounter,
+    /// Set once the connection manager gives this generation up; its execs then fail.
+    lost: Arc<watch::Sender<Option<ConnectionId>>>,
 }
 
 impl DaemonConnection {
@@ -116,6 +121,7 @@ impl DaemonConnection {
             main: daemon_client(main),
             session: daemon_client(session),
             received,
+            lost: Arc::new(watch::Sender::new(None)),
         })
     }
 
@@ -238,7 +244,19 @@ impl DaemonConnection {
 
     /// Run commands on the daemon's host (`ExecStream`).
     pub fn exec_client(&self) -> crate::exec::ExecClient {
-        crate::exec::ExecClient::new(self.rt.clone(), self.main.clone())
+        crate::exec::ExecClient::on_connection(self.rt.clone(), self.main.clone(), self.lost.subscribe())
+    }
+
+    /// `connection` was lost on this generation (it went to reconnecting): every command still
+    /// running on it ends with [`crate::exec::ExecError::ConnectionLost`] and is cancelled, so
+    /// the daemon kills it, and later ones fail at once (Electron's `failAllForConnection`).
+    /// Only the first loss counts.
+    pub fn fail_running_execs(&self, connection: ConnectionId) {
+        self.lost.send_modify(|lost| {
+            if lost.is_none() {
+                *lost = Some(connection);
+            }
+        });
     }
 
     /// Files on the daemon's host (ReadFile/WriteFile/ReadDirectory/SearchFiles/...).

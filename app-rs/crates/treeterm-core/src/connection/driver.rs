@@ -271,6 +271,11 @@ pub(crate) async fn drive<D: Dialer>(shared: Arc<Shared<D::Daemon>>, deps: Arc<D
                     attempt = Some((id, connect(shared.clone(), deps.clone(), plan)));
                 }
                 Effect::CancelAttempt => attempt = None,
+                Effect::ConnectionLost => match &transport {
+                    Some(live) => deps.dialer.connection_lost(&live.daemon, &connection),
+                    // The tunnel ended first; its commands were failed when it was dropped.
+                    None => tracing::debug!(%connection, "lost transport already dropped"),
+                },
                 Effect::DropTransport => {
                     heartbeat = None;
                     transport = None;
@@ -337,9 +342,12 @@ pub(crate) async fn drive<D: Dialer>(shared: Arc<Shared<D::Daemon>>, deps: Arc<D
                 }
             },
             end = tunnel_end(&mut transport) => {
-                // The link is dead whatever the machine makes of it.
+                // The link is dead whatever the machine makes of it, and so are the commands
+                // still running through it.
                 heartbeat = None;
-                transport = None;
+                if let Some(dead) = transport.take() {
+                    deps.dialer.connection_lost(&dead.daemon, &connection);
+                }
                 shared.update(|machine| machine.tunnel_closed(end, now()));
             }
             Some((id, (generation, event))) = forwards.next(), if !forwards.is_empty() => {

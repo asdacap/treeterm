@@ -1176,6 +1176,69 @@ mod heartbeat_monitoring {
     }
 }
 
+/// Electron's `failAllForConnection`: entering reconnecting fails the commands still running
+/// on the lost generation.
+mod running_commands_on_a_lost_connection {
+    use super::*;
+
+    #[tokio::test(start_paused = true)]
+    async fn fail_once_per_lost_generation() {
+        let (harness, local) = Harness::with_local().await;
+        let first = daemon_of(&harness, &local);
+        advance(HEARTBEAT_TIMEOUT).await;
+        assert_eq!(status_of(&harness, &local), StatusKind::Reconnecting);
+        assert_eq!(
+            harness.dialer.losses(),
+            vec![(first.clone(), local.clone())]
+        );
+
+        // Attempts in flight and the backoff lose nothing more.
+        advance(Duration::from_secs(1)).await;
+        let second = daemon_of(&harness, &local);
+        assert_ne!(second, first);
+        assert_eq!(harness.dialer.losses().len(), 1);
+
+        harness.manager.force_reconnect(&local).unwrap();
+        flush().await;
+        assert_eq!(
+            harness.dialer.losses(),
+            vec![(first, local.clone()), (second, local)]
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn fail_when_the_session_watch_fails() {
+        let (harness, local) = Harness::with_local().await;
+        flush().await;
+        let daemon = daemon_of(&harness, &local);
+        harness.dialer.fail_watch(&daemon, "transport error");
+        flush().await;
+        assert_eq!(harness.dialer.losses(), vec![(daemon, local)]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn fail_once_when_the_tunnel_dies() {
+        let (mut harness, _) = Harness::with_local().await;
+        harness.connect_remote().await;
+        flush().await;
+        let daemon = daemon_of(&harness, &remote_id());
+
+        harness.latest(SpawnKind::Tunnel).exit(255);
+        flush().await;
+
+        assert_eq!(status_of(&harness, &remote_id()), StatusKind::Reconnecting);
+        assert_eq!(harness.dialer.losses(), vec![(daemon, remote_id())]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn are_left_alone_by_a_disconnect() {
+        let (mut harness, local) = Harness::with_local().await;
+        harness.manager.disconnect(&local);
+        flush().await;
+        assert!(harness.dialer.losses().is_empty());
+    }
+}
+
 mod reconnect {
     use super::*;
 

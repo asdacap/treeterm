@@ -5,18 +5,24 @@
 //! Closing the input side is the command's stdin EOF. Dropping the event stream cancels the
 //! call, and the daemon kills the command.
 //!
+//! When the connection manager gives the connection up (it goes to reconnecting), every
+//! command still running on it ends with [`ExecError::ConnectionLost`] and is cancelled, and
+//! commands started on it afterwards fail at once (Electron's `failAllForConnection`).
+//!
 //! [`ExecClient::run`] is the common case: no stdin, collect everything, like Electron's
 //! `exec:start` (which writes the start message and ends its side of the stream at once).
 
 use std::collections::HashMap;
 use std::time::Duration;
 
-use futures::channel::mpsc;
+use futures::channel::{mpsc, oneshot};
 use futures::future::BoxFuture;
 use futures::stream::BoxStream;
 use futures::{FutureExt, Stream, StreamExt, TryFutureExt};
+use tokio::sync::watch;
 use treeterm_proto::treeterm::{ExecInput, ExecSignal, ExecStart, exec_input, exec_output};
 
+use crate::connection::ConnectionId;
 use crate::daemon::ApiError;
 use crate::rt::{Rt, Sub};
 use crate::transport::DaemonClient;
@@ -101,7 +107,15 @@ pub enum ExecError {
     /// The timeout plus [`EXEC_BACKSTOP_MARGIN`] passed without a result.
     #[error("{command} timed out after {}ms", .after.as_millis())]
     NoResult { command: String, after: Duration },
+    /// The connection was lost (it went to reconnecting) while the command ran, or before it
+    /// started. The call is cancelled, so the daemon kills the command.
+    #[error("connection {0} lost while command was running")]
+    ConnectionLost(ConnectionId),
 }
+
+/// Whether the connection an [`ExecClient`] runs on is lost: `Some` once the connection
+/// manager gave it up. Set by [`crate::daemon::DaemonConnection::fail_running_execs`].
+pub(crate) type ConnectionLoss = watch::Receiver<Option<ConnectionId>>;
 
 /// Everything a finished command printed, and how it exited.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -163,16 +177,35 @@ pub struct ExecProcess {
 pub struct ExecClient {
     rt: Rt,
     client: DaemonClient,
+    loss: ConnectionLoss,
 }
 
 impl ExecClient {
+    /// A client on `client` alone, whose connection is never reported lost.
     pub fn new(rt: Rt, client: DaemonClient) -> Self {
-        Self { rt, client }
+        let (_never_lost, loss) = watch::channel(None);
+        Self::on_connection(rt, client, loss)
+    }
+
+    /// A client whose commands fail with [`ExecError::ConnectionLost`] once `loss` says so.
+    pub(crate) fn on_connection(rt: Rt, client: DaemonClient, loss: ConnectionLoss) -> Self {
+        Self { rt, client, loss }
     }
 
     /// Start `request` with stdin open.
     pub fn exec(&self, request: ExecRequest) -> ExecProcess {
         let (queue, requests) = mpsc::unbounded::<ExecInput>();
+        let lost = self.loss.borrow().clone();
+        if let Some(connection) = lost {
+            // Nothing is sent: the input side is closed and the only event is the loss.
+            drop(requests);
+            let failed =
+                futures::stream::once(async move { Err(ExecError::ConnectionLost(connection)) });
+            return ExecProcess {
+                input: ExecInputHandle { queue },
+                events: self.rt.subscribe(failed),
+            };
+        }
         let backstop = backstop(&request);
         let start = ExecInput {
             input: Some(exec_input::Input::Start(ExecStart {
@@ -187,15 +220,25 @@ impl ExecClient {
             .unbounded_send(start)
             .expect("receiver is alive: it was created above");
 
+        // h2 resets (cancels) the call only once both of its sides are gone: the request side
+        // ends with the events, even while the input handle is still held.
+        let (input_guard, events_gone) = oneshot::channel::<()>();
+        let requests = requests.take_until(events_gone);
         let mut client = self.client.clone();
         let outputs = async move { client.exec_stream(requests).await }
             .map_ok(tonic::Response::into_inner)
             .try_flatten_stream()
             .map(|item| item.map_err(ApiError::from))
             .boxed();
+        let call = Call {
+            outputs,
+            _input_guard: input_guard,
+        };
         ExecProcess {
             input: ExecInputHandle { queue },
-            events: self.rt.subscribe(exec_events(outputs, backstop)),
+            events: self
+                .rt
+                .subscribe(exec_events(call, backstop, lost_signal(self.loss.clone()))),
         }
     }
 
@@ -267,15 +310,40 @@ fn backstop(request: &ExecRequest) -> BoxFuture<'static, ExecError> {
     }
 }
 
-/// The daemon's outputs as events: data passes through; the result, a call error, the
-/// stream ending early or the backstop firing is the last item.
-fn exec_events(
+/// Resolves with the connection once it is lost. Never resolves while it is not, or once
+/// nothing can report it lost any more (every [`crate::daemon::DaemonConnection`] of it is gone).
+fn lost_signal(mut loss: ConnectionLoss) -> BoxFuture<'static, ConnectionId> {
+    async move {
+        let lost = match loss.wait_for(Option::is_some).await {
+            Ok(lost) => lost.clone(),
+            Err(_closed) => None,
+        };
+        match lost {
+            Some(connection) => connection,
+            None => futures::future::pending().await,
+        }
+    }
+    .boxed()
+}
+
+/// One `ExecStream` call. Dropping it cancels the call, and the daemon kills the command.
+struct Call {
     outputs: BoxStream<'static, Result<treeterm_proto::treeterm::ExecOutput, ApiError>>,
+    /// Dropped with the call: ends its request side.
+    _input_guard: oneshot::Sender<()>,
+}
+
+/// The daemon's outputs as events: data passes through; the result, a call error, the
+/// stream ending early, the backstop firing or the connection being lost is the last item.
+fn exec_events(
+    call: Call,
     backstop: BoxFuture<'static, ExecError>,
+    lost: BoxFuture<'static, ConnectionId>,
 ) -> impl Stream<Item = Result<ExecEvent, ExecError>> + Send + 'static {
     struct Watch {
-        outputs: BoxStream<'static, Result<treeterm_proto::treeterm::ExecOutput, ApiError>>,
+        call: Call,
         backstop: BoxFuture<'static, ExecError>,
+        lost: BoxFuture<'static, ConnectionId>,
     }
 
     enum Step {
@@ -283,31 +351,40 @@ fn exec_events(
         Last(Result<ExecEvent, ExecError>),
     }
 
-    futures::stream::unfold(Some(Watch { outputs, backstop }), |state| async move {
+    let watch = Watch {
+        call,
+        backstop,
+        lost,
+    };
+    futures::stream::unfold(Some(watch), |state| async move {
         let mut watch = state?;
-        let step = match futures::future::select(watch.outputs.next(), &mut watch.backstop).await {
-            futures::future::Either::Left((Some(Ok(output)), _)) => match output.output {
-                Some(exec_output::Output::Stdout(out)) => Step::Data(ExecEvent::Stdout(out.data)),
-                Some(exec_output::Output::Stderr(err)) => Step::Data(ExecEvent::Stderr(err.data)),
-                Some(exec_output::Output::Result(result)) => Step::Last(match result.error {
-                    Some(error) => Err(ExecError::System(error)),
-                    None => Ok(ExecEvent::Exit {
-                        code: result.exit_code,
+        let step = tokio::select! {
+            // The loss goes first: it beats whatever the dying transport reports.
+            biased;
+            connection = &mut watch.lost => Step::Last(Err(ExecError::ConnectionLost(connection))),
+            output = watch.call.outputs.next() => match output {
+                Some(Ok(output)) => match output.output {
+                    Some(exec_output::Output::Stdout(out)) => Step::Data(ExecEvent::Stdout(out.data)),
+                    Some(exec_output::Output::Stderr(err)) => Step::Data(ExecEvent::Stderr(err.data)),
+                    Some(exec_output::Output::Result(result)) => Step::Last(match result.error {
+                        Some(error) => Err(ExecError::System(error)),
+                        None => Ok(ExecEvent::Exit {
+                            code: result.exit_code,
+                        }),
                     }),
-                }),
-                None => Step::Last(Err(
-                    ApiError::Protocol("ExecOutput without a payload").into()
-                )),
+                    None => Step::Last(Err(
+                        ApiError::Protocol("ExecOutput without a payload").into()
+                    )),
+                },
+                Some(Err(error)) => Step::Last(Err(error.into())),
+                None => Step::Last(Err(ExecError::EndedWithoutResult)),
             },
-            futures::future::Either::Left((Some(Err(error)), _)) => Step::Last(Err(error.into())),
-            futures::future::Either::Left((None, _)) => {
-                Step::Last(Err(ExecError::EndedWithoutResult))
-            }
-            futures::future::Either::Right((error, _)) => Step::Last(Err(error)),
+            error = &mut watch.backstop => Step::Last(Err(error)),
         };
         match step {
             Step::Data(event) => Some((Ok(event), Some(watch))),
-            // Dropping the watch cancels the call: nothing more is wanted from it.
+            // Dropping the watch cancels the call: nothing more is wanted from it, and the
+            // daemon kills the command if it still runs.
             Step::Last(item) => Some((item, None)),
         }
     })
@@ -324,10 +401,20 @@ mod tests {
         })
     }
 
+    fn call(outputs: BoxStream<'static, Result<ExecOutput, ApiError>>) -> Call {
+        Call {
+            outputs,
+            _input_guard: oneshot::channel().0,
+        }
+    }
+
     fn events_of(outputs: Vec<Result<ExecOutput, ApiError>>) -> Vec<Result<ExecEvent, ExecError>> {
+        // A connection nobody can report lost any more: the signal never fires.
+        let (_gone, loss) = watch::channel(None);
         let stream = exec_events(
-            futures::stream::iter(outputs).boxed(),
+            call(futures::stream::iter(outputs).boxed()),
             futures::future::pending().boxed(),
+            lost_signal(loss),
         );
         futures::executor::block_on(stream.collect())
     }
@@ -407,7 +494,11 @@ mod tests {
             env: HashMap::new(),
             timeout: ExecTimeout::After(Duration::from_secs(1)),
         };
-        let stream = exec_events(futures::stream::pending().boxed(), backstop(&request));
+        let stream = exec_events(
+            call(futures::stream::pending().boxed()),
+            backstop(&request),
+            futures::future::pending().boxed(),
+        );
         let events: Vec<_> = stream.collect().await;
         match &events[..] {
             [Err(error @ ExecError::NoResult { after, .. })] => {
@@ -416,6 +507,64 @@ mod tests {
             }
             other => panic!("expected the backstop error, got {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn a_lost_connection_ends_the_stream_and_cancels_the_call() {
+        let (outputs, rx) = mpsc::unbounded();
+        let (input_guard, mut events_gone) = oneshot::channel();
+        let (loss, lost) = watch::channel(None);
+        let mut events = std::pin::pin!(exec_events(
+            Call {
+                outputs: rx.boxed(),
+                _input_guard: input_guard,
+            },
+            futures::future::pending().boxed(),
+            lost_signal(lost),
+        ));
+        outputs
+            .unbounded_send(output(exec_output::Output::Stdout(ExecStdout {
+                data: b"partial".to_vec(),
+            })))
+            .unwrap();
+        assert_eq!(
+            events.next().await.unwrap().unwrap(),
+            ExecEvent::Stdout(b"partial".to_vec())
+        );
+
+        loss.send_replace(Some(ConnectionId::new("local-1")));
+        match events.next().await {
+            Some(Err(error @ ExecError::ConnectionLost(_))) => assert_eq!(
+                error.to_string(),
+                "connection local-1 lost while command was running"
+            ),
+            other => panic!("expected the loss, got {other:?}"),
+        }
+        assert!(events.next().await.is_none());
+        // Both sides of the call are gone, so h2 resets it and the daemon kills the command.
+        assert!(outputs.is_closed());
+        assert_eq!(events_gone.try_recv(), Err(oneshot::Canceled));
+    }
+
+    #[tokio::test]
+    async fn the_loss_beats_what_the_dying_transport_reports() {
+        let (_loss, lost) = watch::channel(Some(ConnectionId::new("remote-1")));
+        let events: Vec<_> = exec_events(
+            call(
+                futures::stream::iter(vec![Err(ApiError::from(tonic::Status::unavailable(
+                    "gone",
+                )))])
+                .boxed(),
+            ),
+            futures::future::pending().boxed(),
+            lost_signal(lost),
+        )
+        .collect()
+        .await;
+        assert!(
+            matches!(&events[..], [Err(ExecError::ConnectionLost(id))] if id.as_str() == "remote-1"),
+            "{events:?}"
+        );
     }
 
     #[test]

@@ -73,6 +73,10 @@ pub enum Effect {
     StartAttempt(AttemptPlan),
     /// Abandon the attempt in flight; its result will never come.
     CancelAttempt,
+    /// The connected transport is lost: fail the commands still running on it (Electron's
+    /// `failAllForConnection` on entering reconnecting). Comes right before
+    /// [`Effect::DropTransport`], so its error beats the one the dropped tunnel causes.
+    ConnectionLost,
     /// Drop the current transport (daemon connection and tunnel) and its heartbeat watch.
     DropTransport,
     /// Watch the new transport's session as heartbeat; report through
@@ -527,8 +531,10 @@ impl<C: Clone> ConnectionMachine<C> {
             return;
         }
         tracing::warn!(connection = %self.id, %error, "connection lost; reconnecting");
-        if let State::Connecting { .. } = self.state {
-            self.effects.push_back(Effect::CancelAttempt);
+        match self.state {
+            State::Connecting { .. } => self.effects.push_back(Effect::CancelAttempt),
+            State::Connected { .. } => self.effects.push_back(Effect::ConnectionLost),
+            State::Reconnecting { .. } | State::Failed { .. } | State::Disconnected => {}
         }
         self.effects.push_back(Effect::DropTransport);
         self.state = State::Reconnecting {
