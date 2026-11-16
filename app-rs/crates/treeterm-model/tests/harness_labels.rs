@@ -223,6 +223,20 @@ fn screens_read(fake: &FakeLlm) -> Vec<String> {
         .collect()
 }
 
+/// The System Prompt Debugger opened from `tab`'s activity badge: its `bufferText`.
+fn debugger_buffer(
+    cx: &mut TestAppContext,
+    workspace: &Entity<WorkspaceStore>,
+    tab: &str,
+) -> Value {
+    let debugger = workspace
+        .update(cx, |w, cx| w.open_prompt_debugger_for_tab(tab, cx))
+        .unwrap();
+    workspace.read_with(cx, |w, _| {
+        w.file().app_states[&debugger].state["bufferText"].clone()
+    })
+}
+
 #[gpui_kit::test]
 fn without_an_ai_harness_tab_a_refresh_fails_with_electrons_message(cx: &mut TestAppContext) {
     let _serial = serial();
@@ -355,6 +369,70 @@ fn the_active_ai_harness_tab_is_read_first(cx: &mut TestAppContext) {
     assert!(screens[0].contains("second-screen") && !screens[0].contains("first-screen"));
     assert!(screens[1].contains("first-screen") && !screens[1].contains("second-screen"));
     assert!(screens[2].contains("first-screen") && !screens[2].contains("second-screen"));
+}
+
+#[gpui_kit::test]
+fn an_exited_harness_gives_the_labeller_and_the_debugger_nothing(cx: &mut TestAppContext) {
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let (fake, llm) = titling(&h, suggestion("new-branch"));
+    let settings = bot_settings(r#"sh -c 'echo bye-$((40+2))'"#, TITLE_MODEL);
+    let store = open_store(cx, &h, settings, llm);
+    let workspace = open_workspace(cx, &h, &store, json!({}));
+    let (tab, terminal) = add_harness(cx, &workspace, "bye-42");
+    // keepOnExit: the tab stays with the final screen, its analyzer stopped.
+    wait_until_app(cx, &workspace, |w, cx| {
+        w.analyzer(&tab)
+            .is_some_and(|a| !a.read(cx).analyzer().is_running())
+    });
+    assert!(terminal.read_with(cx, |t, _| t.viewport().contains("bye-42")));
+
+    for kind in [Refresh::TitleAndDescription, Refresh::BranchName] {
+        assert_eq!(
+            refresh(cx, &workspace, kind),
+            Err("Terminal is empty — nothing for the labeller to read".to_owned())
+        );
+    }
+    assert!(fake.chat_calls().is_empty());
+    assert_eq!(debugger_buffer(cx, &workspace, &tab), json!(""));
+}
+
+#[gpui_kit::test]
+fn the_debugger_gets_nothing_from_a_blank_harness_and_a_plain_terminals_screen(
+    cx: &mut TestAppContext,
+) {
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let pty = spawn_shell(&h);
+    let (_, llm) = titling(&h, suggestion("new-branch"));
+    let settings = bot_settings(
+        r#"sh -c 'echo started-$((40+2)); read go; clear; exec sleep 60'"#,
+        TITLE_MODEL,
+    );
+    let store = open_store(cx, &h, settings, llm);
+    let tabs = json!({ "plain": { "applicationId": "terminal", "title": "Terminal", "state": { "ptyId": pty } } });
+    let workspace = open_workspace(cx, &h, &store, tabs);
+    let (tab, terminal) = add_harness(cx, &workspace, "started-42");
+    terminal.update(cx, |t, cx| {
+        t.set_focused(true, cx);
+        t.write_input(b"\r", cx);
+    });
+    wait_until(cx, &terminal, |t| t.screen_text().trim().is_empty());
+    assert!(terminal.read_with(cx, |t, _| !t.viewport().is_empty()));
+    assert_eq!(debugger_buffer(cx, &workspace, &tab), json!(""));
+
+    let plain = terminal_of(cx, &workspace, "plain");
+    wait_until(cx, &plain, |t| !t.screen_text().trim().is_empty());
+    let (screen, debugger) = workspace.update(cx, |w, cx| {
+        let screen = plain.read(cx).viewport();
+        (screen, w.open_prompt_debugger_for_tab("plain", cx).unwrap())
+    });
+    let buffer = workspace.read_with(cx, |w, _| {
+        w.file().app_states[&debugger].state["bufferText"].clone()
+    });
+    assert_eq!(buffer, json!(screen));
 }
 
 #[gpui_kit::test]

@@ -1540,14 +1540,18 @@ impl WorkspaceStore {
         self.add_tab_with("system-prompt-debugger", serde_json::json!({ "bufferText": buffer }), cx)
     }
 
-    /// The activity badge's "Debug System Prompt": the debugger on the tab's current
-    /// viewport (empty when the tab has no terminal).
+    /// The activity badge's "Debug System Prompt": the debugger on what an AI harness's
+    /// analyzer reads (`getBufferText() ?? ''`), a plain terminal's current viewport, or
+    /// nothing when the tab has no terminal.
     pub fn open_prompt_debugger_for_tab(&mut self, tab_id: &str, cx: &mut Context<Self>) -> Option<String> {
-        let viewport = match self.tabs.get(tab_id) {
-            Some(TabRef::Terminal(TerminalTab::Attached { model, .. })) => model.read(cx).viewport(),
+        let buffer = match self.tabs.get(tab_id) {
+            Some(TabRef::Terminal(TerminalTab::Attached { analyzer: Some((analyzer, _)), .. })) => {
+                analyzer.read(cx).buffer_text(cx)
+            }
+            Some(TabRef::Terminal(TerminalTab::Attached { model, analyzer: None, .. })) => model.read(cx).viewport(),
             Some(_) | None => String::new(),
         };
-        self.open_prompt_debugger(&viewport, cx)
+        self.open_prompt_debugger(&buffer, cx)
     }
 
     /// The activity badge's "History": the tab's transitions and analyzer calls.

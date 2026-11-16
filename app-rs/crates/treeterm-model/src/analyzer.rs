@@ -150,6 +150,16 @@ impl AnalyzerModel {
         self.refreshes.values().any(|waiter| waiter.refresh == refresh)
     }
 
+    /// What the labeller and the System Prompt Debugger read (`getBufferText`): the screen
+    /// while the analyzer runs, nothing once it stopped (the PTY exited) or while blank.
+    pub fn buffer_text(&self, cx: &App) -> String {
+        if !self.analyzer.is_running() {
+            return String::new();
+        }
+        let viewport = self.terminal.read(cx).viewport();
+        if viewport.trim().is_empty() { String::new() } else { viewport }
+    }
+
     pub fn set_auto_approve(&mut self, value: bool, cx: &mut Context<Self>) {
         self.analyzer.set_auto_approve(value);
         cx.notify();
@@ -164,10 +174,10 @@ impl AnalyzerModel {
     /// or its branch. The outcome arrives on the receiver; failures carry a message fit to
     /// show the user. It is dropped unsent if the analyzer stops or goes first.
     pub fn refresh(&mut self, refresh: Refresh, cx: &mut Context<Self>) -> oneshot::Receiver<Result<(), String>> {
-        let viewport = self.terminal.read(cx).viewport();
+        let buffer = self.buffer_text(cx);
         let (id, effects) = match refresh {
-            Refresh::TitleAndDescription => self.analyzer.refresh_title_and_description(&viewport, now(cx)),
-            Refresh::BranchName => self.analyzer.refresh_branch_name(&viewport, now(cx)),
+            Refresh::TitleAndDescription => self.analyzer.refresh_title_and_description(&buffer, now(cx)),
+            Refresh::BranchName => self.analyzer.refresh_branch_name(&buffer, now(cx)),
         };
         let (outcome, receiver) = oneshot::channel();
         // Before the effects: a refresh that cannot start finishes among them.
