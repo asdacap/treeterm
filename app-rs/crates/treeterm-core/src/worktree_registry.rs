@@ -50,10 +50,48 @@ pub struct RegistryEntryInput {
     pub description: Option<String>,
 }
 
+/// One element of the file's `entries`, as read. Electron casts the entries without checking
+/// them, so an entry this version cannot read (hand-edited, or from another writer) must not
+/// fail the registry: it is left out of the list and written back as it was.
+#[derive(Debug)]
+enum StoredEntry {
+    Valid(WorktreeRegistryEntry),
+    Unparsed { raw: Value, error: String },
+}
+
+impl StoredEntry {
+    fn read(raw: Value) -> Self {
+        match WorktreeRegistryEntry::deserialize(&raw) {
+            Ok(entry) => Self::Valid(entry),
+            Err(error) => Self::Unparsed {
+                raw,
+                error: error.to_string(),
+            },
+        }
+    }
+
+    /// `e.path === path`: an unreadable entry matches when its `path` is that string.
+    fn has_path(&self, path: &str) -> bool {
+        match self {
+            Self::Valid(entry) => entry.path == path,
+            Self::Unparsed { raw, .. } => raw.get("path").and_then(Value::as_str) == Some(path),
+        }
+    }
+}
+
+impl Serialize for StoredEntry {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Valid(entry) => entry.serialize(serializer),
+            Self::Unparsed { raw, .. } => raw.serialize(serializer),
+        }
+    }
+}
+
 #[derive(Serialize)]
 struct RegistryFile<'a> {
     version: u32,
-    entries: &'a [WorktreeRegistryEntry],
+    entries: &'a [StoredEntry],
 }
 
 #[derive(Debug, Clone, thiserror::Error)]
@@ -74,8 +112,6 @@ pub enum RegistryError {
     InvalidShape,
     #[error("Unsupported worktree registry version: {0}")]
     UnsupportedVersion(String),
-    #[error("Worktree registry entries are invalid: {0}")]
-    InvalidEntries(String),
     #[error("Failed to write worktree registry: {0}")]
     Write(FsError),
     #[error(
@@ -116,7 +152,7 @@ async fn registry_dir(exec: &dyn ExecApi) -> Result<String, RegistryError> {
 
 /// The registry's entries and the guard for writing over what was read.
 struct Snapshot {
-    entries: Vec<WorktreeRegistryEntry>,
+    entries: Vec<StoredEntry>,
     guard: WriteGuard,
 }
 
@@ -139,17 +175,15 @@ async fn read_registry_file(fs: &dyn RegistryFs, dir: &str) -> Result<Snapshot, 
     };
     let version = file.remove("version");
     let entries = match (version, file.remove("entries")) {
-        (Some(version), Some(entries @ Value::Array(_))) if version == 1 => entries,
+        (Some(version), Some(Value::Array(entries))) if version == 1 => entries,
         (version, _) => {
             return Err(RegistryError::UnsupportedVersion(js_string(
                 version.as_ref(),
             )));
         }
     };
-    let entries = serde_json::from_value(entries)
-        .map_err(|error| RegistryError::InvalidEntries(error.to_string()))?;
     Ok(Snapshot {
-        entries,
+        entries: entries.into_iter().map(StoredEntry::read).collect(),
         guard: WriteGuard::Matches(sha256_hex(&content)),
     })
 }
@@ -163,17 +197,33 @@ fn js_string(value: Option<&Value>) -> String {
     }
 }
 
+/// The entries this version can read; the others are skipped (and kept in the file).
 pub async fn load_registry(
     fs: &dyn RegistryFs,
     exec: &dyn ExecApi,
 ) -> Result<Vec<WorktreeRegistryEntry>, RegistryError> {
     let dir = registry_dir(exec).await?;
-    Ok(read_registry_file(fs, &dir).await?.entries)
+    let mut entries = Vec::new();
+    let mut skipped = Vec::new();
+    for stored in read_registry_file(fs, &dir).await?.entries {
+        match stored {
+            StoredEntry::Valid(entry) => entries.push(entry),
+            StoredEntry::Unparsed { error, .. } => skipped.push(error),
+        }
+    }
+    if let Some(first_error) = skipped.first() {
+        tracing::warn!(
+            count = skipped.len(),
+            %first_error,
+            "worktree registry: skipping entries it cannot read"
+        );
+    }
+    Ok(entries)
 }
 
 /// What a mutation decided.
 enum Mutation {
-    Write(Vec<WorktreeRegistryEntry>),
+    Write(Vec<StoredEntry>),
     Unchanged,
 }
 
@@ -182,7 +232,7 @@ enum Mutation {
 async fn mutate_registry(
     fs: &dyn RegistryFs,
     exec: &dyn ExecApi,
-    mutate: impl Fn(Vec<WorktreeRegistryEntry>) -> Mutation,
+    mutate: impl Fn(Vec<StoredEntry>) -> Mutation,
 ) -> Result<(), RegistryError> {
     let dir = registry_dir(exec).await?;
     for _attempt in 0..MAX_CAS_RETRIES {
@@ -207,24 +257,24 @@ async fn mutate_registry(
     Err(RegistryError::Contended)
 }
 
-/// Record `entry` (replacing the one at its path) as used now.
+/// Record `entry` (replacing the first one at its path, readable or not) as used now.
 pub async fn upsert_registry_entry(
     fs: &dyn RegistryFs,
     exec: &dyn ExecApi,
     entry: &RegistryEntryInput,
 ) -> Result<(), RegistryError> {
     mutate_registry(fs, exec, |mut entries| {
-        let stamped = WorktreeRegistryEntry {
+        let stamped = StoredEntry::Valid(WorktreeRegistryEntry {
             path: entry.path.clone(),
             branch: entry.branch.clone(),
             display_name: entry.display_name.clone(),
             description: entry.description.clone(),
             last_used_at: now_millis(),
             extra: Map::new(),
-        };
+        });
         match entries
             .iter_mut()
-            .find(|existing| existing.path == entry.path)
+            .find(|existing| existing.has_path(&entry.path))
         {
             Some(existing) => *existing = stamped,
             None => entries.push(stamped),
@@ -234,7 +284,7 @@ pub async fn upsert_registry_entry(
     .await
 }
 
-/// Forget the entry at `path`; nothing is written when there is none.
+/// Forget the entries at `path`, readable or not; nothing is written when there is none.
 pub async fn remove_registry_entry(
     fs: &dyn RegistryFs,
     exec: &dyn ExecApi,
@@ -244,7 +294,7 @@ pub async fn remove_registry_entry(
         let before = entries.len();
         let filtered: Vec<_> = entries
             .into_iter()
-            .filter(|entry| entry.path != path)
+            .filter(|entry| !entry.has_path(path))
             .collect();
         if filtered.len() == before {
             Mutation::Unchanged

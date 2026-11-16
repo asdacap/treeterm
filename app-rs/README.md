@@ -402,6 +402,10 @@ The chrome was matched to Electron's computed styles, measured side by side on o
 - A corrupt `ui-state.json` (session names and order, Recent Directories) is logged and kept as
   `ui-state.json.corrupt-<ms since the epoch>`; the state starts empty and is saved again as
   usual. Electron dropped a corrupt stored value silently and overwrote it.
+- An entry of the worktree registry (`~/.treeterm/worktrees.json`) that cannot be read, such as
+  a hand-edited one with no `branch` or a fractional `lastUsedAt`, is left out of Auto Open
+  and the recent workspaces (logged) and kept in the file as it is. Electron listed it with
+  whatever fields it had.
 - Merge-and-remove stages untracked files before its WIP commit (Electron's `commit -am`
   skips them, failing the merge or losing new files with the deleted worktree).
 - Review's Refresh also reloads the Commits list once it was shown, keeping as many commits

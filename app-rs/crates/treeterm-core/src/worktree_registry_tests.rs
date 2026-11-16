@@ -38,6 +38,24 @@ fn written(fs: &FakeFs, n: usize) -> Value {
     serde_json::from_str(&fs.writes()[n].content).unwrap()
 }
 
+/// One readable entry among ones this version cannot read (Electron casts them all).
+fn with_unreadable_entries() -> Value {
+    json!({
+        "version": 1,
+        "entries": [
+            { "path": "/wt/nobranch", "displayName": null, "description": null, "lastUsedAt": 1 },
+            { "path": "/wt/ok", "branch": "ok", "displayName": null, "description": null, "lastUsedAt": 2 },
+            { "lastUsedAt": 1.5, "branch": "float", "path": "/wt/float" },
+            null,
+            { "path": 5, "branch": "x", "lastUsedAt": 3 },
+        ],
+    })
+}
+
+fn paths(entries: &[Value]) -> Value {
+    entries.iter().map(|entry| entry["path"].clone()).collect()
+}
+
 mod load_registry {
     use super::*;
 
@@ -79,6 +97,16 @@ mod load_registry {
                 display_name: Some("A".to_owned()),
                 ..entry("/wt/a", "a", 100)
             }]
+        );
+    }
+
+    #[test]
+    fn skips_entries_it_cannot_read() {
+        let (fs, exec) = setup();
+        fs.set_all(FakeRead::Content(with_unreadable_entries().to_string()));
+        assert_eq!(
+            block_on(load_registry(fs.as_ref(), exec.as_ref())).unwrap(),
+            vec![entry("/wt/ok", "ok", 2)]
         );
     }
 
@@ -232,6 +260,57 @@ mod upsert_registry_entry {
     }
 
     #[test]
+    fn writes_entries_it_cannot_read_back_unchanged() {
+        let (fs, exec) = setup();
+        let existing = with_unreadable_entries();
+        fs.set_all(FakeRead::Content(existing.to_string()));
+        block_on(upsert_registry_entry(
+            fs.as_ref(),
+            exec.as_ref(),
+            &input("/wt/new", "new", None, None),
+        ))
+        .unwrap();
+
+        let file = written(&fs, 0);
+        let entries = file["entries"].as_array().unwrap();
+        assert_eq!(entries[..5], existing["entries"].as_array().unwrap()[..]);
+        // Down to the order of their keys.
+        assert_eq!(
+            entries[2].as_object().unwrap().keys().collect::<Vec<_>>(),
+            vec!["lastUsedAt", "branch", "path"]
+        );
+        assert_eq!(entries.len(), 6);
+        assert_eq!(entries[5]["path"], "/wt/new");
+    }
+
+    #[test]
+    fn replaces_an_unreadable_entry_at_its_path() {
+        let (fs, exec) = setup();
+        fs.set_all(FakeRead::Content(with_unreadable_entries().to_string()));
+        block_on(upsert_registry_entry(
+            fs.as_ref(),
+            exec.as_ref(),
+            &input("/wt/float", "float", Some("F"), None),
+        ))
+        .unwrap();
+
+        let file = written(&fs, 0);
+        let entries = file["entries"].as_array().unwrap();
+        assert_eq!(
+            paths(entries),
+            json!(["/wt/nobranch", "/wt/ok", "/wt/float", null, 5])
+        );
+        assert_eq!(entries[2]["displayName"], "F");
+        assert!(entries[2]["lastUsedAt"].as_i64().unwrap() > 0);
+        let listed: Vec<String> = block_on(load_registry(fs.as_ref(), exec.as_ref()))
+            .unwrap()
+            .into_iter()
+            .map(|entry| entry.path)
+            .collect();
+        assert_eq!(listed, vec!["/wt/ok", "/wt/float"]);
+    }
+
+    #[test]
     fn throws_when_write_fails() {
         let (fs, exec) = setup();
         fs.set_all(FakeRead::Fails("not found".to_owned()));
@@ -271,6 +350,33 @@ mod remove_registry_entry {
     fn no_ops_when_path_is_absent_no_write() {
         let (fs, exec) = setup();
         block_on(remove_registry_entry(fs.as_ref(), exec.as_ref(), "/wt/a")).unwrap();
+        assert!(fs.writes().is_empty());
+    }
+
+    #[test]
+    fn filters_out_an_unreadable_entry_at_its_path() {
+        let (fs, exec) = setup();
+        let existing = with_unreadable_entries();
+        fs.set_all(FakeRead::Content(existing.to_string()));
+        block_on(remove_registry_entry(
+            fs.as_ref(),
+            exec.as_ref(),
+            "/wt/nobranch",
+        ))
+        .unwrap();
+        assert_eq!(
+            written(&fs, 0)["entries"].as_array().unwrap()[..],
+            existing["entries"].as_array().unwrap()[1..]
+        );
+    }
+
+    #[test]
+    fn keeps_unreadable_entries_when_path_is_absent_no_write() {
+        let (fs, exec) = setup();
+        fs.set_all(FakeRead::Content(with_unreadable_entries().to_string()));
+        block_on(remove_registry_entry(fs.as_ref(), exec.as_ref(), "/wt/a")).unwrap();
+        // `5 === "5"` is false: a path that is not a string matches nothing.
+        block_on(remove_registry_entry(fs.as_ref(), exec.as_ref(), "5")).unwrap();
         assert!(fs.writes().is_empty());
     }
 }
