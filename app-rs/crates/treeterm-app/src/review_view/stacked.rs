@@ -28,7 +28,7 @@ use treeterm_model::review_patch::{FileDiff, FileDiffs};
 
 use super::ReviewView;
 use crate::comment_ui::{CommentActions, Placement, comment_display, comment_input};
-use super::parts::{change_stats, checkbox, disabled_checkbox, outline_button, plain_icon, spinner, spinning_icon, status_badge};
+use super::parts::{change_stats, checkbox, disabled_checkbox, outline_button, plain_icon, spinner, spinning_icon, status_badge, title};
 use crate::file_browser_view::{ImageDrawing, image_drawing, language_for};
 use crate::theme::colors;
 use treeterm_model::review_find::{DIFF_CONTEXT, MIN_COLLAPSED_LINES};
@@ -931,7 +931,13 @@ fn header_row(
             .text_color(if is_viewed { accent } else { secondary })
             .cursor_pointer()
             .child(checkbox(is_viewed, cx))
-            .child("Viewed")
+            .child(
+                div()
+                    .id(SharedString::from(format!("header-viewed-label-{}", file.path)))
+                    .child("Viewed")
+                    // Told only where the right-click below works: not on the first file.
+                    .when(!above.is_empty(), |d| d.tooltip(title("Right-click to mark all above as viewed"))),
+            )
             .on_click(move |_, _, cx| {
                 cx.stop_propagation();
                 // Checking off an open file: where its header (in the list, or pinned) is now.
@@ -970,8 +976,24 @@ fn header_row(
             14.,
         )))
         .child(status_badge(file.status))
-        .child(div().flex_1().min_w_0().truncate().text_color(primary).child(file.path.clone()))
-        .child(h_flex().flex_shrink_0().gap(px(6.)).text_size(px(11.)).children(change_stats(file.stats, cx)))
+        .child(
+            div()
+                .id(SharedString::from(format!("header-path-{}", file.path)))
+                .flex_1()
+                .min_w_0()
+                .truncate()
+                .text_color(primary)
+                .child(file.path.clone())
+                // `title={file.path}`: the whole path when it is cut short.
+                .tooltip(title(file.path.clone())),
+        )
+        .child(
+            h_flex()
+                .flex_shrink_0()
+                .gap(px(6.))
+                .text_size(px(11.))
+                .children(change_stats(SharedString::from(format!("header-stats-{}", file.path)), file.stats, cx)),
+        )
         .children(stage)
         .child(refresh)
         .child(viewed)

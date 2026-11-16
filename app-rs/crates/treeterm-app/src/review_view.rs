@@ -32,7 +32,7 @@ use treeterm_model::session_store::AfterMerge;
 use treeterm_model::workspace_store::{MergeOutput, MergeState, WorkspaceStore};
 
 use crate::theme::colors;
-use parts::{ERROR_RED, MONO, action_button, branch_pill, plain_icon, spinner, toolbar_button, totals};
+use parts::{ERROR_RED, MONO, action_button, branch_pill, plain_icon, spinner, title, toolbar_button, totals};
 use stacked::{DiffCache, ListedFile};
 
 /// The paths of `files` in the file tree's order (`sortFilesAsTree`), where Previous /
@@ -861,6 +861,7 @@ impl ReviewView {
             .when(total > 0, |d| {
                 d.child(
                     h_flex()
+                        .id("toolbar-viewed-count")
                         .gap(px(4.))
                         .items_center()
                         .px(px(6.))
@@ -868,12 +869,15 @@ impl ReviewView {
                         .text_size(px(11.))
                         .text_color(secondary)
                         .child(plain_icon(IconName::CircleCheck, 14.))
-                        .child(format!("{done}/{total} files viewed")),
+                        .child(format!("{done}/{total} files viewed"))
+                        .tooltip(title(format!("{done} of {total} files viewed"))),
                 )
             })
             .when_some(self.dir_filter.clone(), |d, dir| {
                 d.child(
                     h_flex()
+                        .id("dir-filter-chip")
+                        .tooltip(title(format!("Filtered to {dir}")))
                         .gap(px(4.))
                         .items_center()
                         .max_w(px(320.))
@@ -897,6 +901,7 @@ impl ReviewView {
                                 .cursor_pointer()
                                 .hover(move |d| d.bg(hover).text_color(primary))
                                 .child(plain_icon(IconName::X, 12.))
+                                .tooltip(title("Clear directory filter"))
                                 .on_click(cx.listener(|view, _: &ClickEvent, _, cx| {
                                     view.dir_filter = None;
                                     cx.notify();
@@ -908,35 +913,59 @@ impl ReviewView {
         if let Some(order) = navigate {
             let previous = order.clone();
             controls = controls
-                .child(toolbar_button("prev-unviewed", IconName::ChevronUp, false, unviewed, cx).when(unviewed, |d| {
+                .child(toolbar_button("prev-unviewed", IconName::ChevronUp, "Previous unviewed file", false, unviewed, cx).when(unviewed, |d| {
                     d.on_click(cx.listener(move |view, _: &ClickEvent, _, cx| {
                         view.jump_unviewed(&previous, treeterm_model::review::Direction::Previous, cx);
                     }))
                 }))
-                .child(toolbar_button("next-unviewed", IconName::ChevronDown, false, unviewed, cx).when(unviewed, |d| {
+                .child(toolbar_button("next-unviewed", IconName::ChevronDown, "Next unviewed file", false, unviewed, cx).when(unviewed, |d| {
                     d.on_click(cx.listener(move |view, _: &ClickEvent, _, cx| {
                         view.jump_unviewed(&order, treeterm_model::review::Direction::Next, cx);
                     }))
                 }));
         }
         let ignore = self.model.read(cx).ignore_whitespace();
+        let (split, hide) = (self.split, self.hide_unchanged);
         controls = controls
             .child(
-                toolbar_button("toggle-split", if self.split { IconName::Columns2 } else { IconName::TextAlignJustify }, self.split, true, cx)
-                    .on_click(cx.listener(|view, _: &ClickEvent, _, cx| view.toggle_split(cx))),
+                toolbar_button(
+                    "toggle-split",
+                    if split { IconName::Columns2 } else { IconName::TextAlignJustify },
+                    if split { "Switch to unified view" } else { "Switch to split view" },
+                    split,
+                    true,
+                    cx,
+                )
+                .on_click(cx.listener(|view, _: &ClickEvent, _, cx| view.toggle_split(cx))),
             )
             .child(
-                toolbar_button("toggle-unchanged", if self.hide_unchanged { IconName::EyeOff } else { IconName::Eye }, self.hide_unchanged, true, cx)
-                    .on_click(cx.listener(|view, _: &ClickEvent, _, cx| view.toggle_unchanged(cx))),
+                toolbar_button(
+                    "toggle-unchanged",
+                    if hide { IconName::EyeOff } else { IconName::Eye },
+                    if hide { "Show unchanged regions" } else { "Hide unchanged regions" },
+                    hide,
+                    true,
+                    cx,
+                )
+                .on_click(cx.listener(|view, _: &ClickEvent, _, cx| view.toggle_unchanged(cx))),
             )
             .child(
-                toolbar_button("toggle-whitespace", IconName::Space, ignore, true, cx).on_click(cx.listener(move |view, _: &ClickEvent, _, cx| {
+                toolbar_button(
+                    "toggle-whitespace",
+                    IconName::Space,
+                    if ignore { "Show whitespace changes" } else { "Ignore whitespace changes" },
+                    ignore,
+                    true,
+                    cx,
+                )
+                .on_click(cx.listener(move |view, _: &ClickEvent, _, cx| {
                     view.model.update(cx, |m, cx| m.set_ignore_whitespace(!ignore, cx));
                 })),
             )
             .when(comments > 0, |d| {
                 d.child(
                     h_flex()
+                        .id("toolbar-comment-count")
                         .gap(px(3.))
                         .items_center()
                         .px(px(6.))
@@ -944,7 +973,8 @@ impl ReviewView {
                         .text_size(px(11.))
                         .text_color(secondary)
                         .child(plain_icon(IconName::MessageSquare, 14.))
-                        .child(comments.to_string()),
+                        .child(comments.to_string())
+                        .tooltip(title(format!("{comments} comment(s)"))),
                 )
             });
         h_flex()

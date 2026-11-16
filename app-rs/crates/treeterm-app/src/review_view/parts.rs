@@ -2,7 +2,7 @@
 
 use gpui_kit::assets::IconName;
 use gpui_kit::prelude::*;
-use gpui_kit::{AnyElement, App, Div, ElementId, Hsla, Stateful, div, px, rgb, rgba};
+use gpui_kit::{AnyElement, AnyView, App, Div, ElementId, Hsla, SharedString, Stateful, Window, div, px, rgb, rgba};
 use treeterm_core::git::{FileChangeStats, FileChangeStatus};
 
 use crate::theme::colors;
@@ -39,8 +39,15 @@ pub fn status_badge(status: FileChangeStatus) -> Div {
         .child(letter)
 }
 
-/// `FileChangeStats`: `+N` `-N` (green, red), `±N bytes` for binaries, `new` when skipped.
-pub fn change_stats(stats: FileChangeStats, cx: &App) -> Vec<AnyElement> {
+/// An HTML `title`: GPUI Kit's tooltip showing `text`.
+pub fn title(text: impl Into<SharedString>) -> impl Fn(&mut Window, &mut App) -> AnyView + 'static {
+    let text = text.into();
+    move |window, cx| gpui_kit::component::tooltip::Tooltip::new(text.clone()).build(window, cx)
+}
+
+/// `FileChangeStats`: `+N` `-N` (green, red), `±N bytes` for binaries, `new` when skipped,
+/// which says why while hovered (`id` is that `new`'s).
+pub fn change_stats(id: impl Into<ElementId>, stats: FileChangeStats, cx: &App) -> Vec<AnyElement> {
     let secondary = colors(cx).text_secondary;
     match stats {
         FileChangeStats::Text { additions, deletions } => vec![
@@ -56,7 +63,14 @@ pub fn change_stats(stats: FileChangeStats, cx: &App) -> Vec<AnyElement> {
             let sign = if byte_change > 0 { "+" } else { "" };
             vec![div().text_color(color).child(format!("{sign}{byte_change} bytes")).into_any_element()]
         }
-        FileChangeStats::Unknown => vec![div().text_color(secondary).child("new").into_any_element()],
+        FileChangeStats::Unknown => vec![
+            div()
+                .id(id)
+                .text_color(secondary)
+                .child("new")
+                .tooltip(title("Line counts skipped: too many untracked files"))
+                .into_any_element(),
+        ],
     }
 }
 
@@ -80,9 +94,16 @@ pub fn branch_pill(cx: &App) -> Div {
         .bg(rgba(0x0078d426))
 }
 
-/// `.pierre-diff-btn`: a 24×24 icon button, secondary until hovered; `active` tints it
-/// accent on the hover fill; disabled fades to 30%.
-pub fn toolbar_button(id: impl Into<ElementId>, name: IconName, active: bool, enabled: bool, cx: &App) -> Stateful<Div> {
+/// `.pierre-diff-btn`: a 24×24 icon button whose `tip` is its only label, secondary until
+/// hovered; `active` tints it accent on the hover fill; disabled fades to 30%.
+pub fn toolbar_button(
+    id: impl Into<ElementId>,
+    name: IconName,
+    tip: impl Into<SharedString>,
+    active: bool,
+    enabled: bool,
+    cx: &App,
+) -> Stateful<Div> {
     let c = colors(cx);
     let (hover, primary, accent, secondary) = (c.bg_hover, c.text_primary, c.accent, c.text_secondary);
     div()
@@ -98,6 +119,7 @@ pub fn toolbar_button(id: impl Into<ElementId>, name: IconName, active: bool, en
         .when(!enabled, |d| d.opacity(0.3))
         .when(enabled, |d| d.cursor_pointer().hover(move |d| d.bg(hover).text_color(if active { accent } else { primary })))
         .child(plain_icon(name, 14.))
+        .tooltip(title(tip))
 }
 
 /// A Lucide icon in the surrounding text colour (so a parent's hover recolours it).

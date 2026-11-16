@@ -14,7 +14,7 @@ use treeterm_model::review::StageTarget;
 use treeterm_model::review_tree::{TreeNode, build_tree};
 
 use super::ReviewView;
-use super::parts::{MONO, change_stats, outline_button, plain_icon, status_badge, totals};
+use super::parts::{MONO, change_stats, outline_button, plain_icon, status_badge, title, totals};
 use super::stacked::ListedFile;
 use crate::theme::colors;
 
@@ -282,11 +282,20 @@ fn rows(
                 })
                 .child(status_badge(file.status))
                 .child(div().flex_1().min_w_0().truncate().child(name.clone()))
-                .child(div().flex().gap(px(4.)).font_family(MONO).text_size(px(11.)).children(change_stats(file.stats, cx)))
+                .child(
+                    div()
+                        .flex()
+                        .gap(px(4.))
+                        .font_family(MONO)
+                        .text_size(px(11.))
+                        .children(change_stats(SharedString::from(format!("{id}-stats-{}", file.path)), file.stats, cx)),
+                )
                 .when(is_viewed && staging.is_none(), |d| {
                     d.child(div().flex_shrink_0().ml_auto().text_color(accent).child(plain_icon(IconName::Check, 12.)))
                 })
                 .children(action)
+                // `title={file.path}`: the whole path of a name cut short or deep in the tree.
+                .tooltip(title(file.path.clone()))
                 .on_click(cx.listener(move |view, _: &ClickEvent, _, cx| {
                     view.select_file(&path, cx);
                     // `persistViewState({ selectedFilePath })`: a Committed click only.
