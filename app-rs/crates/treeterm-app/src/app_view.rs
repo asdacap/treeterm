@@ -757,7 +757,10 @@ impl Render for AppView {
             .flat_map(|(_, connected)| connected.review_views.values().cloned().collect::<Vec<_>>())
             .collect();
         for view in hidden_reviews {
-            view.update(cx, |v, cx| v.set_shown(false, cx));
+            view.update(cx, |v, cx| {
+                v.set_shown(false, cx);
+                v.set_visible(false, cx);
+            });
         }
         let pane = match (info, self.current_mut()) {
             (Some(info), _) => info.into_any_element(),
@@ -1838,10 +1841,6 @@ fn workspace_tab_strip(
         let (workspace, view) = (workspace.clone(), view.clone());
         Rc::new(move |tab: &str, _: &mut Window, cx: &mut App| {
             workspace.update(cx, |w, cx| w.set_active_tab(tab, cx));
-            // Electron reloads a Review tab whenever it is shown again.
-            if let Some(TabContent::Review(review)) = workspace.read(cx).tab_content(tab) {
-                review.update(cx, |r, cx| r.refresh(cx));
-            }
             view.update(cx, |view, cx| view.focus_active_tab(cx));
         })
     };
@@ -2057,7 +2056,9 @@ fn workspace_pane(
         let shown = !dialog_open && shown_files == Some(model_id);
         view.update(cx, |v, cx| v.set_shown(shown, cx));
     }
-    // Review shows a favourite's file (a PDF or model in a webview) in place of the diff.
+    // Review shows a favourite's file (a PDF or model in a webview) in place of the diff, and
+    // refreshes when it is shown again (whatever switched to it: the tab strip, a shortcut,
+    // the header's Review button, another workspace and back, a synced tab change).
     let shown_review = match &active {
         Some(tab) => match workspace.read(cx).tab_content(tab) {
             Some(TabContent::Review(model)) => Some(model.entity_id()),
@@ -2068,8 +2069,11 @@ fn workspace_pane(
     let review_views: Vec<(EntityId, Entity<crate::review_view::ReviewView>)> =
         connected.review_views.iter().map(|(k, v)| (*k, v.clone())).collect();
     for (model_id, view) in review_views {
-        let shown = !dialog_open && shown_review == Some(model_id);
-        view.update(cx, |v, cx| v.set_shown(shown, cx));
+        let visible = shown_review == Some(model_id);
+        view.update(cx, |v, cx| {
+            v.set_shown(!dialog_open && visible, cx);
+            v.set_visible(visible, cx);
+        });
     }
 
     v_flex()

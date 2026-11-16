@@ -1014,6 +1014,11 @@ impl ReviewView {
         }
     }
 
+    /// The tab is on screen or not (a dialog over it aside): shown again, it refreshes.
+    pub fn set_visible(&mut self, visible: bool, cx: &mut Context<Self>) {
+        self.model.update(cx, |m, cx| m.set_visible(visible, cx));
+    }
+
     /// `renderRightPane`: the selected favourite's file viewer in the diff's place.
     fn favourite_pane(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let FavouriteSelection::Selected { viewer, .. } = self.model.read(cx).favourite_selection().clone() else {

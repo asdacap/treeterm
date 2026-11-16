@@ -1200,6 +1200,41 @@ fn only_refresh_spins_and_resolves_the_favourites_again(cx: &mut TestAppContext)
 }
 
 #[gpui_kit::test]
+fn a_review_shown_again_refreshes(cx: &mut TestAppContext) {
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let repo = TempRepo::new(&h);
+    repo.write("a.txt", "a\n");
+    let store = open_store(cx, &h);
+    let workspace = open_repo_workspace(cx, &h, &store, &repo);
+    let review = open_review(cx, &workspace);
+    wait_review(cx, &review, "loaded", |r, _| !r.is_loading());
+    let listed = |r: &ReviewModel| match r.content() {
+        ReviewContent::Uncommitted(u) => u.changes.files.len(),
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(review.read_with(cx, |r, _| listed(r)), 1);
+
+    // First shown: the tab loaded when it opened. Shown again while shown: nothing.
+    review.update(cx, |r, cx| r.set_visible(true, cx));
+    assert!(!review.read_with(cx, |r, _| r.is_refreshing()));
+    review.update(cx, |r, cx| r.set_visible(true, cx));
+    assert!(!review.read_with(cx, |r, _| r.is_refreshing()));
+
+    // Hidden, then shown again: it refreshes.
+    review.update(cx, |r, cx| r.set_visible(false, cx));
+    repo.write("b.txt", "b\n");
+    assert!(!review.read_with(cx, |r, _| r.is_refreshing()));
+    review.update(cx, |r, cx| r.set_visible(true, cx));
+    assert!(review.read_with(cx, |r, _| r.is_refreshing()));
+    wait_review(cx, &review, "refreshed", |r, _| !r.is_refreshing());
+    assert_eq!(review.read_with(cx, |r, _| listed(r)), 2);
+    review.update(cx, |r, cx| r.set_visible(true, cx));
+    assert!(!review.read_with(cx, |r, _| r.is_refreshing()));
+}
+
+#[gpui_kit::test]
 fn the_review_header_takes_the_child_actions_from_the_tabs_parent_id(cx: &mut TestAppContext) {
     let _serial = serial();
     cx.executor().allow_parking();

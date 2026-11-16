@@ -142,6 +142,15 @@ struct CommitList {
     has_more: bool,
 }
 
+/// Whether the tab is on screen (`isVisible`), as last told.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Visibility {
+    /// Not told yet: the tab just opened, and loads anyway.
+    Unknown,
+    Hidden,
+    Shown,
+}
+
 /// A stage/unstage or commit in progress, or why the last one failed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GitOp {
@@ -445,6 +454,7 @@ pub struct ReviewModel {
     ignore_whitespace: bool,
     /// "Refresh changes" (or the tab shown again) runs until what it reloads has answered.
     refreshing: bool,
+    visibility: Visibility,
     conflicts_load: Option<Task<()>>,
     /// The fresh conflict check before a merge, while it runs.
     pre_merge: Option<Task<()>>,
@@ -575,6 +585,7 @@ impl ReviewModel {
             selected_commit: None,
             ignore_whitespace: false,
             refreshing: false,
+            visibility: Visibility::Unknown,
             conflicts_load: None,
             pre_merge: None,
             _branches: None,
@@ -1125,6 +1136,17 @@ impl ReviewModel {
         }
         cx.emit(ReviewEvent::GitChanged);
         cx.notify();
+    }
+
+    /// The tab is on screen (the active tab of the workspace shown) or not. Shown again after
+    /// being hidden (a tab switch, back to the workspace), it refreshes (`ReviewBrowser`'s
+    /// visibility effect); the first call only records, as the tab loads when it opens.
+    pub fn set_visible(&mut self, visible: bool, cx: &mut Context<Self>) {
+        let next = if visible { Visibility::Shown } else { Visibility::Hidden };
+        let was = std::mem::replace(&mut self.visibility, next);
+        if (was, next) == (Visibility::Hidden, Visibility::Shown) {
+            self.refresh(cx);
+        }
     }
 
     /// "Refresh changes" runs (its button spins, disabled).
