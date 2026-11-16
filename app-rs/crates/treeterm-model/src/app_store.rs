@@ -29,6 +29,7 @@ use treeterm_core::exec::ExecApi;
 use treeterm_core::local_daemon::LocalDaemonSpec;
 use treeterm_core::rt::Rt;
 use treeterm_core::settings::SshConnectionConfig;
+use treeterm_core::wire::workspace_file::WorktreeSettings;
 
 use crate::session_store::{ConnectionStatus as SessionConnection, Restore, SessionEvent, SessionState, SessionStore};
 use crate::settings_store::SettingsStore;
@@ -549,7 +550,7 @@ impl AppStore {
             unreachable!("a status change ends the lookup (on_status)");
         };
         tracing::info!(%id, %path, "no workspaces: opening the remote home");
-        session.update(cx, |s, cx| s.open_workspace(path, cx));
+        session.update(cx, |s, cx| s.open_workspace(path, WorktreeSettings::default(), cx));
         cx.emit(AppEvent::ShowSession(id.clone()));
     }
 
