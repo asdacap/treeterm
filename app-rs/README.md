@@ -512,9 +512,9 @@ The chrome was matched to Electron's computed styles, measured side by side on o
 - PDFs show in Chromium's PDF viewer rebuilt on pdf.js (its legacy build, for older
   WebKits): the toolbar's Menu (a sidebar of thumbnails, and the document outline when there
   is one), page box, zoom presets and level, Fit to page / Fit to width, Rotate
-  counterclockwise, Download and Print. Chromium's ⋮ menu (two-page view, annotations,
-  document properties) and find in the PDF are missing; Print lays the pages out as 150 dpi
-  images, as pdf.js prints.
+  counterclockwise, Download and Print, and Chromium's "Password required" dialog for a PDF
+  with a password. Chromium's ⋮ menu (two-page view, annotations, document properties) and
+  find in the PDF are missing; Print lays the pages out as 150 dpi images, as pdf.js prints.
 - While a tab is dragged, the outline of where it would dock jumps to its place (flex-layout
   slides it there in 0.3 s), the edge docks' arrows are text triangles, and a pane showing a
   web page (Browser, Web App, a PDF) draws its page over the outline and edge docks: native

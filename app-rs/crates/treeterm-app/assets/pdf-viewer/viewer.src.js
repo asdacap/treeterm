@@ -1,9 +1,10 @@
 // The PDF viewer page: Chromium's PDF viewer (which Electron's PdfViewer shows a PDF in) on
-// pdf.js — its page box, zoom, fit, rotate, download and print, and the sidebar of thumbnails
-// and the document outline. Bundled with pdf.js into viewer.js by build.sh; the app serves it
-// with the PDF's bytes (`document.pdf`), its file name (`name`) and pdf.js's CMaps and
-// standard fonts (`cmaps/`, `standard_fonts/`, copied by build.sh), does what the page asks
-// of it (`print`, `download`) and shows a print that failed here (`print-failed <reason>`).
+// pdf.js — its page box, zoom, fit, rotate, download and print, the sidebar of thumbnails and
+// the document outline, and the dialog asking for a PDF's password. Bundled with pdf.js into
+// viewer.js by build.sh; the app serves it with the PDF's bytes (`document.pdf`), its file
+// name (`name`) and pdf.js's CMaps and standard fonts (`cmaps/`, `standard_fonts/`, copied by
+// build.sh), does what the page asks of it (`print`, `download`) and shows a print that failed
+// here (`print-failed <reason>`).
 
 import './pdfjs-global.js'
 import 'pdfjs-dist/legacy/web/pdf_viewer.css'
@@ -65,10 +66,11 @@ async function main() {
   // Download saves the file as it is on disk, through the app's save panel.
   element('download').addEventListener('click', () => report('download'))
 
+  const password = passwordDialog()
   let pdf
   try {
     const bytes = new Uint8Array(await (await fetch('document.pdf')).arrayBuffer())
-    pdf = await pdfjsLib.getDocument({
+    const loadingTask = pdfjsLib.getDocument({
       data: bytes,
       isEvalSupported: false,
       // pdf.js's CMaps and standard fonts, served with the page: text in a predefined (CJK)
@@ -77,13 +79,18 @@ async function main() {
       cMapUrl: 'cmaps/',
       cMapPacked: true,
       standardFontDataUrl: 'standard_fonts/',
-    }).promise
+    })
+    // A PDF with a password asks for it, as Chromium's PDF viewer does.
+    loadingTask.onPassword = password.ask
+    pdf = await loadingTask.promise
   } catch (err) {
+    password.close()
     element('loading').hidden = true
     show('load-error', `Could not load the PDF: ${errorMessage(err)}`)
     report(`error ${errorMessage(err)}`)
     return
   }
+  password.close()
   const title = (await pdf.getMetadata().catch(() => null))?.info?.Title
   if (typeof title === 'string' && title.trim() !== '') {
     element('title').textContent = title
@@ -208,6 +215,46 @@ async function main() {
     if (fitting !== null) viewer.currentScaleValue = fitting
     if (open) thumbnails.setCurrent(viewer.currentPageNumber)
   })
+}
+
+/**
+ * Chromium's password dialog (viewer-password-dialog): `ask` is pdf.js's `onPassword`, called
+ * for the PDF's password and again after a wrong one (`reason`), and gives pdf.js what is
+ * typed. As Chromium's, it cannot be dismissed and an empty password is not tried.
+ */
+function passwordDialog() {
+  const form = element('password-form')
+  const input = element('password-input')
+  const submit = element('password-submit')
+  /** pdf.js's `updatePassword` while a password is asked for. */
+  let answer = null
+  form.addEventListener('submit', (event) => {
+    event.preventDefault()
+    if (answer === null || input.value === '') return
+    const updatePassword = answer
+    answer = null
+    input.disabled = true
+    submit.disabled = true
+    updatePassword(input.value)
+  })
+  return {
+    ask(updatePassword, reason) {
+      const incorrect = reason === pdfjsLib.PasswordResponses.INCORRECT_PASSWORD
+      answer = updatePassword
+      element('loading').hidden = true
+      element('password-error').hidden = !incorrect
+      form.classList.toggle('invalid', incorrect)
+      input.disabled = false
+      submit.disabled = false
+      show('password-dialog')
+      input.focus()
+      input.select()
+    },
+    close() {
+      answer = null
+      element('password-dialog').hidden = true
+    },
+  }
 }
 
 /** The sidebar's page thumbnails, each drawn once it scrolls into view. */

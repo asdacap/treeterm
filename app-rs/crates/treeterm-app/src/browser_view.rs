@@ -1046,6 +1046,36 @@ mod tests {
         }
     }
 
+    /// A PDF with a password asks for it in Chromium's password dialog, again after a wrong one,
+    /// with Chromium's words.
+    #[test]
+    fn the_pdf_page_asks_for_a_password_as_chromium_does() {
+        let html = std::str::from_utf8(PDF_VIEWER_HTML).unwrap();
+        let script = include_str!("../assets/pdf-viewer/viewer.src.js");
+        for asked in [
+            "loadingTask.onPassword = password.ask",
+            "reason === pdfjsLib.PasswordResponses.INCORRECT_PASSWORD",
+            "element('password-error').hidden = !incorrect",
+            "show('password-dialog')",
+            "updatePassword(input.value)",
+        ] {
+            assert!(script.contains(asked), "{asked} not in the script");
+        }
+        for id in ["password-form", "password-input", "password-submit"] {
+            assert!(script.contains(&format!("element('{id}')")), "#{id} not used");
+        }
+        assert!(html.contains("<div id=\"password-dialog\" hidden>"), "the dialog shows only when asked");
+        assert!(html.contains("<div id=\"password-error\" hidden>Incorrect password</div>"));
+        assert!(html.contains("<input id=\"password-input\" type=\"password\""));
+        for text in [
+            ">Password required<",
+            ">This document is password protected.  Please enter a password.<",
+            "type=\"submit\">Submit<",
+        ] {
+            assert!(html.contains(text), "{text} not in index.html");
+        }
+    }
+
     /// Text in a predefined (CJK) CMap or a standard font the PDF does not embed: pdf.js asks
     /// the page for the CMap's or the font's file, and every one its worker can ask for is
     /// served, and nothing else of pdfjs-dist's data.
