@@ -1208,19 +1208,31 @@ fn a_review_shown_again_refreshes(cx: &mut TestAppContext) {
     repo.write("a.txt", "a\n");
     let store = open_store(cx, &h);
     let workspace = open_repo_workspace(cx, &h, &store, &repo);
-    let review = open_review(cx, &workspace);
-    wait_review(cx, &review, "loaded", |r, _| !r.is_loading());
     let listed = |r: &ReviewModel| match r.content() {
         ReviewContent::Uncommitted(u) => u.changes.files.len(),
         other => panic!("{other:?}"),
     };
-    assert_eq!(review.read_with(cx, |r, _| listed(r)), 1);
 
-    // First shown: the tab loaded when it opened. Shown again while shown: nothing.
+    // First shown while its opening load runs: that load is fresh.
+    let review = open_review(cx, &workspace);
+    assert!(review.read_with(cx, |r, _| r.is_loading()));
     review.update(cx, |r, cx| r.set_visible(true, cx));
     assert!(!review.read_with(cx, |r, _| r.is_refreshing()));
+    wait_review(cx, &review, "loaded", |r, _| !r.is_loading());
+    assert_eq!(review.read_with(cx, |r, _| listed(r)), 1);
+    // Shown again while shown: nothing.
     review.update(cx, |r, cx| r.set_visible(true, cx));
     assert!(!review.read_with(cx, |r, _| r.is_refreshing()));
+
+    // First shown once it loaded (made when the session connected, shown later): it
+    // refreshes.
+    let later = open_review(cx, &workspace);
+    wait_review(cx, &later, "loaded", |r, _| !r.is_loading());
+    repo.write("c.txt", "c\n");
+    later.update(cx, |r, cx| r.set_visible(true, cx));
+    assert!(later.read_with(cx, |r, _| r.is_refreshing()));
+    wait_review(cx, &later, "refreshed", |r, _| !r.is_refreshing());
+    assert_eq!(later.read_with(cx, |r, _| listed(r)), 2);
 
     // Hidden, then shown again: it refreshes.
     review.update(cx, |r, cx| r.set_visible(false, cx));
@@ -1229,7 +1241,7 @@ fn a_review_shown_again_refreshes(cx: &mut TestAppContext) {
     review.update(cx, |r, cx| r.set_visible(true, cx));
     assert!(review.read_with(cx, |r, _| r.is_refreshing()));
     wait_review(cx, &review, "refreshed", |r, _| !r.is_refreshing());
-    assert_eq!(review.read_with(cx, |r, _| listed(r)), 2);
+    assert_eq!(review.read_with(cx, |r, _| listed(r)), 3);
     review.update(cx, |r, cx| r.set_visible(true, cx));
     assert!(!review.read_with(cx, |r, _| r.is_refreshing()));
 }

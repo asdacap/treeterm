@@ -145,7 +145,8 @@ struct CommitList {
 /// Whether the tab is on screen (`isVisible`), as last told.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Visibility {
-    /// Not told yet: the tab just opened, and loads anyway.
+    /// Not told yet: no view has shown the tab since it was made (and loaded) when the
+    /// session connected or the tab opened.
     Unknown,
     Hidden,
     Shown,
@@ -1194,11 +1195,18 @@ impl ReviewModel {
 
     /// The tab is on screen (the active tab of the workspace shown) or not. Shown again after
     /// being hidden (a tab switch, back to the workspace), it refreshes (`ReviewBrowser`'s
-    /// visibility effect); the first call only records, as the tab loads when it opens.
+    /// visibility effect). Shown for the first time, it refreshes too unless what it loaded
+    /// when made is still loading: every Review tab of a session is made and loaded when the
+    /// session connects, and a view first shows it later (Electron mounts it, and so loads
+    /// it, when its workspace is shown).
     pub fn set_visible(&mut self, visible: bool, cx: &mut Context<Self>) {
         let next = if visible { Visibility::Shown } else { Visibility::Hidden };
-        let was = std::mem::replace(&mut self.visibility, next);
-        if (was, next) == (Visibility::Hidden, Visibility::Shown) {
+        let stale = match std::mem::replace(&mut self.visibility, next) {
+            Visibility::Hidden => true,
+            Visibility::Unknown => !self.is_loading(),
+            Visibility::Shown => false,
+        };
+        if visible && stale {
             self.refresh(cx);
         }
     }

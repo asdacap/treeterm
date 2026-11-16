@@ -750,17 +750,8 @@ impl Render for AppView {
         for view in hidden_files {
             view.update(cx, |v, cx| v.set_shown(false, cx));
         }
-        let hidden_reviews: Vec<Entity<crate::review_view::ReviewView>> = self
-            .sessions
-            .iter()
-            .filter(|(id, _)| on_screen.as_ref() != Some(*id))
-            .flat_map(|(_, connected)| connected.review_views.values().cloned().collect::<Vec<_>>())
-            .collect();
-        for view in hidden_reviews {
-            view.update(cx, |v, cx| {
-                v.set_shown(false, cx);
-                v.set_visible(false, cx);
-            });
+        for (_, connected) in self.sessions.iter().filter(|(id, _)| on_screen.as_ref() != Some(*id)) {
+            hide_reviews(connected, cx);
         }
         let pane = match (info, self.current_mut()) {
             (Some(info), _) => info.into_any_element(),
@@ -1860,6 +1851,18 @@ fn workspace_tab_strip(
     strip.render(workspace_id, state, cx.entity_id(), cx)
 }
 
+/// No workspace's tabs are on screen (none picked, or the one picked was removed, is loading
+/// or failed): the session's Review views are hidden, so they refresh when shown again.
+fn hide_reviews(connected: &Connected, cx: &mut Context<AppView>) {
+    let views: Vec<Entity<crate::review_view::ReviewView>> = connected.review_views.values().cloned().collect();
+    for view in views {
+        view.update(cx, |v, cx| {
+            v.set_shown(false, cx);
+            v.set_visible(false, cx);
+        });
+    }
+}
+
 fn workspace_pane(
     connected: &mut Connected,
     header_inset: gpui_kit::Pixels,
@@ -1871,6 +1874,7 @@ fn workspace_pane(
     prune_terminal_views(connected, cx);
     connected.tool_views.prune(connected.session.read(cx), cx);
     let ActiveView::Workspace(id) = &connected.active else {
+        hide_reviews(connected, cx);
         // `.workspace-empty`.
         return centered(
             v_flex()
@@ -1880,6 +1884,11 @@ fn workspace_pane(
         );
     };
     let id = id.clone();
+    let tabs_shown =
+        matches!(connected.session.read(cx).entry(&id), Some(WorkspaceEntry::Loaded(_) | WorkspaceEntry::OperationError { .. }));
+    if !tabs_shown {
+        hide_reviews(connected, cx);
+    }
     let workspace = match connected.session.read(cx).entry(&id) {
         // The selection can outlive its workspace when another window removes it.
         None => return centered(div().text_color(secondary).child("Workspace was removed")),
