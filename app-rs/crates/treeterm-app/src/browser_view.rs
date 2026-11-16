@@ -659,6 +659,10 @@ const PDF_VIEWER_HTML: &[u8] = include_bytes!("../assets/pdf-viewer/index.html")
 const PDF_VIEWER_JS: &[u8] = include_bytes!("../assets/pdf-viewer/viewer.js");
 const PDF_VIEWER_CSS: &[u8] = include_bytes!("../assets/pdf-viewer/viewer.css");
 const PDF_WORKER_JS: &[u8] = include_bytes!("../assets/pdf-viewer/pdf.worker.mjs");
+// pdf.js's CMaps and standard fonts, which `build.sh` copies into `cmaps/` and
+// `standard_fonts/`: `PDF_VIEWER_DATA`, each file's path in the page and its bytes, listed by
+// the crate's `build.rs`.
+include!(concat!(env!("OUT_DIR"), "/pdf_viewer_data.rs"));
 
 /// A page served from memory to a webview: a PDF in the PDF viewer, the 3D model viewer with
 /// the model's bytes, or an image GPUI cannot decode. Each page gets its own URL scheme, so
@@ -720,7 +724,9 @@ pub enum AssetPageEvent {
 impl gpui_kit::EventEmitter<AssetPageEvent> for AssetPageView {}
 
 impl AssetPageView {
-    /// `name` is the file's, the viewer's title unless the PDF has one of its own.
+    /// `name` is the file's, the viewer's title unless the PDF has one of its own. pdf.js reads
+    /// the CMaps and standard fonts a PDF names but does not embed from the page's `cmaps/`
+    /// and `standard_fonts/`.
     pub fn pdf(bytes: std::sync::Arc<Vec<u8>>, name: &str) -> Self {
         let files = [
             ("index.html".to_owned(), ("text/html; charset=utf-8", Asset::Static(PDF_VIEWER_HTML))),
@@ -733,7 +739,10 @@ impl AssetPageView {
                 ("text/plain; charset=utf-8", Asset::Shared(std::sync::Arc::new(name.as_bytes().to_vec()))),
             ),
         ];
-        Self::new(files.into_iter().collect(), "index.html".to_owned(), "the PDF")
+        let data = PDF_VIEWER_DATA
+            .iter()
+            .map(|(path, bytes)| ((*path).to_owned(), ("application/octet-stream", Asset::Static(bytes))));
+        Self::new(files.into_iter().chain(data).collect(), "index.html".to_owned(), "the PDF")
     }
 
     /// `format` is the model's extension (`stl`, `glb`, …), as the viewer's parsers are keyed.
@@ -1029,9 +1038,48 @@ mod tests {
             "report('print')",
             "report(`print-failed ${",
             "report('download')",
+            "cMapUrl: 'cmaps/'",
+            "cMapPacked: true",
+            "standardFontDataUrl: 'standard_fonts/'",
         ] {
             assert!(script.contains(asked), "{asked} not in the script");
         }
+    }
+
+    /// Text in a predefined (CJK) CMap or a standard font the PDF does not embed: pdf.js asks
+    /// the page for the CMap's or the font's file, and every one its worker can ask for is
+    /// served, and nothing else of pdfjs-dist's data.
+    #[test]
+    fn the_pdf_page_serves_every_cmap_and_standard_font_pdfjs_asks_for() {
+        let page = AssetPageView::pdf(std::sync::Arc::new(b"%PDF-1.4".to_vec()), "a.pdf");
+        let served = |path: &str| match page.files.get(path) {
+            Some(("application/octet-stream", Asset::Static(bytes))) => !bytes.is_empty(),
+            _ => false,
+        };
+        let worker = std::str::from_utf8(PDF_WORKER_JS).unwrap();
+        // The worker's built-in CMaps (`BUILT_IN_CMAPS`): the list that starts with Adobe-GB1-UCS2.
+        let start = worker.find("[\"Adobe-GB1-UCS2\"").expect("the worker lists its built-in CMaps");
+        let end = start + worker[start..].find(']').unwrap();
+        let cmaps: Vec<&str> = worker[start + 1..end].split(',').map(|name| name.trim_matches('"')).collect();
+        for name in ["UniJIS-UCS2-H", "Adobe-Japan1-UCS2", "UniGB-UCS2-H", "UniCNS-UCS2-H", "UniKS-UCS2-H"] {
+            assert!(cmaps.contains(&name), "{name} not in {cmaps:?}");
+        }
+        for name in &cmaps {
+            assert!(served(&format!("cmaps/{name}.bcmap")), "cmaps/{name}.bcmap not served");
+        }
+        // The standard fonts' files (the worker's `getFontNameToFileMap`).
+        let fonts: std::collections::BTreeSet<&str> = worker
+            .split('"')
+            .filter(|text| text.ends_with(".pfb") || text.ends_with(".ttf"))
+            .collect();
+        for name in ["FoxitSymbol.pfb", "FoxitDingbats.pfb", "LiberationSans-Regular.ttf"] {
+            assert!(fonts.contains(name), "{name} not in {fonts:?}");
+        }
+        for name in &fonts {
+            assert!(served(&format!("standard_fonts/{name}")), "standard_fonts/{name} not served");
+        }
+        assert_eq!(PDF_VIEWER_DATA.len(), cmaps.len() + fonts.len());
+        assert!(!served("cmaps/LICENSE") && !served("standard_fonts/LICENSE_FOXIT"));
     }
 
     #[test]

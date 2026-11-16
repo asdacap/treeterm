@@ -1,3 +1,5 @@
 viewer.js linguist-generated=true -diff
 viewer.css linguist-generated=true -diff
 pdf.worker.mjs linguist-generated=true -diff
+cmaps/** linguist-generated=true -diff
+standard_fonts/** linguist-generated=true -diff

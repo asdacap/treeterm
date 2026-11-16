@@ -135,8 +135,9 @@ Done (tested against a real in-process daemon unless noted):
 - **AI harness (M5):** per-tab LLM analyzer (classification, auto-approve, titles, branch
   names), activity states with transitions, unread attention markers with the ding.
 - **Files / editor (M6):** file tree with favourites (a child worktree inherits its ancestors'),
-  highlighted viewer, Markdown preview, images, PDF and 3D models (webview; pdf.js and
-  three.js bundled by `assets/pdf-viewer/build.sh` and `assets/model-viewer/build.sh`),
+  highlighted viewer, Markdown preview, images, PDF and 3D models (webview; pdf.js, with its
+  CMaps and standard fonts, and three.js bundled by `assets/pdf-viewer/build.sh` and
+  `assets/model-viewer/build.sh`),
   download, search panel (in file / in repo), find, go to
   definition (F12, Cmd/Ctrl+click, the context menu; a word with a definition is underlined
   while Cmd/Ctrl is held over it) and Peek Definition (Alt+F12, the Peek submenu), review
@@ -513,9 +514,7 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   is one), page box, zoom presets and level, Fit to page / Fit to width, Rotate
   counterclockwise, Download and Print. Chromium's ⋮ menu (two-page view, annotations,
   document properties) and find in the PDF are missing; Print lays the pages out as 150 dpi
-  images, as pdf.js prints. pdf.js's CMaps and standard fonts are not bundled: text in a font
-  the PDF does not embed is drawn in a system font, and text using a predefined (CJK) CMap
-  the PDF does not embed may not show.
+  images, as pdf.js prints.
 - While a tab is dragged, the outline of where it would dock jumps to its place (flex-layout
   slides it there in 0.3 s), the edge docks' arrows are text triangles, and a pane showing a
   web page (Browser, Web App, a PDF) draws its page over the outline and edge docks: native

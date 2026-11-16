@@ -1,7 +1,8 @@
 // The PDF viewer page: Chromium's PDF viewer (which Electron's PdfViewer shows a PDF in) on
 // pdf.js — its page box, zoom, fit, rotate, download and print, and the sidebar of thumbnails
 // and the document outline. Bundled with pdf.js into viewer.js by build.sh; the app serves it
-// with the PDF's bytes (`document.pdf`) and its file name (`name`), does what the page asks
+// with the PDF's bytes (`document.pdf`), its file name (`name`) and pdf.js's CMaps and
+// standard fonts (`cmaps/`, `standard_fonts/`, copied by build.sh), does what the page asks
 // of it (`print`, `download`) and shows a print that failed here (`print-failed <reason>`).
 
 import './pdfjs-global.js'
@@ -67,7 +68,16 @@ async function main() {
   let pdf
   try {
     const bytes = new Uint8Array(await (await fetch('document.pdf')).arrayBuffer())
-    pdf = await pdfjsLib.getDocument({ data: bytes, isEvalSupported: false }).promise
+    pdf = await pdfjsLib.getDocument({
+      data: bytes,
+      isEvalSupported: false,
+      // pdf.js's CMaps and standard fonts, served with the page: text in a predefined (CJK)
+      // CMap the PDF does not embed shows, as in Chromium's PDFium, and Symbol and
+      // ZapfDingbats it does not embed are drawn in pdf.js's fonts, not the system's.
+      cMapUrl: 'cmaps/',
+      cMapPacked: true,
+      standardFontDataUrl: 'standard_fonts/',
+    }).promise
   } catch (err) {
     element('loading').hidden = true
     show('load-error', `Could not load the PDF: ${errorMessage(err)}`)
