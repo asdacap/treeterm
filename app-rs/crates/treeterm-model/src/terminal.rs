@@ -41,6 +41,10 @@ const IMMEDIATE_EXIT_WINDOW: Duration = Duration::from_secs(1);
 /// cannot starve the UI thread of updates.
 const MAX_EVENTS_PER_BATCH: usize = 512;
 
+/// How long a click on the scroll badge waits for a second click (a double-click pins)
+/// before it scrolls. Electron's `badgeClickTimer`.
+pub const BADGE_DOUBLE_CLICK: Duration = Duration::from_millis(250);
+
 #[derive(Debug, Clone)]
 pub struct TerminalOptions {
     pub pty_id: String,
@@ -167,6 +171,15 @@ pub struct TerminalModel {
     data_version: u64,
     idle: Option<IdleDetector>,
     idle_timer: Option<Task<()>>,
+    /// A scroll badge click waiting [`BADGE_DOUBLE_CLICK`] for a second one.
+    badge_click: Option<Task<()>>,
+}
+
+/// Where a single click on the scroll badge goes, decided when it is clicked.
+#[derive(Debug, Clone, Copy)]
+enum BadgeScroll {
+    Top,
+    Bottom,
 }
 
 fn emulator_settings(settings: &TerminalSettings) -> EmulatorSettings {
@@ -203,6 +216,7 @@ impl TerminalModel {
             data_version: 0,
             idle,
             idle_timer: None,
+            badge_click: None,
         }
     }
 
@@ -500,13 +514,35 @@ impl TerminalModel {
         self.refresh_viewport_state();
     }
 
-    /// Pinned: output always brings the newest line into view.
-    pub fn set_pinned(&mut self, pinned: bool, cx: &mut Context<Self>) {
-        self.attachment.gate.set_pinned(pinned);
-        if pinned {
-            self.scroll_to_bottom_quietly();
+    /// A click on the scroll badge. Pinned (output always brings the newest line into view):
+    /// unpins and stays put. Otherwise a second click within [`BADGE_DOUBLE_CLICK`] pins,
+    /// and a single click then scrolls: to the top from the bottom, else to the bottom.
+    pub fn click_scroll_badge(&mut self, cx: &mut Context<Self>) {
+        if self.is_pinned() {
+            self.attachment.gate.set_pinned(false);
+            cx.notify();
+        } else if self.badge_click.take().is_some() {
+            self.attachment.gate.set_pinned(true);
+            self.scroll_to_bottom(cx);
+        } else {
+            let target = match self.scroll_position {
+                ScrollPosition::Bottom => BadgeScroll::Top,
+                ScrollPosition::Top | ScrollPosition::Middle => BadgeScroll::Bottom,
+            };
+            let executor = cx.background_executor().clone();
+            self.badge_click = Some(cx.spawn(async move |this, cx| {
+                executor.timer(BADGE_DOUBLE_CLICK).await;
+                match this.update(cx, |model, cx| {
+                    model.badge_click = None;
+                    match target {
+                        BadgeScroll::Top => model.scroll_to_top(cx),
+                        BadgeScroll::Bottom => model.scroll_to_bottom(cx),
+                    }
+                }) {
+                    Ok(()) | Err(_) => {} // Err: model dropped
+                }
+            }));
         }
-        cx.notify();
     }
 
     // ---- selection ---------------------------------------------------------------------

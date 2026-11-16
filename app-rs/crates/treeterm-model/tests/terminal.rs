@@ -3,11 +3,14 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::time::Duration;
 
 use gpui_kit::{AppContext as _, Entity, Subscription, TestAppContext};
 use treeterm_core::pty::CreatePty;
 use treeterm_core::settings::TerminalSettings;
-use treeterm_model::terminal::{Overlay, TerminalEvent, TerminalModel, TerminalOptions};
+use treeterm_model::terminal::{
+    BADGE_DOUBLE_CLICK, Overlay, TerminalEvent, TerminalModel, TerminalOptions,
+};
 use treeterm_term::core::GridSize;
 use treeterm_term::fit::WidthLimit;
 use treeterm_term::palette::DEFAULT_BACKGROUND;
@@ -216,8 +219,25 @@ fn with_scrollback(cx: &mut TestAppContext, h: &Harness) -> Entity<TerminalModel
     model
 }
 
+fn offset(cx: &mut TestAppContext, model: &Entity<TerminalModel>) -> usize {
+    model.read_with(cx, |m, _| m.term().lock().grid().display_offset())
+}
+
 fn position(cx: &mut TestAppContext, model: &Entity<TerminalModel>) -> ScrollPosition {
     model.read_with(cx, |m, _| m.scroll_position())
+}
+
+fn pinned(cx: &mut TestAppContext, model: &Entity<TerminalModel>) -> bool {
+    model.read_with(cx, |m, _| m.is_pinned())
+}
+
+fn click_badge(cx: &mut TestAppContext, model: &Entity<TerminalModel>) {
+    model.update(cx, |m, cx| m.click_scroll_badge(cx));
+}
+
+fn advance(cx: &mut TestAppContext, by: Duration) {
+    cx.executor().advance_clock(by);
+    cx.run_until_parked();
 }
 
 #[gpui_kit::test]
@@ -229,4 +249,55 @@ fn one_line_above_the_bottom_reads_bottom(cx: &mut TestAppContext) {
     assert_eq!(position(cx, &model), ScrollPosition::Bottom);
     model.update(cx, |m, cx| m.scroll_lines(1, cx));
     assert_eq!(position(cx, &model), ScrollPosition::Middle);
+}
+
+#[gpui_kit::test]
+fn a_badge_click_scrolls_once_no_second_click_came(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    let model = with_scrollback(cx, &h);
+
+    // From the bottom a single click goes to the top...
+    click_badge(cx, &model);
+    advance(cx, BADGE_DOUBLE_CLICK - Duration::from_millis(1));
+    assert_eq!(position(cx, &model), ScrollPosition::Bottom);
+    advance(cx, Duration::from_millis(1));
+    assert_eq!(position(cx, &model), ScrollPosition::Top);
+
+    // ...and from anywhere else to the bottom.
+    click_badge(cx, &model);
+    advance(cx, BADGE_DOUBLE_CLICK);
+    assert_eq!((offset(cx, &model), pinned(cx, &model)), (0, false));
+}
+
+#[gpui_kit::test]
+fn a_badge_double_click_pins_without_scrolling_first(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    let model = with_scrollback(cx, &h);
+
+    click_badge(cx, &model);
+    assert_eq!(position(cx, &model), ScrollPosition::Bottom);
+    click_badge(cx, &model);
+    assert!(pinned(cx, &model));
+    advance(cx, BADGE_DOUBLE_CLICK * 2);
+    assert_eq!((offset(cx, &model), pinned(cx, &model)), (0, true));
+}
+
+#[gpui_kit::test]
+fn a_double_click_on_pinned_unpins_then_scrolls_to_the_top(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    let model = with_scrollback(cx, &h);
+    click_badge(cx, &model);
+    click_badge(cx, &model);
+    assert!(pinned(cx, &model));
+
+    // The first click unpins and stays at the bottom; the second is a new single click.
+    click_badge(cx, &model);
+    assert_eq!((offset(cx, &model), pinned(cx, &model)), (0, false));
+    click_badge(cx, &model);
+    assert!(!pinned(cx, &model));
+    advance(cx, BADGE_DOUBLE_CLICK);
+    assert_eq!(position(cx, &model), ScrollPosition::Top);
 }

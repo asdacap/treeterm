@@ -510,18 +510,9 @@ impl TerminalView {
             .hover(move |d| d.opacity(1.).border_color(accent).text_color(primary))
             .cursor_pointer()
             .tooltip_text(title)
-            .on_click(cx.listener(move |view, event: &gpui_kit::ClickEvent, _, cx| {
-                view.model.update(cx, |model, cx| {
-                    if model.is_pinned() {
-                        model.set_pinned(false, cx);
-                    } else if event.click_count() >= 2 {
-                        model.set_pinned(true, cx);
-                    } else if model.scroll_position() == ScrollPosition::Bottom {
-                        model.scroll_to_top(cx);
-                    } else {
-                        model.scroll_to_bottom(cx);
-                    }
-                });
+            // Each click of a double-click arrives here; the model tells them apart by time.
+            .on_click(cx.listener(|view, _, _, cx| {
+                view.model.update(cx, |model, cx| model.click_scroll_badge(cx));
             }))
     }
 }
