@@ -2,9 +2,59 @@
 //! `Started` only once a response commits, and nothing for a load's request, a load that
 //! fails, or a navigation within the page. WKWebView (key-value observing) and WebKitGTK
 //! (property notifications) report it as it changes. Also the history, reload and stop calls
-//! wry does not wrap.
+//! wry does not wrap, and the Edit menu's commands on a page.
 
-pub use platform::{NavObserver, go_back, go_forward, observe, reload_from_origin, stop_loading};
+#[cfg(target_os = "macos")]
+pub use platform::{send_edit, web_page_has_focus};
+pub use platform::{NavObserver, edit, go_back, go_forward, observe, reload_from_origin, stop_loading};
+
+/// An Edit menu command, as a web page takes it (Electron's edit roles on a focused
+/// `<webview>`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditCommand {
+    Undo,
+    Redo,
+    Cut,
+    Copy,
+    Paste,
+    /// macOS's Paste and Match Style.
+    PasteAsPlainText,
+    /// Delete the selection.
+    Delete,
+    SelectAll,
+}
+
+impl EditCommand {
+    /// The AppKit action a menu item sends the first responder for it.
+    #[cfg(target_os = "macos")]
+    pub fn selector(self) -> &'static std::ffi::CStr {
+        match self {
+            EditCommand::Undo => c"undo:",
+            EditCommand::Redo => c"redo:",
+            EditCommand::Cut => c"cut:",
+            EditCommand::Copy => c"copy:",
+            EditCommand::Paste => c"paste:",
+            EditCommand::PasteAsPlainText => c"pasteAsPlainText:",
+            EditCommand::Delete => c"delete:",
+            EditCommand::SelectAll => c"selectAll:",
+        }
+    }
+
+    /// WebKitGTK's editing command for it (`webkit_web_view_execute_editing_command`).
+    #[cfg(target_os = "linux")]
+    pub fn webkit_command(self) -> &'static str {
+        match self {
+            EditCommand::Undo => "Undo",
+            EditCommand::Redo => "Redo",
+            EditCommand::Cut => "Cut",
+            EditCommand::Copy => "Copy",
+            EditCommand::Paste => "Paste",
+            EditCommand::PasteAsPlainText => "PasteAsPlainText",
+            EditCommand::Delete => "Delete",
+            EditCommand::SelectAll => "SelectAll",
+        }
+    }
+}
 
 #[cfg(target_os = "macos")]
 mod platform {
@@ -136,6 +186,50 @@ mod platform {
     pub fn stop_loading(webview: &wry::WebView) {
         unsafe { wk(webview).stopLoading() };
     }
+
+    /// The shared application. GPUI calls the app back on the main thread, as AppKit requires.
+    fn app() -> Retained<objc2_app_kit::NSApplication> {
+        let main_thread = objc2::MainThreadMarker::new().expect("AppKit is called from the main thread");
+        objc2_app_kit::NSApplication::sharedApplication(main_thread)
+    }
+
+    /// Whether the key window's first responder is a web page (a WKWebView, or a view in
+    /// one): the page took the keyboard, which GPUI does not see.
+    pub fn web_page_has_focus() -> bool {
+        let Some(responder) = app().keyWindow().and_then(|window| window.firstResponder()) else {
+            return false;
+        };
+        let mut view = responder.downcast::<objc2_app_kit::NSView>().ok();
+        while let Some(current) = view {
+            if current.isKindOfClass(<WKWebView as objc2::ClassType>::class()) {
+                return true;
+            }
+            // SAFETY: a view property read, on the main thread.
+            view = unsafe { current.superview() };
+        }
+        false
+    }
+
+    /// Send `command` to the key window's first responder, as an AppKit Edit menu item does.
+    pub fn send_edit(command: super::EditCommand) {
+        let action = objc2::runtime::Sel::register(command.selector());
+        // SAFETY: an action message, sent down the responder chain on the main thread.
+        if !unsafe { app().sendAction_to_from(action, None, None) } {
+            tracing::warn!(?command, "nothing in the responder chain took the Edit command");
+        }
+    }
+
+    /// Give `webview` the keyboard and send it `command`.
+    pub fn edit(webview: &wry::WebView, command: super::EditCommand) {
+        let page = wk(webview);
+        match page.window() {
+            Some(window) => {
+                window.makeFirstResponder(Some(&page));
+                send_edit(command);
+            }
+            None => tracing::warn!(?command, "the page is in no window"),
+        }
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -224,5 +318,14 @@ mod platform {
 
     pub fn stop_loading(webview: &wry::WebView) {
         wry::WebViewExtUnix::webview(webview).stop_loading();
+    }
+
+    /// Run `command` on the page and give it the keyboard back, which the menu bar drawn in
+    /// the GPUI window took.
+    pub fn edit(webview: &wry::WebView, command: super::EditCommand) {
+        wry::WebViewExtUnix::webview(webview).execute_editing_command(command.webkit_command());
+        if let Err(error) = webview.focus() {
+            tracing::warn!(%error, ?command, "cannot give the page the keyboard back");
+        }
     }
 }

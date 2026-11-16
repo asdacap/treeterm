@@ -25,12 +25,12 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::Duration;
 
-use gpui_kit::component::input::{InputEvent, InputState};
+use gpui_kit::component::input::{self, InputEvent, InputState};
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    Animation, AnimationExt as _, AnyElement, Context, Entity, SharedString, Subscription, Task, WeakEntity, Window, div,
-    px, relative, rgb,
+    Animation, AnimationExt as _, AnyElement, App, Context, DispatchPhase, Div, Entity, FocusHandle, MouseDownEvent,
+    SharedString, Subscription, Task, WeakEntity, Window, canvas, div, px, relative, rgb,
 };
 use gpui_webview::WebView;
 use treeterm_model::apps::{
@@ -40,8 +40,9 @@ use treeterm_model::apps::{
 use treeterm_model::page_nav::{NavInput, PageNav, PageState, Reload};
 use treeterm_model::workspace_store::WorkspaceStore;
 
+use crate::menus::{DeleteSelection, PasteAndMatchStyle};
 use crate::theme::colors;
-use crate::webview_native;
+use crate::webview_native::{self, EditCommand};
 
 enum Page {
     /// Built on first render (it needs the window).
@@ -454,7 +455,11 @@ impl Render for BrowserView {
                     .child(div().absolute().inset_0().child(load_failure(url, cx)))
                     .into_any_element(),
                 (PageState::Shown, PageContent::Web) => {
-                    div().size_full().bg(gpui_kit::white()).child(webview.clone()).into_any_element()
+                    let focus = gpui_kit::Focusable::focus_handle(webview.read(cx), cx);
+                    let page = webview.clone();
+                    let edit = move |command, cx: &mut App| webview_native::edit(page.read(cx).raw(), command);
+                    page_edits(div().size_full().bg(gpui_kit::white()).child(webview.clone()), focus, edit)
+                        .into_any_element()
                 }
                 // `.webapp-markdown`: the webview keeps its place (hidden) under the page.
                 (PageState::Shown, PageContent::Markdown(text)) => {
@@ -566,6 +571,46 @@ impl Render for BrowserView {
     }
 }
 
+
+/// A shown page's part in the Edit menu, as Electron's edit roles act on a focused `<webview>`.
+/// A press on the page gives its webview's `focus` GPUI's focus: WebKitGTK passes presses on to
+/// GPUI (AppKit does not, see `menus::FocusedPage`). While it has the focus, the Edit menu's
+/// commands go to the page (`edit`), not to the field GPUI's focus was on before.
+fn page_edits(page: Div, focus: FocusHandle, edit: impl Fn(EditCommand, &mut App) + 'static) -> Div {
+    let edit = Rc::new(edit);
+    let to_page = |command: EditCommand| {
+        let edit = edit.clone();
+        move |cx: &mut App| edit(command, cx)
+    };
+    let (undo, redo, cut) = (to_page(EditCommand::Undo), to_page(EditCommand::Redo), to_page(EditCommand::Cut));
+    let (copy, paste, plain) =
+        (to_page(EditCommand::Copy), to_page(EditCommand::Paste), to_page(EditCommand::PasteAsPlainText));
+    let (delete, select_all) = (to_page(EditCommand::Delete), to_page(EditCommand::SelectAll));
+    let pressed = canvas(
+        |bounds, _, _| bounds,
+        move |_, bounds, window, _| {
+            window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
+                if phase == DispatchPhase::Bubble && bounds.contains(&event.position) {
+                    window.focus(&focus, cx);
+                }
+            });
+        },
+    )
+    .absolute()
+    .top_0()
+    .left_0()
+    .size_full();
+    page.relative()
+        .child(pressed)
+        .on_action(move |_: &input::Undo, _, cx| undo(cx))
+        .on_action(move |_: &input::Redo, _, cx| redo(cx))
+        .on_action(move |_: &input::Cut, _, cx| cut(cx))
+        .on_action(move |_: &input::Copy, _, cx| copy(cx))
+        .on_action(move |_: &input::Paste, _, cx| paste(cx))
+        .on_action(move |_: &PasteAndMatchStyle, _, cx| plain(cx))
+        .on_action(move |_: &DeleteSelection, _, cx| delete(cx))
+        .on_action(move |_: &input::SelectAll, _, cx| select_all(cx))
+}
 
 /// Files a page is built from: served to its webview from memory.
 #[derive(Clone)]
@@ -811,5 +856,70 @@ mod tests {
         }
         // Until the script runs, the page says what FileViewer's Suspense fallback says.
         assert!(html.contains("<div id=\"loading\" class=\"placeholder\">Loading 3D viewer…</div>"));
+    }
+
+    /// A text field above a page standing in for the webview, whose Edit commands are recorded.
+    struct PageUnderField {
+        field: Entity<InputState>,
+        page: FocusHandle,
+        taken: Rc<RefCell<Vec<EditCommand>>>,
+    }
+
+    impl Render for PageUnderField {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let taken = self.taken.clone();
+            // As `gpui_webview`'s: the native view covers the element tracking the focus.
+            let native = canvas(
+                |bounds, window, _| window.insert_hitbox(bounds, gpui_kit::HitboxBehavior::BlockMouse),
+                |_, _, _, _| {},
+            )
+            .size_full();
+            let page = div().size_full().child(div().size_full().track_focus(&self.page).child(native));
+            v_flex()
+                .size_full()
+                .child(gpui_kit::component::input::Input::new(&self.field))
+                .child(page_edits(page, self.page.clone(), move |command, _| taken.borrow_mut().push(command)))
+        }
+    }
+
+    /// A press on the page (which WebKitGTK passes on to GPUI) takes GPUI's focus from the
+    /// field, and the Edit menu's commands then go to the page, not the field.
+    #[gpui_kit::test]
+    fn a_pressed_page_takes_the_edit_menu(cx: &mut gpui_kit::TestAppContext) {
+        let taken = Rc::new(RefCell::new(Vec::new()));
+        let recorded = taken.clone();
+        let (window, view) = cx.update(|cx| {
+            gpui_kit::init(cx);
+            gpui_kit::open_window(gpui_kit::WindowOptions::default(), cx, |window, cx| {
+                let field = cx.new(|cx| InputState::new(window, cx).default_value("hello"));
+                cx.new(|cx| PageUnderField { field, page: cx.focus_handle(), taken: recorded })
+            })
+            .expect("open a window")
+        });
+        let cx = gpui_kit::VisualTestContext::from_window(window, cx).into_mut();
+        let (field, page) = view.read_with(cx, |view, _| (view.field.clone(), view.page.clone()));
+        cx.update(|window, cx| field.update(cx, |field, cx| field.focus(window, cx)));
+        cx.run_until_parked();
+
+        let size = cx.update(|window, _| window.viewport_size());
+        cx.simulate_click(gpui_kit::point(size.width / 2., size.height - px(10.)), gpui_kit::Modifiers::default());
+        assert!(cx.update(|window, _| page.is_focused(window)), "the page has the focus");
+        let menu: [(Box<dyn gpui_kit::Action>, EditCommand); 8] = [
+            (Box::new(input::Undo), EditCommand::Undo),
+            (Box::new(input::Redo), EditCommand::Redo),
+            (Box::new(input::Cut), EditCommand::Cut),
+            (Box::new(input::Copy), EditCommand::Copy),
+            (Box::new(input::Paste), EditCommand::Paste),
+            (Box::new(PasteAndMatchStyle), EditCommand::PasteAsPlainText),
+            (Box::new(DeleteSelection), EditCommand::Delete),
+            (Box::new(input::SelectAll), EditCommand::SelectAll),
+        ];
+        let expected: Vec<EditCommand> = menu.iter().map(|(_, command)| *command).collect();
+        for (action, _) in menu {
+            cx.update(|window, cx| window.dispatch_action(action, cx));
+        }
+        cx.run_until_parked();
+        assert_eq!(*taken.borrow(), expected);
+        assert_eq!(cx.update(|_, cx| field.read(cx).value().to_string()), "hello");
     }
 }

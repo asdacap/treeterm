@@ -24,6 +24,7 @@ use crate::active_processes_view::CloseAnyway;
 use crate::app_view::AppView;
 use crate::terminal_view;
 use crate::theme::colors;
+use crate::webview_native::EditCommand;
 
 actions!(
     treeterm,
@@ -46,10 +47,36 @@ actions!(
         ZoomWindow,
         BringAllToFront,
         LearnMore,
+        Undo,
+        Redo,
         PasteAndMatchStyle,
         DeleteSelection
     ]
 );
+
+/// Hands an Edit command to a web page holding the keyboard outside GPUI, if one does, and
+/// says whether one did. On macOS that is AppKit's first responder, a WKWebView, which GPUI
+/// does not see; off macOS a page takes the Edit menu through GPUI's focus instead (see
+/// `browser_view`), so none does.
+pub type FocusedPage = Rc<dyn Fn(EditCommand) -> bool>;
+
+/// The [`FocusedPage`] of this platform.
+pub fn focused_page() -> FocusedPage {
+    #[cfg(target_os = "macos")]
+    {
+        Rc::new(|command| {
+            let focused = crate::webview_native::web_page_has_focus();
+            if focused {
+                crate::webview_native::send_edit(command);
+            }
+            focused
+        })
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Rc::new(|_| false)
+    }
+}
 
 /// The menu shortcuts off macOS (Electron's Linux accelerators), in `key_bindings` order.
 /// GPUI runs bindings before a focused terminal sees the key, so the terminal takes back
@@ -78,7 +105,8 @@ const INPUT_CONTEXT: &str = "Input";
 ///
 /// Edit's Undo, Redo, Cut, Copy, Paste and Select All keep GPUI Kit's keys, which are
 /// Electron's, in the inputs and editors that handle them (a terminal binds its own, see
-/// `terminal_view::edit_keys`). Redo off macOS is Electron's Linux Ctrl+Shift+Z, besides the
+/// `terminal_view::edit_keys`). On macOS Undo and Redo also have them everywhere else, for a
+/// web page ([`FocusedPage`]). Redo off macOS is Electron's Linux Ctrl+Shift+Z, besides the
 /// Kit's Ctrl+Y (Windows'). Edit > Delete has no shortcut, as in Electron.
 fn key_bindings(mac: bool) -> Vec<KeyBinding> {
     if mac {
@@ -95,6 +123,8 @@ fn key_bindings(mac: bool) -> Vec<KeyBinding> {
             KeyBinding::new("cmd--", ZoomOut, None),
             KeyBinding::new("ctrl-cmd-f", ToggleFullScreen, None),
             KeyBinding::new("cmd-m", Minimize, None),
+            KeyBinding::new("cmd-z", Undo, None),
+            KeyBinding::new("cmd-shift-z", Redo, None),
             KeyBinding::new("cmd-alt-shift-v", PasteAndMatchStyle, None),
         ]
     } else {
@@ -125,12 +155,18 @@ fn bind_keys(mac: bool, terminal: KeyOptions, cx: &mut App) {
 
 /// Edit: Electron's edit roles, which act on whatever has focus. Its items run GPUI Kit's edit
 /// actions, which its inputs and editors, the diff, selectable text (Copy) and a terminal
-/// (Copy, Paste, Select All) handle; on macOS GPUI greys out an item nothing focused handles,
-/// and AppKit sends Cut, Copy, Paste and Select All to a focused web view itself.
+/// (Copy, Paste, Select All) handle, and a web page the focus is on (`browser_view`). On
+/// macOS GPUI greys out a Cut, Copy, Paste or Select All nothing focused handles, and AppKit
+/// sends those to a focused web view itself; Undo and Redo go there through [`route_edit`].
 fn edit_menu(mac: bool) -> Menu {
+    let (undo, redo) = if mac {
+        (MenuItem::action("Undo", Undo), MenuItem::action("Redo", Redo))
+    } else {
+        (MenuItem::action("Undo", input::Undo), MenuItem::action("Redo", input::Redo))
+    };
     let mut items = vec![
-        MenuItem::os_action("Undo", input::Undo, OsAction::Undo),
-        MenuItem::os_action("Redo", input::Redo, OsAction::Redo),
+        undo,
+        redo,
         MenuItem::separator(),
         MenuItem::os_action("Cut", input::Cut, OsAction::Cut),
         MenuItem::os_action("Copy", input::Copy, OsAction::Copy),
@@ -231,6 +267,7 @@ pub fn install(zoom: ZoomStore, cx: &mut App) {
     cx.on_action(|_: &LearnMore, cx| cx.open_url("https://github.com"));
     #[cfg(target_os = "macos")]
     {
+        route_page_keys(focused_page(), cx);
         cx.on_action(|_: &About, _| crate::macos::about_panel());
         cx.on_action(|_: &BringAllToFront, _| crate::macos::bring_all_to_front());
     }
@@ -249,16 +286,30 @@ fn install_zoom(zoom: ZoomStore, cx: &mut App) {
     cx.on_action(|_: &ZoomOut, cx| cx.update_global::<ZoomStore, _>(|zoom, _| zoom.zoom_out()));
 }
 
-/// Edit > Paste and Match Style and Delete, which GPUI Kit has no action for: they send the
-/// Kit's Paste, or Backspace, to whatever has focus in `window`. All the app's text is plain,
-/// so matching the style pastes as Paste does (into a terminal too). Delete removes the
-/// selected text, as Chromium's does: with nothing selected it leaves the text as it is.
-/// Global listeners keep both enabled, as Electron's are.
-fn route_edit(window: AnyWindowHandle, cx: &mut App) {
+/// Edit > Undo and Redo on macOS, Paste and Match Style and Delete: to a web page holding the
+/// keyboard outside GPUI (`page`), or else to whatever has focus in `window`. GPUI Kit has no
+/// action for the last two: they send the Kit's Paste, or Backspace. All the app's text is
+/// plain, so matching the style pastes as Paste does (into a terminal too). Delete removes
+/// the selected text, as Chromium's does: with nothing selected it leaves the text as it is.
+/// Global listeners keep all four enabled, as Electron's are.
+fn route_edit(window: AnyWindowHandle, page: FocusedPage, cx: &mut App) {
+    fn to_focus(window: AnyWindowHandle, page: &FocusedPage, command: EditCommand, action: impl Action, cx: &mut App) {
+        if !page(command) {
+            in_window(window, cx, move |window, cx| window.dispatch_action(action.boxed_clone(), cx));
+        }
+    }
+    let on_undo = page.clone();
+    cx.on_action(move |_: &Undo, cx| to_focus(window, &on_undo, EditCommand::Undo, input::Undo, cx));
+    let on_redo = page.clone();
+    cx.on_action(move |_: &Redo, cx| to_focus(window, &on_redo, EditCommand::Redo, input::Redo, cx));
+    let on_paste = page.clone();
     cx.on_action(move |_: &PasteAndMatchStyle, cx| {
-        in_window(window, cx, |window, cx| window.dispatch_action(Box::new(input::Paste), cx));
+        to_focus(window, &on_paste, EditCommand::PasteAsPlainText, input::Paste, cx);
     });
     cx.on_action(move |_: &DeleteSelection, cx| {
+        if page(EditCommand::Delete) {
+            return;
+        }
         in_window(window, cx, |window, _| {
             // GPUI Kit learns which input has focus as the input draws. Off macOS the menu bar
             // drawn in the window held focus while its menu was open, and gives it back as it
@@ -337,7 +388,28 @@ pub fn route_to_window(window: AnyWindowHandle, view: WeakEntity<AppView>, store
     route::<Minimize, _>(window, view.clone(), |_, window, _| window.minimize_window(), |_| {}, cx);
     route::<ZoomWindow, _>(window, view.clone(), |_, window, _| window.zoom_window(), |_| {}, cx);
     route::<ToggleFullScreen, _>(window, view, |_, window, _| window.toggle_fullscreen(), |_| {}, cx);
-    route_edit(window, cx);
+    route_edit(window, focused_page(), cx);
+}
+
+/// On macOS, Undo's, Redo's and Paste and Match Style's keys while a web page holds the
+/// keyboard outside GPUI (`page`) go to the page, whatever GPUI's focus is: GPUI sees a key
+/// equivalent before AppKit's menu, and its focus can still be on a field the page took the
+/// keyboard from.
+pub fn route_page_keys(page: FocusedPage, cx: &mut App) {
+    cx.intercept_keystrokes(move |event, _, cx| {
+        let keystroke = &event.keystroke;
+        let m = keystroke.modifiers;
+        let command = match (keystroke.key.as_str(), m.platform, m.control, m.alt, m.shift) {
+            ("z", true, false, false, false) => EditCommand::Undo,
+            ("z", true, false, false, true) => EditCommand::Redo,
+            ("v", true, false, true, true) => EditCommand::PasteAsPlainText,
+            _ => return,
+        };
+        if page(command) {
+            cx.stop_propagation();
+        }
+    })
+    .detach();
 }
 
 /// Run `A` on `view` in `window`, or `no_window` once the window is gone. A global listener
@@ -397,8 +469,8 @@ mod tests {
     }
 
     const MAC_EDIT: [&str; 9] = [
-        "Undo = input::Undo",
-        "Redo = input::Redo",
+        "Undo = treeterm::Undo",
+        "Redo = treeterm::Redo",
         "-",
         "Cut = input::Cut",
         "Copy = input::Copy",
@@ -530,6 +602,8 @@ mod tests {
                 ("cmd--", "treeterm::ZoomOut"),
                 ("ctrl-cmd-f", "treeterm::ToggleFullScreen"),
                 ("cmd-m", "treeterm::Minimize"),
+                ("cmd-z", "treeterm::Undo"),
+                ("cmd-shift-z", "treeterm::Redo"),
                 ("alt-cmd-shift-v", "treeterm::PasteAndMatchStyle"),
             ])
         );
@@ -737,8 +811,14 @@ mod tests {
         assert_eq!(keys, ["ctrl-w", "ctrl-q", "ctrl-m", "f11", "ctrl-c"]);
     }
 
+    /// No web page holds the keyboard outside GPUI.
+    fn no_page() -> FocusedPage {
+        Rc::new(|_| false)
+    }
+
     /// Edit's Copy, Paste and Select All, their keys and Paste and Match Style act on a focused
-    /// terminal; the items it has nothing for are greyed out, except Delete, which is a no-op.
+    /// terminal; Cut and GPUI Kit's Undo and Redo, which it has nothing for, are greyed out.
+    /// The menu's Undo and Redo, and Delete, stay enabled and do nothing there, as in Electron.
     #[gpui_kit::test]
     fn the_edit_menu_acts_on_a_focused_terminal(cx: &mut TestAppContext) {
         let (window, terminal) = cx.update(|cx| {
@@ -746,7 +826,7 @@ mod tests {
             cx.bind_keys(terminal_view::edit_keys(true));
             bind_keys(true, KeyOptions::for_host(), cx);
             let (window, terminal) = terminal_window(cx);
-            route_edit(window, cx);
+            route_edit(window, no_page(), cx);
             (window, terminal)
         });
         let cx = VisualTestContext::from_window(window, cx).into_mut();
@@ -771,6 +851,8 @@ mod tests {
             Box::new(input::SelectAll),
             Box::new(PasteAndMatchStyle),
             Box::new(DeleteSelection),
+            Box::new(Undo),
+            Box::new(Redo),
         ] {
             cx.update(|window, cx| window.dispatch_action(action, cx));
             cx.run_until_parked();
@@ -784,6 +866,7 @@ mod tests {
         assert!(!available(cx, &input::Undo) && !available(cx, &input::Redo) && !available(cx, &input::Cut));
         assert!(available(cx, &input::Copy) && available(cx, &input::Paste) && available(cx, &input::SelectAll));
         assert!(available(cx, &DeleteSelection) && available(cx, &PasteAndMatchStyle));
+        assert!(available(cx, &Undo) && available(cx, &Redo));
     }
 
     /// A focused text input.
@@ -795,8 +878,8 @@ mod tests {
         }
     }
 
-    /// Every Edit item acts on a focused input. Delete removes the selection, and with nothing
-    /// selected leaves the text as it is (Chromium's Delete).
+    /// Every Edit item acts on a focused input, macOS's Undo and Redo too. Delete removes the
+    /// selection, and with nothing selected leaves the text as it is (Chromium's Delete).
     #[gpui_kit::test]
     fn the_edit_menu_acts_on_a_focused_input(cx: &mut TestAppContext) {
         let (window, field) = cx.update(|cx| {
@@ -806,7 +889,7 @@ mod tests {
                 cx.new(|_| Field(state))
             })
             .expect("open a window");
-            route_edit(window, cx);
+            route_edit(window, no_page(), cx);
             (window, field)
         });
         let cx = VisualTestContext::from_window(window, cx).into_mut();
@@ -832,6 +915,8 @@ mod tests {
         assert_eq!(menu(cx, &DeleteSelection), "");
         assert_eq!(menu(cx, &input::Undo), "hello");
         assert_eq!(menu(cx, &input::Redo), "");
+        assert_eq!(menu(cx, &Undo), "hello");
+        assert_eq!(menu(cx, &Redo), "");
         assert_eq!(menu(cx, &input::Paste), "hello");
         assert_eq!(menu(cx, &PasteAndMatchStyle), "hellohello");
         menu(cx, &input::SelectAll);
@@ -873,7 +958,7 @@ mod tests {
                 cx.new(|cx| FieldWithMenuBar { bar: AppMenuBar::new(cx), field })
             })
             .expect("open a window");
-            route_edit(window, cx);
+            route_edit(window, no_page(), cx);
             (window, view)
         });
         let cx = VisualTestContext::from_window(window, cx).into_mut();
@@ -901,6 +986,58 @@ mod tests {
         assert_eq!(delete(cx, 5..5), "hello world", "nothing selected");
         assert_eq!(delete(cx, 5..11), "hello");
         assert_eq!(cx.read_from_clipboard(), None, "Delete is not Cut");
+    }
+
+    /// A web page holding the keyboard outside GPUI (on macOS, AppKit's first responder) takes
+    /// macOS's Undo, Redo, Paste and Match Style and Delete, from the menu and from their keys,
+    /// though GPUI's focus is still on the field the page took the keyboard from.
+    #[gpui_kit::test]
+    fn a_web_page_holding_the_keyboard_takes_the_edit_menu(cx: &mut TestAppContext) {
+        let taken = Rc::new(std::cell::RefCell::new(Vec::new()));
+        let page: FocusedPage = {
+            let taken = taken.clone();
+            Rc::new(move |command| {
+                taken.borrow_mut().push(command);
+                true
+            })
+        };
+        let (window, field) = cx.update(|cx| {
+            gpui_kit::init(cx);
+            bind_keys(true, KeyOptions::for_host(), cx);
+            route_page_keys(page.clone(), cx);
+            let (window, field) = gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
+                let state = cx.new(|cx| input::InputState::new(window, cx).default_value("hello"));
+                cx.new(|_| Field(state))
+            })
+            .expect("open a window");
+            route_edit(window, page, cx);
+            (window, field)
+        });
+        let cx = VisualTestContext::from_window(window, cx).into_mut();
+        let state = field.read_with(cx, |field, _| field.0.clone());
+        cx.update(|window, cx| {
+            state.update(cx, |state, cx| {
+                state.focus(window, cx);
+                state.set_selected_range(0..5, cx);
+            });
+        });
+        cx.run_until_parked();
+
+        let menu: [Box<dyn Action>; 4] =
+            [Box::new(Undo), Box::new(Redo), Box::new(PasteAndMatchStyle), Box::new(DeleteSelection)];
+        for action in menu {
+            cx.update(|window, cx| window.dispatch_action(action, cx));
+            cx.run_until_parked();
+            next_frames(cx);
+        }
+        for keys in ["cmd-z", "cmd-shift-z", "cmd-alt-shift-v"] {
+            cx.simulate_keystrokes(keys);
+        }
+        cx.run_until_parked();
+        use EditCommand::{Delete, PasteAsPlainText, Redo as PageRedo, Undo as PageUndo};
+        let (menu, keys) = ([PageUndo, PageRedo, PasteAsPlainText, Delete], [PageUndo, PageRedo, PasteAsPlainText]);
+        assert_eq!(*taken.borrow(), menu.into_iter().chain(keys).collect::<Vec<_>>());
+        assert_eq!(state.read_with(cx, |state, _| state.value().to_string()), "hello", "the field is left alone");
     }
 
     /// Delivers two frames, as the platform would: each runs what the last scheduled, then draws.
