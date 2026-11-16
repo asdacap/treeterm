@@ -2047,8 +2047,7 @@ fn workspace_pane(
     window: &mut Window,
     cx: &mut Context<AppView>,
 ) -> AnyElement {
-    let c = colors(cx);
-    let (secondary, error) = (c.text_secondary, c.error);
+    let error = colors(cx).error;
     prune_terminal_views(connected, cx);
     connected.tool_views.prune(connected.session.read(cx), cx);
     // Set again below for each terminal this render shows.
