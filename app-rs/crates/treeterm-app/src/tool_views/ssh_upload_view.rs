@@ -7,6 +7,7 @@ use gpui_kit::prelude::*;
 use gpui_kit::{App, Context, Entity, FontWeight, Subscription, Window, div, px, rgb};
 use treeterm_model::tool_tabs::ssh_upload::{LinkStatus, SshUpload, SshUploadEvent, UploadState, UploadTarget};
 
+use crate::open_panel::{self, Choose};
 use crate::remote_dir_browser::{Inline, RemoteDirBrowserEvent};
 use crate::theme::colors;
 use crate::ui::{DialogButton, FieldStyle, MONO, field, pane_dialog_button};
@@ -54,20 +55,13 @@ impl SshUploadView {
         Self { model, local_path, remote_dir, browser: Inline::Hidden, _subscriptions: vec![typed, observe, refilled] }
     }
 
-    /// "Choose file…": the native picker (local files), with its default "Open" button.
-    fn choose_file(&mut self, cx: &mut Context<Self>) {
-        let picked = cx.prompt_for_paths(gpui_kit::PathPromptOptions {
-            files: true,
-            directories: false,
-            multiple: false,
-            prompt: None,
-        });
+    /// "Choose file…": the native open panel (local files), a sheet on the window with its
+    /// default "Open" button.
+    fn choose_file(&mut self, window: &Window, cx: &mut Context<Self>) {
+        let picked = open_panel::choose_path(Choose::File, window, cx);
         cx.spawn(async move |view, cx| {
-            let path = match picked.await {
-                Ok(Ok(Some(mut paths))) if !paths.is_empty() => paths.remove(0),
-                Ok(Ok(_)) => return, // cancelled
-                Ok(Err(error)) => return tracing::error!(%error, "file picker failed"),
-                Err(_canceled) => return,
+            let Some(path) = picked.await else {
+                return; // cancelled
             };
             match view.update(cx, |view, cx| view.model.update(cx, |m, cx| m.set_local_path(path, cx))) {
                 Ok(()) | Err(_) => {} // Err: the tab closed
@@ -175,7 +169,7 @@ impl Render for SshUploadView {
                 v_flex().gap(px(4.)).child(label("Local file")).child(
                     h_flex().gap(px(8.)).child(local_field).child(
                         pane_dialog_button("upload-choose", "Choose file...", DialogButton::Plain, uploading, cx)
-                            .when(!uploading, |d| d.on_click(cx.listener(|view, _, _, cx| view.choose_file(cx)))),
+                            .when(!uploading, |d| d.on_click(cx.listener(|view, _, window, cx| view.choose_file(window, cx)))),
                     ),
                 ),
             )

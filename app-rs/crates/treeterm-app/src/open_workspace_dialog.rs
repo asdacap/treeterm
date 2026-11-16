@@ -19,6 +19,7 @@ use treeterm_model::session_store::SessionStore;
 use treeterm_model::settings_store::SettingsStore;
 use treeterm_model::tool_tabs::workspace_settings::{DefaultAppChoice, default_app_label};
 
+use crate::open_panel::{self, Choose};
 use crate::remote_dir_browser::{BrowserFocus, Inline, RemoteDirBrowserEvent};
 use crate::theme::colors;
 use crate::ui;
@@ -206,21 +207,9 @@ impl OpenWorkspaceDialog {
     /// directories, even when the dialog was closed meanwhile; a cancelled or failed pick
     /// records nothing.
     fn pick_native(&mut self, settings: Entity<SettingsStore>, window: &mut Window, cx: &mut Context<Self>) {
-        let picked = cx.prompt_for_paths(gpui_kit::PathPromptOptions {
-            files: false,
-            directories: true,
-            multiple: false,
-            prompt: Some("Open Workspace".into()),
-        });
+        let picked = open_panel::choose_path(Choose::Directory, window, cx);
         cx.spawn_in(window, async move |dialog, cx| {
-            let path = match picked.await {
-                Ok(Ok(Some(mut paths))) if !paths.is_empty() => Some(paths.remove(0).to_string_lossy().into_owned()),
-                Ok(Ok(_)) | Err(_) => None, // cancelled
-                Ok(Err(error)) => {
-                    tracing::error!(%error, "folder picker failed");
-                    None
-                }
-            };
+            let path = picked.await.map(|path| path.to_string_lossy().into_owned());
             if let Some(path) = &path {
                 settings.update(cx, |s, cx| s.add_recent_directory(path, cx));
             }

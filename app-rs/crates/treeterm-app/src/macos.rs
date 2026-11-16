@@ -1,15 +1,25 @@
 //! The macOS menu items AppKit implements and GPUI does not wrap (Electron gets them from
 //! menu roles): the About panel, Bring All to Front, the Help menu's search field, and no
-//! automatic "Enter Full Screen" item beside View > Toggle Full Screen.
+//! automatic "Enter Full Screen" item beside View > Toggle Full Screen. Also the open panel
+//! as a sheet on its window, which GPUI's free-standing `prompt_for_paths` is not.
 
+use std::cell::Cell;
+use std::path::PathBuf;
+
+use block2::RcBlock;
 use objc2::MainThreadMarker;
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
+use objc2::{class, msg_send};
 use objc2_app_kit::{
     NSAboutPanelOptionApplicationName, NSAboutPanelOptionApplicationVersion, NSAboutPanelOptionKey,
-    NSApplication,
+    NSApplication, NSModalResponse, NSModalResponseAbort, NSModalResponseOK, NSOpenPanel, NSView,
+    NSWindow,
 };
 use objc2_foundation::{NSDictionary, NSNumber, NSString, NSUserDefaults};
+use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
+use crate::open_panel::Choose;
 
 /// The shared application. GPUI calls the app back on the main thread, as AppKit requires.
 fn app() -> Retained<NSApplication> {
@@ -64,5 +74,68 @@ pub fn register_help_menu() {
     match help {
         Some(menu) => app.setHelpMenu(Some(&menu)),
         None => tracing::error!("the menu bar has no Help menu"),
+    }
+}
+
+/// The AppKit window behind a GPUI window. A test window has none.
+pub fn ns_window(window: &gpui_kit::Window) -> Result<Retained<NSWindow>, String> {
+    let handle = HasWindowHandle::window_handle(window).map_err(|error| error.to_string())?;
+    let RawWindowHandle::AppKit(appkit) = handle.as_raw() else {
+        return Err(format!("not an AppKit window: {:?}", handle.as_raw()));
+    };
+    // SAFETY: GPUI's macOS handle points at the window's content NSView, which lives as long
+    // as the window, borrowed here.
+    let view = unsafe { appkit.ns_view.cast::<NSView>().as_ref() };
+    view.window()
+        .ok_or_else(|| "the window's view is in no NSWindow".to_owned())
+}
+
+/// Electron's `dialog.showOpenDialog(focusedWindow, { properties: [choose] })`: an
+/// NSOpenPanel attached to `parent` as a sheet. Electron sets only what it chooses, so the
+/// rest keeps AppKit's defaults: the "Open" button, no New Folder, aliases resolved. Resolves
+/// to the first chosen path; to None when cancelled.
+///
+/// Await it in a spawned task, not inside a GPUI update: the sheet takes the key window from
+/// `parent`, which GPUI handles as a window event.
+pub async fn open_panel_sheet(
+    parent: Retained<NSWindow>,
+    choose: Choose,
+) -> Result<Option<PathBuf>, String> {
+    // AppKit can return nil despite the nonnull annotation of objc2's binding (as GPUI's own
+    // panel notes).
+    // SAFETY: `+[NSOpenPanel openPanel]` takes no arguments and returns an NSOpenPanel.
+    let panel: Option<Retained<NSOpenPanel>> = unsafe { msg_send![class!(NSOpenPanel), openPanel] };
+    let panel = panel.ok_or("macOS could not create the open panel")?;
+    panel.setCanChooseFiles(choose == Choose::File);
+    panel.setCanChooseDirectories(choose == Choose::Directory);
+
+    let (done_tx, done_rx) = tokio::sync::oneshot::channel();
+    let done_tx = Cell::new(Some(done_tx));
+    let handler = RcBlock::new({
+        let panel = panel.clone();
+        move |response: NSModalResponse| {
+            let Some(done_tx) = done_tx.take() else {
+                return;
+            };
+            let outcome = if response == NSModalResponseOK {
+                let urls = panel.URLs();
+                Ok(urls
+                    .iter()
+                    .filter(|url| url.isFileURL())
+                    .find_map(|url| url.to_file_path()))
+            } else if response == NSModalResponseAbort {
+                Err("macOS could not show the open panel".to_owned())
+            } else {
+                Ok(None) // cancelled
+            };
+            match done_tx.send(outcome) {
+                Ok(()) | Err(_) => {} // Err: the task awaiting the panel was dropped
+            }
+        }
+    });
+    panel.beginSheetModalForWindow_completionHandler(&parent, &handler);
+    match done_rx.await {
+        Ok(outcome) => outcome,
+        Err(_closed) => Err("the open panel closed without an answer".to_owned()),
     }
 }

@@ -37,6 +37,10 @@ futures = { workspace = true, optional = true }
 objc2 = "0.6"
 objc2-foundation = "0.3"
 objc2-app-kit = "0.3"
+# The open panel's completion handler; GPUI's version.
+block2 = "0.6"
+# A GPUI window's NSView, to attach the open panel as a sheet; GPUI's version.
+raw-window-handle = "0.6"
 
 [features]
 # Debug-only control socket (TREETERM_AUTOMATION_SOCKET) for e2e tests and screenshots.
