@@ -4,6 +4,8 @@
 //!
 //! The analyzer reads the tab's own terminal (always alive in the workspace store), so
 //! unlike Electron it needs no second, headless attachment.
+//!
+//! Auto-approve starts off with every analyzer and is never saved, as in Electron.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -90,13 +92,12 @@ fn now(cx: &App) -> Now {
 }
 
 impl AnalyzerModel {
-    /// Starts analyzing right away (the terminal is attached).
+    /// Starts analyzing right away (the terminal is attached), with auto-approve off.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         settings: &Settings,
         cwd: String,
         repo_path: String,
-        auto_approve: bool,
         llm: LlmService,
         git: GitApi,
         terminal: Entity<TerminalModel>,
@@ -105,7 +106,6 @@ impl AnalyzerModel {
         cx: &mut Context<Self>,
     ) -> Self {
         let mut analyzer = Analyzer::new(cwd, settings);
-        analyzer.set_auto_approve(auto_approve);
         analyzer.start();
         let events = cx.subscribe(&terminal, |model, _, event: &TerminalEvent, cx| model.on_terminal(event, cx));
         Self {

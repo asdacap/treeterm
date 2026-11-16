@@ -442,17 +442,9 @@ impl WorkspaceStore {
         })
     }
 
-    /// The status bar's "Auto-approve safe" switch, persisted per tab.
+    /// The status bar's "Auto-approve safe" switch. Like Electron's, it lives in the
+    /// analyzer only: never saved, so every load starts with it off.
     pub fn set_auto_approve(&mut self, tab_id: &str, enabled: bool, cx: &mut Context<Self>) {
-        self.update_tab_state(
-            tab_id,
-            |state| {
-                if let Value::Object(state) = state {
-                    state.insert("autoApprove".into(), Value::Bool(enabled));
-                }
-            },
-            cx,
-        );
         if let Some(analyzer) = self.analyzer(tab_id) {
             analyzer.update(cx, |a, cx| a.set_auto_approve(enabled, cx));
         }
@@ -980,14 +972,12 @@ impl WorkspaceStore {
             return None;
         };
         let llm = self.llm.clone()?;
-        let auto_approve = tab.state.get("autoApprove").and_then(Value::as_bool).unwrap_or(false);
         let cwd = self.workspace.path.clone();
         let repo_path = self.workspace.file.git_root_path.clone().unwrap_or_else(|| cwd.clone());
         let (settings, git, terminal, workspace, owned_tab) =
             (self.settings.clone(), self.conn.git(), terminal.clone(), cx.weak_entity(), tab_id.to_owned());
-        let analyzer = cx.new(|cx| {
-            AnalyzerModel::new(&settings, cwd, repo_path, auto_approve, llm, git, terminal, workspace, owned_tab, cx)
-        });
+        let analyzer =
+            cx.new(|cx| AnalyzerModel::new(&settings, cwd, repo_path, llm, git, terminal, workspace, owned_tab, cx));
         let owned_tab = tab_id.to_owned();
         let events = cx.subscribe(&analyzer, move |store, _, event: &AnalyzerEvent, cx| match event {
             AnalyzerEvent::SetActivity { state, detail } => store.set_activity(&owned_tab, *state, detail.clone(), cx),
