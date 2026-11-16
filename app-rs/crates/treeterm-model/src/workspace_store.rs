@@ -5,6 +5,7 @@
 //! persistence and writes the body to the daemon. Bodies from other writers come in
 //! through [`WorkspaceStore::apply_external`].
 
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -245,10 +246,7 @@ enum TabRef {
 }
 
 enum TerminalTab {
-    Creating {
-        handle: String,
-        _task: Task<()>,
-    },
+    Creating(PtyCreation),
     Attached {
         model: Entity<TerminalModel>,
         /// AI-harness tabs: the LLM analyzer reading this terminal.
@@ -256,6 +254,34 @@ enum TerminalTab {
         _events: Subscription,
     },
     Failed(String),
+}
+
+/// A tab's PTY being created (`ensureTty` in flight). Dropping it cancels the creation,
+/// as an unmount does; [`PtyCreation::close`] is the user closing the tab.
+struct PtyCreation {
+    handle: String,
+    on_created: Rc<Cell<OnCreated>>,
+    task: Task<()>,
+}
+
+/// What a PTY creation does once the PTY exists.
+#[derive(Clone, Copy)]
+enum OnCreated {
+    /// Attach it to its tab (`on_pty_created`).
+    Attach,
+    /// Its tab was closed meanwhile: kill it.
+    Kill,
+}
+
+impl PtyCreation {
+    /// `close()` while the PTY is still being created (`creating.then(kill)`): the creation
+    /// goes on without the tab and the store, either of which may go first, and kills the
+    /// PTY once its id is known.
+    fn close(&mut self) {
+        tracing::debug!(handle = %self.handle, "tab closed while its PTY was starting");
+        self.on_created.set(OnCreated::Kill);
+        std::mem::replace(&mut self.task, Task::ready(())).detach();
+    }
 }
 
 pub struct WorkspaceStore {
@@ -418,8 +444,8 @@ impl WorkspaceStore {
         }
         Some(match self.tabs.get(tab_id) {
             Some(TabRef::Terminal(TerminalTab::Attached { model, .. })) => TabContent::Terminal(model.clone()),
-            Some(TabRef::Terminal(TerminalTab::Creating { .. })) if harness => TabContent::StartingHarness,
-            Some(TabRef::Terminal(TerminalTab::Creating { .. })) => TabContent::StartingTerminal,
+            Some(TabRef::Terminal(TerminalTab::Creating(_))) if harness => TabContent::StartingHarness,
+            Some(TabRef::Terminal(TerminalTab::Creating(_))) => TabContent::StartingTerminal,
             Some(TabRef::Terminal(TerminalTab::Failed(error))) => TabContent::Failed(error.clone()),
             Some(TabRef::Files { model, .. }) => TabContent::Files(model.clone()),
             Some(TabRef::Editor { model, .. }) => TabContent::Editor(model.clone()),
@@ -953,7 +979,7 @@ impl WorkspaceStore {
                     self.scrollbar(tab_id),
                     self.background(tab_id),
                 )),
-                TabRef::Terminal(TerminalTab::Creating { .. } | TerminalTab::Failed(_))
+                TabRef::Terminal(TerminalTab::Creating(_) | TerminalTab::Failed(_))
                 | TabRef::Files { .. }
                 | TabRef::Editor { .. }
                 | TabRef::Review { .. }
@@ -1005,7 +1031,7 @@ impl WorkspaceStore {
     pub fn terminals(&self) -> impl Iterator<Item = &Entity<TerminalModel>> {
         self.tabs.values().filter_map(|tab| match tab {
             TabRef::Terminal(TerminalTab::Attached { model, .. }) => Some(model),
-            TabRef::Terminal(TerminalTab::Creating { .. } | TerminalTab::Failed(_))
+            TabRef::Terminal(TerminalTab::Creating(_) | TerminalTab::Failed(_))
             | TabRef::Files { .. }
             | TabRef::Editor { .. }
             | TabRef::Review { .. }
@@ -1321,7 +1347,8 @@ impl WorkspaceStore {
     /// `ensureTty`: create the tab's PTY, keyed by its persisted handle so the daemon
     /// returns the same PTY however often this runs (reconciliation can dispose and
     /// re-init a tab mid-creation), in `sandbox` if given. On success the id lands in the
-    /// tab's state (and so on disk) and the terminal attaches.
+    /// tab's state (and so on disk) and the terminal attaches. A tab closed meanwhile has
+    /// its PTY killed instead ([`PtyCreation::close`]).
     fn create_pty(
         &mut self,
         tab_id: &str,
@@ -1338,18 +1365,29 @@ impl WorkspaceStore {
             ..CreatePty::default()
         });
         let tab_id = tab_id.to_owned();
-        let owned_handle = handle.clone();
+        let (owned_handle, conn) = (handle.clone(), self.conn.clone());
+        let on_created = Rc::new(Cell::new(OnCreated::Attach));
+        let then = on_created.clone();
         let task = cx.spawn(async move |this, cx| {
             let result = match create.await {
                 Ok(Ok(pty_id)) => Ok(pty_id),
                 Ok(Err(error)) => Err(error.to_string()),
                 Err(lost) => Err(lost.to_string()),
             };
-            match this.update(cx, |store, cx| store.on_pty_created(&tab_id, &owned_handle, result, cx)) {
-                Ok(()) | Err(_) => {} // Err: the workspace went away; the daemon kept the PTY
+            match then.get() {
+                OnCreated::Attach => {
+                    match this.update(cx, |store, cx| store.on_pty_created(&tab_id, &owned_handle, result, cx)) {
+                        Ok(()) | Err(_) => {} // Err: the workspace went away; the daemon kept the PTY
+                    }
+                }
+                // Without the store, which may be gone by now.
+                OnCreated::Kill => match result {
+                    Ok(pty_id) => kill_orphaned_pty(&conn, &pty_id).await,
+                    Err(error) => tracing::error!(%tab_id, %error, "failed to create the PTY of a closed tab"),
+                },
             }
         });
-        TerminalTab::Creating { handle, _task: task }
+        TerminalTab::Creating(PtyCreation { handle, on_created, task })
     }
 
     /// A tab's PTY was created or failed to start. A web app's start-up waiting for it goes
@@ -1372,15 +1410,12 @@ impl WorkspaceStore {
                 return;
             }
         };
-        // Closed while the PTY was starting: nothing references it any more, so kill it.
+        // The tab left the body without its creation being closed or cancelled. Not expected
+        // (closing a tab kills through its creation, reconciliation cancels it), but nothing
+        // references this PTY, so kill it rather than leave it running.
         let Some(tab) = self.workspace.file.app_states.get_mut(tab_id) else {
-            let kill = self.conn.kill_pty(&pty_id);
-            cx.spawn(async move |_, _| match kill.await {
-                Ok(Ok(())) => {}
-                Ok(Err(error)) => tracing::error!(%pty_id, %error, "failed to kill orphaned PTY"),
-                Err(lost) => tracing::error!(%pty_id, %lost, "failed to kill orphaned PTY"),
-            })
-            .detach();
+            let conn = self.conn.clone();
+            cx.spawn(async move |_, _| kill_orphaned_pty(&conn, &pty_id).await).detach();
             return;
         };
         if let Value::Object(state) = &mut tab.state {
@@ -1441,7 +1476,7 @@ impl WorkspaceStore {
                 web_app.model.update(cx, |app, _| app.server_pty_settled(Ok(())));
                 return;
             }
-            Some(TabRef::Terminal(TerminalTab::Creating { .. })) => return,
+            Some(TabRef::Terminal(TerminalTab::Creating(_))) => return,
             Some(TabRef::Terminal(TerminalTab::Failed(_))) | None => {}
             // Only a terminal runs a web app's server.
             Some(
@@ -1753,12 +1788,8 @@ impl WorkspaceStore {
             Some(TabRef::Terminal(TerminalTab::Attached { model, .. })) => {
                 model.update(cx, |model, cx| model.kill(cx));
             }
-            Some(TabRef::Terminal(TerminalTab::Creating { handle, _task: creation })) => {
-                // Left to finish rather than dropped (which would abandon the PTY): it finds
-                // the tab gone and kills the PTY (`on_pty_created`).
-                tracing::debug!(%handle, "tab closed while its PTY was starting");
-                creation.detach();
-            }
+            // Left to finish rather than dropped (which would abandon the PTY), and kill it.
+            Some(TabRef::Terminal(TerminalTab::Creating(mut creation))) => creation.close(),
             Some(TabRef::Browser { page, .. }) => page.update(cx, |page, cx| page.close(cx)),
             Some(
                 TabRef::Terminal(TerminalTab::Failed(_))
@@ -2221,14 +2252,16 @@ impl WorkspaceStore {
         for app in apps {
             app.update(cx, |app, cx| app.close(cx));
         }
-        for tab in self.tabs.values() {
+        for tab in self.tabs.values_mut() {
             match tab {
                 TabRef::Terminal(TerminalTab::Attached { model, .. }) => {
                     model.update(cx, |model, cx| model.kill(cx));
                 }
+                // Killed once it exists, though the store goes first; the tab says it is
+                // starting until then.
+                TabRef::Terminal(TerminalTab::Creating(creation)) => creation.close(),
                 TabRef::Browser { page, .. } => page.update(cx, |page, cx| page.close(cx)),
-                // A PTY still starting is killed by its creation finding the tab gone.
-                TabRef::Terminal(TerminalTab::Creating { .. } | TerminalTab::Failed(_))
+                TabRef::Terminal(TerminalTab::Failed(_))
                 | TabRef::Files { .. }
                 | TabRef::Editor { .. }
                 | TabRef::Review { .. }
@@ -2237,11 +2270,21 @@ impl WorkspaceStore {
         }
     }
 
-    /// The workspace leaves the session: detach every terminal and writer. PTYs keep
+    /// The workspace leaves the session: detach every terminal and writer, and cancel the
+    /// creations of PTYs not yet there (their handles get the same PTYs back). PTYs keep
     /// running.
     pub fn dispose(&mut self) {
         self.tabs.clear();
         self.writers.clear();
+    }
+}
+
+/// Kill a PTY no tab references any more. No tab is left to show a failure, so it is logged.
+async fn kill_orphaned_pty(conn: &DaemonConnection, pty_id: &str) {
+    match conn.kill_pty(pty_id).await {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => tracing::error!(%pty_id, %error, "failed to kill orphaned PTY"),
+        Err(lost) => tracing::error!(%pty_id, %lost, "failed to kill orphaned PTY"),
     }
 }
 

@@ -427,6 +427,152 @@ fn adding_a_tab_creates_its_pty_and_persists_it(cx: &mut TestAppContext) {
     assert!(file_on_disk(&h, "a").get("activeTabId").is_none(), "no null for an absent optional");
 }
 
+/// The PTYs of `count` tabs closed while they were being created: the daemon starts them
+/// all the same, and each is killed once its id is known (`close()` chaining
+/// `creating.then(kill)`). No GPUI work runs while they start, so no kill comes first.
+fn closed_tabs_ptys_start_then_are_killed(cx: &mut TestAppContext, h: &Harness, count: usize) {
+    for _ in 0..500 {
+        if pty_ids(h).len() == count {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert_eq!(pty_ids(h).len(), count, "the closed tabs' PTYs were created");
+    for _ in 0..500 {
+        cx.run_until_parked();
+        if pty_ids(h).is_empty() {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    panic!("a closed tab's PTY was left running: {:?}", pty_ids(h));
+}
+
+#[gpui_kit::test]
+fn closing_a_terminal_harness_or_runner_tab_while_its_pty_starts_kills_the_pty(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    std::fs::write(h.daemon.workspaces_dir().join("a.json"), body("a", None)).unwrap();
+    publish(&h, &["a"]);
+    let settings = treeterm_core::settings::from_value(serde_json::json!({
+        "aiHarness": { "instances": [{
+            "id": "bot", "name": "Bot", "icon": "B", "command": "sleep 60",
+            "isDefault": false, "enableSandbox": false, "allowNetwork": true,
+            "backgroundColor": "#1a1a24", "disableScrollbar": false, "keepOnExit": false
+        }]},
+        "customRunner": { "instances": [{
+            "id": "run", "name": "Run", "icon": "R", "commandTemplate": "sleep 60", "isDefault": false
+        }]}
+    }))
+    .unwrap();
+    let settings = cx.new(|_| SettingsStore::in_memory(settings));
+    let conn = h.conn.clone();
+    let store = cx.new(|cx| SessionStore::new(conn, "client-a".into(), settings, None, cx.new(ConnectionTraffic::new), cx));
+    wait_until(cx, &store, |s| loaded(s, "a"));
+    let workspace = store.read_with(cx, |s, _| ws(s, "a"));
+
+    // Each closed right after it opened, while its PTY is being created.
+    workspace.update(cx, |w, cx| {
+        for app in ["terminal", "aiharness-bot", "customrunner-run"] {
+            let tab = w.add_tab(app, cx).unwrap();
+            let starting = matches!(w.tab_content(&tab), Some(TabContent::StartingTerminal | TabContent::StartingHarness));
+            assert!(starting, "{app}");
+            w.remove_tab(&tab, cx);
+        }
+    });
+    closed_tabs_ptys_start_then_are_killed(cx, &h, 3);
+}
+
+#[gpui_kit::test]
+fn a_tab_closed_while_its_pty_starts_has_it_killed_even_if_its_window_goes_first(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    std::fs::write(h.daemon.workspaces_dir().join("a.json"), body("a", None)).unwrap();
+    publish(&h, &["a"]);
+    let store = open_store(cx, &h, "client-a");
+    wait_until(cx, &store, |s| loaded(s, "a"));
+    let workspace = store.read_with(cx, |s, _| ws(s, "a"));
+
+    cx.update(|cx| {
+        workspace.update(cx, |w, cx| {
+            let tab = w.add_tab("terminal", cx).unwrap();
+            w.remove_tab(&tab, cx);
+        });
+        // The window closes, or its connection is replaced, before the PTY exists.
+        store.update(cx, |s, cx| s.dispose(cx));
+    });
+    let gone = workspace.downgrade();
+    drop((store, workspace));
+    cx.update(|_| {}); // releases the dropped stores, and runs nothing else
+    assert!(gone.upgrade().is_none(), "the workspace store is gone");
+    closed_tabs_ptys_start_then_are_killed(cx, &h, 1);
+}
+
+#[gpui_kit::test]
+fn removing_a_workspace_while_a_tabs_pty_starts_kills_the_pty(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    std::fs::write(h.daemon.workspaces_dir().join("a.json"), body("a", None)).unwrap();
+    publish(&h, &["a"]);
+    let store = open_store(cx, &h, "client-a");
+    wait_until(cx, &store, |s| loaded(s, "a"));
+    let workspace = store.read_with(cx, |s, _| ws(s, "a"));
+
+    // What `remove_workspace` does to each workspace it removes: close every tab, then
+    // drop the store (`on_workspace_removed`).
+    workspace.update(cx, |w, cx| {
+        let tab = w.add_tab("terminal", cx).unwrap();
+        w.close_all_tabs(cx);
+        // Until the store goes, the tab still says its terminal is starting.
+        assert!(matches!(w.tab_content(&tab), Some(TabContent::StartingTerminal)));
+        w.dispose();
+    });
+    closed_tabs_ptys_start_then_are_killed(cx, &h, 1);
+}
+
+#[gpui_kit::test]
+fn a_tab_unloaded_while_its_pty_starts_gets_that_pty_when_it_loads_again(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    // The tab's PTY already runs under its handle; the tab does not know its id yet.
+    let create = treeterm_core::pty::CreatePty {
+        cwd: h.daemon.root().to_string_lossy().into_owned(),
+        handle: Some("tab-handle".to_owned()),
+        ..treeterm_core::pty::CreatePty::default()
+    };
+    let pty = futures::executor::block_on(h.conn.create_pty(create)).unwrap().unwrap();
+    let mut file: serde_json::Value = serde_json::from_str(&body("a", None)).unwrap();
+    file["appStates"]["t1"] = serde_json::json!({
+        "applicationId": "terminal", "title": "Terminal 1",
+        "state": { "ptyId": null, "ptyHandle": "tab-handle", "keepOnExit": false }
+    });
+    std::fs::write(h.daemon.workspaces_dir().join("a.json"), file.to_string()).unwrap();
+    publish(&h, &["a"]);
+
+    // Unloaded (`dispose`: the window's connection replaced, say) as soon as it loads, with
+    // the creation of its tab's PTY in flight. Unmount is not close.
+    let unload = cx.update(|cx| cx.observe_new::<WorkspaceStore>(|w, _, _| w.dispose()));
+    let first = open_store(cx, &h, "client-a");
+    wait_until(cx, &first, |s| loaded(s, "a"));
+    drop(unload);
+    first.update(cx, |s, cx| s.dispose(cx));
+    drop(first);
+
+    // Loaded again, the tab gets the same PTY through its handle.
+    let second = open_store(cx, &h, "client-b");
+    let terminal = |s: &SessionStore, cx: &gpui_kit::App| match ws(s, "a").read(cx).tab_content("t1") {
+        Some(TabContent::Terminal(terminal)) => Some(terminal.read(cx).pty_id().to_owned()),
+        Some(_) | None => None,
+    };
+    wait_until_app(cx, &second, |s, cx| loaded(s, "a") && terminal(s, cx).is_some());
+    for _ in 0..20 {
+        cx.run_until_parked();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    second.read_with(cx, |s, cx| assert_eq!(terminal(s, cx).as_deref(), Some(pty.as_str())));
+    assert_eq!(pty_ids(&h), [pty], "nothing killed it");
+}
+
 #[gpui_kit::test]
 fn a_review_tab_names_the_parent_of_any_child_workspace(cx: &mut TestAppContext) {
     cx.executor().allow_parking();
@@ -3096,25 +3242,7 @@ fn a_web_app_closed_while_its_server_terminal_starts_kills_it_once_it_exists(cx:
     drop(app);
     cx.run_until_parked();
     assert_eq!(server_terminal(cx, &workspace, &tab), "gone");
-
-    let sessions = || futures::executor::block_on(h.conn.list_pty_sessions()).unwrap().unwrap().len();
-    // The daemon starts it all the same…
-    for _ in 0..500 {
-        if sessions() == 1 {
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(10));
-    }
-    assert_eq!(sessions(), 1, "the server's PTY was created");
-    // …and it is killed once its id is known.
-    for _ in 0..500 {
-        cx.run_until_parked();
-        if sessions() == 0 {
-            return;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(10));
-    }
-    panic!("the closed tab's PTY was left running");
+    closed_tabs_ptys_start_then_are_killed(cx, &h, 1);
 }
 
 #[gpui_kit::test]
