@@ -1675,6 +1675,12 @@ fn track_presses<H: gpui_kit::base::ScrollbarHandle + Clone>(id: ElementId, axis
     .size_full()
 }
 
+/// Whether what `handle` scrolls overflows along `axis`, as last laid out: whether the
+/// [`scrollbar`] along that axis is drawn.
+pub fn overflows(handle: &impl gpui_kit::base::ScrollbarHandle, axis: Axis) -> bool {
+    Extent::of(handle, axis).is_some()
+}
+
 /// Electron's classic scrollbar (`::-webkit-scrollbar`: 10px, a `#3c3c3c` thumb rounded 5px
 /// on a clear track, `--bg-hover` under the pointer) for what `handle` scrolls along `axis`,
 /// to follow it in a row (vertical) or a column (horizontal). While there is something to
