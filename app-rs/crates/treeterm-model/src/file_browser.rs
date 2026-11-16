@@ -519,8 +519,15 @@ impl FileBrowser {
         }
     }
 
+    /// Read a directory. Loaded entries stay shown until the new ones arrive; anything else
+    /// (a failure too, as Electron's `loadDirectory` does) shows "Loading..." meanwhile.
     fn load(&mut self, dir: String, cx: &mut Context<Self>) {
-        self.listings.entry(dir.clone()).or_insert(Listing::Loading);
+        match self.listings.get(&dir) {
+            Some(Listing::Loaded(_)) => {}
+            Some(Listing::Loading | Listing::Failed(_)) | None => {
+                self.listings.insert(dir.clone(), Listing::Loading);
+            }
+        }
         let read = self.fs.read_directory(&self.root, &dir);
         let key = dir.clone();
         let task = cx.spawn(async move |this, cx| {

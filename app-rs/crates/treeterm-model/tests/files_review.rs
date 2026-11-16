@@ -4,8 +4,8 @@
 use gpui_kit::{AppContext as _, Entity, TestAppContext};
 use treeterm_core::review::{CommitAnchor, Freshness, LineAnchor, Resolution, Side};
 use treeterm_model::file_browser::{
-    Anchor, DefinitionLookup, Favourites, FileBrowser, FileView, Host, LineDraft, NAME_SEARCH_DEBOUNCE, NameResults,
-    REPO_SEARCH_DEBOUNCE, RepoResults, SearchPanel, SearchRow, Star,
+    Anchor, DefinitionLookup, Favourites, FileBrowser, FileView, Host, LineDraft, Listing, NAME_SEARCH_DEBOUNCE,
+    NameResults, REPO_SEARCH_DEBOUNCE, RepoResults, SearchPanel, SearchRow, Star,
 };
 use treeterm_model::review::{
     DiffFind, Direction, FavouriteSelection, GitOp, Head, Notice, ReviewContent, ReviewMode, ReviewModel,
@@ -215,6 +215,36 @@ fn the_tree_searches_file_names_after_a_pause(cx: &mut TestAppContext) {
     wait_until(cx, &browser, |b| b.name_search().results == NameResults::Idle);
     browser.update(cx, |b, cx| b.clear_name_search(cx));
     assert!(!browser.read_with(cx, |b, _| b.name_search().is_active()));
+}
+
+#[gpui_kit::test]
+fn a_folder_that_failed_to_load_loads_again_when_reopened(cx: &mut TestAppContext) {
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let repo = TempRepo::new(&h);
+    repo.write("a.txt", "a\n");
+    repo.commit_all("a");
+    let (_store, _workspace, browser) = open_browser(cx, &h, &repo, "a.txt");
+    let late = format!("{}/late", repo.root());
+    let listing = |b: &FileBrowser| b.listing(&late).cloned();
+
+    // The daemon's reason, as it gave it.
+    browser.update(cx, |b, cx| b.toggle_dir(&late, cx));
+    wait_until(cx, &browser, |b| matches!(listing(b), Some(Listing::Failed(_))));
+    let Some(Listing::Failed(reason)) = browser.read_with(cx, |b, _| listing(b)) else { unreachable!() };
+    assert!(reason.contains("No such file"), "{reason}");
+
+    // Collapsed and opened again: "Loading..." in place of the old error, then the entries.
+    browser.update(cx, |b, cx| b.toggle_dir(&late, cx));
+    repo.write("late/b.txt", "b\n");
+    browser.update(cx, |b, cx| b.toggle_dir(&late, cx));
+    assert!(matches!(browser.read_with(cx, |b, _| listing(b)), Some(Listing::Loading)));
+    wait_until(cx, &browser, |b| matches!(listing(b), Some(Listing::Loaded(entries)) if entries.len() == 1));
+
+    // A loaded folder keeps its entries while it is read again.
+    browser.update(cx, |b, cx| b.refresh(cx));
+    assert!(matches!(browser.read_with(cx, |b, _| listing(b)), Some(Listing::Loaded(_))));
 }
 
 #[gpui_kit::test]
