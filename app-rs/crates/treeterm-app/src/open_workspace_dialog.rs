@@ -11,7 +11,8 @@ use gpui_kit::component::menu::DropdownMenu as _;
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    App, Context, Div, Entity, FocusHandle, Focusable as _, FontWeight, Hsla, SharedString, Subscription, Window, div, px,
+    App, Context, Div, Entity, FocusHandle, Focusable as _, FontWeight, Hsla, KeyDownEvent, SharedString, Subscription,
+    Window, div, px,
 };
 use treeterm_core::wire::workspace_file::WorktreeSettings;
 use treeterm_model::session_store::SessionStore;
@@ -143,20 +144,45 @@ impl OpenWorkspaceDialog {
     /// instead, as Electron's `<button>`s do. In the remote browser, Enter acts on the browser
     /// only; Electron also opened the folder field's path from there, which looks accidental.
     fn enter(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Entered {
-        let browser = match &self.picker {
-            Picker::Remote { browser: Inline::Shown { view, .. }, .. } => view.read(cx).keyboard_focus(window, cx),
-            Picker::Remote { browser: Inline::Hidden, .. } | Picker::Native { .. } => BrowserFocus::Outside,
-        };
-        match browser {
+        match self.browser_focus(window, cx) {
             BrowserFocus::PathField => Entered::Handled,
             BrowserFocus::Inside => Entered::PassedOn,
-            BrowserFocus::Outside if !self.selected(cx).is_empty() && !self.picking() => {
+            BrowserFocus::Outside if self.has_folder(cx) => {
                 self.open_selected(window, cx);
                 Entered::Handled
             }
             BrowserFocus::Outside if self.folder.read(cx).focus_handle(cx).is_focused(window) => Entered::Handled,
             BrowserFocus::Outside => Entered::PassedOn,
         }
+    }
+
+    /// Enter on a focused button of the dialog's own: `ui::bind_keys` unbinds Enter there
+    /// (`KeyControl`), so the Kit's `Confirm`, and [`Self::enter`], never see it. Electron's
+    /// `handleKeyDown` still opens the chosen folder before the button's own activation, so
+    /// the dialog takes the key on its way down to the button. Anywhere else `Confirm` has
+    /// already run, and either opened or found nothing to open.
+    fn enter_on_button(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        let key = &event.keystroke;
+        if key.key != "enter" || key.modifiers.modified() {
+            return;
+        }
+        if matches!(self.browser_focus(window, cx), BrowserFocus::Outside) && self.has_folder(cx) {
+            cx.stop_propagation();
+            self.open_selected(window, cx);
+        }
+    }
+
+    /// Where the focus is relative to the remote browser, if shown.
+    fn browser_focus(&self, window: &Window, cx: &App) -> BrowserFocus {
+        match &self.picker {
+            Picker::Remote { browser: Inline::Shown { view, .. }, .. } => view.read(cx).keyboard_focus(window, cx),
+            Picker::Remote { browser: Inline::Hidden, .. } | Picker::Native { .. } => BrowserFocus::Outside,
+        }
+    }
+
+    /// Whether Enter opens (`selectedPath && !isSelecting`).
+    fn has_folder(&self, cx: &App) -> bool {
+        !self.selected(cx).is_empty() && !self.picking()
     }
 
     fn browse(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -370,6 +396,7 @@ impl Render for OpenWorkspaceDialog {
         let cancel = ui::dialog_key_button("open-cancel", "Cancel", ui::ButtonKind::Secondary, false, window, cx)
             .on_click(|_, window, cx| window.close_dialog(cx));
         ui::dialog_root(cx)
+            .capture_key_down(cx.listener(Self::enter_on_button))
             .child(ui::dialog_header("Open Workspace", "×", primary, cx))
             .child(
                 div()
@@ -470,6 +497,8 @@ mod tests {
         let window = cx.update(|cx| {
             gpui_kit::init(cx);
             crate::theme::install(cx);
+            // The app's keymap: Enter and Space reach a focused button (`KeyControl`).
+            crate::ui::bind_keys(cx);
             gpui_kit::open_window(WindowOptions::default(), cx, |_, cx| cx.new(|_| Blank)).expect("open a window").0
         });
         let cx = VisualTestContext::from_window(window, cx).into_mut();

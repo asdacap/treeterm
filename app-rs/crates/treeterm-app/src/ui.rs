@@ -994,7 +994,7 @@ pub fn star_icon(size: f32, filled: bool) -> Icon {
     icon.size(px(size))
 }
 
-/// The key context of [`key_button`] and [`key_checkbox`].
+/// The key context of [`key_button`], [`ringless_key_button`] and [`key_checkbox`].
 const KEY_CONTROL: &str = "KeyControl";
 
 /// Enter and Space reach a focused [`key_button`] or [`key_checkbox`]: GPUI runs key
