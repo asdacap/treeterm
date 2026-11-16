@@ -1747,14 +1747,11 @@ fn git_status_items(
             .into_any_element(),
     ];
     // `.workspace-action-btn-pull`: accent fill while behind upstream.
-    let pull_state = controller.read(cx).pull_state().clone();
+    let pull_state = controller.read(cx).pull_state();
     if status.behind_count > 0 {
         let pull = controller.clone();
         let behind = status.behind_count;
-        let title = match &pull_state {
-            PullState::Failed(error) => error.clone(),
-            PullState::Idle | PullState::Pulling => format!("Pull {behind} commit{} from remote", if behind > 1 { "s" } else { "" }),
-        };
+        let title = format!("Pull {behind} commit{} from remote", if behind > 1 { "s" } else { "" });
         let accent = c.accent;
         items.push(
             crate::ui::action_button("git-pull", cx)
@@ -1764,7 +1761,7 @@ fn git_status_items(
                 .tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(title.clone()).build(window, cx))
                 .child(match pull_state {
                     PullState::Pulling => spinner(14., gpui_kit::white()),
-                    PullState::Idle | PullState::Failed(_) => crate::ui::icon(IconName::ArrowDownToLine, 14., gpui_kit::white()).into_any_element(),
+                    PullState::Idle => crate::ui::icon(IconName::ArrowDownToLine, 14., gpui_kit::white()).into_any_element(),
                 })
                 .child(
                     h_flex()
@@ -1772,7 +1769,15 @@ fn git_status_items(
                         .child("Pull")
                         .child(div().text_size(px(10.)).font_weight(gpui_kit::FontWeight::SEMIBOLD).child(behind.to_string())),
                 )
-                .on_click(move |_, _, cx| pull.update(cx, |git, cx| git.pull(cx)))
+                .map(|button| match pull_state {
+                    PullState::Pulling => disabled(button),
+                    // `handlePull`: `alert(result.error)` when it fails.
+                    PullState::Idle => button.on_click(move |_, window, cx| {
+                        if let Some(outcome) = pull.update(cx, |git, cx| git.pull(cx)) {
+                            crate::ui::alert_failure(outcome, window, cx);
+                        }
+                    }),
+                })
                 .into_any_element(),
         );
     }

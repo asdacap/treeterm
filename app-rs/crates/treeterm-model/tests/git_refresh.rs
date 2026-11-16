@@ -1,18 +1,23 @@
 //! When a workspace's git status (its `GitController`) refreshes, as Electron's `refreshGit`
 //! callers do: every workspace on load, every select (the shown one too), the AI going idle,
 //! Review's refresh / stage / unstage / commit, and merges (the parent, and a kept child).
+//! And the header's Pull (`pullFromRemote`), whose outcome the button alerts when it fails.
 //!
 //! The scheduler's clock is the test clock: within the cooldown since a run started,
 //! requests wait for [`cool_down`], so each check below sees what one trigger asked for.
 
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::sync::Arc;
+use std::time::Duration;
 
-use gpui_kit::{AppContext as _, Entity, TestAppContext};
+use gpui_kit::{AppContext as _, Entity, Task, TestAppContext};
 use treeterm_core::git_status::{
     GitStatus, ParentConflicts, ParentDiff, REFRESH_COOLDOWN, WorkingTree,
 };
 use treeterm_core::github::UnavailableGitHub;
+use treeterm_model::git_controller::{GitController, PULL_GONE, PullState};
 use treeterm_model::review::{GitOp, ReviewEvent, ReviewModel, StageTarget};
 use treeterm_model::session_store::{AfterMerge, SessionState, SessionStore, WorkspaceEntry};
 use treeterm_model::settings_store::SettingsStore;
@@ -450,4 +455,169 @@ fn merges_refresh_the_parent_and_the_kept_child(cx: &mut TestAppContext) {
     }
     assert_eq!(status(cx, &store, &mid).working_tree, WorkingTree::Clean);
     assert_eq!(status(cx, &store, &keep).working_tree, WorkingTree::Clean);
+}
+
+/// Pump the GPUI test scheduler until `task` resolves.
+fn finish<T: 'static>(cx: &mut TestAppContext, task: Task<T>) -> T {
+    let slot = Rc::new(RefCell::new(None));
+    let sink = slot.clone();
+    cx.foreground_executor()
+        .spawn(async move { *sink.borrow_mut() = Some(task.await) })
+        .detach();
+    for _ in 0..1000 {
+        cx.run_until_parked();
+        if let Some(value) = slot.borrow_mut().take() {
+            return value;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    panic!("task did not finish");
+}
+
+fn controller(
+    cx: &mut TestAppContext,
+    store: &Entity<SessionStore>,
+    id: &str,
+) -> Entity<GitController> {
+    store.read_with(cx, |s, _| {
+        s.git_controller(id).expect("a git controller").clone()
+    })
+}
+
+/// The header's Pull click: the pull starts (none runs yet).
+fn start_pull(
+    cx: &mut TestAppContext,
+    controller: &Entity<GitController>,
+) -> Task<Result<(), String>> {
+    controller
+        .update(cx, |git, cx| git.pull(cx))
+        .expect("no pull runs yet")
+}
+
+#[gpui_kit::test]
+fn a_failed_pull_resolves_with_gits_error_and_one_pull_runs_at_a_time(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    publish_empty(&h);
+    // No upstream to pull from.
+    let repo = new_repo(&h);
+    let store = open_store(cx, &h, "client-a");
+    let id = open(cx, &store, &repo);
+    settle(cx, &store, &[&id]);
+    let git = controller(cx, &store, &id);
+
+    let pull = start_pull(cx, &git);
+    assert_eq!(git.read_with(cx, |g, _| g.pull_state()), PullState::Pulling);
+    // `disabled={pullLoading}`: a click meanwhile starts nothing.
+    assert!(git.update(cx, |g, cx| g.pull(cx)).is_none());
+
+    // `alert(result.error)`: git's own words.
+    let error = finish(cx, pull).expect_err("there is no upstream");
+    assert!(
+        error.starts_with("There is no tracking information for the current branch."),
+        "{error}"
+    );
+    assert_eq!(git.read_with(cx, |g, _| g.pull_state()), PullState::Idle);
+    // And the next click pulls again.
+    let again = start_pull(cx, &git);
+    assert!(finish(cx, again).is_err());
+}
+
+#[gpui_kit::test]
+fn a_pull_brings_in_the_commits_behind_upstream(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    publish_empty(&h);
+    let root = h.daemon.root();
+    let remote = root.join(format!("remote-{}.git", uuid::Uuid::new_v4().simple()));
+    git(
+        root,
+        &[
+            "init",
+            "-q",
+            "--bare",
+            "-b",
+            "main",
+            &remote.to_string_lossy(),
+        ],
+    );
+    let upstream = new_repo(&h);
+    git(
+        &upstream,
+        &["remote", "add", "origin", &remote.to_string_lossy()],
+    );
+    git(&upstream, &["push", "-q", "-u", "origin", "main"]);
+    let clone = root.join(format!("clone-{}", uuid::Uuid::new_v4().simple()));
+    git(
+        root,
+        &[
+            "clone",
+            "-q",
+            &remote.to_string_lossy(),
+            &clone.to_string_lossy(),
+        ],
+    );
+    let store = open_store(cx, &h, "client-a");
+    let id = open(cx, &store, &clone);
+    settle(cx, &store, &[&id]);
+
+    commit_file(&upstream, "b.txt", "upstream\n");
+    git(&upstream, &["push", "-q"]);
+    cool_down(cx);
+    store.update(cx, |s, cx| s.refresh_git_status(&id, cx));
+    wait_status(cx, &store, &id, |s| s.behind_count == 1);
+    settle(cx, &store, &[&id]);
+
+    let git_controller = controller(cx, &store, &id);
+    let pull = start_pull(cx, &git_controller);
+    assert_eq!(finish(cx, pull), Ok(()));
+    assert_eq!(status(cx, &store, &id).behind_count, 0);
+    assert_eq!(
+        git_controller.read_with(cx, |g, _| g.pull_state()),
+        PullState::Idle
+    );
+    assert_eq!(
+        std::fs::read_to_string(clone.join("b.txt")).unwrap(),
+        "upstream\n"
+    );
+}
+
+#[gpui_kit::test]
+fn pulling_outside_a_git_repo_fails_with_not_a_git_repo(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    publish_empty(&h);
+    let plain = h
+        .daemon
+        .root()
+        .join(format!("plain-{}", uuid::Uuid::new_v4().simple()));
+    std::fs::create_dir_all(&plain).unwrap();
+    let store = open_store(cx, &h, "client-a");
+    let id = open(cx, &store, &plain);
+    settle(cx, &store, &[&id]);
+
+    let git = controller(cx, &store, &id);
+    let pull = start_pull(cx, &git);
+    assert_eq!(finish(cx, pull), Err("Not a git repo".to_owned()));
+}
+
+#[gpui_kit::test]
+fn a_pull_whose_workspace_goes_first_says_so(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    publish_empty(&h);
+    let store = open_store(cx, &h, "client-a");
+    let git = cx.new(|_| {
+        GitController::new(
+            "gone".to_owned(),
+            store.downgrade(),
+            h.conn.git(),
+            Arc::new(UnavailableGitHub::new("tls".to_owned())),
+        )
+    });
+    let pull = start_pull(cx, &git);
+    // The workspace leaves the session (its controller with it) before the pull ran.
+    drop(git);
+    cx.update(|_| {});
+    assert_eq!(finish(cx, pull), Err(PULL_GONE.to_owned()));
 }

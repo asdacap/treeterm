@@ -6,6 +6,7 @@
 use std::sync::{Arc, RwLock};
 
 use futures::FutureExt as _;
+use futures::channel::oneshot;
 use futures::future::LocalBoxFuture;
 use gpui_kit::{AsyncApp, Context, Task, WeakEntity};
 use treeterm_core::git::{GitApi, GitInfo};
@@ -114,6 +115,9 @@ pub fn github_client(
     Ok(Arc::new(GitHubClient::new(Arc::new(conn.exec_client()), Arc::new(http), Arc::new(source))))
 }
 
+/// A pull's outcome when its workspace left the session before the pull finished.
+pub const PULL_GONE: &str = "The workspace closed before the pull finished";
+
 pub struct GitController {
     id: String,
     session: WeakEntity<SessionStore>,
@@ -123,7 +127,7 @@ pub struct GitController {
     scheduler: RefreshScheduler,
     /// Why the last refresh's failing steps failed (logged, and shown on hover).
     failures: Vec<String>,
-    /// `pullLoading` / the last pull's error.
+    /// `pullLoading`.
     pull: PullState,
     _pull: Option<Task<()>>,
     _run: Option<Task<()>>,
@@ -160,16 +164,19 @@ impl GitController {
         &self.failures
     }
 
-    pub fn pull_state(&self) -> &PullState {
-        &self.pull
+    pub fn pull_state(&self) -> PullState {
+        self.pull
     }
 
-    /// `pullFromRemote`: pull the branch, then refresh the status.
-    pub fn pull(&mut self, cx: &mut Context<Self>) {
+    /// `pullFromRemote`: pull the branch, then refresh the status. The task resolves with
+    /// the pull's outcome, a failure with what Electron alerts (git's error, "Not a git
+    /// repo"); the pull goes on when it is dropped. None while a pull runs already.
+    pub fn pull(&mut self, cx: &mut Context<Self>) -> Option<Task<Result<(), String>>> {
         if self.pull == PullState::Pulling {
-            return;
+            return None;
         }
         self.pull = PullState::Pulling;
+        let (outcome, receiver) = oneshot::channel();
         let (id, session, git, github) = (self.id.clone(), self.session.clone(), self.git.clone(), self.github.clone());
         self._pull = Some(cx.spawn(async move |this, cx| {
             let deps = Deps { id, session, git, github, cx: cx.clone() };
@@ -185,16 +192,22 @@ impl GitController {
             };
             let result = treeterm_core::git_status::pull_from_remote(&deps, &mut apply).await;
             match this.update(cx, |controller, cx| {
-                controller.pull = match result {
-                    Ok(()) => PullState::Idle,
-                    Err(error) => PullState::Failed(format!("Pull failed: {error}")),
-                };
+                controller.pull = PullState::Idle;
                 controller.refresh(cx);
             }) {
-                Ok(()) | Err(_) => {}
+                Ok(()) | Err(_) => {} // Err: workspace gone
+            }
+            match outcome.send(result.map_err(|error| error.to_string())) {
+                Ok(()) | Err(_) => {} // Err: nobody waits for it
             }
         }));
         cx.notify();
+        Some(cx.foreground_executor().spawn(async move {
+            match receiver.await {
+                Ok(result) => result,
+                Err(oneshot::Canceled) => Err(PULL_GONE.to_owned()),
+            }
+        }))
     }
 
     /// `refreshGit`: run the checks now, or once the cooldown since the last run ends.
@@ -296,11 +309,10 @@ impl GitController {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PullState {
     Idle,
     Pulling,
-    Failed(String),
 }
 
 /// What a PR needs, at a glance (`getPrSignal`).
