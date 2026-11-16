@@ -374,8 +374,31 @@ pub fn dialog_root(cx: &App) -> Div {
 /// `.xxx-dialog-header`: 16px 20px padding, a bottom border, the 16px/500 title and the
 /// close button (`.dialog-close`, whose glyph is "×" or "x" depending on the dialog).
 pub fn dialog_header(title: impl Into<SharedString>, close_glyph: &'static str, title_color: impl Into<Hsla>, cx: &App) -> Div {
-    let c = colors(cx);
-    let (hover_bg, primary) = (c.bg_hover, c.text_primary);
+    let close = dialog_close_look(div().id("dialog-close").rounded(px(4.)), close_glyph, cx)
+        .on_click(|_, window, cx| window.close_dialog(cx));
+    dialog_header_with(title, title_color, close, cx)
+}
+
+/// [`dialog_header`] whose close button is a `<button>` ([`key_button`]): Tab reaches it, and
+/// Enter or Space closes the dialog.
+pub fn dialog_key_header(
+    title: impl Into<SharedString>,
+    close_glyph: &'static str,
+    title_color: impl Into<Hsla>,
+    window: &mut Window,
+    cx: &mut App,
+) -> Div {
+    let close = dialog_close_look(key_button("dialog-close", 4., window, cx), close_glyph, cx)
+        .on_click(|_, window, cx| window.close_dialog(cx));
+    dialog_header_with(title, title_color, close, cx)
+}
+
+fn dialog_header_with(
+    title: impl Into<SharedString>,
+    title_color: impl Into<Hsla>,
+    close: impl IntoElement,
+    cx: &App,
+) -> Div {
     div()
         .flex()
         .flex_shrink_0()
@@ -384,7 +407,7 @@ pub fn dialog_header(title: impl Into<SharedString>, close_glyph: &'static str, 
         .px(px(20.))
         .py(px(16.))
         .border_b_1()
-        .border_color(c.border)
+        .border_color(colors(cx).border)
         .child(
             div()
                 .text_size(px(16.))
@@ -393,20 +416,22 @@ pub fn dialog_header(title: impl Into<SharedString>, close_glyph: &'static str, 
                 .text_color(title_color.into())
                 .child(title.into()),
         )
-        .child(
-            div()
-                .id("dialog-close")
-                .px(px(8.))
-                .py(px(4.))
-                .rounded(px(4.))
-                .text_size(px(18.))
-                .line_height(px(21.))
-                .text_color(c.text_secondary)
-                .cursor_pointer()
-                .hover(move |d| d.bg(hover_bg).text_color(primary))
-                .child(close_glyph)
-                .on_click(|_, window, cx| window.close_dialog(cx)),
-        )
+        .child(close)
+}
+
+/// `.dialog-close` in a dialog header: 18px, 4px 8px padding, secondary until hovered.
+fn dialog_close_look<B: Styled + InteractiveElement + ParentElement>(button: B, glyph: &'static str, cx: &App) -> B {
+    let c = colors(cx);
+    let (hover_bg, primary) = (c.bg_hover, c.text_primary);
+    button
+        .px(px(8.))
+        .py(px(4.))
+        .text_size(px(18.))
+        .line_height(px(21.))
+        .text_color(c.text_secondary)
+        .cursor_pointer()
+        .hover(move |d| d.bg(hover_bg).text_color(primary))
+        .child(glyph)
 }
 
 /// `.xxx-dialog-actions`: right-aligned buttons, 8px apart, 16px 20px padding, a top border.
@@ -572,6 +597,34 @@ pub fn checkbox_label(
         .when(!disabled, |d| d.on_click(move |_: &ClickEvent, window, cx| on_click(!checked, window, cx)))
 }
 
+/// [`checkbox_label`] as a native checkbox in its `<label>` ([`key_checkbox`]): Tab reaches it
+/// unless `disabled`, and Space toggles it, but Enter does not. The row keeps the pointer
+/// cursor while disabled (`.settings-checkbox-label`), though a click on it does nothing.
+pub fn key_checkbox_label(
+    id: impl Into<ElementId>,
+    checked: bool,
+    disabled: bool,
+    label: impl Into<SharedString>,
+    on_click: impl Fn(bool, &mut Window, &mut App) + 'static,
+    window: &mut Window,
+    cx: &mut App,
+) -> gpui_kit::base::Checkbox {
+    let label: SharedString = label.into();
+    key_checkbox(id, checked, disabled, 16., window, cx)
+        .flex()
+        .items_center()
+        .gap(px(8.))
+        .text_size(px(BODY))
+        .line_height(px(16.))
+        .cursor_pointer()
+        .child(label)
+        .on_change(move |next, event, window, cx| {
+            if !pressed_enter(event) {
+                on_click(next == gpui_kit::base::CheckboxState::Checked, window, cx);
+            }
+        })
+}
+
 /// `.settings-select`: a `<select>` box (as the input, 35px tall) with the chosen option and
 /// Chromium's chevron at the right. Wrap it in [`Trigger`] for its menu.
 pub fn select_box(id: impl Into<ElementId>, label: impl Into<SharedString>, cx: &App) -> Stateful<Div> {
@@ -595,6 +648,25 @@ pub fn select_box(id: impl Into<ElementId>, label: impl Into<SharedString>, cx: 
         .cursor_pointer()
         .child(div().truncate().child(label))
         .child(icon(IconName::ChevronDown, 12., c.text_primary))
+}
+
+/// [`select_box`] as a `<select>` that takes the keyboard ([`key_select`]); focused, its
+/// border is accent (`.settings-select:focus`), however it took the focus.
+pub fn key_select_box(
+    id: impl Into<ElementId>,
+    label: impl Into<SharedString>,
+    focus: &FocusHandle,
+    cx: &App,
+) -> Stateful<Div> {
+    let accent = colors(cx).accent;
+    key_select(select_box(id, label, cx), focus).focus(move |d| d.border_color(accent))
+}
+
+/// A select box (a [`Trigger`] for its menu) as a `<select>` on macOS: Tab reaches it, and
+/// Space, ArrowUp or ArrowDown open its menu, but Enter does not. `focus` is its focus handle,
+/// which a `<label>` linked to it focuses ([`keyed_focus`] when none is).
+pub fn key_select(boxed: Stateful<Div>, focus: &FocusHandle) -> Stateful<Div> {
+    boxed.track_focus(&focus.clone().tab_stop(true)).key_context(KEY_SELECT).role(gpui_kit::Role::ComboBox)
 }
 
 /// A `.context-menu-item` for GPUI Kit's popup menu: 13px text on a 31.5px pitch (the menu
@@ -1146,23 +1218,72 @@ pub fn star_icon(size: f32, filled: bool) -> Icon {
 
 /// The key context of [`key_button`], [`ringless_key_button`] and [`key_checkbox`].
 const KEY_CONTROL: &str = "KeyControl";
+/// The key context of [`key_select`].
+const KEY_SELECT: &str = "KeySelect";
 
 /// Enter and Space reach a focused [`key_button`] or [`key_checkbox`]: GPUI runs key
 /// bindings before an element's own keys, so a GPUI Kit dialog's Enter (`Confirm`) would
 /// otherwise take the press, as a `<button>` in an Electron dialog takes it.
+///
+/// A focused [`key_select`] opens its menu on ArrowUp and ArrowDown (the menu's popover
+/// opens on `Confirm`, which it binds to Space too) and ignores Enter, as Chromium's
+/// `<select>` does on macOS.
 pub fn bind_keys(cx: &mut App) {
+    use gpui_kit::base::actions::Confirm;
     cx.bind_keys([
         KeyBinding::new("enter", NoAction, Some(KEY_CONTROL)),
         KeyBinding::new("space", NoAction, Some(KEY_CONTROL)),
+        KeyBinding::new("enter", NoAction, Some(KEY_SELECT)),
+        KeyBinding::new("up", Confirm { secondary: false }, Some(KEY_SELECT)),
+        KeyBinding::new("down", Confirm { secondary: false }, Some(KEY_SELECT)),
     ]);
+}
+
+/// The focus handle kept for the element `id` while it is drawn, as a `<button>`'s own.
+pub fn keyed_focus(id: impl Into<ElementId>, window: &mut Window, cx: &mut App) -> FocusHandle {
+    window.use_keyed_state(id.into(), cx, |_, cx| cx.focus_handle()).read(cx).clone()
 }
 
 /// A focus handle kept for the element `id`, and whether it shows Chromium's focus ring
 /// (`:focus-visible`: focused from the keyboard).
 fn key_focus(id: &ElementId, window: &mut Window, cx: &mut App) -> (FocusHandle, bool) {
-    let focus = window.use_keyed_state(id.clone(), cx, |_, cx| cx.focus_handle()).read(cx).clone();
-    let ring = focus.is_focused(window) && window.last_input_was_keyboard();
+    let focus = keyed_focus(id.clone(), window, cx);
+    let ring = keyboard_focused(&focus, window);
     (focus, ring)
+}
+
+/// Whether `focus` is focused from the keyboard (`:focus-visible`).
+fn keyboard_focused(focus: &FocusHandle, window: &Window) -> bool {
+    focus.is_focused(window) && window.last_input_was_keyboard()
+}
+
+/// `control`, which `focus` focuses, with Chromium's focus ring (rounded `radius`) while it
+/// is focused from the keyboard.
+pub fn with_focus_ring<E: ParentElement + FluentBuilder>(
+    control: E,
+    focus: &FocusHandle,
+    radius: f32,
+    window: &Window,
+) -> E {
+    control.when(keyboard_focused(focus, window), |control| control.child(focus_outline(radius)))
+}
+
+/// A `<textarea>` around `textarea`: Tab moves the focus on and Shift+Tab back, as Chromium's
+/// do, where GPUI Kit's textarea would indent the text.
+pub fn tabbing_text_area(textarea: impl IntoElement) -> Div {
+    use gpui_kit::component::input::{IndentInline, OutdentInline};
+    div()
+        .capture_action(|_: &IndentInline, window, cx| move_focus("root::Tab", window, cx))
+        .capture_action(|_: &OutdentInline, window, cx| move_focus("root::TabPrev", window, cx))
+        .child(textarea)
+}
+
+/// Run GPUI Kit's root focus move `action` (Tab's or Shift+Tab's, which keep the focus in an
+/// open dialog) in place of the action being dispatched.
+fn move_focus(action: &str, window: &mut Window, cx: &mut App) {
+    cx.stop_propagation();
+    let action = cx.build_action(action, None).unwrap_or_else(|error| panic!("GPUI Kit's {action}: {error}"));
+    window.dispatch_action(action, cx);
 }
 
 /// A borderless `<button>`, rounded `radius`: Tab reaches it and Enter or Space presses it.
@@ -1170,8 +1291,8 @@ fn key_focus(id: &ElementId, window: &mut Window, cx: &mut App) -> (FocusHandle,
 /// its look, and an accessibility label when its content does not name it.
 pub fn key_button(id: impl Into<ElementId>, radius: f32, window: &mut Window, cx: &mut App) -> gpui_kit::base::Button {
     let id = id.into();
-    let (focus, ring) = key_focus(&id, window, cx);
-    ringless_key_button(id, &focus, radius).when(ring, |button| button.child(focus_outline(radius)))
+    let focus = keyed_focus(id.clone(), window, cx);
+    with_focus_ring(ringless_key_button(id, &focus, radius), &focus, radius, window)
 }
 
 /// A [`key_button`] whose CSS replaces the focus ring (`:focus { outline: none; ... }`): it

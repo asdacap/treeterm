@@ -1,14 +1,17 @@
 //! The sections that edit single settings (the instance lists are in `instance_list`).
 
 use gpui_kit::prelude::*;
-use gpui_kit::{AnyElement, Context, Div, Stateful, div, px, rgb, rgba};
+use gpui_kit::{AnyElement, App, Context, Div, Stateful, Window, div, px, rgb, rgba};
 use treeterm_core::keybinding::{Os, PrefixAction};
 use treeterm_core::settings::{
     ClassifiedState, ClassifierCriteria, ClassifierProvider, CursorStyle, DEFAULT_ANALYZER_SYSTEM_PROMPT,
-    DEFAULT_TITLE_SYSTEM_PROMPT, ReasoningEffort, Theme,
+    DEFAULT_TITLE_SYSTEM_PROMPT, ReasoningEffort, Settings, Theme,
 };
 
-use super::widgets::{divider, group, heading, hint, label, reset_button, section, select, select_menu, toggle, unlabeled};
+use super::widgets::{
+    divider, group, heading, hint, label, label_for, labelled, option_label, reset_button, section, select, select_from,
+    select_menu, toggle, unlabeled,
+};
 use super::{Recording, SettingsView, form};
 use crate::number_field::NumberField;
 use crate::theme::colors;
@@ -25,16 +28,21 @@ const REASONING: &[(ReasoningEffort, &str)] = &[
     (ReasoningEffort::High, "High"),
 ];
 const THEMES: &[(Theme, &str)] = &[(Theme::Dark, "Dark"), (Theme::Light, "Light"), (Theme::System, "System")];
+/// The provider select's `<label>`, which also names it.
+const PROVIDER_LABEL: &str = "Classifier Provider";
+/// The title model input's `<label>`, which also names it.
+const TITLE_MODEL_LABEL: &str = "Title Model";
 
 impl SettingsView {
-    pub(super) fn render_general(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_general(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let mut preview = self.draft.clone();
         self.lists(cx).store_in(&mut preview);
         let options = form::default_app_choices(&preview);
         let selected = self.draft.global_default_application_id.clone();
         let current = form::default_app_label(&options, &selected);
         let view = cx.entity().downgrade();
-        let picker = select_menu(ui::select_box("default-app", current, cx), move |mut menu| {
+        let focus = ui::keyed_focus("default-app", window, cx);
+        let picker = select_menu(ui::key_select_box("default-app", current, &focus, cx), move |mut menu| {
             for option in &options {
                 let (view, id) = (view.clone(), option.id.clone());
                 menu = menu.item(ui::menu_item(option.label.clone()).checked(option.id == selected).on_click(
@@ -63,16 +71,27 @@ impl SettingsView {
             .into_any_element()
     }
 
-    pub(super) fn render_terminal(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_terminal(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let t = &self.draft.terminal;
-        let cursor = select("cursor-style", CURSOR_STYLES, t.cursor_style, |s, style| s.terminal.cursor_style = style, cx);
-        let blink = toggle("cursor-blink", "Cursor Blink", t.cursor_blink, false, |s, on| s.terminal.cursor_blink = on, cx);
+        let focus = ui::keyed_focus("cursor-style", window, cx);
+        let cursor =
+            select("cursor-style", CURSOR_STYLES, t.cursor_style, |s, style| s.terminal.cursor_style = style, &focus, cx);
+        let blink = toggle(
+            "cursor-blink",
+            "Cursor Blink",
+            t.cursor_blink,
+            false,
+            |s, on| s.terminal.cursor_blink = on,
+            window,
+            cx,
+        );
         let osc52 = toggle(
             "osc52",
             "Allow Terminal Clipboard Writes (OSC 52)",
             t.allow_osc52_clipboard,
             false,
             |s, on| s.terminal.allow_osc52_clipboard = on,
+            window,
             cx,
         );
         let raw = toggle(
@@ -81,6 +100,7 @@ impl SettingsView {
             t.show_raw_chars,
             false,
             |s, on| s.terminal.show_raw_chars = on,
+            window,
             cx,
         );
         section()
@@ -102,7 +122,7 @@ impl SettingsView {
             .into_any_element()
     }
 
-    pub(super) fn render_sandbox(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_sandbox(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let unavailable = !self.sandbox.is_available();
         let s = &self.draft.sandbox;
         let enabled = toggle(
@@ -111,6 +131,7 @@ impl SettingsView {
             s.enabled_by_default,
             unavailable,
             |s, on| s.sandbox.enabled_by_default = on,
+            window,
             cx,
         );
         let network = toggle(
@@ -119,6 +140,7 @@ impl SettingsView {
             s.allow_network_by_default,
             unavailable,
             |s, on| s.sandbox.allow_network_by_default = on,
+            window,
             cx,
         );
         section()
@@ -131,19 +153,32 @@ impl SettingsView {
             .into_any_element()
     }
 
-    pub(super) fn render_llm(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_llm(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let a = &self.draft.terminal_analyzer;
-        let provider = select("classifier-provider", PROVIDERS, a.provider, |s, provider| s.terminal_analyzer.provider = provider, cx);
-        let reasoning = plain_select(a.reasoning_effort, cx);
-        let reset_prompt = reset_button("reset-system-prompt", "Reset to default", false, cx).on_click(cx.listener(
-            |view, _, window, cx| {
+        let set_provider = |s: &mut Settings, provider| s.terminal_analyzer.provider = provider;
+        let provider = select_from(self.provider_box(cx), PROVIDERS, a.provider, set_provider, cx);
+        // `<label htmlFor="classifier-provider">`: a click on it focuses the select.
+        let provider_focus = self.provider_focus.clone();
+        let focus_provider = move |window: &mut Window, cx: &mut App| window.focus(&provider_focus, cx);
+        let provider_label = label_for("classifier-provider-label", PROVIDER_LABEL, focus_provider, cx);
+        // `<label htmlFor="title-model">`.
+        let title_model = self.inputs.title_model.clone();
+        let title_model_label = label_for(
+            "title-model-label",
+            TITLE_MODEL_LABEL,
+            move |window, cx| title_model.update(cx, |input, cx| input.focus(window, cx)),
+            cx,
+        );
+        let reasoning = plain_select(a.reasoning_effort, window, cx);
+        let reset_prompt = reset_button("reset-system-prompt", "Reset to default", false, window, cx).on_click(
+            cx.listener(|view, _, window, cx| {
                 view.inputs.analyzer_system_prompt.update(cx, |state, cx| {
                     state.set_value(DEFAULT_ANALYZER_SYSTEM_PROMPT, window, cx)
                 });
                 cx.notify();
-            },
-        ));
-        let reset_title_prompt = reset_button("reset-title-prompt", "Reset to default", false, cx).on_click(
+            }),
+        );
+        let reset_title_prompt = reset_button("reset-title-prompt", "Reset to default", false, window, cx).on_click(
             cx.listener(|view, _, window, cx| {
                 view.inputs.title_system_prompt.update(cx, |state, cx| {
                     state.set_value(DEFAULT_TITLE_SYSTEM_PROMPT, window, cx)
@@ -171,8 +206,8 @@ impl SettingsView {
                 cx,
             ))
             .child(heading("Terminal Analyzer", cx))
-            .child(group(
-                "Classifier Provider",
+            .child(labelled(
+                provider_label,
                 provider,
                 Some(
                     "Classifier uses OpenRouter Decisions with the shared API Key and the configured Base URL \
@@ -183,14 +218,14 @@ impl SettingsView {
             ))
             .child(group(
                 "Model",
-                ui::text_input(&self.inputs.analyzer_model, cx),
+                ui::text_input(&self.inputs.analyzer_model, cx).aria_label("Classifier Model"),
                 Some("Model name for terminal analysis with the selected provider (e.g. typesafe/jev-1.13)."),
                 cx,
             ))
             .child(
                 group(
                     "System Prompt",
-                    ui::text_area(&self.inputs.analyzer_system_prompt, cx),
+                    ui::tabbing_text_area(ui::text_area(&self.inputs.analyzer_system_prompt, cx)),
                     Some(
                         "Context and policy for the analyzer. Supports {{cwd}} and {{safe_paths}} template \
                          variables. Do not list the states here: Chat Completions appends the output format and \
@@ -200,17 +235,17 @@ impl SettingsView {
                 )
                 .child(reset_prompt),
             )
-            .child(self.render_criteria(cx))
-            .child(group(
-                "Title Model",
-                ui::text_input(&self.inputs.title_model, cx),
+            .child(self.render_criteria(window, cx))
+            .child(labelled(
+                title_model_label,
+                ui::text_input(&self.inputs.title_model, cx).aria_label(TITLE_MODEL_LABEL),
                 Some("Chat Completions model for titles, independent of the classifier provider and model."),
                 cx,
             ))
             .child(
                 group(
                     "Title System Prompt",
-                    ui::text_area(&self.inputs.title_system_prompt, cx),
+                    ui::tabbing_text_area(ui::text_area(&self.inputs.title_system_prompt, cx)),
                     Some("System prompt for auto-generating workspace titles from terminal output."),
                     cx,
                 )
@@ -259,8 +294,14 @@ impl SettingsView {
             .into_any_element()
     }
 
+    /// The Classifier Provider select's box, named by its `<label>`.
+    pub(super) fn provider_box(&self, cx: &App) -> Stateful<Div> {
+        let current = option_label(PROVIDERS, &self.draft.terminal_analyzer.provider);
+        ui::key_select_box("classifier-provider", current, &self.provider_focus, cx).aria_label(PROVIDER_LABEL)
+    }
+
     /// "State Criteria": one text per classified state, each resettable.
-    fn render_criteria(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_criteria(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let defaults = ClassifierCriteria::default();
         let mut list = div().flex().flex_col().gap(px(6.)).child(label("State Criteria", cx)).child(hint(
             "When the classifier should report each state. Used by both providers. Supports {{cwd}} and \
@@ -269,16 +310,23 @@ impl SettingsView {
         ));
         for (index, (state, input)) in ClassifiedState::ALL.iter().copied().zip(&self.inputs.criteria).enumerate() {
             let is_default = input.read(cx).value().as_ref() == defaults.get(state);
-            let reset = reset_button(("reset-criterion", index), "Reset to default", is_default, cx).when(
-                !is_default,
-                |button| {
-                    button.on_click(cx.listener(move |view, _, window, cx| {
-                        let default = ClassifierCriteria::default().get(state).to_owned();
-                        view.inputs.criteria[index].update(cx, |input, cx| input.set_value(default, window, cx));
-                        cx.notify();
-                    }))
-                },
+            let reset = reset_button(("reset-criterion", index), "Reset to default", is_default, window, cx)
+                .accessibility_label(format!("Reset {} criterion", state.as_str()))
+                .on_click(cx.listener(move |view, _, window, cx| {
+                    let default = ClassifierCriteria::default().get(state).to_owned();
+                    view.inputs.criteria[index].update(cx, |input, cx| input.set_value(default, window, cx));
+                    cx.notify();
+                }));
+            // `<label htmlFor="criterion-<state>">`: a click on it focuses the textarea, which
+            // its `aria-label` names.
+            let area = input.clone();
+            let name = label_for(
+                ("criterion-label", index),
+                state.as_str(),
+                move |window, cx| area.update(cx, |input, cx| input.focus(window, cx)),
+                cx,
             );
+            let area = ui::text_area(input, cx).aria_label(format!("{} criterion", state.as_str()));
             // `.settings-criterion`: 8px 0 4px margins, the reset button at its own width.
             list = list.child(
                 div()
@@ -287,12 +335,12 @@ impl SettingsView {
                     .flex()
                     .flex_col()
                     .items_start()
-                    .child(label(state.as_str(), cx).font_family("Menlo").line_height(px(16.)))
-                    .child(div().w_full().child(ui::text_area(input, cx)))
+                    .child(name.font_family("Menlo").line_height(px(16.)))
+                    .child(ui::tabbing_text_area(area).w_full())
                     .child(reset),
             );
         }
-        let reset_all = reset_button("reset-all-criteria", "Reset all criteria", false, cx).on_click(cx.listener(
+        let reset_all = reset_button("reset-all-criteria", "Reset all criteria", false, window, cx).on_click(cx.listener(
             |view, _, window, cx| {
                 let defaults = ClassifierCriteria::default();
                 for (state, input) in ClassifiedState::ALL.iter().zip(&view.inputs.criteria) {
@@ -305,18 +353,21 @@ impl SettingsView {
         list.child(reset_all).into_any_element()
     }
 
-    pub(super) fn render_appearance(&self, cx: &mut Context<Self>) -> AnyElement {
-        let theme = select("theme", THEMES, self.draft.appearance.theme, |s, theme| s.appearance.theme = theme, cx);
+    pub(super) fn render_appearance(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let focus = ui::keyed_focus("theme", window, cx);
+        let set_theme = |s: &mut Settings, theme| s.appearance.theme = theme;
+        let theme = select("theme", THEMES, self.draft.appearance.theme, set_theme, &focus, cx);
         section().child(group("Theme", theme, None, cx)).into_any_element()
     }
 
-    pub(super) fn render_keybindings(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_keybindings(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let prefix_text = self.inputs.prefix_key.read(cx).value().to_string();
         let prefix_label = match self.recording {
             Some(Recording::Prefix) => "Press keys...".to_owned(),
             _ => form::format_prefix_key(&prefix_text, Os::host()),
         };
-        let prefix = keybinding_button("prefix-key", prefix_label, self.recording == Some(Recording::Prefix), false, cx)
+        let recording_prefix = self.recording == Some(Recording::Prefix);
+        let prefix = keybinding_button("prefix-key", prefix_label, recording_prefix, false, window, cx)
             .on_click(cx.listener(|view, _, window, cx| view.toggle_recording(Recording::Prefix, window, cx)));
         let mut list = section()
             .child(group(
@@ -335,7 +386,7 @@ impl SettingsView {
         for (index, (action, input)) in PrefixAction::ALL.iter().zip(&self.inputs.action_keys).enumerate() {
             let recording = self.recording == Some(Recording::Action(index));
             let text = if recording { "Press key...".to_owned() } else { input.read(cx).value().to_uppercase() };
-            let button = keybinding_button(("action-key", index), text, recording, true, cx).on_click(cx.listener(
+            let button = keybinding_button(("action-key", index), text, recording, true, window, cx).on_click(cx.listener(
                 move |view, _, window, cx| view.toggle_recording(Recording::Action(index), window, cx),
             ));
             // `.keybinding-row`: label and button 8px apart.
@@ -348,7 +399,7 @@ impl SettingsView {
         .into_any_element()
     }
 
-    pub(super) fn render_github(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_github(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let autodetect = self.draft.github.autodetect_via_gh;
         let detect = toggle(
             "github-autodetect",
@@ -356,6 +407,7 @@ impl SettingsView {
             autodetect,
             false,
             |s, on| s.github.autodetect_via_gh = on,
+            window,
             cx,
         );
         section()
@@ -379,13 +431,14 @@ impl SettingsView {
             .into_any_element()
     }
 
-    pub(super) fn render_debug(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_debug(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let badge = toggle(
             "debug-badge",
             "Show Debug Badge",
             self.draft.debug.show_badge,
             false,
             |s, on| s.debug.show_badge = on,
+            window,
             cx,
         );
         section()
@@ -417,17 +470,16 @@ fn keybinding_button(
     text: String,
     recording: bool,
     centred: bool,
-    cx: &gpui_kit::App,
-) -> Stateful<Div> {
+    window: &mut Window,
+    cx: &mut App,
+) -> gpui_kit::base::Button {
+    let button = ui::key_button(id, 4., window, cx);
     let c = colors(cx);
     let hover = c.bg_hover;
-    div()
-        .id(id)
-        .flex()
-        .when(centred, |d| d.justify_center())
+    button
+        .when(!centred, |d| d.justify_start())
         .px(px(12.))
         .py(px(8.))
-        .rounded(px(4.))
         .border_1()
         .text_size(px(ui::BODY))
         .line_height(px(15.))
@@ -439,9 +491,14 @@ fn keybinding_button(
 }
 
 /// The Reasoning `<select>`, which has no class: Chromium's own light control (white, a
-/// #767676 border, black 13px text).
-fn plain_select(selected: ReasoningEffort, cx: &mut Context<SettingsView>) -> impl IntoElement + use<> {
-    let current = REASONING.iter().find(|(value, _)| *value == selected).map_or("", |(_, text)| *text);
+/// #767676 border, black 13px text), with its focus ring while focused from the keyboard.
+fn plain_select(
+    selected: ReasoningEffort,
+    window: &mut Window,
+    cx: &mut Context<SettingsView>,
+) -> impl IntoElement + use<> {
+    let current = option_label(REASONING, &selected);
+    let focus = ui::keyed_focus("reasoning-effort", window, cx);
     let boxed = div()
         .id("reasoning-effort")
         .flex()
@@ -461,19 +518,6 @@ fn plain_select(selected: ReasoningEffort, cx: &mut Context<SettingsView>) -> im
         .cursor_pointer()
         .child(current)
         .child(ui::icon(gpui_kit::assets::IconName::ChevronDown, 10., rgb(0x000000)));
-    let view = cx.entity().downgrade();
-    select_menu(boxed, move |mut menu| {
-        for (value, text) in REASONING.iter().copied() {
-            let view = view.clone();
-            menu = menu.item(ui::menu_item(text).checked(value == selected).on_click(move |_, _, cx| {
-                if let Err(error) = view.update(cx, |view, cx| {
-                    view.draft.terminal_analyzer.reasoning_effort = value;
-                    cx.notify();
-                }) {
-                    tracing::debug!(%error, "settings closed");
-                }
-            }));
-        }
-        menu
-    })
+    let boxed = ui::with_focus_ring(ui::key_select(boxed, &focus), &focus, 3., window);
+    select_from(boxed, REASONING, selected, |s, effort| s.terminal_analyzer.reasoning_effort = effort, cx)
 }

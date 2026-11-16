@@ -3,7 +3,7 @@
 
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenu};
 use gpui_kit::prelude::*;
-use gpui_kit::{App, Context, Div, FontWeight, SharedString, Stateful, div, px};
+use gpui_kit::{App, Context, Div, ElementId, FocusHandle, FontWeight, SharedString, Stateful, Window, div, px};
 use treeterm_core::settings::Settings;
 
 use super::SettingsView;
@@ -26,13 +26,30 @@ pub fn label(text: impl Into<SharedString>, cx: &App) -> Div {
         .child(text)
 }
 
+/// A `<label htmlFor>`: a click on it focuses its control, with `focus`.
+pub fn label_for(
+    id: impl Into<ElementId>,
+    text: impl Into<SharedString>,
+    focus: impl Fn(&mut Window, &mut App) + 'static,
+    cx: &App,
+) -> Stateful<Div> {
+    let id = id.into();
+    let selector = format!("{id}");
+    label(text, cx).id(id).debug_selector(move || selector).on_click(move |_, window, cx| focus(window, cx))
+}
+
 /// `.settings-group`: a label above its control (6px apart), an optional hint below.
 pub fn group(label_text: &'static str, control: impl IntoElement, hint: Option<&'static str>, cx: &App) -> Div {
+    labelled(label(label_text, cx), control, hint, cx)
+}
+
+/// [`group`] with its own label element ([`label_for`]).
+pub fn labelled(label: impl IntoElement, control: impl IntoElement, hint: Option<&'static str>, cx: &App) -> Div {
     div()
         .flex()
         .flex_col()
         .gap(px(6.))
-        .child(label(label_text, cx))
+        .child(label)
         .child(control)
         .when_some(hint, |group, text| group.child(self::hint(text, cx)))
 }
@@ -79,25 +96,28 @@ pub fn divider(cx: &App) -> Div {
     div().my(px(8.)).h(px(1.)).bg(colors(cx).border)
 }
 
-/// `.settings-reset-btn`: 11px secondary text, 4px 8px padding, 3px radius, a border, 4px
-/// below what precedes it; disabled at half opacity.
-pub fn reset_button(id: impl Into<gpui_kit::ElementId>, text: &'static str, disabled: bool, cx: &App) -> Stateful<Div> {
+/// `.settings-reset-btn` (a `<button>`): 11px secondary text, 4px 8px padding, 3px radius, a
+/// border, 4px below what precedes it; disabled at half opacity, and then skipped by Tab.
+pub fn reset_button(
+    id: impl Into<ElementId>,
+    text: &'static str,
+    disabled: bool,
+    window: &mut Window,
+    cx: &mut App,
+) -> gpui_kit::base::Button {
+    let button = ui::key_button(id, 3., window, cx).disabled(disabled);
     let c = colors(cx);
     let (hover_bg, primary) = (c.bg_hover, c.text_primary);
-    div()
-        .id(id)
+    button
         .mt(px(4.))
         .px(px(8.))
         .py(px(4.))
-        .rounded(px(3.))
         .border_1()
         .border_color(c.border)
         .bg(c.bg_tertiary)
         .text_size(px(ui::SMALL))
         .line_height(px(13.))
         .text_color(c.text_secondary)
-        .flex()
-        .justify_center()
         .when(disabled, |d| d.opacity(0.5))
         .when(!disabled, |d| d.cursor_pointer().hover(move |d| d.bg(hover_bg).text_color(primary)))
         .child(text)
@@ -110,31 +130,50 @@ pub fn toggle(
     checked: bool,
     disabled: bool,
     set: fn(&mut Settings, bool),
+    window: &mut Window,
     cx: &mut Context<SettingsView>,
-) -> Stateful<Div> {
+) -> gpui_kit::base::Checkbox {
     let view = cx.entity().downgrade();
-    ui::checkbox_label(id, checked, disabled, text, move |on, _, cx| {
+    let on_click = move |on, _: &mut Window, cx: &mut App| {
         if let Err(error) = view.update(cx, |view, cx| {
             set(&mut view.draft, on);
             cx.notify();
         }) {
             tracing::debug!(%error, "settings closed");
         }
-    })
+    };
+    ui::key_checkbox_label(id, checked, disabled, text, on_click, window, cx)
+}
+
+/// The label of the option `selected` among `options`.
+pub fn option_label<T: PartialEq>(options: &'static [(T, &'static str)], selected: &T) -> &'static str {
+    options.iter().find(|(value, _)| value == selected).map_or("", |(_, label)| *label)
 }
 
 /// A `.settings-select` (`<select>`): the chosen option's label in the box; the options in
-/// a menu below it, the chosen one ticked.
+/// a menu below it, the chosen one ticked. `focus` is the box's focus handle.
 pub fn select<T: Copy + PartialEq + 'static>(
     id: &'static str,
     options: &'static [(T, &'static str)],
     selected: T,
     set: fn(&mut Settings, T),
+    focus: &FocusHandle,
     cx: &mut Context<SettingsView>,
 ) -> impl IntoElement + use<T> {
-    let current = options.iter().find(|(value, _)| *value == selected).map_or("", |(_, label)| *label);
+    let boxed = ui::key_select_box(id, option_label(options, &selected), focus, cx);
+    select_from(boxed, options, selected, set, cx)
+}
+
+/// [`select`] around a box already made.
+pub fn select_from<T: Copy + PartialEq + 'static>(
+    boxed: Stateful<Div>,
+    options: &'static [(T, &'static str)],
+    selected: T,
+    set: fn(&mut Settings, T),
+    cx: &mut Context<SettingsView>,
+) -> impl IntoElement + use<T> {
     let view = cx.entity().downgrade();
-    select_menu(ui::select_box(id, current, cx), move |mut menu| {
+    select_menu(boxed, move |mut menu| {
         for (value, text) in options.iter().copied() {
             let view = view.clone();
             menu = menu.item(ui::menu_item(text).checked(value == selected).on_click(move |_, _, cx| {

@@ -113,6 +113,7 @@ pub fn render<T: InstanceForm>(
     list: &InstanceList<T>,
     pick: fn(&mut SettingsView) -> &mut InstanceList<T>,
     sandbox: SandboxSupport,
+    window: &mut Window,
     cx: &mut Context<SettingsView>,
 ) -> AnyElement {
     let c = colors(cx);
@@ -135,7 +136,7 @@ pub fn render<T: InstanceForm>(
             let id = SharedString::from(format!("{}-{index}-toggle-{toggle_index}", T::ID_PREFIX));
             let view = view.clone();
             let label = T::toggle_label(toggle);
-            let checkbox = ui::checkbox_label(
+            let checkbox = ui::key_checkbox_label(
                 id,
                 current.toggle(toggle),
                 !current.toggle_enabled(toggle, sandbox),
@@ -151,6 +152,8 @@ pub fn render<T: InstanceForm>(
                         tracing::debug!(%error, "settings closed");
                     }
                 },
+                window,
+                cx,
             );
             if beside_fields(label) {
                 beside = Some(checkbox.whitespace_nowrap());
@@ -161,12 +164,10 @@ pub fn render<T: InstanceForm>(
         let has_stacked = T::TOGGLES.iter().any(|toggle| !beside_fields(T::toggle_label(*toggle)));
         let delete_id = SharedString::from(format!("{}-{index}-delete", T::ID_PREFIX));
         // `.application-delete`: transparent, a border, #f14c4c 12px text, 4px 8px padding.
-        let delete = div()
-            .id(delete_id)
+        let delete = ui::key_button(delete_id, 4., window, cx)
             .flex_shrink_0()
             .px(px(8.))
             .py(px(4.))
-            .rounded(px(4.))
             .border_1()
             .border_color(border)
             .text_size(px(12.))
@@ -204,14 +205,10 @@ pub fn render<T: InstanceForm>(
     }
     let add_id = SharedString::from(format!("{}-add", T::ID_PREFIX));
     // `.settings-btn.add-app`: full width, dashed border (solid on hover), 12px below.
-    let add = div()
-        .id(add_id)
-        .flex()
-        .justify_center()
+    let add = ui::key_button(add_id, 4., window, cx)
         .mb(px(12.))
         .px(px(16.))
         .py(px(8.))
-        .rounded(px(4.))
         .border_1()
         .border_dashed()
         .border_color(border)

@@ -71,6 +71,8 @@ pub struct SettingsView {
     intercept: Option<Subscription>,
     /// Focused while recording, so no input takes the keys too.
     focus: FocusHandle,
+    /// The Classifier Provider select's, which its `<label>` focuses.
+    provider_focus: FocusHandle,
     /// The shown section's natural height, measured after layout: the dialog grows with it
     /// up to 80% of the window, as Electron's does.
     body_height: f32,
@@ -238,6 +240,7 @@ impl SettingsView {
             recording: None,
             intercept: None,
             focus: cx.focus_handle(),
+            provider_focus: cx.focus_handle(),
             body_height: 0.,
             scroll: gpui_kit::ScrollHandle::new(),
         }
@@ -341,9 +344,9 @@ impl SettingsView {
         true
     }
 
-    /// `.settings-tabs`: 140px, 8px vertical padding, a right border; `.settings-tab` rows of
-    /// 13px text with 10px 16px padding, the active one bg-active.
-    fn sidebar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    /// `.settings-tabs`: 140px, 8px vertical padding, a right border; `.settings-tab` buttons
+    /// of 13px text with 10px 16px padding, the active one bg-active.
+    fn sidebar(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let c = colors(cx);
         let (active_bg, hover_bg, primary, secondary) = (c.bg_active, c.bg_hover, c.text_primary, c.text_secondary);
         let mut list = div()
@@ -358,8 +361,8 @@ impl SettingsView {
         for section in Section::ALL {
             let active = section == self.section;
             list = list.child(
-                div()
-                    .id(section.label())
+                ui::key_button(section.label(), 0., window, cx)
+                    .justify_start()
                     .px(px(16.))
                     .py(px(10.))
                     .text_size(px(ui::BODY))
@@ -381,19 +384,21 @@ impl SettingsView {
 impl Render for SettingsView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let body = match self.section {
-            Section::General => self.render_general(cx),
-            Section::Terminal => self.render_terminal(cx),
-            Section::TerminalProfiles => instance_list::render(&self.profiles, |v| &mut v.profiles, self.sandbox, cx),
-            Section::AiHarness => instance_list::render(&self.harnesses, |v| &mut v.harnesses, self.sandbox, cx),
-            Section::CustomRunners => instance_list::render(&self.runners, |v| &mut v.runners, self.sandbox, cx),
-            Section::WebApps => instance_list::render(&self.web_apps, |v| &mut v.web_apps, self.sandbox, cx),
-            Section::Browsers => instance_list::render(&self.browsers, |v| &mut v.browsers, self.sandbox, cx),
-            Section::Llm => self.render_llm(cx),
-            Section::Sandbox => self.render_sandbox(cx),
-            Section::Appearance => self.render_appearance(cx),
-            Section::Keybindings => self.render_keybindings(cx),
-            Section::Github => self.render_github(cx),
-            Section::Debug => self.render_debug(cx),
+            Section::General => self.render_general(window, cx),
+            Section::Terminal => self.render_terminal(window, cx),
+            Section::TerminalProfiles => {
+                instance_list::render(&self.profiles, |v| &mut v.profiles, self.sandbox, window, cx)
+            }
+            Section::AiHarness => instance_list::render(&self.harnesses, |v| &mut v.harnesses, self.sandbox, window, cx),
+            Section::CustomRunners => instance_list::render(&self.runners, |v| &mut v.runners, self.sandbox, window, cx),
+            Section::WebApps => instance_list::render(&self.web_apps, |v| &mut v.web_apps, self.sandbox, window, cx),
+            Section::Browsers => instance_list::render(&self.browsers, |v| &mut v.browsers, self.sandbox, window, cx),
+            Section::Llm => self.render_llm(window, cx),
+            Section::Sandbox => self.render_sandbox(window, cx),
+            Section::Appearance => self.render_appearance(window, cx),
+            Section::Keybindings => self.render_keybindings(window, cx),
+            Section::Github => self.render_github(window, cx),
+            Section::Debug => self.render_debug(window, cx),
         };
         // `.settings-dialog`: max-height 80vh, the content (flex: 1) at least as tall as the
         // tab list; past that the panel scrolls.
@@ -421,11 +426,17 @@ impl Render for SettingsView {
         .left_0()
         .size_full();
         let error = colors(cx).error;
+        let header = ui::dialog_key_header("Settings", "×", colors(cx).text_primary, window, cx);
+        let sidebar = self.sidebar(window, cx);
+        let cancel = ui::dialog_key_button("cancel-settings", "Cancel", ui::ButtonKind::Secondary, false, window, cx)
+            .on_click(|_, window, cx| window.close_dialog(cx));
+        let save = ui::dialog_key_button("save-settings", "Save", ui::ButtonKind::Primary, false, window, cx)
+            .on_click(cx.listener(|view, _, window, cx| view.save(window, cx)));
         ui::dialog_root(cx)
             .track_focus(&self.focus)
-            .child(ui::dialog_header("Settings", "×", colors(cx).text_primary, cx))
+            .child(header)
             .child(
-                div().flex().w_full().h(px(content_height)).overflow_hidden().child(self.sidebar(cx)).child(
+                div().flex().w_full().h(px(content_height)).overflow_hidden().child(sidebar).child(
                     div()
                         .relative()
                         .flex_1()
@@ -465,13 +476,8 @@ impl Render for SettingsView {
                                 .child(message),
                         )
                     })
-                    .child(
-                        ui::dialog_button("cancel-settings", "Cancel", ui::ButtonKind::Secondary, false, cx)
-                            .on_click(|_, window, cx| window.close_dialog(cx)),
-                    )
-                    .child(ui::dialog_button("save-settings", "Save", ui::ButtonKind::Primary, false, cx).on_click(
-                        cx.listener(|view, _, window, cx| view.save(window, cx)),
-                    )),
+                    .child(cancel)
+                    .child(save),
             )
     }
 }
@@ -493,8 +499,10 @@ pub fn open(
 
 #[cfg(test)]
 mod tests {
-    use gpui_kit::{TestAppContext, VisualTestContext, WindowOptions};
+    use gpui_kit::base::test_support;
+    use gpui_kit::{ElementId, Focusable, Role, TestAppContext, VisualTestContext, WindowOptions};
     use treeterm_core::keybinding::{KeyOutcome, KeybindingSettings, PrefixMode};
+    use treeterm_core::settings::{ClassifiedState, CursorStyle};
 
     use super::*;
 
@@ -508,10 +516,19 @@ mod tests {
 
     /// The dialog over a window whose keystrokes pass the shortcuts first, as `main` sets up.
     fn dialog(cx: &mut TestAppContext) -> (&mut VisualTestContext, Entity<KeybindingStore>, Entity<SettingsView>) {
+        dialog_in(WindowOptions::default(), cx)
+    }
+
+    /// [`dialog`] in a window opened with `options`, with the app's key bindings.
+    fn dialog_in(
+        options: WindowOptions,
+        cx: &mut TestAppContext,
+    ) -> (&mut VisualTestContext, Entity<KeybindingStore>, Entity<SettingsView>) {
         let window = cx.update(|cx| {
             gpui_kit::init(cx);
             crate::theme::install(cx);
-            gpui_kit::open_window(WindowOptions::default(), cx, |_, cx| cx.new(|_| Empty)).expect("open a window").0
+            ui::bind_keys(cx);
+            gpui_kit::open_window(options, cx, |_, cx| cx.new(|_| Empty)).expect("open a window").0
         });
         let cx = VisualTestContext::from_window(window, cx).into_mut();
         let keybindings = cx.update(|_, cx| cx.new(|_| KeybindingStore::new(KeybindingSettings::default())));
@@ -669,5 +686,266 @@ mod tests {
         cx.simulate_keystrokes("ctrl-1");
         assert_eq!(recording(cx, &view), None);
         assert_eq!(texts(cx, &view).action_keys[1], "1");
+    }
+
+    fn show(section: Section, cx: &mut VisualTestContext, view: &Entity<SettingsView>) {
+        cx.update(|_, cx| {
+            view.update(cx, |view, cx| {
+                view.section = section;
+                cx.notify();
+            })
+        });
+        cx.run_until_parked();
+    }
+
+    /// The control holding the focus, as GPUI Kit's test observation sees it after a frame: a
+    /// button or checkbox by its element id, a text field as "text field", and "" when none of
+    /// those has it (a select box is not observed).
+    fn focused_control(cx: &mut VisualTestContext) -> String {
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+            let mut focused = test_support::snapshots(window).into_iter().filter_map(|control| {
+                let name = match control.role()? {
+                    Role::Button | Role::CheckBox => control.path().last()?.to_string(),
+                    Role::TextInput | Role::MultilineTextInput | Role::PasswordInput => "text field".to_owned(),
+                    _ => return None,
+                };
+                (control.focused() == Some(true)).then_some(name)
+            });
+            let control = focused.next().unwrap_or_default();
+            assert_eq!(focused.next(), None, "one control has the focus");
+            control
+        })
+    }
+
+    /// Press and release `key`: a focused button or checkbox acts on the release.
+    fn press(key: &str, cx: &mut VisualTestContext) {
+        let keystroke = cx.update(|_, cx| gpui_kit::Keystroke::parse_with_os(key, cx.platform_info().os).expect("a key"));
+        let down = gpui_kit::KeyDownEvent { keystroke: keystroke.clone(), is_held: false, prefer_character_input: false };
+        cx.simulate_event(down);
+        cx.simulate_event(gpui_kit::KeyUpEvent { keystroke });
+    }
+
+    /// Press Tab until the control `id` has the focus.
+    fn tab_to(id: &str, cx: &mut VisualTestContext) {
+        for _ in 0..80 {
+            cx.simulate_keystrokes("tab");
+            if focused_control(cx) == id {
+                return;
+            }
+        }
+        panic!("Tab never reached {id}");
+    }
+
+    fn focus_field<S: Focusable + 'static>(field: &Entity<S>, cx: &mut VisualTestContext) {
+        cx.update(|window, cx| window.focus(&field.focus_handle(cx), cx));
+        cx.run_until_parked();
+    }
+
+    fn is_focused<S: Focusable + 'static>(field: &Entity<S>, cx: &mut VisualTestContext) -> bool {
+        cx.update(|window, cx| field.focus_handle(cx).is_focused(window))
+    }
+
+    /// Whether a select's menu is open.
+    fn menu_open(cx: &mut VisualTestContext) -> bool {
+        cx.update(|_, cx| gpui_kit::base::GlobalState::is_in_deferred_context(cx))
+    }
+
+    /// Tab and Shift+Tab move through the controls in document order, as Electron's native
+    /// controls do: the close button, the section tabs, the section's fields, Cancel and Save,
+    /// and round again.
+    #[gpui_kit::test]
+    fn tab_moves_through_the_controls_in_order(cx: &mut TestAppContext) {
+        let (cx, _, _view) = dialog(cx);
+        let mut expected = vec!["dialog-close"];
+        expected.extend(Section::ALL.map(Section::label));
+        // Font Size, Max Columns, Font Family, the Cursor Style select, the checkboxes.
+        expected.extend(["text field", "text field", "text field", "", "cursor-blink", "osc52", "show-raw-chars"]);
+        expected.extend(["cancel-settings", "save-settings", "dialog-close"]);
+        let mut reached = Vec::new();
+        for _ in &expected {
+            cx.simulate_keystrokes("tab");
+            reached.push(focused_control(cx));
+        }
+        assert_eq!(reached, expected);
+        cx.simulate_keystrokes("shift-tab");
+        assert_eq!(focused_control(cx), "save-settings");
+    }
+
+    /// Disabled controls are not tab stops: the sandbox checkboxes without bubblewrap, and a
+    /// criterion's "Reset to default" while the criterion is the default.
+    #[gpui_kit::test]
+    fn tab_skips_disabled_controls(cx: &mut TestAppContext) {
+        let (cx, _, view) = dialog(cx);
+        cx.update(|_, cx| view.update(cx, |view, _| view.sandbox = SandboxSupport::MissingBwrap));
+        show(Section::Sandbox, cx, &view);
+        tab_to("Debug", cx);
+        cx.simulate_keystrokes("tab");
+        assert_eq!(focused_control(cx), "cancel-settings");
+
+        show(Section::Llm, cx, &view);
+        let [working, next] = cx.update(|_, cx| [0, 1].map(|i| view.read(cx).inputs.criteria[i].clone()));
+        focus_field(&working, cx);
+        cx.simulate_keystrokes("tab");
+        assert!(is_focused(&next, cx), "the default criterion's reset is skipped");
+        focus_field(&working, cx);
+        cx.simulate_input("!");
+        cx.simulate_keystrokes("tab");
+        assert_eq!(focused_control(cx), "reset-criterion-0");
+    }
+
+    /// Space toggles a focused checkbox; Enter does not, as with a native one.
+    #[gpui_kit::test]
+    fn space_toggles_a_focused_checkbox_and_enter_does_not(cx: &mut TestAppContext) {
+        let (cx, _, view) = dialog(cx);
+        let blink = |cx: &mut VisualTestContext| cx.update(|_, cx| view.read(cx).draft.terminal.cursor_blink);
+        let before = blink(cx);
+        tab_to("cursor-blink", cx);
+        press("space", cx);
+        assert_eq!(blink(cx), !before);
+        press("enter", cx);
+        assert_eq!(blink(cx), !before);
+        assert_eq!(focused_control(cx), "cursor-blink");
+    }
+
+    /// Space or Enter presses a focused button: a section tab, "+ Add", Delete and the close
+    /// button.
+    #[gpui_kit::test]
+    fn space_or_enter_presses_a_focused_button(cx: &mut TestAppContext) {
+        let (cx, _, view) = dialog(cx);
+        let section = |cx: &mut VisualTestContext| cx.update(|_, cx| view.read(cx).section);
+        tab_to("LLM", cx);
+        press("space", cx);
+        assert_eq!(section(cx), Section::Llm);
+        tab_to("Terminal Profiles", cx);
+        press("enter", cx);
+        assert_eq!(section(cx), Section::TerminalProfiles);
+
+        let profiles = |cx: &mut VisualTestContext| cx.update(|_, cx| view.read(cx).profiles.current(cx).len());
+        let before = profiles(cx);
+        tab_to("term-add", cx);
+        press("space", cx);
+        press("enter", cx);
+        assert_eq!(profiles(cx), before + 2);
+        tab_to("term-0-delete", cx);
+        press("space", cx);
+        assert_eq!(profiles(cx), before + 1);
+
+        tab_to("dialog-close", cx);
+        press("enter", cx);
+        cx.run_until_parked();
+        assert!(!cx.update(|window, cx| window.has_active_dialog(cx)), "the dialog closed");
+    }
+
+    /// A focused select opens its menu on Space, ArrowDown or ArrowUp (as on macOS), not on
+    /// Enter. In the menu the arrows and Enter pick an option; Escape closes it. Either way the
+    /// select keeps the focus.
+    #[gpui_kit::test]
+    fn a_focused_select_opens_its_menu_from_the_keyboard(cx: &mut TestAppContext) {
+        let (cx, _, view) = dialog(cx);
+        let font_family = cx.update(|_, cx| view.read(cx).inputs.font_family.clone());
+        focus_field(&font_family, cx);
+        cx.simulate_keystrokes("tab");
+        assert_eq!(focused_control(cx), "", "the Cursor Style select");
+
+        press("enter", cx);
+        assert!(!menu_open(cx));
+        for key in ["space", "up", "down"] {
+            press(key, cx);
+            assert!(menu_open(cx), "{key} opens the menu");
+            cx.simulate_keystrokes("escape");
+            assert!(!menu_open(cx), "Escape closes it");
+        }
+        assert!(cx.update(|window, cx| window.has_active_dialog(cx)), "and not the dialog");
+
+        cx.simulate_keystrokes("space down down enter");
+        assert!(!menu_open(cx));
+        assert_eq!(cx.update(|_, cx| view.read(cx).draft.terminal.cursor_style), CursorStyle::Underline);
+        cx.simulate_keystrokes("tab");
+        assert_eq!(focused_control(cx), "cursor-blink", "the select had the focus back");
+    }
+
+    /// Tab in a textarea moves the focus on, and Shift+Tab back, without typing anything, as in
+    /// Chromium.
+    #[gpui_kit::test]
+    fn tab_in_a_textarea_moves_the_focus(cx: &mut TestAppContext) {
+        let (cx, _, view) = dialog(cx);
+        show(Section::Llm, cx, &view);
+        let prompt = cx.update(|_, cx| view.read(cx).inputs.analyzer_system_prompt.clone());
+        let text = |cx: &mut VisualTestContext| cx.update(|_, cx| prompt.read(cx).value().to_string());
+        let before = text(cx);
+        focus_field(&prompt, cx);
+        cx.simulate_keystrokes("tab");
+        assert_eq!(focused_control(cx), "reset-system-prompt");
+        cx.simulate_keystrokes("shift-tab");
+        assert!(is_focused(&prompt, cx));
+        cx.simulate_keystrokes("shift-tab");
+        assert!(!is_focused(&prompt, cx));
+        assert_eq!(text(cx), before);
+    }
+
+    /// A click on a `<label htmlFor>` focuses its control: "Classifier Provider" its select
+    /// (without opening it), a criterion's state its textarea, "Title Model" its field.
+    #[gpui_kit::test]
+    fn a_click_on_a_linked_label_focuses_its_control(cx: &mut TestAppContext) {
+        let tall = gpui_kit::Bounds::new(gpui_kit::point(px(0.), px(0.)), gpui_kit::size(px(1000.), px(4000.)));
+        let options = WindowOptions { window_bounds: Some(gpui_kit::WindowBounds::Windowed(tall)), ..Default::default() };
+        let (cx, _, view) = dialog_in(options, cx);
+        show(Section::Llm, cx, &view);
+        let click = |selector: &'static str, cx: &mut VisualTestContext| {
+            // The dialog takes the section's height, measured as it is drawn.
+            for _ in 0..2 {
+                cx.update(|window, cx| window.draw(cx).clear(cx));
+                cx.run_until_parked();
+            }
+            let bounds = cx.debug_bounds(selector).unwrap_or_else(|| panic!("{selector} is drawn"));
+            cx.simulate_click(bounds.center(), gpui_kit::Modifiers::default());
+        };
+        let (title_model, criterion) =
+            cx.update(|_, cx| (view.read(cx).inputs.title_model.clone(), view.read(cx).inputs.criteria[2].clone()));
+
+        click("title-model-label", cx);
+        assert!(is_focused(&title_model, cx));
+        click("criterion-label-2", cx);
+        assert!(is_focused(&criterion, cx));
+        click("classifier-provider-label", cx);
+        assert!(cx.update(|window, cx| view.read(cx).provider_focus.is_focused(window)));
+        assert!(!menu_open(cx));
+    }
+
+    /// The analyzer's controls carry Electron's accessible names: its `aria-label`s and the
+    /// labels linked with `htmlFor`.
+    #[gpui_kit::test]
+    fn the_analyzer_controls_have_electrons_accessible_names(cx: &mut TestAppContext) {
+        let (cx, _, view) = dialog(cx);
+        show(Section::Llm, cx, &view);
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+            let observed = test_support::snapshots(window);
+            let field_name = |field: gpui_kit::EntityId| {
+                let field = observed
+                    .iter()
+                    .find(|s| {
+                        s.path().contains(&ElementId::View(field))
+                            && matches!(s.role(), Some(Role::TextInput | Role::MultilineTextInput))
+                    })
+                    .expect("the field is drawn");
+                field.label().map(str::to_owned)
+            };
+            let inputs = &view.read(cx).inputs;
+            assert_eq!(field_name(inputs.analyzer_model.entity_id()).as_deref(), Some("Classifier Model"));
+            assert_eq!(field_name(inputs.title_model.entity_id()).as_deref(), Some("Title Model"));
+            for (index, (state, field)) in ClassifiedState::ALL.iter().zip(&inputs.criteria).enumerate() {
+                assert_eq!(field_name(field.entity_id()), Some(format!("{} criterion", state.as_str())));
+                let reset = test_support::find(window, &[], &ElementId::from(("reset-criterion", index)))
+                    .expect("the reset button is drawn");
+                assert_eq!(reset.label(), Some(format!("Reset {} criterion", state.as_str()).as_str()));
+            }
+
+            let provider = view.read(cx).provider_box(cx).into_element();
+            let mut node = gpui_kit::accesskit::Node::new(Role::ComboBox);
+            provider.write_a11y_info(&mut node);
+            assert_eq!(node.label(), Some("Classifier Provider"));
+        });
     }
 }

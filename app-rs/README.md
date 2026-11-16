@@ -100,8 +100,11 @@ Done (tested against a real in-process daemon unless noted):
   the next start, as Electron's), Toggle Full Screen, Reset Input, Minimize, Zoom,
   Bring All to Front, Help; its commands also work while a dialog has focus;
   off macOS the window draws the menu bar, and a focused terminal keeps the keys it encodes,
-  as with xterm.js), Exit and Kill Daemon; all 13 Settings sections; live reload when Electron
-  edits `settings.json`; close confirmation for unmerged workspaces; Window → Active Processes.
+  as with xterm.js), Exit and Kill Daemon; all 13 Settings sections, whose controls Tab reaches
+  as Electron's native ones (Space or Enter presses a button, Space toggles a checkbox, Space or
+  an arrow opens a select, Tab leaves a textarea, a linked label focuses its control); live
+  reload when Electron edits `settings.json`; close confirmation for unmerged workspaces;
+  Window → Active Processes.
 - **Connections (M4):** local + SSH sessions on the core connection manager (bootstrap,
   tunnel, reconnect with backoff, outdated-daemon refresh/accept), SSH connection picker with
   saved connections, remote directory browser, session pane with logs and port forwards.
@@ -295,11 +298,13 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   Stage (Electron lists it twice, each section with the staged hunks);
   the editor has no minimap and cannot open space between lines, so the Files viewer lists
   its file's review comments (and the comment box) in a panel under the editor instead of
-  Monaco's view zones; selects open a Kit menu, not the native popup; textareas have no
-  resize grip; GPUI has no backdrop filter, so the prefix-mode overlay does not blur what
-  is behind it; GPUI has no animated scrolling, so the Chat tab jumps to its last message
-  where Electron's smooth-scrolls there. Off macOS the menu bar is GPUI Kit's, drawn in the window (not GTK's), above
-  dialogs so that it stays usable while one is open, as GTK's is.
+  Monaco's view zones; selects open a Kit menu, not the native popup (a focused one has no
+  type-ahead); textareas have no resize grip; GPUI has no backdrop filter, so the prefix-mode
+  overlay does not blur what is behind it; GPUI has no animated scrolling, so the Chat tab
+  jumps to its last message where Electron's smooth-scrolls there; GPUI does not scroll a
+  focused control into view, so Tab can focus a Settings field below the panel's fold. Off
+  macOS the menu bar is GPUI Kit's, drawn in the window (not GTK's), above dialogs so that it
+  stays usable while one is open, as GTK's is.
 - The Comments tab's text (paths, code, comments, the generated prompt) is selected as GPUI
   Kit selects text: a selection over several lines copies a blank line as nothing, and a
   path cut short by its ellipsis cannot be selected (its tooltip shows it whole). A long
