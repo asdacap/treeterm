@@ -1704,17 +1704,19 @@ fn fill_run_menu(
     menu
 }
 
-/// The header's git buttons: status (`GitStatusButton`), pull (`GitPullButton`) and, for a
-/// child worktree on a branch, the GitHub pair (`GitHubButton`).
+/// `.workspace-action-btn:disabled`: half opacity and a not-allowed cursor, no click.
+fn disabled_action(button: gpui_kit::Stateful<gpui_kit::Div>) -> gpui_kit::Stateful<gpui_kit::Div> {
+    button.opacity(0.5).cursor_not_allowed()
+}
+
+/// The header's git buttons: status (`GitStatusButton`) and pull (`GitPullButton`).
 fn git_status_items(
     controller: &Entity<treeterm_model::git_controller::GitController>,
-    workspace: &Entity<treeterm_model::workspace_store::WorkspaceStore>,
-    github: bool,
     cx: &mut Context<AppView>,
 ) -> Vec<AnyElement> {
     use gpui_kit::component::Sizable as _;
-    use treeterm_core::git_status::{ParentConflicts, PullRequest, WorkingTree};
-    use treeterm_model::git_controller::{OpenGitHubState, PullState};
+    use treeterm_core::git_status::{ParentConflicts, WorkingTree};
+    use treeterm_model::git_controller::PullState;
     let c = colors(cx);
     let (status, refreshing, failures) = {
         let git = controller.read(cx);
@@ -1741,8 +1743,6 @@ fn git_status_items(
         (crate::ui::icon(IconName::Check, 14., green).into_any_element(), "Clean", "Working tree clean".into(), green.into(), gpui_kit::rgba(0x2ea04366).into())
     };
     let title = if failures.is_empty() { title } else { format!("{title}\n{}", failures.join("\n")) };
-    // `.workspace-action-btn:disabled`: half opacity and a not-allowed cursor, no click.
-    let disabled = |button: gpui_kit::Stateful<gpui_kit::Div>| button.opacity(0.5).cursor_not_allowed();
     let refresh = controller.clone();
     let mut items = vec![
         crate::ui::action_button("git-status", cx)
@@ -1753,7 +1753,7 @@ fn git_status_items(
             .child(label)
             .map(|button| {
                 if refreshing {
-                    disabled(button)
+                    disabled_action(button)
                 } else {
                     button.on_click(move |_, _, cx| refresh.update(cx, |git, cx| git.refresh(cx)))
                 }
@@ -1784,7 +1784,7 @@ fn git_status_items(
                         .child(div().text_size(px(10.)).font_weight(gpui_kit::FontWeight::SEMIBOLD).child(behind.to_string())),
                 )
                 .map(|button| match pull_state {
-                    PullState::Pulling => disabled(button),
+                    PullState::Pulling => disabled_action(button),
                     // `handlePull`: `alert(result.error)` when it fails.
                     PullState::Idle => button.on_click(move |_, window, cx| {
                         if let Some(outcome) = pull.update(cx, |git, cx| git.pull(cx)) {
@@ -1795,99 +1795,106 @@ fn git_status_items(
                 .into_any_element(),
         );
     }
-    if github {
-        let (pr, unresolved) = match &status.pull_request {
-            PullRequest::Found(pr) => (true, pr.unresolved_count()),
-            PullRequest::None => (false, 0),
-        };
-        // `.workspace-action-btn-github` (green) with a PR, `-github-comments` (amber) with
-        // unresolved threads.
-        let tint: Option<(u32, u32)> = if unresolved > 0 {
-            Some((0xd29922, 0xd2992226))
-        } else if pr {
-            Some((0x238636, 0x23863626))
-        } else {
-            None
-        };
-        let style = move |button: gpui_kit::Stateful<gpui_kit::Div>| match tint {
-            Some((fg, bg)) => button.text_color(gpui_kit::rgb(fg)).border_color(gpui_kit::rgb(fg)).bg(gpui_kit::rgba(bg)),
-            None => button,
-        };
-        let label = if unresolved > 0 {
-            format!("Address {unresolved} comment{}", if unresolved == 1 { "" } else { "s" })
-        } else if pr {
-            "Open PR".to_owned()
-        } else {
-            "Create PR".to_owned()
-        };
-        let main_title = if unresolved > 0 { label.clone() } else if pr { "Open GitHub PR".into() } else { "Create GitHub PR".into() };
-        let browser_title = if pr { "Open GitHub PR in browser" } else { "Open create PR page in browser" };
-        let fg = match tint {
-            Some((fg, _)) => gpui_kit::rgb(fg).into(),
-            None => c.text_primary,
-        };
-        let open = {
-            let controller = controller.clone();
-            move |window: &mut Window, cx: &mut App| {
-                // None: a click in the same frame as the one that started the lookup.
-                let Some(task) = controller.update(cx, |git, cx| git.open_github(cx)) else {
-                    return;
-                };
-                let handle = window.window_handle();
-                cx.spawn(async move |cx| match task.await {
-                    Ok(url) => cx.update(|cx| cx.open_url(&url)),
-                    Err(error) => match handle.update(cx, |_, window, cx| {
-                        use gpui_kit::component::WindowExt as _;
-                        window.push_notification(error, cx);
-                    }) {
-                        Ok(()) | Err(_) => {}
-                    },
-                })
-                .detach();
-            }
-        };
-        // `disabled={loading}` on both while the URL resolves, the comments path too.
-        let open_state = controller.read(cx).open_github_state();
-        let (main_open, comments_ws) = (open.clone(), workspace.clone());
-        items.push(
-            h_flex()
-                .child(
-                    style(crate::ui::action_button("github-main", cx))
-                        .rounded_r(px(0.))
-                        .tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(main_title.clone()).build(window, cx))
-                        .child(crate::ui::icon(IconName::Github, 14., fg))
-                        .child(label)
-                        .map(|button| match open_state {
-                            OpenGitHubState::Opening => disabled(button),
-                            OpenGitHubState::Idle => button.on_click(move |_, window, cx| {
-                                if unresolved > 0 {
-                                    comments_ws.update(cx, |w, cx| {
-                                        if w.open_or_focus_tab("github", cx).is_none() {
-                                            tracing::error!("the github application is not registered");
-                                        }
-                                    });
-                                } else {
-                                    main_open(window, cx);
-                                }
-                            }),
-                        }),
-                )
-                .child(
-                    style(crate::ui::action_button("github-browser", cx))
-                        .ml(px(1.))
-                        .px(px(6.))
-                        .rounded_l(px(0.))
-                        .tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(browser_title).build(window, cx))
-                        .child(crate::ui::icon(IconName::ExternalLink, 14., fg))
-                        .map(|button| match open_state {
-                            OpenGitHubState::Opening => disabled(button),
-                            OpenGitHubState::Idle => button.on_click(move |_, window, cx| open(window, cx)),
-                        }),
-                )
-                .into_any_element(),
-        );
-    }
     items
+}
+
+/// The GitHub pair (`GitHubButton`) of a child worktree on a branch: create or open its PR
+/// (or address its unresolved comments), and open that page in the browser.
+fn github_items(
+    controller: &Entity<treeterm_model::git_controller::GitController>,
+    workspace: &Entity<treeterm_model::workspace_store::WorkspaceStore>,
+    cx: &mut Context<AppView>,
+) -> AnyElement {
+    use treeterm_core::git_status::PullRequest;
+    use treeterm_model::git_controller::OpenGitHubState;
+    let (pr, unresolved) = match &controller.read(cx).status().pull_request {
+        PullRequest::Found(pr) => (true, pr.unresolved_count()),
+        PullRequest::None => (false, 0),
+    };
+    // `.workspace-action-btn-github` (green) with a PR, `-github-comments` (amber) with
+    // unresolved threads.
+    let tint: Option<(u32, u32)> = if unresolved > 0 {
+        Some((0xd29922, 0xd2992226))
+    } else if pr {
+        Some((0x238636, 0x23863626))
+    } else {
+        None
+    };
+    let style = move |button: gpui_kit::Stateful<gpui_kit::Div>| match tint {
+        Some((fg, bg)) => button.text_color(gpui_kit::rgb(fg)).border_color(gpui_kit::rgb(fg)).bg(gpui_kit::rgba(bg)),
+        None => button,
+    };
+    let label = if unresolved > 0 {
+        format!("Address {unresolved} comment{}", if unresolved == 1 { "" } else { "s" })
+    } else if pr {
+        "Open PR".to_owned()
+    } else {
+        "Create PR".to_owned()
+    };
+    let main_title = if unresolved > 0 { label.clone() } else if pr { "Open GitHub PR".into() } else { "Create GitHub PR".into() };
+    let browser_title = if pr { "Open GitHub PR in browser" } else { "Open create PR page in browser" };
+    let fg = match tint {
+        Some((fg, _)) => gpui_kit::rgb(fg).into(),
+        None => colors(cx).text_primary,
+    };
+    let open = {
+        let controller = controller.clone();
+        move |window: &mut Window, cx: &mut App| {
+            // None: a click in the same frame as the one that started the lookup.
+            let Some(task) = controller.update(cx, |git, cx| git.open_github(cx)) else {
+                return;
+            };
+            let handle = window.window_handle();
+            cx.spawn(async move |cx| match task.await {
+                Ok(url) => cx.update(|cx| cx.open_url(&url)),
+                Err(error) => match handle.update(cx, |_, window, cx| {
+                    use gpui_kit::component::WindowExt as _;
+                    window.push_notification(error, cx);
+                }) {
+                    Ok(()) | Err(_) => {}
+                },
+            })
+            .detach();
+        }
+    };
+    // `disabled={loading}` on both while the URL resolves, the comments path too.
+    let open_state = controller.read(cx).open_github_state();
+    let (main_open, comments_ws) = (open.clone(), workspace.clone());
+    h_flex()
+        .child(
+            style(crate::ui::action_button("github-main", cx))
+                .rounded_r(px(0.))
+                .tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(main_title.clone()).build(window, cx))
+                .child(crate::ui::icon(IconName::Github, 14., fg))
+                .child(label)
+                .map(|button| match open_state {
+                    OpenGitHubState::Opening => disabled_action(button),
+                    OpenGitHubState::Idle => button.on_click(move |_, window, cx| {
+                        if unresolved > 0 {
+                            comments_ws.update(cx, |w, cx| {
+                                if w.open_or_focus_tab("github", cx).is_none() {
+                                    tracing::error!("the github application is not registered");
+                                }
+                            });
+                        } else {
+                            main_open(window, cx);
+                        }
+                    }),
+                }),
+        )
+        .child(
+            style(crate::ui::action_button("github-browser", cx))
+                .ml(px(1.))
+                .px(px(6.))
+                .rounded_l(px(0.))
+                .tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(browser_title).build(window, cx))
+                .child(crate::ui::icon(IconName::ExternalLink, 14., fg))
+                .map(|button| match open_state {
+                    OpenGitHubState::Opening => disabled_action(button),
+                    OpenGitHubState::Idle => button.on_click(move |_, window, cx| open(window, cx)),
+                }),
+        )
+        .into_any_element()
 }
 
 fn centered(child: impl IntoElement) -> AnyElement {
@@ -2069,13 +2076,19 @@ fn workspace_header(
                 }),
         );
     }
-    if file.is_git_repo
-        && let Some(controller) = connected.session.read(cx).git_controller(id).cloned()
-    {
-        let github = file.is_worktree && !root && file.git_branch.is_some();
-        actions = actions.children(git_status_items(&controller, workspace, github, cx));
+    // Electron's order: status, Pull, Run, the GitHub pair, Merge/Abandon, Review, ×.
+    let git = connected.session.read(cx).git_controller(id).cloned().filter(|_| file.is_git_repo);
+    if let Some(controller) = &git {
+        actions = actions.children(git_status_items(controller, cx));
     }
     actions = actions.child(run_menu(connected, workspace, id, cx));
+    if let Some(controller) = &git
+        && file.is_worktree
+        && !root
+        && file.git_branch.is_some()
+    {
+        actions = actions.child(github_items(controller, workspace, cx));
+    }
     actions = actions.children(merge_menu(connected, workspace, id, cx));
     if root && file.is_git_repo {
         let review = workspace.clone();
