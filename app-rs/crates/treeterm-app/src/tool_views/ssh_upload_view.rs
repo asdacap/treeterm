@@ -5,7 +5,7 @@ use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::{Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{App, Context, Entity, FontWeight, Subscription, Window, div, px, rgb};
-use treeterm_model::tool_tabs::ssh_upload::{LinkStatus, SshUpload, UploadState, UploadTarget};
+use treeterm_model::tool_tabs::ssh_upload::{LinkStatus, SshUpload, SshUploadEvent, UploadState, UploadTarget};
 
 use crate::remote_dir_browser::{Inline, RemoteDirBrowserEvent};
 use crate::theme::colors;
@@ -45,7 +45,13 @@ impl SshUploadView {
             }
             cx.notify();
         });
-        Self { model, local_path, remote_dir, browser: Inline::Hidden, _subscriptions: vec![typed, observe] }
+        // An emptied directory refilled at a connection status change.
+        let refilled = cx.subscribe_in(&model, window, |view, _, event: &SshUploadEvent, window, cx| match event {
+            SshUploadEvent::RemoteDirRefilled(dir) => {
+                view.remote_dir.update(cx, |input, cx| input.set_value(dir.clone(), window, cx));
+            }
+        });
+        Self { model, local_path, remote_dir, browser: Inline::Hidden, _subscriptions: vec![typed, observe, refilled] }
     }
 
     /// "Choose file…": the native picker (local files), with its default "Open" button.
@@ -194,5 +200,33 @@ impl Render for SshUploadView {
                 ),
             )
             .children(banner)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui_kit::{TestAppContext, VisualTestContext};
+
+    use super::*;
+
+    #[gpui_kit::test]
+    fn a_refilled_directory_shows_in_its_field(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        cx.update(crate::theme::install);
+        let model = cx.new(|cx| SshUpload::new(None, cx));
+        let (view, cx) = cx.add_window_view({
+            let model = model.clone();
+            move |window, cx| SshUploadView::new(model, window, cx)
+        });
+        let field = |cx: &mut VisualTestContext| {
+            cx.update(|_, cx| view.read(cx).remote_dir.read(cx).value().to_string())
+        };
+        assert_eq!(field(cx), "");
+
+        cx.update(|_, cx| {
+            model.update(cx, |_, cx| cx.emit(SshUploadEvent::RemoteDirRefilled("/home/me".to_owned())));
+        });
+        cx.run_until_parked();
+        assert_eq!(field(cx), "/home/me");
     }
 }

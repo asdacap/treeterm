@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use gpui_kit::{App, AppContext as _, Context, Entity, Subscription, Task};
+use gpui_kit::{App, AppContext as _, Context, Entity, EventEmitter, Subscription, Task};
 use treeterm_core::connection::{ConnectionId, ConnectionTarget, StatusKind};
 use treeterm_core::fs::FsClient;
 
@@ -57,10 +57,22 @@ pub struct SshUpload {
     local_path: Option<PathBuf>,
     /// `None` until edited: the user's home directory on the host.
     remote_dir: Option<String>,
+    /// The connection as the tab last saw it: when it changes, an emptied directory is
+    /// refilled ([`refill`]).
+    seen: Option<UploadTarget>,
     upload: UploadState,
     _upload: Option<Task<()>>,
     _connection: Option<Subscription>,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SshUploadEvent {
+    /// The emptied directory was refilled with this one (the home directory on the host): an
+    /// input showing the directory takes it.
+    RemoteDirRefilled(String),
+}
+
+impl EventEmitter<SshUploadEvent> for SshUpload {}
 
 /// The Upload tabs' models of the ssh connections, by connection, workspace and tab. Each
 /// connection generation (every reconnect) builds its workspaces' tabs anew; an Upload tab
@@ -135,6 +147,17 @@ pub fn destination(remote_dir: &str, local: &Path) -> String {
     format!("{}/{}", remote_dir.trim().trim_end_matches('/'), basename(&local))
 }
 
+/// At a connection status event Electron sets the directory to `prev || /home/<user>`: a
+/// directory the user emptied (exactly empty: blanks are kept) is the home directory again.
+/// Whether it was refilled.
+pub fn refill(remote_dir: &mut Option<String>) -> bool {
+    if remote_dir.as_deref() == Some("") {
+        *remote_dir = None;
+        return true;
+    }
+    false
+}
+
 /// Where "Browse..." starts: the directory as typed, trimmed, else the user's home on the
 /// host (`remoteDir.trim() || /home/<user>`).
 pub fn browse_start(remote_dir: &str, target: &UploadTarget) -> String {
@@ -146,12 +169,34 @@ pub fn browse_start(remote_dir: &str, target: &UploadTarget) -> String {
 
 impl SshUpload {
     pub fn new(remote: Option<RemoteHost>, cx: &mut Context<Self>) -> Self {
-        // Follow the connection's status (connected, reconnecting, gone).
+        // Follow the connection's status (connected, reconnecting, gone). It is not read here:
+        // the tab can be made while the app store is being updated.
         let connection = remote
             .as_ref()
             .and_then(|remote| remote.app.upgrade())
-            .map(|app| cx.observe(&app, |_, _, cx| cx.notify()));
-        Self { remote, local_path: None, remote_dir: None, upload: UploadState::Idle, _upload: None, _connection: connection }
+            .map(|app| cx.observe(&app, |upload, _, cx| upload.app_changed(cx)));
+        Self {
+            remote,
+            local_path: None,
+            remote_dir: None,
+            seen: None,
+            upload: UploadState::Idle,
+            _upload: None,
+            _connection: connection,
+        }
+    }
+
+    /// The app store changed. A change of the connection's status is one of Electron's status
+    /// events, which refill an emptied directory; the app store changes far more often, and an
+    /// emptied field stays empty until then.
+    fn app_changed(&mut self, cx: &mut Context<Self>) {
+        let now = self.target(cx);
+        let changed = self.seen.as_ref().is_some_and(|seen| *seen != now);
+        self.seen = Some(now);
+        if changed && refill(&mut self.remote_dir) {
+            cx.emit(SshUploadEvent::RemoteDirRefilled(self.remote_dir(cx)));
+        }
+        cx.notify();
     }
 
     pub fn target(&self, cx: &App) -> UploadTarget {
@@ -279,6 +324,18 @@ mod tests {
         assert_eq!(down(connecting), "connecting");
         assert_eq!(down(ConnState::Reconnecting { attempt: 2, error: "lost".to_owned() }), "reconnecting");
         assert_eq!(down(ConnState::Failed { error: "refused".to_owned(), hash_mismatch: false }), "error");
+    }
+
+    #[test]
+    fn only_an_emptied_directory_is_refilled() {
+        let mut emptied = Some(String::new());
+        assert!(refill(&mut emptied));
+        assert_eq!(emptied, None);
+        for kept in [Some("  ".to_owned()), Some("/srv/drop".to_owned()), None] {
+            let mut dir = kept.clone();
+            assert!(!refill(&mut dir));
+            assert_eq!(dir, kept);
+        }
     }
 
     #[test]

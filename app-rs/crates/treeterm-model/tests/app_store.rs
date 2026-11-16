@@ -23,7 +23,7 @@ use treeterm_model::session_info::SessionInfo;
 use treeterm_model::session_store::{SessionState, SessionStore, WorkspaceEntry};
 use treeterm_model::settings_store::SettingsStore;
 use treeterm_model::system_monitor::{Metrics, POLL_INTERVAL, SystemMonitor};
-use treeterm_model::tool_tabs::ssh_upload::{LinkStatus, SshUpload, UploadState, UploadTarget};
+use treeterm_model::tool_tabs::ssh_upload::{LinkStatus, SshUpload, SshUploadEvent, UploadState, UploadTarget};
 use treeterm_model::traffic::{ConnectionTraffic, Reading, TrafficMeter};
 use treeterm_model::web_app::RemoteHost;
 use treeterm_model::workspace_store::{TabContent, WorkspaceStore};
@@ -1468,6 +1468,54 @@ fn the_upload_tab_keeps_its_file_directory_and_upload_result_across_a_reconnect(
     assert!(app.app.read_with(cx, |a, cx| kept(a, cx, "a", &tab)));
     rebuilt.update(cx, |w, cx| w.remove_tab(&tab, cx));
     assert!(!app.app.read_with(cx, |a, cx| kept(a, cx, "a", &tab)));
+}
+
+#[gpui_kit::test]
+fn an_emptied_upload_directory_is_the_home_directory_again_at_the_next_status_change(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    isolated_home();
+    let h = harness();
+    let app = app(cx, &h, None);
+    app.connect(cx);
+    app.restored(cx);
+    let host = remote_host(cx, &app);
+    let upload = cx.new(|cx| SshUpload::new(Some(host), cx));
+    let refilled = Rc::new(RefCell::new(Vec::new()));
+    let _refilled = cx.update(|cx| {
+        let refilled = refilled.clone();
+        cx.subscribe(&upload, move |_, event: &SshUploadEvent, _| refilled.borrow_mut().push(event.clone()))
+    });
+    let dir = |cx: &mut TestAppContext| upload.read_with(cx, |u, cx| u.remote_dir(cx));
+    assert_eq!(dir(cx), "/home/test");
+
+    // Emptied: it stays empty while the app changes but the connection's status does not.
+    upload.update(cx, |u, cx| u.set_remote_dir("", cx));
+    for _ in 0..2 {
+        app.app.update(cx, |_, cx| cx.notify());
+        cx.run_until_parked();
+    }
+    assert_eq!(dir(cx), "");
+    assert!(refilled.borrow().is_empty());
+
+    // The connection is lost: the home directory again.
+    app.refuse.store(true, Ordering::SeqCst);
+    app.tunnels.lock().unwrap().clear();
+    wait_until(cx, &app.app, |a| {
+        matches!(remote(a).map(|slot| &slot.state), Some(ConnState::Reconnecting { .. }))
+    });
+    cx.run_until_parked();
+    assert_eq!(dir(cx), "/home/test");
+    assert_eq!(*refilled.borrow(), [SshUploadEvent::RemoteDirRefilled("/home/test".to_owned())]);
+
+    // A typed directory, blanks too, stays through the reconnect.
+    upload.update(cx, |u, cx| u.set_remote_dir("  ", cx));
+    app.refuse.store(false, Ordering::SeqCst);
+    app.app.read_with(cx, |a, _| a.reconnect_now(&remote_id()));
+    wait_until(cx, &app.app, |a| matches!(remote(a).map(|slot| &slot.state), Some(ConnState::Connected(_))));
+    cx.run_until_parked();
+    assert_eq!(link(cx, &upload), LinkStatus::Connected);
+    assert_eq!(dir(cx), "  ");
+    assert_eq!(refilled.borrow().len(), 1);
 }
 
 #[gpui_kit::test]
