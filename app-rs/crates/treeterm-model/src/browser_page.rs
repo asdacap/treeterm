@@ -4,7 +4,7 @@
 
 use gpui_kit::{Context, EventEmitter, Task};
 
-use crate::apps::{forwarded_url, page_url, target_port};
+use crate::apps::{forwarded_url, page_url, parse_local_url, target_port};
 use crate::web_app::{RemoteHost, WebAppEvent, ensure_forward, forward_id_for_tab};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -84,23 +84,27 @@ impl BrowserPageModel {
     }
 
     fn start(&mut self, cx: &mut Context<Self>) {
-        let url = page_url(&self.home, &self.path);
-        let Some(remote) = self.remote.clone() else {
-            self.phase = BrowserPhase::Ready { url, home: self.home.clone() };
-            cx.notify();
-            return;
-        };
-        let port = match target_port(&self.home) {
-            Ok(port) => port,
+        // Checked before anything else, on this machine too: a start page that is not on
+        // localhost is an error with Retry, not a page that cannot be shown.
+        let home = match parse_local_url(&self.home) {
+            Ok(home) => home,
             Err(error) => {
                 self.phase = BrowserPhase::Error(error);
                 cx.notify();
                 return;
             }
         };
+        let port = target_port(&home);
+        let home = String::from(home);
+        let url = page_url(&home, &self.path);
+        let Some(remote) = self.remote.clone() else {
+            self.phase = BrowserPhase::Ready { url, home };
+            cx.notify();
+            return;
+        };
         self.phase = BrowserPhase::Forwarding { port };
         cx.notify();
-        let (tab_id, preferred, home) = (self.tab_id.clone(), self.local_port, self.home.clone());
+        let (tab_id, preferred) = (self.tab_id.clone(), self.local_port);
         let executor = cx.background_executor().clone();
         self._run = Some(cx.spawn(async move |this, cx| {
             let ready = async {

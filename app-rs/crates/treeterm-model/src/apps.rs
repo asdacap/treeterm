@@ -202,68 +202,24 @@ impl AppDef {
     }
 }
 
+/// `parseLocalUrl`: `url` as the WHATWG URL parser reads it (scheme and host lower-cased,
+/// surrounding spaces dropped, `127.1` read as `127.0.0.1`, ...) when it is http(s) on
+/// localhost or 127.0.0.1, the only pages a browser tab shows. The error names `url` as given.
+pub fn parse_local_url(url: &str) -> Result<url::Url, String> {
+    match url::Url::parse(url) {
+        Ok(parsed)
+            if matches!(parsed.scheme(), "http" | "https")
+                && matches!(parsed.host_str(), Some("localhost" | "127.0.0.1")) =>
+        {
+            Ok(parsed)
+        }
+        Ok(_) | Err(_) => Err(format!("URL must be http(s)://localhost or 127.0.0.1: {url}")),
+    }
+}
+
 /// Whether a page may load: http(s) on localhost or 127.0.0.1 only (`isAllowedWebviewUrl`).
 pub fn is_allowed_webview_url(url: &str) -> bool {
-    let Some((scheme, rest)) = url.split_once("://") else {
-        return false;
-    };
-    if scheme != "http" && scheme != "https" {
-        return false;
-    }
-    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
-    let host_port = authority.rsplit('@').next().unwrap_or_default();
-    let host = match host_port.strip_prefix('[') {
-        Some(_) => return false, // IPv6 literals are not on the list
-        None => host_port.split(':').next().unwrap_or_default(),
-    };
-    matches!(host.to_ascii_lowercase().as_str(), "localhost" | "127.0.0.1")
-}
-
-/// An http(s) URL split as the browser tab's address bar needs it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct PageUrl {
-    scheme: String,
-    host: String,
-    port: Option<u16>,
-    /// Path, query and fragment; at least `/`.
-    rest: String,
-}
-
-impl PageUrl {
-    fn parse(url: &str) -> Option<Self> {
-        let (scheme, after) = url.split_once("://")?;
-        let scheme = scheme.to_ascii_lowercase();
-        if scheme != "http" && scheme != "https" {
-            return None;
-        }
-        let end = after.find(['/', '?', '#']).unwrap_or(after.len());
-        let (authority, rest) = after.split_at(end);
-        let host_port = authority.rsplit('@').next().unwrap_or_default();
-        let (host, port) = match host_port.rsplit_once(':') {
-            Some((host, "")) => (host, None),
-            Some((host, port)) => (host, Some(port.parse::<u16>().ok()?)),
-            None => (host_port, None),
-        };
-        if host.is_empty() {
-            return None;
-        }
-        let rest = if rest.starts_with('/') { rest.to_owned() } else { format!("/{rest}") };
-        let default = if scheme == "https" { 443 } else { 80 };
-        let port = port.filter(|p| *p != default);
-        Some(Self { scheme, host: host.to_ascii_lowercase(), port, rest })
-    }
-
-    /// `targetPort`: the explicit port or the scheme's default.
-    fn target_port(&self) -> u16 {
-        self.port.unwrap_or(if self.scheme == "https" { 443 } else { 80 })
-    }
-
-    fn origin(&self) -> String {
-        match self.port {
-            Some(port) => format!("{}://{}:{port}", self.scheme, self.host),
-            None => format!("{}://{}", self.scheme, self.host),
-        }
-    }
+    parse_local_url(url).is_ok()
 }
 
 /// What was typed into a browser tab's address bar, resolved against the page it shows
@@ -275,16 +231,9 @@ pub fn resolve_address(input: &str, page_url: &str) -> Result<String, String> {
     if trimmed.is_empty() {
         return Err("Enter a URL or path".to_owned());
     }
-    let page = PageUrl::parse(page_url).ok_or_else(|| format!("Invalid page URL: {page_url}"))?;
-    let typed = if trimmed.starts_with(['/', '?', '#']) {
-        let path_end = page.rest.find(['?', '#']).unwrap_or(page.rest.len());
-        let query_end = page.rest.find('#').unwrap_or(page.rest.len());
-        let base = match trimmed.chars().next() {
-            Some('/') => "",
-            Some('?') => &page.rest[..path_end],
-            Some(_) | None => &page.rest[..query_end],
-        };
-        PageUrl { rest: format!("{base}{trimmed}"), ..page.clone() }
+    let page = url::Url::parse(page_url).map_err(|_| format!("Invalid page URL: {page_url}"))?;
+    let mut typed = if trimmed.starts_with(['/', '?', '#']) {
+        page.join(trimmed).map_err(|error| format!("Invalid address {trimmed}: {error}"))?
     } else {
         let has_scheme = trimmed.split_once("://").is_some_and(|(scheme, _)| {
             let mut chars = scheme.chars();
@@ -292,16 +241,14 @@ pub fn resolve_address(input: &str, page_url: &str) -> Result<String, String> {
                 && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '.' | '-'))
         });
         let absolute = if has_scheme { trimmed.to_owned() } else { format!("http://{trimmed}") };
-        match PageUrl::parse(&absolute) {
-            Some(url) if is_allowed_webview_url(&absolute) => url,
-            Some(_) | None => return Err(format!("URL must be http(s)://localhost or 127.0.0.1: {absolute}")),
-        }
+        parse_local_url(&absolute)?
     };
-    if typed.scheme != page.scheme || typed.target_port() != page.target_port() {
-        return Err(format!("Only pages on {} can be opened in this tab", page.origin()));
+    if typed.scheme() != page.scheme() || target_port(&typed) != target_port(&page) {
+        return Err(format!("Only pages on {} can be opened in this tab", page.origin().ascii_serialization()));
     }
-    let rest = typed.rest.clone();
-    Ok(format!("{}{rest}", PageUrl { host: page.host.clone(), ..typed }.origin()))
+    // The page's host is kept, so the forward's cookies and storage stay.
+    typed.set_host(page.host_str()).map_err(|error| format!("Invalid page URL {page_url}: {error}"))?;
+    Ok(typed.into())
 }
 
 /// The page a browser tab opens: its start page with the path it remembers (`pageUrl`).
@@ -310,26 +257,28 @@ pub fn page_url(home: &str, path: &str) -> String {
     format!("{}{separator}{path}", home.trim_end_matches('/'))
 }
 
-/// `targetPort`: the port a localhost page is served on (the scheme's default without one).
-pub fn target_port(url: &str) -> Result<u16, String> {
-    PageUrl::parse(url)
-        .filter(|_| is_allowed_webview_url(url))
-        .map(|page| page.target_port())
-        .ok_or_else(|| format!("URL must be http(s)://localhost or 127.0.0.1: {url}"))
+/// `targetPort`: the port a page is served on (the scheme's default without one).
+pub fn target_port(url: &url::Url) -> u16 {
+    url.port().unwrap_or(if url.scheme() == "https" { 443 } else { 80 })
 }
 
 /// `forwardedUrl`: the same path and query, through the local end of an ssh forward.
 pub fn forwarded_url(url: &str, local_port: u16) -> Result<String, String> {
-    let page = PageUrl::parse(url).ok_or_else(|| format!("Invalid page URL: {url}"))?;
-    let local = PageUrl { host: "localhost".to_owned(), port: Some(local_port), ..page };
-    Ok(format!("{}{}", local.origin(), local.rest))
+    let invalid = || format!("Invalid page URL: {url}");
+    let mut page = url::Url::parse(url).map_err(|_| invalid())?;
+    // Both fail only for a URL without a host (`mailto:`, `file:`, ...).
+    page.set_host(Some("localhost")).map_err(|_| invalid())?;
+    page.set_port(Some(local_port)).map_err(|()| invalid())?;
+    Ok(page.into())
 }
 
 /// The path, query and fragment of `url` when it is on `home`'s origin: what a browser tab
 /// remembers as its page (`rememberPage`).
 pub fn page_path(home: &str, url: &str) -> Option<String> {
-    let (home, page) = (PageUrl::parse(home)?, PageUrl::parse(url)?);
-    (home.origin() == page.origin()).then_some(page.rest)
+    match (url::Url::parse(home), url::Url::parse(url)) {
+        (Ok(home), Ok(page)) if home.origin() == page.origin() => Some(page[url::Position::BeforePath..].to_owned()),
+        (Ok(_) | Err(_), Ok(_) | Err(_)) => None,
+    }
 }
 
 /// What a browser tab shows once a page has loaded (`PageContent`).
@@ -630,12 +579,19 @@ mod tests {
         assert_eq!(page_url("http://localhost:3000", "/docs?x=1"), "http://localhost:3000/docs?x=1");
         assert_eq!(page_url("http://localhost:3000/", "docs"), "http://localhost:3000/docs");
         assert_eq!(page_url("http://localhost:3000/", ""), "http://localhost:3000");
-        assert_eq!(target_port("http://localhost:3000/a"), Ok(3000));
-        assert_eq!(target_port("http://127.0.0.1/"), Ok(80));
-        assert_eq!(target_port("https://localhost"), Ok(443));
-        assert!(target_port("http://example.com:3000/").is_err());
+        let port = |url: &str| target_port(&parse_local_url(url).unwrap());
+        assert_eq!(port("http://localhost:3000/a"), 3000);
+        assert_eq!(port("http://127.0.0.1/"), 80);
+        assert_eq!(port("https://localhost"), 443);
+        assert_eq!(port("https://localhost:443/"), 443);
+        assert_eq!(port("HTTP://127.1:3000/"), 3000);
         assert_eq!(forwarded_url("http://127.0.0.1:3000/a/b?q#h", 24567), Ok("http://localhost:24567/a/b?q#h".to_owned()));
         assert_eq!(forwarded_url("http://localhost", 24567), Ok("http://localhost:24567/".to_owned()));
+        // The scheme's default port is not written, as WHATWG URL serialises it.
+        assert_eq!(forwarded_url("http://127.0.0.1:3000/a", 80), Ok("http://localhost/a".to_owned()));
+        assert_eq!(forwarded_url("not a url", 24567), Err("Invalid page URL: not a url".to_owned()));
+        assert_eq!(forwarded_url("mailto:me@localhost", 24567), Err("Invalid page URL: mailto:me@localhost".to_owned()));
+        assert_eq!(forwarded_url("file:///etc/hosts", 24567), Err("Invalid page URL: file:///etc/hosts".to_owned()));
     }
 
     #[test]
@@ -683,12 +639,33 @@ mod tests {
             Err("Only pages on http://localhost:8765 can be opened in this tab".to_owned())
         );
         assert_eq!(resolve_address("http://localhost/", "http://localhost:80/").as_deref(), Ok("http://localhost/"));
+        // Full addresses parse as WHATWG URL does.
+        assert_eq!(resolve_address("HTTP://LOCALHOST:8765/c", "http://localhost:8765/").as_deref(), Ok("http://localhost:8765/c"));
+        assert_eq!(resolve_address("http://127.1:8765/c", page).as_deref(), Ok("http://localhost:8765/c"));
+        assert_eq!(resolve_address("localhost:8765/c", "http://127.0.0.1:8765/").as_deref(), Ok("http://127.0.0.1:8765/c"));
+        assert_eq!(
+            resolve_address("http://evil.com\\@localhost:8765/", page),
+            Err("URL must be http(s)://localhost or 127.0.0.1: http://evil.com\\@localhost:8765/".to_owned())
+        );
+        assert_eq!(
+            resolve_address("https://localhost:8765/", page),
+            Err("Only pages on http://localhost:8765 can be opened in this tab".to_owned())
+        );
+        assert_eq!(
+            resolve_address("//localhost:9000/x", page),
+            Err("Only pages on http://localhost:8765 can be opened in this tab".to_owned())
+        );
+        assert_eq!(resolve_address("/x", "not a url"), Err("Invalid page URL: not a url".to_owned()));
+        assert!(resolve_address("/x", "about:blank").unwrap_err().starts_with("Invalid address /x: "));
     }
 
     #[test]
     fn pages_are_remembered_only_on_the_home_origin() {
         assert_eq!(page_path("http://localhost:8765", "http://localhost:8765/a?b#c").as_deref(), Some("/a?b#c"));
+        assert_eq!(page_path("HTTP://LOCALHOST:8765/x", "http://localhost:8765/").as_deref(), Some("/"));
         assert_eq!(page_path("http://localhost:8765/x", "http://localhost:9000/a"), None);
+        assert_eq!(page_path("not a url", "http://localhost:8765/a"), None);
+        assert_eq!(page_path("http://localhost:8765/", "not a url"), None);
     }
 
     #[test]
@@ -735,13 +712,63 @@ mod tests {
 
     #[test]
     fn only_local_http_pages_are_allowed() {
-        assert!(is_allowed_webview_url("http://localhost:3000/app"));
-        assert!(is_allowed_webview_url("https://127.0.0.1/"));
-        assert!(!is_allowed_webview_url("https://example.com"));
-        assert!(!is_allowed_webview_url("http://localhost.evil.com"));
-        assert!(!is_allowed_webview_url("http://user@evil.com"));
-        assert!(!is_allowed_webview_url("file:///etc/passwd"));
-        assert!(!is_allowed_webview_url("javascript:alert(1)"));
+        // As WHATWG URL reads them: any case, surrounding spaces, IPv4 shorthands, escapes,
+        // and a special scheme without slashes.
+        let allowed = [
+            "http://localhost:3000/app",
+            "https://127.0.0.1/",
+            "HTTP://LOCALHOST:8080/",
+            "HTTP://localhost:3000",
+            "  http://localhost:3000  ",
+            "http://127.1/",
+            "http://127.1:3000/",
+            "http://0x7f.1/",
+            "http://0x7f000001/",
+            "http://%6Cocalhost/",
+            "http:localhost:8080",
+            "http://user:pass@localhost/",
+            "http://localhost\\x",
+        ];
+        for url in allowed {
+            assert!(is_allowed_webview_url(url), "{url}");
+        }
+        let refused = [
+            "https://example.com",
+            "http://localhost.evil.com",
+            "http://user@evil.com",
+            // A backslash ends the host in http(s): the host is evil.com.
+            "http://evil.com\\@localhost/",
+            "http://localhost:99999/",
+            "http://localhost:abc/",
+            "http://[::1]/",
+            "http://[::1]:3000/",
+            "http://localhost./",
+            "ftp://localhost/",
+            "localhost:8080",
+            "",
+            "file:///etc/passwd",
+            "javascript:alert(1)",
+        ];
+        for url in refused {
+            assert!(!is_allowed_webview_url(url), "{url}");
+        }
+    }
+
+    #[test]
+    fn local_urls_read_back_normalised_and_errors_name_the_url_as_given() {
+        let href = |url: &str| parse_local_url(url).map(String::from);
+        assert_eq!(href("HTTP://LOCALHOST:8080/a?b#c").as_deref(), Ok("http://localhost:8080/a?b#c"));
+        assert_eq!(href("  http://localhost:3000  ").as_deref(), Ok("http://localhost:3000/"));
+        assert_eq!(href("http://0x7f.1:80/").as_deref(), Ok("http://127.0.0.1/"));
+        assert_eq!(href("http:localhost:8080").as_deref(), Ok("http://localhost:8080/"));
+        assert_eq!(
+            href("http://localhost:99999/"),
+            Err("URL must be http(s)://localhost or 127.0.0.1: http://localhost:99999/".to_owned())
+        );
+        assert_eq!(
+            href(" https://example.com "),
+            Err("URL must be http(s)://localhost or 127.0.0.1:  https://example.com ".to_owned())
+        );
     }
 
     #[test]

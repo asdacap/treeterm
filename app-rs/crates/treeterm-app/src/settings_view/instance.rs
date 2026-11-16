@@ -5,7 +5,7 @@
 use treeterm_core::settings::{
     AiHarnessInstance, BrowserInstance, CustomRunnerInstance, Extra, TerminalInstance, WebAppInstance,
 };
-use treeterm_model::apps::is_allowed_webview_url;
+use treeterm_model::apps::parse_local_url;
 
 use super::form::{SandboxSupport, Section};
 
@@ -582,8 +582,7 @@ impl InstanceForm for BrowserInstance {
 
     /// `parseLocalUrl`'s error.
     fn problem(&self) -> Option<String> {
-        (!is_allowed_webview_url(&self.url))
-            .then(|| format!("URL must be http(s)://localhost or 127.0.0.1: {}", self.url))
+        parse_local_url(&self.url).err()
     }
 }
 
@@ -653,11 +652,27 @@ mod tests {
     #[test]
     fn browser_urls_must_be_local() {
         let mut browser = BrowserInstance::added("browser-1".into());
-        for url in ["http://localhost:3000/grafana", "https://127.0.0.1/"] {
+        // As WHATWG URL reads them (`parseLocalUrl`).
+        for url in [
+            "http://localhost:3000/grafana",
+            "https://127.0.0.1/",
+            "HTTP://localhost:3000",
+            " http://localhost:3000 ",
+            "http://127.1:3000/",
+            "http:localhost:8080",
+        ] {
             browser.url = url.into();
             assert_eq!(browser.problem(), None, "{url}");
         }
-        for url in ["http://example.com/", "file:///etc/passwd", "localhost:8080", ""] {
+        for url in [
+            "http://example.com/",
+            "file:///etc/passwd",
+            "localhost:8080",
+            "",
+            "http://localhost:99999/",
+            "http://localhost:abc/",
+            "http://evil.com\\@localhost/",
+        ] {
             browser.url = url.into();
             assert_eq!(browser.problem(), Some(format!("URL must be http(s)://localhost or 127.0.0.1: {url}")));
         }

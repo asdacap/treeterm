@@ -1595,6 +1595,50 @@ fn a_local_browser_tab_opens_its_remembered_page_directly(cx: &mut TestAppContex
     assert!(workspace.read_with(cx, |w, _| w.tab_content(&tab)).is_none());
 }
 
+/// A new tab of a Browser instance opening `url`, on a loaded local workspace: its page.
+fn local_browser_page(
+    cx: &mut TestAppContext,
+    url: &str,
+) -> (Harness, Entity<SessionStore>, Entity<treeterm_model::browser_page::BrowserPageModel>) {
+    let h = harness();
+    std::fs::write(h.daemon.workspaces_dir().join("a.json"), body("a", None)).unwrap();
+    publish(&h, &["a"]);
+    let settings = treeterm_core::settings::from_value(serde_json::json!({
+        "browser": { "instances": [{ "id": "docs", "name": "Docs", "icon": "B", "url": url, "isDefault": false }] }
+    }))
+    .unwrap();
+    let (conn, settings) = (h.conn.clone(), cx.new(|_| SettingsStore::in_memory(settings)));
+    let store = cx.new(|cx| SessionStore::new(conn, "client-a".into(), settings, None, cx));
+    wait_until(cx, &store, |s| loaded(s, "a"));
+    let workspace = store.read_with(cx, |s, _| ws(s, "a"));
+    let tab = workspace.update(cx, |w, cx| w.add_tab("browser-docs", cx)).unwrap();
+    let Some(TabContent::Browser { page, .. }) = workspace.read_with(cx, |w, _| w.tab_content(&tab)) else {
+        panic!("not a browser tab");
+    };
+    (h, store, page)
+}
+
+#[gpui_kit::test]
+fn a_browser_start_page_off_localhost_is_an_error_with_retry_on_this_machine_too(cx: &mut TestAppContext) {
+    use treeterm_model::browser_page::BrowserPhase;
+    cx.executor().allow_parking();
+    let (_h, _store, page) = local_browser_page(cx, "ftp://localhost/");
+    let error = BrowserPhase::Error("URL must be http(s)://localhost or 127.0.0.1: ftp://localhost/".into());
+    assert_eq!(page.read_with(cx, |p, _| p.phase().clone()), error);
+    page.update(cx, |p, cx| p.retry(cx));
+    assert_eq!(page.read_with(cx, |p, _| p.phase().clone()), error);
+}
+
+#[gpui_kit::test]
+fn a_browser_start_page_opens_as_whatwg_url_reads_it(cx: &mut TestAppContext) {
+    use treeterm_model::browser_page::BrowserPhase;
+    cx.executor().allow_parking();
+    let (_h, _store, page) = local_browser_page(cx, " HTTP://LOCALHOST:3000/grafana ");
+    let home = "http://localhost:3000/grafana";
+    let ready = BrowserPhase::Ready { url: home.into(), home: home.into() };
+    assert_eq!(page.read_with(cx, |p, _| p.phase().clone()), ready);
+}
+
 #[gpui_kit::test]
 fn auto_open_adopts_worktrees_under_their_detected_parents(cx: &mut TestAppContext) {
     use treeterm_model::session_store::AutoOpenItem;
