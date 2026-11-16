@@ -54,7 +54,7 @@ pub const MAX_VIEW_BYTES: u64 = treeterm_core::files::MAX_READ_FILE_BYTES;
 pub const NAME_SEARCH_DEBOUNCE: Duration = Duration::from_millis(300);
 
 pub use crate::definition::DefinitionLookup;
-use crate::definition::{Begin, DefinitionProbe, Settled};
+use crate::definition::{Begin, DefinitionProbe, Navigate, Settled};
 pub use crate::search_panel::{REPO_SEARCH_DEBOUNCE, RepoResults, SearchRow};
 use crate::search_panel::{count_label, push_repo_section, spawn_repo_search};
 
@@ -1291,6 +1291,16 @@ impl FileBrowser {
     /// Look up the definition of the word at byte `offset` of the open file: one result
     /// opens, several are offered to choose from.
     pub fn go_to_definition(&mut self, offset: usize, cx: &mut Context<Self>) {
+        self.look_up_definition(offset, Navigate::Go, cx);
+    }
+
+    /// Peek Definition at byte `offset`: the definitions found are offered to choose from,
+    /// even a lone one.
+    pub fn peek_definition(&mut self, offset: usize, cx: &mut Context<Self>) {
+        self.look_up_definition(offset, Navigate::Peek, cx);
+    }
+
+    fn look_up_definition(&mut self, offset: usize, navigate: Navigate, cx: &mut Context<Self>) {
         let FileView::Text { path, text } = &self.view else {
             return;
         };
@@ -1304,7 +1314,7 @@ impl FileBrowser {
                 let searched = symbol.clone();
                 self._definition = Some(cx.spawn(async move |this, cx| {
                     let result = search.await;
-                    match this.update(cx, |browser, cx| browser.on_definitions(searched, result, cx)) {
+                    match this.update(cx, |browser, cx| browser.on_definitions(searched, result, navigate, cx)) {
                         Ok(()) | Err(_) => {} // Err: tab closed
                     }
                 }));
@@ -1314,8 +1324,14 @@ impl FileBrowser {
         cx.notify();
     }
 
-    fn on_definitions(&mut self, symbol: String, result: Result<Vec<DefinitionLocation>, ExecError>, cx: &mut Context<Self>) {
-        self.definition = match crate::definition::settle(symbol, result) {
+    fn on_definitions(
+        &mut self,
+        symbol: String,
+        result: Result<Vec<DefinitionLocation>, ExecError>,
+        navigate: Navigate,
+        cx: &mut Context<Self>,
+    ) {
+        self.definition = match crate::definition::settle(symbol, result, navigate) {
             Settled::Go(location) => {
                 self.go_to_location(&location, cx);
                 DefinitionLookup::Idle

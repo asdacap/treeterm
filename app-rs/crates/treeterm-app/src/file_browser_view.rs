@@ -21,6 +21,7 @@ use std::rc::Rc;
 
 use gpui_kit::assets::IconName;
 use gpui_kit::component::Icon;
+use gpui_kit::component::native_menu::NativeMenu;
 use gpui_kit::component::input::{
     Copy as CopyText, Editor, EditorState, GutterDecoration, Input, InputEvent, InputState, RangeDecoration,
     RangeDecorationCollection, RangeDecorationStyle, Search, SelectAll, TextareaState,
@@ -50,7 +51,7 @@ use crate::ui::{self, ReadingOrder};
 mod markdown;
 mod vs_dark;
 
-actions!(file_browser, [GoToDefinition, SearchWord]);
+actions!(file_browser, [GoToDefinition, PeekDefinition, SearchWord]);
 
 /// The viewer and its editor.
 const VIEWER_CONTEXT: &str = "FileViewer";
@@ -59,6 +60,7 @@ const VIEWER_CONTEXT: &str = "FileViewer";
 /// the Editor tab), installed over the theme at start-up.
 pub fn bind_keys(cx: &mut App) {
     cx.bind_keys(definition_keys(VIEWER_CONTEXT));
+    cx.bind_keys([peek_key(VIEWER_CONTEXT)]);
     gpui_kit::component::Theme::global_mut(cx).highlight_theme = vs_dark::theme();
 }
 
@@ -74,6 +76,22 @@ pub(crate) fn definition_keys(context: &'static str) -> [KeyBinding; 4] {
         ["f12", "ctrl-f12", "ctrl-k f12", "ctrl-k ctrl-f12"]
     };
     keys.map(|keys| KeyBinding::new(keys, GoToDefinition, Some(context)))
+}
+
+/// Monaco's Peek Definition key in a code editor's key `context`: Alt+F12, Ctrl+Shift+F10
+/// on Linux.
+pub(crate) fn peek_key(context: &'static str) -> KeyBinding {
+    let keys = if cfg!(target_os = "linux") { "ctrl-shift-f10" } else { "alt-f12" };
+    KeyBinding::new(keys, PeekDefinition, Some(context))
+}
+
+/// Monaco's Peek submenu of a code editor's right-click menu: Peek Definition, where the
+/// file's language has go to definition (the submenu shows only then).
+pub(crate) fn peek_menu(menu: NativeMenu, has_definitions: bool) -> NativeMenu {
+    if !has_definitions {
+        return menu;
+    }
+    menu.submenu("Peek", NativeMenu::new().menu("Peek Definition", Box::new(PeekDefinition)))
 }
 
 /// Go-to-definition progress, failures and the pick list, over a code editor (the Files
@@ -145,10 +163,10 @@ pub(crate) fn definition_overlay<V: 'static>(
                             .px(px(8.))
                             .py(px(4.))
                             .text_size(px(ui::SMALL))
-                            .child(div().flex_1().text_color(secondary).child(format!(
-                                "{} definitions of '{symbol}'",
-                                locations.len()
-                            )))
+                            .child(div().flex_1().text_color(secondary).child(match locations.len() {
+                                1 => format!("1 definition of '{symbol}'"),
+                                count => format!("{count} definitions of '{symbol}'"),
+                            }))
                             .child(close(cx)),
                     )
                     .child(list)
@@ -902,6 +920,14 @@ impl FileBrowserView {
         self.model.update(cx, |m, cx| m.go_to_definition(offset, cx));
     }
 
+    fn on_peek_definition(&mut self, _: &PeekDefinition, _: &mut Window, cx: &mut Context<Self>) {
+        let Some(editor) = self.shown_editor(cx) else {
+            return;
+        };
+        let offset = editor.read(cx).cursor();
+        self.model.update(cx, |m, cx| m.peek_definition(offset, cx));
+    }
+
     /// Cmd/Ctrl+click goes to the definition, a click on a line number starts a comment
     /// there (`GUTTER_LINE_NUMBERS`): the press already put the cursor on the clicked word, or
     /// at the start of the clicked line. A press on an underlined definition already went
@@ -1574,6 +1600,7 @@ impl FileBrowserView {
     /// the file's review comments under it.
     fn text_body(&mut self, path: &str, text: &str, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let editor = self.editor_for(path, text, window, cx);
+        let has_definitions = treeterm_model::definition::has_definitions(path);
         // Monaco shows the search panel's matches only by selecting the chosen one.
         self.apply_reveal(&editor, window, cx);
         self.restore_scroll(path, &editor, window, cx);
@@ -1596,6 +1623,7 @@ impl FileBrowserView {
                     .min_h_0()
                     .key_context(VIEWER_CONTEXT)
                     .on_action(cx.listener(Self::on_go_to_definition))
+                    .on_action(cx.listener(Self::on_peek_definition))
                     .on_action(cx.listener(Self::on_search_word))
                     .children(overlay)
                     .child(
@@ -1616,8 +1644,9 @@ impl FileBrowserView {
                                 .h_full()
                                 .font_family(MONO)
                                 .text_size(px(14.))
-                                .context_menu(|menu, _, _| {
-                                    menu.menu("Go to Definition", Box::new(GoToDefinition))
+                                .context_menu(move |menu, _, _| {
+                                    let menu = menu.menu("Go to Definition", Box::new(GoToDefinition));
+                                    peek_menu(menu, has_definitions)
                                         .separator()
                                         .menu("Copy", Box::new(CopyText))
                                         .menu("Search", Box::new(SearchWord))

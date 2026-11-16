@@ -23,6 +23,7 @@ mod web_data;
 
 use std::ops::Range;
 
+use crate::indentation::Indentation;
 use crate::words::Trigger;
 
 /// How serious a problem is: Monaco draws errors red and warnings yellow.
@@ -91,6 +92,71 @@ pub fn completions(language: &str, text: &str, offset: usize, trigger: Trigger) 
         "json" => json::completions(text, offset, trigger),
         _ => None,
     }
+}
+
+/// A change to a text: the bytes `range` replaced with `text`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TextEdit {
+    pub range: Range<usize>,
+    pub text: String,
+}
+
+/// `text` with `edits` made (in order, none overlapping), and where `selection` goes: its
+/// ends move with the text around them, and an end inside a replaced range stays within it.
+pub fn apply_edits(text: &str, edits: &[TextEdit], selection: Range<usize>) -> (String, Range<usize>) {
+    let mut out = String::with_capacity(text.len());
+    let mut copied = 0;
+    for edit in edits {
+        out.push_str(&text[copied..edit.range.start]);
+        out.push_str(&edit.text);
+        copied = edit.range.end;
+    }
+    out.push_str(&text[copied..]);
+    let map = |at: usize| {
+        let mut moved = at;
+        for edit in edits.iter().rev() {
+            if edit.range.end <= at {
+                moved = moved + edit.text.len() - edit.range.len();
+            } else if edit.range.start < at {
+                moved = moved - (at - edit.range.start) + (at - edit.range.start).min(edit.text.len());
+            }
+        }
+        moved
+    };
+    (out, map(selection.start)..map(selection.end))
+}
+
+/// What Format Document or Format Selection formats.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FormatScope {
+    Document,
+    /// The lines a selection touches; with nothing selected, the cursor's line.
+    Selection(Range<usize>),
+}
+
+/// Whether Monaco formats a file of `language` (its worker has a formatter): the editable
+/// editor's right-click menu offers Format Document, and Format Selection, then.
+pub fn formats(language: &str) -> bool {
+    language == "json"
+}
+
+/// The edits that format `scope` of `text`, a file of Monaco's `language` the editor
+/// indents with `indentation`; none in a language without a formatter.
+pub fn format(language: &str, text: &str, scope: FormatScope, indentation: Indentation) -> Vec<TextEdit> {
+    if !formats(language) {
+        return Vec::new();
+    }
+    let range = match scope {
+        FormatScope::Document => None,
+        FormatScope::Selection(range) if range.is_empty() => {
+            let at = range.start.min(text.len());
+            let start = text[..at].rfind(['\n', '\r']).map_or(0, |index| index + 1);
+            let end = text[at..].find(['\n', '\r']).map_or(text.len(), |index| at + index);
+            Some(start..end)
+        }
+        FormatScope::Selection(range) => Some(range),
+    };
+    json::format(text, range, indentation)
 }
 
 /// The characters that ask a language worker for its completions as they are typed (its
@@ -240,6 +306,33 @@ mod tests {
         assert_eq!(completions("rust", "fn colo", 7, Trigger::Typing), None);
         // Where the worker has nothing, none: word suggestions take over.
         assert_eq!(completions("css", "a { color: r }", 12, Trigger::Typing), None);
+    }
+
+    #[test]
+    fn edits_are_made_and_the_selection_moves_with_the_text() {
+        let edits = [
+            TextEdit { range: 1..1, text: "\n  ".to_owned() },
+            TextEdit { range: 5..8, text: " ".to_owned() },
+        ];
+        let (text, selection) = apply_edits("{\"a\":   1}", &edits, 4..10);
+        assert_eq!(text, "{\n  \"a\": 1}");
+        // After an edit: moved by what it added or took; inside one: kept within it.
+        assert_eq!(selection, 7..11);
+        assert_eq!(apply_edits("abc", &[], 1..2), ("abc".to_owned(), 1..2));
+        let spaces = [TextEdit { range: 1..4, text: " ".to_owned() }];
+        assert_eq!(apply_edits("a   b", &spaces, 3..3), ("a b".to_owned(), 2..2));
+    }
+
+    #[test]
+    fn only_json_is_formatted_and_an_empty_selection_formats_its_line() {
+        let spaces = Indentation::MONACO_DEFAULT;
+        assert!(formats("json") && !formats("css") && !formats("rust"));
+        assert_eq!(format("rust", "fn  x", FormatScope::Document, spaces), []);
+        let text = "[1,\n[2,3]]";
+        let applied = |scope| apply_edits(text, &format("json", text, scope, spaces), 0..0).0;
+        assert_eq!(applied(FormatScope::Document), "[\n    1,\n    [\n        2,\n        3\n    ]\n]");
+        // The cursor on the second line: only its edits, from its indent.
+        assert_eq!(applied(FormatScope::Selection(5..5)), "[1,\n[\n    2,\n    3\n]\n]");
     }
 
     fn words_of(suggested: Suggested) -> Vec<String> {

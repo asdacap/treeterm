@@ -139,10 +139,14 @@ Done (tested against a real in-process daemon unless noted):
   three.js bundled by `assets/pdf-viewer/build.sh` and `assets/model-viewer/build.sh`),
   download, search panel (in file / in repo), find, go to
   definition (F12, Cmd/Ctrl+click, the context menu; a word with a definition is underlined
-  while Cmd/Ctrl is held over it), review comments (click a line number; commented lines
-  marked in the glyph margin); editor tab with go to definition, Change All Occurrences
-  (Cmd/Ctrl+F2) and suggestions while typing (Ctrl+Space asks): CSS, SCSS and Less property
-  names, HTML element, end tag and attribute names, else the file's words. Both code editors
+  while Cmd/Ctrl is held over it) and Peek Definition (Alt+F12, the Peek submenu), review
+  comments (click a line number; commented lines marked in the glyph margin); editor tab with
+  go to definition, Change All Occurrences (Cmd/Ctrl+F2), Format Document and Format
+  Selection for JSON (Shift+Alt+F, Cmd/Ctrl+K Cmd/Ctrl+F), and suggestions while typing
+  (Ctrl+Space asks; none in comments and strings; Enter or Tab takes one): CSS, SCSS and
+  Less property names, HTML element, end tag and attribute names, JSON keys and values the
+  file uses elsewhere, else the words of the file and of the workspace's other open files of
+  its language. Both code editors
   mark problems (their message on hover): JSON's (Monaco's JSON worker, ported), TypeScript
   and JavaScript syntax errors, and CSS lint warnings (empty rules, unknown and duplicate
   properties, unknown at-rules, incomplete `@font-face`); they paint CSS, SCSS and Less
@@ -439,31 +443,35 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   text's colour (Monaco's link is `#4E94CE`).
 - There are no language servers behind the code editors. Monaco's TypeScript / JavaScript
   service (semantic errors such as unresolved imports, IntelliSense, hover types, signature
-  help, references), JSON schemas (validation, completion, hover: a file whose root object
-  names a `$schema` gets no JSON completions, where Monaco's completes the keywords of the
-  JSON Schema drafts it has built in), hover documentation, CSS value and selector
-  completion, HTML attribute value and entity completion, and formatting are missing. A problem's hover shows its message without
-  the source and code Monaco adds after it (`json(513)`, `(1005)`). Picking an HTML end
-  tag typed on a line of its own does not move it to its start tag's indentation, as
-  Monaco's does. TypeScript and JavaScript syntax errors are read from GPUI Kit's tree-sitter
-  grammars, not TypeScript's parser: they are marked where the parse fails, as "';'
-  expected."-style messages or "Unexpected token.", and a `.tsx` file is read with JSX
-  (Monaco's worker reads it as plain TypeScript and marks the JSX). CSS files get the lint
-  warnings that read rules and declarations, not the CSS parser's errors; SCSS and Less files
-  get none. JSON whose arrays and objects nest more than 512 deep, and style sheets whose
-  blocks do, get no marks or colours (Monaco's workers give up only where JavaScript's stack
-  runs out, a few thousand and about a thousand levels deep). Colours are painted behind
-  their text, not as a swatch before it. A completed CSS property is inserted as `name: `
-  with the cursor after it (Monaco's snippet puts it between `:` and `;`). Other suggestions are the words of the file and of
-  the Editor tabs and Files viewers of the workspace with a file of its language open; what
-  is a comment or a string, where typing suggests nothing, is read from GPUI Kit's
-  tree-sitter grammars, not Monaco's tokenizers. The right-click menu has no Go to
-  References, Peek, Format Document or Command Palette.
-- Neither the Files viewer nor the Editor tab has Monaco's Peek Definition (Alt+F12, and
-  the Peek submenu of the right-click menu): GPUI Kit's editor has no view zones to show a
-  peek in. Open Definition to the Side (Cmd/Ctrl+K F12) goes to the definition as F12
-  does, as in Electron, whose editor opener opened it in a new Editor tab (there is no
-  split editor in either app).
+  help, references, rename, formatting), JSON schemas (validation, completion, hover: a file
+  whose root object names a `$schema` gets no JSON completions, where Monaco's completes
+  the keywords of the JSON Schema drafts it has built in), hover documentation, CSS value
+  and selector completion, the CSS parser's errors and value lint, HTML attribute value and
+  entity completion, matching tag highlights and tag rename, and the CSS and HTML formatters
+  are missing. A problem's hover shows its message without the source and code Monaco adds
+  after it (`json(513)`, `(1005)`). Picking an HTML end tag typed on a line of its own does
+  not move it to its start tag's indentation, as Monaco's does. TypeScript and JavaScript
+  syntax errors are read from GPUI Kit's tree-sitter grammars, not TypeScript's parser: they
+  are marked where the parse fails, as "';' expected."-style messages or "Unexpected
+  token.", and a `.tsx` file is read with JSX (Monaco's worker reads it as plain TypeScript
+  and marks the JSX). CSS files get the lint warnings that read rules and declarations, not
+  the CSS parser's errors; SCSS and Less files get none. JSON whose arrays and objects nest
+  more than 512 deep, and style sheets whose blocks do, get no marks or colours (Monaco's
+  workers give up only where JavaScript's stack runs out, a few thousand and about a
+  thousand levels deep). Colours are painted behind their text, not as a swatch before it,
+  and have no colour picker. A completed CSS property is inserted as `name: ` with the
+  cursor after it (Monaco's snippet puts it between `:` and `;`). Other suggestions are the
+  words of the file and of the Editor tabs and Files viewers of the workspace with a file of
+  its language open; what is a comment or a string, where typing suggests nothing, is read
+  from GPUI Kit's tree-sitter grammars, not Monaco's tokenizers. The Editor tab's
+  right-click menu has Format Document and Format Selection for JSON only, and no Go to
+  References, Peek References, Rename Symbol or Command Palette.
+- Peek Definition (Alt+F12, Ctrl+Shift+F10 on Linux, or the right-click menu's Peek
+  submenu) lists the definitions found above the code, as go to definition lists several,
+  not in Monaco's peek widget under the line (GPUI Kit's editor has no view zones to show a
+  peek in; Monaco's has no preview of grep's results either). Open Definition to the Side
+  (Cmd/Ctrl+K F12) goes to the definition as F12 does, as in Electron, whose editor opener
+  opened it in a new Editor tab (there is no split editor in either app).
 - The Files viewer's right-click Search reads the word under the cursor in the language
   there, as Monaco does (JavaScript or CSS in the `<script>` and `<style>` blocks of an HTML,
   Vue, Svelte or PHP file, a Markdown code fence's language), except in Less's backquoted

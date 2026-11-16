@@ -27,7 +27,7 @@ use treeterm_core::exec::{ExecApi, ExecError};
 use treeterm_core::fs::{FsClient, FsError, ReadOutcome, WriteGuard, WriteOutcome};
 use treeterm_core::search::{self, DefinitionLocation};
 
-use crate::definition::{Begin, DefinitionLookup, DefinitionProbe, Settled};
+use crate::definition::{Begin, DefinitionLookup, DefinitionProbe, Navigate, Settled};
 use crate::file_browser::{fs_error_text, fs_outcome, scroll_top_of, scroll_top_value};
 use crate::workspace_store::WorkspaceStore;
 
@@ -405,6 +405,16 @@ impl TextEditor {
     /// Look up the definition of the word at byte `offset` of the text as it is now: one
     /// result is gone to, several are offered to choose from.
     pub fn go_to_definition(&mut self, offset: usize, cx: &mut Context<Self>) {
+        self.look_up_definition(offset, Navigate::Go, cx);
+    }
+
+    /// Peek Definition at byte `offset`: the definitions found are offered to choose from,
+    /// even a lone one.
+    pub fn peek_definition(&mut self, offset: usize, cx: &mut Context<Self>) {
+        self.look_up_definition(offset, Navigate::Peek, cx);
+    }
+
+    fn look_up_definition(&mut self, offset: usize, navigate: Navigate, cx: &mut Context<Self>) {
         let EditorDoc::Ready { current, .. } = &self.doc else {
             return;
         };
@@ -418,7 +428,7 @@ impl TextEditor {
                 let searched = symbol.clone();
                 self._definition = Some(cx.spawn(async move |this, cx| {
                     let result = search.await;
-                    match this.update(cx, |editor, cx| editor.on_definitions(searched, result, cx)) {
+                    match this.update(cx, |editor, cx| editor.on_definitions(searched, result, navigate, cx)) {
                         Ok(()) | Err(_) => {} // Err: tab closed
                     }
                 }));
@@ -428,8 +438,14 @@ impl TextEditor {
         cx.notify();
     }
 
-    fn on_definitions(&mut self, symbol: String, result: Result<Vec<DefinitionLocation>, ExecError>, cx: &mut Context<Self>) {
-        self.definition = match crate::definition::settle(symbol, result) {
+    fn on_definitions(
+        &mut self,
+        symbol: String,
+        result: Result<Vec<DefinitionLocation>, ExecError>,
+        navigate: Navigate,
+        cx: &mut Context<Self>,
+    ) {
+        self.definition = match crate::definition::settle(symbol, result, navigate) {
             Settled::Go(location) => {
                 self.go_to_location(&location, cx);
                 DefinitionLookup::Idle

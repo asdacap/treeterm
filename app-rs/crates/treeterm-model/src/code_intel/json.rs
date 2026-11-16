@@ -17,9 +17,11 @@ use super::uri::{Uri, is_scheme};
 use super::{Problem, Severity};
 
 mod completion;
+mod format;
 
 pub use completion::completions;
 pub(super) use completion::TRIGGER_CHARACTERS;
+pub(super) use format::format;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Token {

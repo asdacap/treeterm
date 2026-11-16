@@ -3,6 +3,7 @@
 
 use gpui_kit::{AppContext as _, Entity, TestAppContext};
 use treeterm_core::review::{CommitAnchor, Freshness, LineAnchor, Resolution, Side};
+use treeterm_core::search::DefinitionLocation;
 use treeterm_model::file_browser::{
     Anchor, DefinitionLookup, Favourites, FileBrowser, FileView, Host, LineDraft, Listing, NAME_SEARCH_DEBOUNCE,
     NameResults, REPO_SEARCH_DEBOUNCE, RepoResults, SearchOpen, SearchOpened, SearchPanel, SearchRow, Star,
@@ -707,6 +708,41 @@ fn files_tab(cx: &mut TestAppContext, workspace: &Entity<WorkspaceStore>, state:
     };
     wait_until(cx, &browser, |b| matches!(b.view(), FileView::Text { .. }));
     (tab, browser)
+}
+
+#[gpui_kit::test]
+fn peek_definition_lists_even_a_lone_definition_and_the_chosen_one_opens(cx: &mut TestAppContext) {
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let repo = TempRepo::new(&h);
+    repo.write("src/a.rs", "pub fn helper() {}\n");
+    repo.write("src/b.rs", "fn main() {\n    helper();\n}\n");
+    repo.commit_all("files");
+    let store = open_store(cx, &h);
+    let workspace = open_repo_workspace(cx, &h, &store, &repo);
+    let lone = vec![DefinitionLocation { file_path: "src/a.rs".into(), line_number: 1 }];
+    let peeked = DefinitionLookup::Choose { symbol: "helper".into(), locations: lone };
+
+    // The Editor tab: listed, then opened in an Editor tab at its line when chosen.
+    let editor = open_editor(cx, &workspace, &format!("{}/src/b.rs", repo.root()));
+    let call = editor_text(cx, &editor).find("helper()").unwrap();
+    editor.update(cx, |e, cx| e.peek_definition(call, cx));
+    wait_until(cx, &editor, |e| !matches!(e.definition(), DefinitionLookup::Searching { .. }));
+    assert_eq!(editor.read_with(cx, |e, _| e.definition().clone()), peeked);
+    editor.update(cx, |e, cx| e.choose_definition(0, cx));
+    let opened: Vec<serde_json::Value> = editor_states(cx, &workspace)
+        .into_iter()
+        .filter(|state| state["filePath"].as_str().unwrap().ends_with("src/a.rs"))
+        .map(|state| state["scrollToLine"].clone())
+        .collect();
+    assert_eq!(opened, [serde_json::json!(1)]);
+
+    // The Files viewer lists it too.
+    let (_, browser) = files_tab(cx, &workspace, serde_json::json!({ "selectedPath": format!("{}/src/b.rs", repo.root()), "expandedDirs": [] }));
+    browser.update(cx, |b, cx| b.peek_definition(call, cx));
+    wait_until(cx, &browser, |b| !matches!(b.definition(), DefinitionLookup::Searching { .. }));
+    assert_eq!(browser.read_with(cx, |b, _| b.definition().clone()), peeked);
 }
 
 #[gpui_kit::test]

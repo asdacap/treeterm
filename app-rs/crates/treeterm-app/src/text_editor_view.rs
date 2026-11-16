@@ -30,29 +30,37 @@ use gpui_kit::{
     App, Context, Entity, FontWeight, KeyBinding, MouseButton, MouseUpEvent, PromptLevel, SharedString, Subscription,
     Window, actions, div, px, rgb,
 };
+use treeterm_model::code_intel::{self, FormatScope};
+use treeterm_model::indentation::{Indentation, guess_indentation};
 use treeterm_model::text_editor::{EditorDoc, SaveState, ScrollTarget, TextEditor};
 
 use crate::editor_hooks::Follow;
-use crate::file_browser_view::{GoToDefinition, PointerOver, language_for};
+use crate::file_browser_view::{GoToDefinition, PeekDefinition, PointerOver, language_for};
 use crate::theme::colors;
 use crate::ui;
 
-actions!(text_editor, [Save, ChangeAllOccurrences]);
+actions!(text_editor, [Save, ChangeAllOccurrences, FormatDocument, FormatSelection]);
 
 const CONTEXT: &str = "TextEditor";
 
 /// Cmd/Ctrl+S saves. Monaco's replace is Cmd+Alt+F on macOS (GPUI Kit's Cmd+Shift+F
 /// stays); elsewhere it is Ctrl+H, as in the Kit. F12 goes to the definition
-/// ([`crate::file_browser_view::definition_keys`]), Cmd/Ctrl+F2 changes all occurrences, and
-/// Ctrl+Space or Cmd/Ctrl+I (Alt+Escape on macOS) ask for suggestions, as in Monaco.
+/// ([`crate::file_browser_view::definition_keys`]), Alt+F12 peeks at it, Cmd/Ctrl+F2 changes
+/// all occurrences, Shift+Alt+F (Ctrl+Shift+I on Linux) formats the document and Cmd/Ctrl+K
+/// Cmd/Ctrl+F the selection, and Ctrl+Space or Cmd/Ctrl+I (Alt+Escape on macOS) ask for
+/// suggestions, as in Monaco.
 pub fn bind_keys(cx: &mut gpui_kit::App) {
     cx.bind_keys(crate::file_browser_view::definition_keys(CONTEXT));
+    cx.bind_keys([crate::file_browser_view::peek_key(CONTEXT)]);
     cx.bind_keys([KeyBinding::new("ctrl-space", ShowCompletions, Some(CONTEXT))]);
+    let format_document = if cfg!(target_os = "linux") { "ctrl-shift-i" } else { "shift-alt-f" };
+    cx.bind_keys([KeyBinding::new(format_document, FormatDocument, Some(CONTEXT))]);
     if cfg!(target_os = "macos") {
         cx.bind_keys([
             KeyBinding::new("cmd-s", Save, Some(CONTEXT)),
             KeyBinding::new("cmd-alt-f", Replace, Some(CONTEXT)),
             KeyBinding::new("cmd-f2", ChangeAllOccurrences, Some(CONTEXT)),
+            KeyBinding::new("cmd-k cmd-f", FormatSelection, Some(CONTEXT)),
             KeyBinding::new("cmd-i", ShowCompletions, Some(CONTEXT)),
             KeyBinding::new("alt-escape", ShowCompletions, Some(CONTEXT)),
         ]);
@@ -60,6 +68,7 @@ pub fn bind_keys(cx: &mut gpui_kit::App) {
         cx.bind_keys([
             KeyBinding::new("ctrl-s", Save, Some(CONTEXT)),
             KeyBinding::new("ctrl-f2", ChangeAllOccurrences, Some(CONTEXT)),
+            KeyBinding::new("ctrl-k ctrl-f", FormatSelection, Some(CONTEXT)),
             KeyBinding::new("ctrl-i", ShowCompletions, Some(CONTEXT)),
         ]);
     }
@@ -78,6 +87,9 @@ pub struct TextEditorView {
     definition_clicked: Rc<Cell<bool>>,
     /// The language worker's problems in the file, marked again at every change.
     problems: crate::editor_hooks::ProblemMarks,
+    /// What the editor indents with, read from the file when it opened (Monaco's model
+    /// options), which formatting indents with too.
+    indentation: Indentation,
     preview_scroll: gpui_kit::ScrollHandle,
     /// The tab is on screen ([`Self::set_visible`]).
     visible: bool,
@@ -96,6 +108,7 @@ impl TextEditorView {
             pointer_over: PointerOver::default(),
             definition_clicked: Rc::new(Cell::new(false)),
             problems,
+            indentation: Indentation::MONACO_DEFAULT,
             preview_scroll: gpui_kit::ScrollHandle::new(),
             visible: false,
             _subscriptions: vec![observe],
@@ -115,6 +128,7 @@ impl TextEditorView {
         let monaco_language = self.model.read(cx).language();
         let brackets = crate::file_browser_view::bracket_colors(&current, monaco_language);
         let links = crate::editor_hooks::link_underlines(&current);
+        self.indentation = guess_indentation(&current, Indentation::MONACO_DEFAULT);
         let editor = cx.new(|cx| crate::file_browser_view::code_editor(language, current, window, cx));
         self.gutter = Some(crate::file_browser_view::monaco_gutter(&editor, false, &self.pointer_over, cx));
         let brackets = editor.update(cx, |editor, cx| editor.create_decorations_collection(brackets, cx));
@@ -227,6 +241,28 @@ impl TextEditorView {
         self.model.update(cx, |m, cx| m.go_to_definition(offset, cx));
     }
 
+    fn on_peek_definition(&mut self, _: &PeekDefinition, _: &mut Window, cx: &mut Context<Self>) {
+        let Some(editor) = &self.editor else {
+            return;
+        };
+        let offset = editor.read(cx).cursor();
+        self.model.update(cx, |m, cx| m.peek_definition(offset, cx));
+    }
+
+    fn on_format_document(&mut self, _: &FormatDocument, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(editor) = &self.editor {
+            let language = self.model.read(cx).language();
+            format(editor, language, self.indentation, |_| FormatScope::Document, window, cx);
+        }
+    }
+
+    fn on_format_selection(&mut self, _: &FormatSelection, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(editor) = &self.editor {
+            let language = self.model.read(cx).language();
+            format(editor, language, self.indentation, FormatScope::Selection, window, cx);
+        }
+    }
+
     /// Cmd/Ctrl+click goes to the definition of the clicked word (the press put the cursor
     /// on it), unless the press went to an underlined definition, which already went there.
     fn on_editor_mouse_up(&mut self, event: &MouseUpEvent, _: &mut Window, cx: &mut Context<Self>) {
@@ -291,6 +327,34 @@ impl TextEditorView {
     }
 }
 
+/// Format `editor`'s text, a file of Monaco's `language` it indents with `indentation`: the
+/// document, or the part `scope` takes of the selection, as the language's worker does, as
+/// one undoable edit. The selection moves with the text around it, and the view stays where
+/// it was.
+fn format(
+    editor: &Entity<EditorState>,
+    language: &str,
+    indentation: Indentation,
+    scope: impl FnOnce(std::ops::Range<usize>) -> FormatScope,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let (text, selection, scroll) = {
+        let editor = editor.read(cx);
+        (editor.value().to_string(), editor.selected_range(), editor.scroll_offset())
+    };
+    let edits = code_intel::format(language, &text, scope(selection.clone()), indentation);
+    if edits.is_empty() {
+        return;
+    }
+    let (formatted, selection) = code_intel::apply_edits(&text, &edits, selection);
+    editor.update(cx, |editor, cx| {
+        editor.replace_all(formatted, window, cx);
+        editor.set_selected_range(selection, cx);
+        editor.set_scroll_offset(scroll, cx);
+    });
+}
+
 /// Take the suggestion selected in `editor`'s menu, if it shows one: whether it did.
 fn accept_suggestion(editor: &Entity<EditorState>, window: &mut Window, cx: &mut App) -> bool {
     if !editor.read(cx).completion_menu_state().open {
@@ -314,6 +378,7 @@ impl Render for TextEditorView {
         let saving = matches!(model.save_state(), SaveState::Saving);
         let (markdown, preview, language) = (model.is_markdown(), model.is_preview(), model.language());
         let (has_definitions, definition) = (model.has_definitions(), model.definition().clone());
+        let formats = code_intel::formats(language);
         let doc = model.doc().clone();
         let current = match doc {
             EditorDoc::Loading => return frame.child(ui::viewer_placeholder("Loading...", cx)).into_any_element(),
@@ -343,21 +408,28 @@ impl Render for TextEditorView {
                         |view: &mut Self, cx| view.model.update(cx, |m, cx| m.dismiss_definition(cx)),
                         cx,
                     );
-                    // Monaco's menu for an editable file: Go to Definition where the language
-                    // has it, Change All Occurrences, then the clipboard.
+                    // Monaco's menu for an editable file: Go to Definition and the Peek submenu
+                    // where the language has them, Change All Occurrences, Format Document
+                    // and (with a selection) Format Selection where it has a formatter, then
+                    // the clipboard.
+                    let selecting = editor.downgrade();
                     let editor_element = Editor::new(&editor)
                         .bordered(false)
                         .h_full()
                         .font_family("Menlo")
                         .text_size(px(14.))
-                        .context_menu(move |menu, _, _| {
+                        .context_menu(move |menu, _, cx| {
                             let menu = if has_definitions {
-                                menu.menu("Go to Definition", Box::new(GoToDefinition)).separator()
+                                let menu = menu.menu("Go to Definition", Box::new(GoToDefinition));
+                                crate::file_browser_view::peek_menu(menu, true).separator()
                             } else {
                                 menu
                             };
-                            menu.menu("Change All Occurrences", Box::new(ChangeAllOccurrences))
-                                .separator()
+                            let menu = menu.menu("Change All Occurrences", Box::new(ChangeAllOccurrences));
+                            let selected = selecting.upgrade().is_some_and(|editor| !editor.read(cx).selected_range().is_empty());
+                            let menu = if formats { menu.menu("Format Document", Box::new(FormatDocument)) } else { menu };
+                            let menu = if formats && selected { menu.menu("Format Selection", Box::new(FormatSelection)) } else { menu };
+                            menu.separator()
                                 .menu("Cut", Box::new(Cut))
                                 .menu("Copy", Box::new(CopyText))
                                 .menu("Paste", Box::new(Paste))
@@ -401,7 +473,10 @@ impl Render for TextEditorView {
             .key_context(CONTEXT)
             .on_action(cx.listener(Self::save))
             .on_action(cx.listener(Self::on_go_to_definition))
+            .on_action(cx.listener(Self::on_peek_definition))
             .on_action(cx.listener(Self::on_change_all))
+            .on_action(cx.listener(Self::on_format_document))
+            .on_action(cx.listener(Self::on_format_selection))
             .capture_action(cx.listener(Self::on_tab))
             .child(
                 h_flex()
@@ -562,10 +637,11 @@ food");
         assert_eq!(shown(&editor, cx), Some(vec!["fond".to_owned()]));
     }
 
-    /// A code editor in the Editor tab's key context, counting go to definition.
+    /// A code editor in the Editor tab's key context, counting go to definition and peek.
     struct DefinitionHost {
         editor: Entity<EditorState>,
         gone: usize,
+        peeked: usize,
     }
 
     impl Render for DefinitionHost {
@@ -573,6 +649,7 @@ food");
             div()
                 .key_context(CONTEXT)
                 .on_action(cx.listener(|host, _: &GoToDefinition, _, _| host.gone += 1))
+                .on_action(cx.listener(|host, _: &PeekDefinition, _, _| host.peeked += 1))
                 .w(px(400.))
                 .h(px(300.))
                 .child(Editor::new(&self.editor).h_full())
@@ -589,6 +666,7 @@ food");
         let (host, cx) = cx.add_window_view(|window, cx| DefinitionHost {
             editor: cx.new(|cx| EditorState::new(window, cx).language("rust").default_value(text)),
             gone: 0,
+            peeked: 0,
         });
         let editor = cx.update(|_, cx| host.read(cx).editor.clone());
         cx.update(|window, cx| editor.update(cx, |editor, cx| editor.focus(window, cx)));
@@ -599,7 +677,75 @@ food");
             cx.simulate_keystrokes(&keys);
         }
         assert_eq!(cx.update(|_, cx| host.read(cx).gone), 4);
+        // Peek Definition: Alt+F12 (Ctrl+Shift+F10 on Linux).
+        cx.simulate_keystrokes(if cfg!(target_os = "linux") { "ctrl-shift-f10" } else { "alt-f12" });
+        assert_eq!(cx.update(|_, cx| host.read(cx).peeked), 1);
         assert_eq!(cx.update(|_, cx| editor.read(cx).value().to_string()), text);
+    }
+
+    /// A code editor of Monaco's `language` in the Editor tab's key context, formatting as the
+    /// tab does.
+    struct FormatHost {
+        editor: Entity<EditorState>,
+        language: &'static str,
+    }
+
+    impl Render for FormatHost {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            let indentation = Indentation::MONACO_DEFAULT;
+            div()
+                .key_context(CONTEXT)
+                .on_action(cx.listener(move |host, _: &FormatDocument, window, cx| {
+                    format(&host.editor, host.language, indentation, |_| FormatScope::Document, window, cx);
+                }))
+                .on_action(cx.listener(move |host, _: &FormatSelection, window, cx| {
+                    format(&host.editor, host.language, indentation, FormatScope::Selection, window, cx);
+                }))
+                .w(px(400.))
+                .h(px(300.))
+                .child(Editor::new(&self.editor).h_full())
+        }
+    }
+
+    #[gpui_kit::test]
+    fn monacos_format_keys_format_a_json_document_or_the_selected_lines_undoably(cx: &mut gpui_kit::TestAppContext) {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            bind_keys(cx);
+        });
+        let text = "{\"a\":1,\n\"b\":[2,3]}";
+        let (host, cx) = cx.add_window_view(|window, cx| FormatHost {
+            editor: cx.new(|cx| EditorState::new(window, cx).language("json").default_value(text)),
+            language: "json",
+        });
+        let editor = cx.update(|_, cx| host.read(cx).editor.clone());
+        let b = text.find("\"b\"").unwrap();
+        cx.update(|window, cx| {
+            editor.update(cx, |editor, cx| {
+                editor.focus(window, cx);
+                editor.set_selected_range(b..b, cx);
+            });
+        });
+        cx.run_until_parked();
+        // Cmd/Ctrl+K Cmd/Ctrl+F with nothing selected: the cursor's line.
+        let secondary = if cfg!(target_os = "macos") { "cmd" } else { "ctrl" };
+        cx.simulate_keystrokes(&format!("{secondary}-k {secondary}-f"));
+        let (now, cursor) = text_and_cursor(&editor, cx);
+        assert_eq!(now, "{\"a\":1,\n\"b\": [\n    2,\n    3\n]\n}");
+        assert_eq!(cursor, b..b);
+        // Shift+Alt+F (Ctrl+Shift+I on Linux): the whole document, the cursor moving with it.
+        cx.simulate_keystrokes(if cfg!(target_os = "linux") { "ctrl-shift-i" } else { "shift-alt-f" });
+        let (now, cursor) = text_and_cursor(&editor, cx);
+        assert_eq!(now, "{\n    \"a\": 1,\n    \"b\": [\n        2,\n        3\n    ]\n}");
+        let b = now.find("\"b\"").unwrap();
+        assert_eq!(cursor, b..b);
+        // Undone in one step.
+        cx.simulate_keystrokes(if cfg!(target_os = "macos") { "cmd-z" } else { "ctrl-z" });
+        assert_eq!(text_and_cursor(&editor, cx).0, "{\"a\":1,\n\"b\": [\n    2,\n    3\n]\n}");
+        // A language without a formatter is left as it is.
+        host.update(cx, |host, _| host.language = "rust");
+        cx.simulate_keystrokes(if cfg!(target_os = "linux") { "ctrl-shift-i" } else { "shift-alt-f" });
+        assert_eq!(text_and_cursor(&editor, cx).0, "{\"a\":1,\n\"b\": [\n    2,\n    3\n]\n}");
     }
 
     #[gpui_kit::test]

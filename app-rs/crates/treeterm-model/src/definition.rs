@@ -72,6 +72,15 @@ pub fn begin(path: &str, text: &str, offset: usize) -> Begin {
     Begin::Search(Query { symbol: symbol.to_owned(), language })
 }
 
+/// How a definition lookup shows a lone definition: Go to Definition goes there, Peek
+/// Definition lists it, as either lists several (Monaco's peek widget, which TreeTerm shows
+/// as a list over the editor).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Navigate {
+    Go,
+    Peek,
+}
+
 /// What a finished search leads to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Settled {
@@ -81,12 +90,15 @@ pub enum Settled {
     Show(DefinitionLookup),
 }
 
-/// What the search for `symbol` found leads to.
-pub fn settle(symbol: String, result: Result<Vec<DefinitionLocation>, ExecError>) -> Settled {
+/// What the search for `symbol` found leads to, looked up to `navigate` there.
+pub fn settle(symbol: String, result: Result<Vec<DefinitionLocation>, ExecError>, navigate: Navigate) -> Settled {
     match result {
         Err(error) => Settled::Show(DefinitionLookup::Failed { symbol, error: error.to_string() }),
         Ok(locations) => match <[DefinitionLocation; 1]>::try_from(locations) {
-            Ok([location]) => Settled::Go(location),
+            Ok([location]) => match navigate {
+                Navigate::Go => Settled::Go(location),
+                Navigate::Peek => Settled::Show(DefinitionLookup::Choose { symbol, locations: vec![location] }),
+            },
             Err(locations) if locations.is_empty() => Settled::Show(DefinitionLookup::NotFound { symbol }),
             Err(locations) => Settled::Show(DefinitionLookup::Choose { symbol, locations }),
         },
@@ -174,17 +186,34 @@ mod tests {
 
     #[test]
     fn one_result_is_gone_to_and_others_are_shown() {
-        assert_eq!(settle("x".into(), Ok(vec![location("a.rs", 3)])), Settled::Go(location("a.rs", 3)));
-        assert_eq!(settle("x".into(), Ok(vec![])), Settled::Show(DefinitionLookup::NotFound { symbol: "x".into() }));
-        let two = vec![location("a.rs", 3), location("b.rs", 1)];
+        assert_eq!(settle("x".into(), Ok(vec![location("a.rs", 3)]), Navigate::Go), Settled::Go(location("a.rs", 3)));
         assert_eq!(
-            settle("x".into(), Ok(two.clone())),
-            Settled::Show(DefinitionLookup::Choose { symbol: "x".into(), locations: two })
+            settle("x".into(), Ok(vec![]), Navigate::Go),
+            Settled::Show(DefinitionLookup::NotFound { symbol: "x".into() })
         );
-        let failed = settle("x".into(), Err(ExecError::System("grep: not found".into())));
+        let two = vec![location("a.rs", 3), location("b.rs", 1)];
+        for navigate in [Navigate::Go, Navigate::Peek] {
+            assert_eq!(
+                settle("x".into(), Ok(two.clone()), navigate),
+                Settled::Show(DefinitionLookup::Choose { symbol: "x".into(), locations: two.clone() })
+            );
+        }
+        let failed = settle("x".into(), Err(ExecError::System("grep: not found".into())), Navigate::Go);
         assert!(
             matches!(&failed, Settled::Show(DefinitionLookup::Failed { symbol, error }) if symbol == "x" && error.contains("grep")),
             "{failed:?}"
+        );
+    }
+
+    #[test]
+    fn peek_lists_a_lone_definition() {
+        assert_eq!(
+            settle("x".into(), Ok(vec![location("a.rs", 3)]), Navigate::Peek),
+            Settled::Show(DefinitionLookup::Choose { symbol: "x".into(), locations: vec![location("a.rs", 3)] })
+        );
+        assert_eq!(
+            settle("x".into(), Ok(vec![]), Navigate::Peek),
+            Settled::Show(DefinitionLookup::NotFound { symbol: "x".into() })
         );
     }
 
