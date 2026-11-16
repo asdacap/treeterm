@@ -360,19 +360,33 @@ mod tests {
         }
     }
 
-    /// Draws until the scrollbars, which show a frame after the lists are laid out, are in.
-    fn settle(cx: &mut VisualTestContext) {
-        for _ in 0..3 {
-            cx.run_until_parked();
-            cx.update(|window, cx| window.draw(cx).clear(cx));
-        }
+    /// Draws a frame as the platform does when nothing else changes: only if the last one
+    /// asked for another. Whether it did.
+    fn next_frame(cx: &mut VisualTestContext) -> bool {
+        cx.update(|window, cx| {
+            let asked = window.simulate_next_frame(cx) > 0;
+            if asked {
+                window.draw(cx).clear(cx);
+            }
+            asked
+        })
     }
 
-    /// Dragging the thumb of one panel's results scrolls that list and not the other one,
-    /// whose scrollbar sees the same drag.
-    #[gpui_kit::test]
-    fn dragging_a_thumb_scrolls_only_its_own_results(cx: &mut TestAppContext) {
-        use gpui_kit::{Modifiers, MouseButton};
+    /// Draws a frame, as a change to the panes would, then the frames it asks for after it;
+    /// how many those were.
+    fn draw_panes(panes: &Entity<Panes>, cx: &mut VisualTestContext) -> usize {
+        panes.update(cx, |_, cx| cx.notify());
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let mut after = 0;
+        while next_frame(cx) {
+            after += 1;
+            assert!(after < 5, "the scrollbars keep asking for frames");
+        }
+        after
+    }
+
+    /// Two panes of [`searching_rows`], drawn with their scrollbars.
+    fn open_panes(cx: &mut TestAppContext) -> (Entity<Panes>, &mut VisualTestContext) {
         cx.update(gpui_kit::init);
         cx.update(crate::theme::install);
         let (panes, cx) = cx.add_window_view(|_, _| {
@@ -382,23 +396,59 @@ mod tests {
                 results
             }))
         });
-        settle(cx);
-        let offsets = |cx: &mut VisualTestContext| {
-            panes.read_with(cx, |panes, _| panes.0.each_ref().map(|results| results.list.scroll_px_offset_for_scrollbar().y))
-        };
-        assert_eq!(offsets(cx), [px(0.), px(0.)]);
+        // The bars are built before the rows are first laid out: they show in the frame
+        // asked for after.
+        assert_eq!(draw_panes(&panes, cx), 1);
+        (panes, cx)
+    }
 
-        // The first pane's thumb, at the top of the 10px track on its right.
-        let x = px(PANE - 5.);
-        cx.simulate_mouse_move(point(x, px(5.)), None, Modifiers::default());
-        cx.simulate_mouse_down(point(x, px(5.)), MouseButton::Left, Modifiers::default());
-        for y in [10., 30., 50.] {
-            cx.simulate_mouse_move(point(x, px(y)), MouseButton::Left, Modifiers::default());
+    fn offsets(panes: &Entity<Panes>, cx: &mut VisualTestContext) -> [gpui_kit::Pixels; 2] {
+        panes.read_with(cx, |panes, _| panes.0.each_ref().map(|results| results.list.scroll_px_offset_for_scrollbar().y))
+    }
+
+    /// Drags the thumb of the first pane (on the right of the pane, in its 10px track) from
+    /// `from` down to `to`, through `via`.
+    fn drag_first_thumb(from: f32, via: &[f32], to: f32, cx: &mut VisualTestContext) {
+        use gpui_kit::{Modifiers, MouseButton};
+        let at = |y: f32| point(px(PANE - 5.), px(y));
+        cx.simulate_mouse_move(at(from), None, Modifiers::default());
+        cx.simulate_mouse_down(at(from), MouseButton::Left, Modifiers::default());
+        for &y in via.iter().chain([&to]) {
+            cx.simulate_mouse_move(at(y), MouseButton::Left, Modifiers::default());
         }
-        cx.simulate_mouse_up(point(x, px(50.)), MouseButton::Left, Modifiers::default());
-        settle(cx);
+        cx.simulate_mouse_up(at(to), MouseButton::Left, Modifiers::default());
+    }
+
+    /// Dragging the thumb of one panel's results scrolls that list and not the other one,
+    /// whose scrollbar sees the same drag.
+    #[gpui_kit::test]
+    fn dragging_a_thumb_scrolls_only_its_own_results(cx: &mut TestAppContext) {
+        let (panes, cx) = open_panes(cx);
+        assert_eq!(offsets(&panes, cx), [px(0.), px(0.)]);
+
+        // From the top of the thumb.
+        drag_first_thumb(5., &[10., 30.], 50., cx);
         // Grabbed 10px below its top (where the drag starts) and moved 40px down a travel of
         // 80px (the viewport less the 20px shortest thumb): half the 580px the list scrolls.
-        assert_eq!(offsets(cx), [px(-290.), px(0.)]);
+        assert_eq!(offsets(&panes, cx), [px(-290.), px(0.)]);
+    }
+
+    /// Rows arriving off screen reach the thumb in the frame its bar asks for after the one
+    /// that laid them out, with nothing else drawing the window: dragging it to the bottom
+    /// then reaches the last of them.
+    #[gpui_kit::test]
+    fn the_thumb_follows_rows_arriving_off_screen(cx: &mut TestAppContext) {
+        let (panes, cx) = open_panes(cx);
+        let mut rows = searching_rows();
+        rows.pop();
+        rows.push(SearchRow::File("a.rs".into()));
+        rows.extend((1..=10).map(repo_hit));
+        panes.update(cx, |panes, _| panes.0[0].sync(&rows));
+        assert_eq!(draw_panes(&panes, cx), 1);
+        // Nothing changed: no frame is asked for.
+        assert_eq!(draw_panes(&panes, cx), 0);
+
+        drag_first_thumb(5., &[10., 100.], 200., cx);
+        assert_eq!(offsets(&panes, cx), [-max_offset(rows.len()), px(0.)]);
     }
 }

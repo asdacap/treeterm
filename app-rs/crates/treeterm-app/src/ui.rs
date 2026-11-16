@@ -1067,22 +1067,25 @@ pub fn scroll_area(id: impl Into<ElementId>, handle: &gpui_kit::ScrollHandle, co
 /// the content, as Chromium's does; its thumb can be dragged.
 pub fn scrollbar<H: gpui_kit::base::ScrollbarHandle + Clone>(id: impl Into<ElementId>, handle: &H, cx: &App) -> Vec<gpui_kit::AnyElement> {
     use gpui_kit::{Bounds, DragMoveEvent, point, px as pixels};
-    // The height shown, how far it scrolls and whether it does.
-    fn extent(handle: &impl gpui_kit::base::ScrollbarHandle) -> (f32, f32, bool) {
+    /// What the bar shows of `handle`: nothing when there is nothing to scroll, else the
+    /// height shown, how far it scrolls and how far it is scrolled.
+    fn extent(handle: &impl gpui_kit::base::ScrollbarHandle) -> Option<(f32, f32, f32)> {
         let viewport = f32::from(handle.viewport_bounds().size.height);
         let max = f32::from(handle.content_size().height) - viewport;
-        (viewport, max, max > 0. && viewport > 0.)
+        (max > 0. && viewport > 0.).then(|| (viewport, max, -f32::from(handle.offset().y)))
     }
     let id: ElementId = id.into();
-    let (viewport, max, overflowing) = extent(handle);
-    // Whether the bar shows is only known once the content is laid out (before the bar in
-    // its row): ask for another frame when it changes.
+    let shown = extent(handle);
+    // The bar is built from the content as it was last laid out; how it is now is only
+    // known once the content is laid out again (before the bar in its row). When the two
+    // differ (rows came or went, the bar itself took its 10px), ask for another frame. A
+    // refresh asked for while drawing is dropped, so it is asked for from the next frame.
     let probe = {
         let handle = handle.clone();
         gpui_kit::canvas(
             move |_: Bounds<gpui_kit::Pixels>, window, _| {
-                if extent(&handle).2 != overflowing {
-                    window.refresh();
+                if extent(&handle) != shown {
+                    window.on_next_frame(|window, _| window.refresh());
                 }
             },
             |_, _, _, _| {},
@@ -1090,11 +1093,11 @@ pub fn scrollbar<H: gpui_kit::base::ScrollbarHandle + Clone>(id: impl Into<Eleme
         .absolute()
         .size_0()
     };
-    let bar = overflowing.then(|| {
+    let bar = shown.map(|(viewport, max, scrolled)| {
         let content = viewport + max;
         let thumb = (viewport * viewport / content).max(20.);
         let travel = viewport - thumb;
-        let top = travel * (-f32::from(handle.offset().y) / max).clamp(0., 1.);
+        let top = travel * (scrolled / max).clamp(0., 1.);
         let c = colors(cx);
         let (thumb_color, hover) = (c.border, c.bg_hover);
         let (drag_handle, drag_id, thumb_id) = (handle.clone(), id.clone(), id);
