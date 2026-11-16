@@ -184,7 +184,8 @@ fn row(row: SearchRow, index: usize, actions: &PanelActions, cx: &App) -> AnyEle
 /// scrollbar.
 fn results_list(results: &ResultsList, item: impl FnMut(usize, &mut Window, &mut App) -> AnyElement + 'static, cx: &App) -> gpui_kit::Div {
     let list = list(results.list.clone(), item).flex_1().min_w_0().h_full();
-    h_flex().flex_1().min_h_0().child(list).children(ui::scrollbar(results.scrollbar_id(), &results.list, cx))
+    let bar = ui::scrollbar(results.scrollbar_id(), gpui_kit::Axis::Vertical, &results.list, cx);
+    h_flex().flex_1().min_h_0().child(list).children(bar)
 }
 
 /// `.search-panel`: the find bar over `rows`, a third of the height it is given.
@@ -431,6 +432,18 @@ mod tests {
         // Grabbed 10px below its top (where the drag starts) and moved 40px down a travel of
         // 80px (the viewport less the 20px shortest thumb): half the 580px the list scrolls.
         assert_eq!(offsets(&panes, cx), [px(-290.), px(0.)]);
+    }
+
+    /// A press on the empty track below the thumb pages that list down by 87.5% of what it
+    /// shows, as Chromium's; the other list stays where it is.
+    #[gpui_kit::test]
+    fn a_press_on_the_track_pages_only_its_own_results(cx: &mut TestAppContext) {
+        use gpui_kit::{Modifiers, MouseButton};
+        let (panes, cx) = open_panes(cx);
+        let below_thumb = point(px(PANE - 5.), px(90.));
+        cx.simulate_mouse_down(below_thumb, MouseButton::Left, Modifiers::default());
+        cx.simulate_mouse_up(below_thumb, MouseButton::Left, Modifiers::default());
+        assert_eq!(offsets(&panes, cx), [px(-87.), px(0.)]);
     }
 
     /// Rows arriving off screen reach the thumb in the frame its bar asks for after the one

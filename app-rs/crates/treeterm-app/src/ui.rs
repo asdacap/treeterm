@@ -5,8 +5,8 @@ use gpui_kit::assets::IconName;
 use gpui_kit::component::Icon;
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    App, ClickEvent, Div, ElementId, FocusHandle, Hsla, KeyBinding, KeyboardButton, KeyboardClickEvent, NoAction, Stateful,
-    Window, div, px, rgb,
+    Along as _, App, Axis, Bounds, ClickEvent, Div, ElementId, FocusHandle, Hsla, KeyBinding, KeyboardButton, KeyboardClickEvent,
+    NoAction, Pixels, Point, Stateful, Window, div, px, rgb,
 };
 
 use crate::theme::colors;
@@ -1366,15 +1366,15 @@ pub fn dialog_shadow() -> Vec<gpui_kit::BoxShadow> {
 /// `#f14c4c`: the Files and Editor tabs' error red (`.file-viewer-error`, `.file-tree-error`).
 pub const FILE_ERROR: u32 = 0xf14c4c;
 
-/// Width of Electron's `::-webkit-scrollbar`.
+/// Width of Electron's `::-webkit-scrollbar` (the height of a horizontal one).
 const SCROLLBAR: f32 = 10.;
 
-/// Dragging the thumb of the [`scrollbar`] named `id`, grabbed `grab` below its top (known
+/// Dragging the thumb of the [`scrollbar`] named `id`, grabbed `grab` from its start (known
 /// once the drag starts; the drag's value, not its view, reaches the moves).
 #[derive(Clone)]
 struct ThumbDrag {
     id: ElementId,
-    grab: std::rc::Rc<std::cell::Cell<gpui_kit::Pixels>>,
+    grab: std::rc::Rc<std::cell::Cell<Pixels>>,
 }
 
 impl gpui_kit::Render for ThumbDrag {
@@ -1392,33 +1392,187 @@ pub fn scroll_area(id: impl Into<ElementId>, handle: &gpui_kit::ScrollHandle, co
         .flex()
         .relative()
         .child(div().id(id.clone()).flex_1().min_w_0().h_full().overflow_y_scroll().track_scroll(handle).child(content))
-        .children(scrollbar(id, handle, cx))
+        .children(scrollbar(id, Axis::Vertical, handle, cx))
+}
+
+/// What a [`scrollbar`] shows of what its handle scrolls along its axis.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Extent {
+    /// The length shown.
+    viewport: f32,
+    /// How far it scrolls.
+    max: f32,
+    /// How far it is scrolled.
+    scrolled: f32,
+}
+
+impl Extent {
+    /// Nothing when there is nothing to scroll along `axis`.
+    fn of(handle: &impl gpui_kit::base::ScrollbarHandle, axis: Axis) -> Option<Self> {
+        let viewport = f32::from(handle.viewport_bounds().size.along(axis));
+        let max = f32::from(handle.content_size().along(axis)) - viewport;
+        (max > 0. && viewport > 0.).then(|| Self { viewport, max, scrolled: -f32::from(handle.offset().along(axis)) })
+    }
+
+    /// The thumb's length: the share of the track that is shown, at least 20px.
+    fn thumb(&self) -> f32 {
+        (self.viewport * self.viewport / (self.viewport + self.max)).max(20.)
+    }
+
+    /// How far along the track the thumb moves.
+    fn travel(&self) -> f32 {
+        self.viewport - self.thumb()
+    }
+
+    /// Where the thumb starts along the track.
+    fn thumb_start(&self) -> f32 {
+        self.travel() * (self.scrolled / self.max).clamp(0., 1.)
+    }
+
+    /// Which side of the thumb `at` (along the track, from its start) is; nothing on it.
+    fn side(&self, at: f32) -> Option<TrackSide> {
+        let start = self.thumb_start();
+        if at < start {
+            Some(TrackSide::Before)
+        } else if at >= start + self.thumb() {
+            Some(TrackSide::After)
+        } else {
+            None
+        }
+    }
+
+    /// Scrolled a page toward `side`: Chromium's `PageStep`, 87.5% of the length shown,
+    /// within the scroll range.
+    fn paged(&self, side: TrackSide) -> f32 {
+        let step = (self.viewport * 0.875).floor().max(1.);
+        match side {
+            TrackSide::Before => (self.scrolled - step).max(0.),
+            TrackSide::After => (self.scrolled + step).min(self.max),
+        }
+    }
+}
+
+/// Where on a [`scrollbar`]'s track a press lands: before or after the thumb.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum TrackSide {
+    Before,
+    After,
+}
+
+/// The side of the thumb `position` is on, on the `track` of a [`scrollbar`] along `axis`,
+/// with what the bar shows; nothing off the track or on the thumb.
+fn track_side(
+    handle: &impl gpui_kit::base::ScrollbarHandle,
+    axis: Axis,
+    track: Bounds<Pixels>,
+    position: Point<Pixels>,
+) -> Option<(Extent, TrackSide)> {
+    if !track.contains(&position) {
+        return None;
+    }
+    let extent = Extent::of(handle, axis)?;
+    Some((extent, extent.side(f32::from(position.along(axis) - track.origin.along(axis)))?))
+}
+
+/// Scrolls `handle`, showing `extent` along `axis`, a page toward `side`.
+fn page(handle: &impl gpui_kit::base::ScrollbarHandle, axis: Axis, extent: Extent, side: TrackSide, window: &mut Window) {
+    handle.set_offset(handle.offset().apply_along(axis, |_| px(-extent.paged(side))));
+    window.refresh();
+}
+
+/// Chromium's wait before a press held on a scrollbar's track pages again: the native
+/// theme's (`NSScrollerButtonDelay` on macOS).
+const TRACK_FIRST_REPEAT: std::time::Duration =
+    std::time::Duration::from_millis(if cfg!(target_os = "macos") { 500 } else { 250 });
+/// Chromium's wait between the pages that follow.
+const TRACK_REPEAT: std::time::Duration = std::time::Duration::from_millis(50);
+
+/// A press held on a [`scrollbar`]'s track: the pages that follow it. Dropping it (the button
+/// comes up, or the bar goes) stops them.
+#[derive(Default)]
+struct TrackPress(Option<gpui_kit::Task<()>>);
+
+/// Presses on the `track` of the [`scrollbar`] `id` along `axis`, off its thumb. As
+/// Chromium's (`Scrollbar::AutoscrollPressedPart`), one pages toward the pointer at once,
+/// then again after [`TRACK_FIRST_REPEAT`] and every [`TRACK_REPEAT`] while the button is
+/// held and the pointer is on that side of the thumb, so the thumb stops where it reaches
+/// the pointer.
+fn track_presses<H: gpui_kit::base::ScrollbarHandle + Clone>(id: ElementId, axis: Axis, handle: H) -> impl IntoElement {
+    use gpui_kit::{DispatchPhase, HitboxBehavior, MouseButton, MouseDownEvent, MouseUpEvent};
+    gpui_kit::canvas(
+        move |track, window, cx| {
+            let press = window.use_keyed_state((id, "track"), cx, |_, _| TrackPress::default());
+            (press, window.insert_hitbox(track, HitboxBehavior::Normal))
+        },
+        move |track, (press, hitbox), window, _| {
+            let released = press.clone();
+            window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
+                if phase != DispatchPhase::Bubble || event.button != MouseButton::Left || !hitbox.is_hovered(window) {
+                    return;
+                }
+                let Some((extent, side)) = track_side(&handle, axis, track, event.position) else {
+                    return;
+                };
+                page(&handle, axis, extent, side, window);
+                let handle = handle.clone();
+                let repeat = window.spawn(cx, async move |cx| {
+                    let mut wait = TRACK_FIRST_REPEAT;
+                    loop {
+                        cx.background_executor().timer(wait).await;
+                        wait = TRACK_REPEAT;
+                        let paged = cx.update(|window, _| {
+                            if let Some((extent, under)) = track_side(&handle, axis, track, window.mouse_position())
+                                && under == side
+                            {
+                                page(&handle, axis, extent, side, window);
+                            }
+                        });
+                        // The window closed.
+                        if paged.is_err() {
+                            return;
+                        }
+                    }
+                });
+                press.update(cx, |press, _| press.0 = Some(repeat));
+            });
+            window.on_mouse_event(move |event: &MouseUpEvent, phase, _, cx| {
+                if phase == DispatchPhase::Capture && event.button == MouseButton::Left {
+                    released.update(cx, |press, _| press.0 = None);
+                }
+            });
+        },
+    )
+    .absolute()
+    .size_full()
 }
 
 /// Electron's classic scrollbar (`::-webkit-scrollbar`: 10px, a `#3c3c3c` thumb rounded 5px
-/// on a clear track, `--bg-hover` under the pointer) for what `handle` scrolls vertically,
-/// to follow it in a row. While there is something to scroll, the bar takes its 10px from
-/// the content, as Chromium's does; its thumb can be dragged.
-pub fn scrollbar<H: gpui_kit::base::ScrollbarHandle + Clone>(id: impl Into<ElementId>, handle: &H, cx: &App) -> Vec<gpui_kit::AnyElement> {
-    use gpui_kit::{Bounds, DragMoveEvent, point, px as pixels};
-    /// What the bar shows of `handle`: nothing when there is nothing to scroll, else the
-    /// height shown, how far it scrolls and how far it is scrolled.
-    fn extent(handle: &impl gpui_kit::base::ScrollbarHandle) -> Option<(f32, f32, f32)> {
-        let viewport = f32::from(handle.viewport_bounds().size.height);
-        let max = f32::from(handle.content_size().height) - viewport;
-        (max > 0. && viewport > 0.).then(|| (viewport, max, -f32::from(handle.offset().y)))
-    }
-    let id: ElementId = id.into();
-    let shown = extent(handle);
+/// on a clear track, `--bg-hover` under the pointer) for what `handle` scrolls along `axis`,
+/// to follow it in a row (vertical) or a column (horizontal). While there is something to
+/// scroll, the bar takes its 10px from the content, as Chromium's does; its thumb can be
+/// dragged, and a press on its track pages (see [`track_presses`]).
+pub fn scrollbar<H: gpui_kit::base::ScrollbarHandle + Clone>(
+    id: impl Into<ElementId>,
+    axis: Axis,
+    handle: &H,
+    cx: &App,
+) -> Vec<gpui_kit::AnyElement> {
+    use gpui_kit::DragMoveEvent;
+    let name = match axis {
+        Axis::Vertical => "vertical",
+        Axis::Horizontal => "horizontal",
+    };
+    let id = ElementId::from((id.into(), name));
+    let shown = Extent::of(handle, axis);
     // The bar is built from the content as it was last laid out; how it is now is only
-    // known once the content is laid out again (before the bar in its row). When the two
-    // differ (rows came or went, the bar itself took its 10px), ask for another frame. A
+    // known once the content is laid out again (before the bar in its row or column). When
+    // the two differ (rows came or went, a bar took its 10px), ask for another frame. A
     // refresh asked for while drawing is dropped, so it is asked for from the next frame.
     let probe = {
         let handle = handle.clone();
         gpui_kit::canvas(
-            move |_: Bounds<gpui_kit::Pixels>, window, _| {
-                if extent(&handle) != shown {
+            move |_: Bounds<Pixels>, window, _| {
+                if Extent::of(&handle, axis) != shown {
                     window.on_next_frame(|window, _| window.refresh());
                 }
             },
@@ -1427,17 +1581,27 @@ pub fn scrollbar<H: gpui_kit::base::ScrollbarHandle + Clone>(id: impl Into<Eleme
         .absolute()
         .size_0()
     };
-    let bar = shown.map(|(viewport, max, scrolled)| {
-        let content = viewport + max;
-        let thumb = (viewport * viewport / content).max(20.);
-        let travel = viewport - thumb;
-        let top = travel * (scrolled / max).clamp(0., 1.);
+    let bar = shown.map(|extent| {
+        let (travel, max) = (extent.travel(), extent.max);
         let c = colors(cx);
         let (thumb_color, hover) = (c.border, c.bg_hover);
-        let (drag_handle, drag_id, thumb_id) = (handle.clone(), id.clone(), id);
-        div()
-            .w(pixels(SCROLLBAR))
-            .h_full()
+        let (drag_handle, drag_id, thumb_id) = (handle.clone(), id.clone(), id.clone());
+        let thumb = div()
+            .id((thumb_id.clone(), "thumb"))
+            .absolute()
+            .rounded(px(5.))
+            .bg(thumb_color)
+            .hover(move |d| d.bg(hover))
+            .on_drag(ThumbDrag { id: thumb_id, grab: Default::default() }, move |drag, grab, _, cx| {
+                drag.grab.set(grab.along(axis));
+                cx.new(|_| drag.clone())
+            });
+        let (start, length) = (px(extent.thumb_start()), px(extent.thumb()));
+        let (track, thumb) = match axis {
+            Axis::Vertical => (div().w(px(SCROLLBAR)).h_full(), thumb.top(start).w_full().h(length)),
+            Axis::Horizontal => (div().h(px(SCROLLBAR)).w_full(), thumb.left(start).h_full().w(length)),
+        };
+        track
             .flex_shrink_0()
             .relative()
             .on_drag_move(move |event: &DragMoveEvent<ThumbDrag>, window, cx| {
@@ -1445,25 +1609,13 @@ pub fn scrollbar<H: gpui_kit::base::ScrollbarHandle + Clone>(id: impl Into<Eleme
                 if drag.id != drag_id || travel <= 0. {
                     return;
                 }
-                let at = f32::from(event.event.position.y - event.bounds.top() - drag.grab.get()).clamp(0., travel);
-                drag_handle.set_offset(point(drag_handle.offset().x, pixels(-(max * at / travel))));
+                let along = event.event.position.along(axis) - event.bounds.origin.along(axis) - drag.grab.get();
+                let at = f32::from(along).clamp(0., travel);
+                drag_handle.set_offset(drag_handle.offset().apply_along(axis, |_| px(-(max * at / travel))));
                 window.refresh();
             })
-            .child(
-                div()
-                    .id((thumb_id.clone(), "thumb"))
-                    .absolute()
-                    .top(pixels(top))
-                    .w_full()
-                    .h(pixels(thumb))
-                    .rounded(pixels(5.))
-                    .bg(thumb_color)
-                    .hover(move |d| d.bg(hover))
-                    .on_drag(ThumbDrag { id: thumb_id, grab: Default::default() }, |drag, grab, _, cx| {
-                        drag.grab.set(grab.y);
-                        cx.new(|_| drag.clone())
-                    }),
-            )
+            .child(thumb)
+            .child(track_presses(id, axis, handle.clone()))
             .into_any_element()
     });
     let mut parts = vec![probe.into_any_element()];
@@ -2320,5 +2472,180 @@ mod tests {
         assert!(cx.debug_bounds("rows").is_none());
         show(true, cx);
         assert_eq!(f32::from(area("rows", cx).size.height), 78.);
+    }
+
+    /// A 100×100 box scrolling 1000px of content along `axis`, with its [`scrollbar`]: the
+    /// thumb is 20px long (the shortest), travels 80px over the 900px scrolled, and a page is
+    /// 87px.
+    struct Scrolled {
+        axis: Axis,
+        handle: gpui_kit::ScrollHandle,
+    }
+
+    impl Render for Scrolled {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            let (axis, handle) = (self.axis, &self.handle);
+            match axis {
+                Axis::Vertical => div().size(px(100.)).child(scroll_area("scrolled", handle, div().w_full().h(px(1000.)), cx)),
+                Axis::Horizontal => div().size(px(100.)).flex().flex_col().child(
+                    div()
+                        .id("scrolled")
+                        .flex_1()
+                        .min_h_0()
+                        .overflow_x_scroll()
+                        .track_scroll(handle)
+                        .child(div().h_full().w(px(1000.)).flex_none()),
+                ),
+            }
+            .children(match axis {
+                Axis::Vertical => Vec::new(),
+                Axis::Horizontal => scrollbar("scrolled", axis, handle, cx),
+            })
+        }
+    }
+
+    /// The window drawn, and the frames it asks for after (the bar shows in the second).
+    fn draw_settled(cx: &mut VisualTestContext) {
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        for _ in 0..5 {
+            let asked = cx.update(|window, cx| window.simulate_next_frame(cx) > 0);
+            if !asked {
+                return;
+            }
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+        }
+        panic!("the scrollbar keeps asking for frames");
+    }
+
+    fn scrolled(axis: Axis, cx: &mut TestAppContext) -> (Entity<Scrolled>, &mut VisualTestContext) {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            crate::theme::install(cx);
+        });
+        let (view, cx) = cx.add_window_view(|_, _| Scrolled { axis, handle: gpui_kit::ScrollHandle::new() });
+        draw_settled(cx);
+        (view, cx)
+    }
+
+    /// How far the box is scrolled along its axis.
+    fn scrolled_by(view: &Entity<Scrolled>, cx: &mut VisualTestContext) -> f32 {
+        view.read_with(cx, |view, _| -f32::from(view.handle.offset().along(view.axis)))
+    }
+
+    /// The point `at` along the bar of a [`Scrolled`] along `axis`, in the middle of its 10px.
+    fn on_bar(axis: Axis, at: f32) -> Point<Pixels> {
+        match axis {
+            Axis::Vertical => gpui_kit::point(px(95.), px(at)),
+            Axis::Horizontal => gpui_kit::point(px(at), px(95.)),
+        }
+    }
+
+    /// Chromium's press on the track: a page (87.5% of the length shown) toward the pointer,
+    /// either way; a press on the thumb pages nothing.
+    fn a_press_on_the_track_pages_toward_the_pointer(axis: Axis, cx: &mut TestAppContext) {
+        use gpui_kit::{Modifiers, MouseButton};
+        let (view, cx) = scrolled(axis, cx);
+        let click = |at: f32, cx: &mut VisualTestContext| {
+            cx.simulate_mouse_down(on_bar(axis, at), MouseButton::Left, Modifiers::none());
+            cx.simulate_mouse_up(on_bar(axis, at), MouseButton::Left, Modifiers::none());
+            draw_settled(cx);
+        };
+        click(10., cx);
+        assert_eq!(scrolled_by(&view, cx), 0., "on the thumb");
+        click(90., cx);
+        assert_eq!(scrolled_by(&view, cx), 87., "a page on");
+        click(90., cx);
+        assert_eq!(scrolled_by(&view, cx), 174.);
+        // The thumb starts 80 × 174/900 = 15.5px along the track.
+        click(5., cx);
+        assert_eq!(scrolled_by(&view, cx), 87., "a page back");
+        click(5., cx);
+        assert_eq!(scrolled_by(&view, cx), 0., "no further than the start");
+    }
+
+    #[gpui_kit::test]
+    fn a_press_on_a_vertical_track_pages_toward_the_pointer(cx: &mut TestAppContext) {
+        a_press_on_the_track_pages_toward_the_pointer(Axis::Vertical, cx);
+    }
+
+    #[gpui_kit::test]
+    fn a_press_on_a_horizontal_track_pages_toward_the_pointer(cx: &mut TestAppContext) {
+        a_press_on_the_track_pages_toward_the_pointer(Axis::Horizontal, cx);
+    }
+
+    /// A press held on the track pages on after a wait, then every 50 ms, while the pointer
+    /// is on that side of the thumb, and stops where the thumb reaches it or the button
+    /// comes up.
+    #[gpui_kit::test]
+    fn a_press_held_on_the_track_pages_until_the_thumb_reaches_the_pointer(cx: &mut TestAppContext) {
+        use gpui_kit::{Modifiers, MouseButton};
+        let (view, cx) = scrolled(Axis::Vertical, cx);
+        let wait = |time: std::time::Duration, cx: &mut VisualTestContext| {
+            cx.executor().advance_clock(time);
+            cx.run_until_parked();
+            draw_settled(cx);
+        };
+        let ticks = |count: usize, cx: &mut VisualTestContext| {
+            for _ in 0..count {
+                wait(TRACK_REPEAT, cx);
+            }
+        };
+        cx.simulate_mouse_down(on_bar(Axis::Vertical, 60.), MouseButton::Left, Modifiers::none());
+        draw_settled(cx);
+        assert_eq!(scrolled_by(&view, cx), 87.);
+        wait(TRACK_FIRST_REPEAT - std::time::Duration::from_millis(1), cx);
+        assert_eq!(scrolled_by(&view, cx), 87., "not before the first wait");
+        wait(std::time::Duration::from_millis(1), cx);
+        assert_eq!(scrolled_by(&view, cx), 174.);
+        ticks(1, cx);
+        assert_eq!(scrolled_by(&view, cx), 261.);
+
+        // Off the bar, the pages wait; back on it, they go on.
+        cx.simulate_mouse_move(gpui_kit::point(px(50.), px(60.)), MouseButton::Left, Modifiers::none());
+        ticks(4, cx);
+        assert_eq!(scrolled_by(&view, cx), 261.);
+        cx.simulate_mouse_move(on_bar(Axis::Vertical, 60.), MouseButton::Left, Modifiers::none());
+        ticks(1, cx);
+        assert_eq!(scrolled_by(&view, cx), 348.);
+
+        // At 522px, the thumb (80 × 522/900 = 46.4px along, 20px long) is under the pointer.
+        ticks(2, cx);
+        assert_eq!(scrolled_by(&view, cx), 522.);
+        ticks(4, cx);
+        assert_eq!(scrolled_by(&view, cx), 522., "the thumb reached the pointer");
+
+        // Further down, the pages go on, until the button comes up.
+        cx.simulate_mouse_move(on_bar(Axis::Vertical, 95.), MouseButton::Left, Modifiers::none());
+        ticks(1, cx);
+        assert_eq!(scrolled_by(&view, cx), 609.);
+        cx.simulate_mouse_up(on_bar(Axis::Vertical, 95.), MouseButton::Left, Modifiers::none());
+        ticks(4, cx);
+        assert_eq!(scrolled_by(&view, cx), 609.);
+    }
+
+    /// The thumb follows a drag along its bar.
+    fn a_thumb_follows_a_drag_along_its_bar(axis: Axis, cx: &mut TestAppContext) {
+        use gpui_kit::{Modifiers, MouseButton};
+        let (view, cx) = scrolled(axis, cx);
+        cx.simulate_mouse_move(on_bar(axis, 5.), None, Modifiers::none());
+        cx.simulate_mouse_down(on_bar(axis, 5.), MouseButton::Left, Modifiers::none());
+        for at in [10., 30., 50.] {
+            cx.simulate_mouse_move(on_bar(axis, at), MouseButton::Left, Modifiers::none());
+        }
+        cx.simulate_mouse_up(on_bar(axis, 50.), MouseButton::Left, Modifiers::none());
+        draw_settled(cx);
+        // Grabbed 10px into the thumb (where the drag starts) and moved 40px along a travel
+        // of 80px: half way.
+        assert_eq!(scrolled_by(&view, cx), 450.);
+    }
+
+    #[gpui_kit::test]
+    fn a_vertical_thumb_follows_a_drag_along_its_bar(cx: &mut TestAppContext) {
+        a_thumb_follows_a_drag_along_its_bar(Axis::Vertical, cx);
+    }
+
+    #[gpui_kit::test]
+    fn a_horizontal_thumb_follows_a_drag_along_its_bar(cx: &mut TestAppContext) {
+        a_thumb_follows_a_drag_along_its_bar(Axis::Horizontal, cx);
     }
 }
