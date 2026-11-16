@@ -261,6 +261,7 @@ impl ReviewView {
         selector.into_any_element()
     }
 
+    /// The filter typed survives closing the picker (`search`); only a choice empties it.
     fn toggle_base_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.base_picker.take().is_some() {
             cx.notify();
@@ -273,9 +274,13 @@ impl ReviewView {
                 cx.notify();
             }
         });
-        input.update(cx, |input, cx| input.focus(window, cx));
+        // The caret after the text kept, as when a value is set on an `<input>`.
+        let query = self.base_query.clone();
+        input.update(cx, |input, cx| {
+            input.set_value(query, window, cx);
+            input.focus(window, cx);
+        });
         self.base_picker = Some((input, changed));
-        self.base_query.clear();
         if !matches!(self.model.read(cx).branches(), Loaded::Ready(_)) {
             self.model.update(cx, |m, cx| m.load_branches(cx));
         }
