@@ -2,6 +2,7 @@
 //! SSH Upload's "Browse...". The host decides what Select and Cancel do.
 
 use gpui_kit::component::input::{Escape, Input, InputEvent, InputState};
+use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::prelude::*;
 use gpui_kit::{
     App, Context, Entity, EventEmitter, FontWeight, SharedString, Subscription, Window, div, px,
@@ -149,6 +150,7 @@ impl Render for RemoteDirBrowserView {
             .font_weight(FontWeight::SEMIBOLD)
             .text_color(primary)
             .child("..")
+            .tooltip(|window, cx| Tooltip::new("Go up").build(window, cx))
             .when(at_root, |d| d.opacity(0.4))
             .when(!at_root, |d| {
                 d.cursor_pointer()
@@ -231,7 +233,9 @@ impl Render for RemoteDirBrowserView {
             }
             Listing::Loaded(dirs) => {
                 for dir in dirs {
-                    let path = dir.path;
+                    // The tooltip is the full path (`title={entry.path}`).
+                    let path = SharedString::from(dir.path);
+                    let tooltip = path.clone();
                     list = list.child(
                         div()
                             .id(SharedString::from(format!("dir-{path}")))
@@ -249,10 +253,13 @@ impl Render for RemoteDirBrowserView {
                             .cursor_pointer()
                             .hover(move |d| d.bg(hover).border_color(border))
                             .child(dir.name)
+                            .tooltip(move |window, cx| {
+                                Tooltip::new(tooltip.clone()).build(window, cx)
+                            })
                             .on_click(cx.listener(move |view, _, _, cx| {
                                 let typed = view.typed(cx);
                                 view.browser.update(cx, |browser, cx| {
-                                    browser.open_entry(&typed, path.clone(), cx)
+                                    browser.open_entry(&typed, path.to_string(), cx)
                                 })
                             })),
                     );

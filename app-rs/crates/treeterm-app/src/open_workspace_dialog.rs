@@ -8,6 +8,7 @@ use std::rc::Rc;
 use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::component::menu::DropdownMenu as _;
+use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::prelude::*;
 use gpui_kit::{App, Context, Div, Entity, FontWeight, Hsla, SharedString, Subscription, Window, div, px};
 use treeterm_core::wire::workspace_file::WorktreeSettings;
@@ -196,15 +197,15 @@ impl OpenWorkspaceDialog {
         cx.notify();
     }
 
-    /// `.recent-directories-list`: each row the folder name over its path; a click fills the
-    /// folder field (`handleSelectRecent`).
+    /// `.recent-directories-list`: each row the folder name over its path, with the full path
+    /// as its tooltip; a click fills the folder field (`handleSelectRecent`).
     fn render_recent(&self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
         let c = colors(cx);
         let (primary, secondary, border, hover, tertiary) =
             (c.text_primary, c.text_secondary, c.border, c.bg_hover, c.bg_tertiary);
         let mut list = div().id("recent-directories").flex().flex_col().gap(px(4.)).max_h(px(200.)).overflow_y_scroll();
         for (i, dir) in self.recent.iter().enumerate() {
-            let path = dir.clone();
+            let (path, tooltip) = (dir.clone(), SharedString::from(dir.clone()));
             list = list.child(
                 div()
                     .id(SharedString::from(format!("recent-{i}")))
@@ -227,6 +228,7 @@ impl OpenWorkspaceDialog {
                             .child(folder_name(dir).to_owned()),
                     )
                     .child(div().truncate().text_size(px(11.)).text_color(secondary).child(dir.clone()))
+                    .tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
                     .on_click(cx.listener(move |dialog, _, window, cx| {
                         let path = path.clone();
                         dialog.folder.update(cx, |input, cx| input.set_value(path, window, cx));
