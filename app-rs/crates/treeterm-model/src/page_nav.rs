@@ -36,7 +36,9 @@ pub enum NavInput {
     /// The load turned into a download (a page the webview cannot display): it ends without
     /// a page, which is no failure.
     Downloaded,
-    /// Stop was pressed: the load ends without a page, which is no failure.
+    /// Stop was pressed: the load ends without a page, which is no failure. With nothing
+    /// loading in the webview (WebKit ignores a reload without a page), it ends at once, as
+    /// no end will come.
     Stopped,
 }
 
@@ -65,7 +67,8 @@ pub enum PageState {
 pub enum Reload {
     /// Reload the page shown, bypassing the cache (`reloadIgnoringCache`).
     FromOrigin,
-    /// Load the page that could not be loaded again (Chromium reloads its error page's URL).
+    /// Load the page that could not be loaded again (Chromium reloads its error page's URL),
+    /// or the page shown when the webview has none to reload.
     Retry(String),
 }
 
@@ -99,11 +102,10 @@ pub struct PageNav {
     proxy: String,
     current: String,
     load: Load,
-    /// Whether the webview said it was loading, last time.
-    native_loading: bool,
+    /// What the webview said last. Its URL is empty while it has no page (before its first,
+    /// or once its first load failed or was stopped): WebKit then reloads nothing.
+    native: NativeNav,
     page: PageState,
-    can_go_back: bool,
-    can_go_forward: bool,
 }
 
 impl PageNav {
@@ -113,10 +115,8 @@ impl PageNav {
             proxy,
             current,
             load: Load::Idle,
-            native_loading: false,
+            native: NativeNav::default(),
             page: PageState::Shown,
-            can_go_back: false,
-            can_go_forward: false,
         }
     }
 
@@ -131,11 +131,11 @@ impl PageNav {
     }
 
     pub fn can_go_back(&self) -> bool {
-        self.can_go_back
+        self.native.can_go_back
     }
 
     pub fn can_go_forward(&self) -> bool {
-        self.can_go_forward
+        self.native.can_go_forward
     }
 
     pub fn page(&self) -> &PageState {
@@ -144,8 +144,10 @@ impl PageNav {
 
     pub fn reload(&self) -> Reload {
         match &self.page {
-            PageState::Shown => Reload::FromOrigin,
             PageState::Failed { url } => Reload::Retry(url.clone()),
+            // A webview whose first load was stopped has nothing to reload: load the page.
+            PageState::Shown if self.native.url.is_empty() => Reload::Retry(self.current.clone()),
+            PageState::Shown => Reload::FromOrigin,
         }
     }
 
@@ -153,12 +155,11 @@ impl PageNav {
         let mut effects = NavEffects::default();
         match input {
             NavInput::Native(native) => {
-                let url = self.shown(native.url);
-                self.can_go_back = native.can_go_back;
-                self.can_go_forward = native.can_go_forward;
-                let started = native.loading && !self.native_loading;
-                let ended = !native.loading && self.native_loading;
-                self.native_loading = native.loading;
+                let url = self.shown(native.url.clone());
+                let loading = native.loading;
+                let started = loading && !self.native.loading;
+                let ended = !loading && self.native.loading;
+                self.native = native;
                 // A load the page or the history started. A failure goes with it: it may
                 // be the load this one cancelled.
                 if started && self.load == Load::Idle {
@@ -170,9 +171,9 @@ impl PageNav {
                 }
                 match &mut self.load {
                     // The page shown stays until the load commits.
-                    Load::Provisional { url: loading, .. } => {
-                        if native.loading {
-                            loading.clone_from(&url);
+                    Load::Provisional { url: target, .. } => {
+                        if loading {
+                            target.clone_from(&url);
                         }
                     }
                     // `pushState`, `replaceState`, a fragment, Back / Forward within the page.
@@ -229,7 +230,11 @@ impl PageNav {
                 Load::Idle | Load::Committed => self.page = PageState::Shown,
             },
             NavInput::Stopped => {
-                if let Load::Provisional { kind, .. } = &mut self.load {
+                if !self.native.loading {
+                    // The webview's reports all came before Stop: it loads nothing, so it will
+                    // report no end (a reload WebKit ignored, a load it never started).
+                    self.load = Load::Idle;
+                } else if let Load::Provisional { kind, .. } = &mut self.load {
                     *kind = Attempt::Diverted;
                 }
             }
@@ -455,6 +460,39 @@ mod tests {
         nav.apply(NavInput::Downloaded);
         assert_eq!(nav.apply(native(&page("/a"), false)), ENDED);
         assert_eq!(nav.page(), &PageState::Shown);
+    }
+
+    #[test]
+    fn reload_after_the_first_load_was_stopped_loads_the_page() {
+        let mut nav = tab();
+        nav.apply(native(HOME, true));
+        nav.apply(NavInput::Stopped);
+        // WebKit has no page left, so its reload would do nothing.
+        assert_eq!(nav.apply(native("", false)), ENDED);
+        assert!(!nav.loading());
+        assert_eq!(nav.page(), &PageState::Shown);
+        assert_eq!(nav.reload(), Reload::Retry(HOME.to_owned()));
+        nav.apply(NavInput::Requested(HOME.to_owned()));
+        nav.apply(native(HOME, true));
+        nav.apply(NavInput::Committed(HOME.to_owned()));
+        assert_eq!(nav.apply(native(HOME, false)), ENDED);
+        assert_eq!(nav.page(), &PageState::Shown);
+        assert_eq!(nav.reload(), Reload::FromOrigin);
+    }
+
+    #[test]
+    fn stop_ends_a_load_the_webview_never_started() {
+        for input in [NavInput::Requested(page("/a")), NavInput::Reloading] {
+            let mut nav = tab();
+            nav.apply(native(HOME, false));
+            nav.apply(input.clone());
+            assert!(nav.loading(), "{input:?}");
+            // The webview reports no end of a load it never started.
+            assert_eq!(nav.apply(NavInput::Stopped), NOTHING, "{input:?}");
+            assert!(!nav.loading(), "{input:?}");
+            assert_eq!(nav.page(), &PageState::Shown, "{input:?}");
+            assert_eq!(nav.current(), HOME, "{input:?}");
+        }
     }
 
     #[test]
