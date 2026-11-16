@@ -438,11 +438,12 @@ impl TreePane {
         };
         match rows {
             Err(status) => status,
-            // `.tree-empty`: 16px padding, 12px secondary text.
+            // `.tree-empty`: 16px padding, 12px secondary text, centred.
             Ok(rows) if rows.is_empty() => div()
                 .p(px(16.))
                 .text_size(px(12.))
                 .text_color(text_secondary)
+                .text_center()
                 .child("No workspaces. Click + to add one.")
                 .into_any_element(),
             Ok(rows) => {
