@@ -8,6 +8,7 @@ use gpui_kit::{Context, Entity, FontWeight, Subscription, Window, div, px, rgb};
 use treeterm_model::session_store::SessionStore;
 use treeterm_model::tool_tabs::ssh_upload::{LinkStatus, SshUpload, UploadState, UploadTarget};
 
+use crate::remote_dir_browser::{Inline, RemoteDirBrowserEvent};
 use crate::theme::colors;
 use crate::ui::{DialogButton, FieldStyle, MONO, pane_dialog_button, field, normal_line};
 
@@ -16,6 +17,8 @@ pub struct SshUploadView {
     /// Browses the host's directories.
     session: Entity<SessionStore>,
     remote_dir: Entity<InputState>,
+    /// The directory browser under the remote directory, shown by "Browse...".
+    browser: Inline,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -30,7 +33,7 @@ impl SshUploadView {
             }
         });
         let observe = cx.observe(&model, |_, _, cx| cx.notify());
-        Self { model, session, remote_dir, _subscriptions: vec![typed, observe] }
+        Self { model, session, remote_dir, browser: Inline::Hidden, _subscriptions: vec![typed, observe] }
     }
 
     /// "Choose file…": the native picker (local files), with its default "Open" button.
@@ -55,20 +58,26 @@ impl SshUploadView {
         .detach();
     }
 
-    /// "Browse…": pick the directory on the host.
+    /// "Browse…": the host's directories under the remote directory, from the typed one (else
+    /// the home directory). Select sets the remote directory and hides the browser; while it
+    /// is shown, "Browse…" does nothing.
     fn browse(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let (model, input) = (self.model.clone(), self.remote_dir.clone());
-        let on_picked: crate::open_workspace_dialog::OnPicked = std::rc::Rc::new(move |path, window, cx| {
-            input.update(cx, |input, cx| input.set_value(path.clone(), window, cx));
-            model.update(cx, |m, cx| m.set_remote_dir(&path, cx));
-        });
-        crate::open_workspace_dialog::open(
-            crate::open_workspace_dialog::Location::Remote(self.session.clone()),
-            Vec::new(), // a destination, not a workspace: no recents
-            on_picked,
-            window,
-            cx,
-        );
+        match self.browser {
+            Inline::Shown { .. } => {}
+            Inline::Hidden => {
+                let fs = self.session.read(cx).connection().fs_client();
+                let start = self.model.read(cx).browse_start(cx);
+                self.browser = Inline::show(fs, start, window, cx, |view: &mut Self, event, window, cx| {
+                    if let RemoteDirBrowserEvent::Selected(path) = event {
+                        view.remote_dir.update(cx, |input, cx| input.set_value(path.clone(), window, cx));
+                        view.model.update(cx, |m, cx| m.set_remote_dir(path, cx));
+                    }
+                    view.browser = Inline::Hidden;
+                    cx.notify();
+                });
+                cx.notify();
+            }
+        }
     }
 }
 
@@ -180,6 +189,7 @@ impl Render for SshUploadView {
                         ),
                 ),
             )
+            .children(self.browser.view())
             .child(
                 h_flex().gap(px(8.)).child(
                     pane_dialog_button("upload-start", "Upload", DialogButton::Primary, !can_upload, cx)

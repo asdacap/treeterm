@@ -61,6 +61,15 @@ pub fn destination(remote_dir: &str, local: &Path) -> String {
     format!("{}/{}", remote_dir.trim().trim_end_matches('/'), basename(&local))
 }
 
+/// Where "Browse..." starts: the directory as typed, trimmed, else the user's home on the
+/// host (`remoteDir.trim() || /home/<user>`).
+pub fn browse_start(remote_dir: &str, target: &UploadTarget) -> String {
+    match (remote_dir.trim(), target) {
+        ("", UploadTarget::Remote { user, .. }) => format!("/home/{user}"),
+        (dir, _) => dir.to_owned(),
+    }
+}
+
 impl SshUpload {
     pub fn new(remote: Option<RemoteHost>, cx: &mut Context<Self>) -> Self {
         // Follow the connection's status (connected, reconnecting, gone).
@@ -111,6 +120,11 @@ impl SshUpload {
             (None, UploadTarget::Remote { user, .. }) => format!("/home/{user}"),
             (None, UploadTarget::Local | UploadTarget::Gone) => String::new(),
         }
+    }
+
+    /// See [`browse_start`].
+    pub fn browse_start(&self, cx: &App) -> String {
+        browse_start(&self.remote_dir(cx), &self.target(cx))
     }
 
     pub fn set_remote_dir(&mut self, dir: &str, cx: &mut Context<Self>) {
@@ -176,5 +190,15 @@ mod tests {
         assert_eq!(basename("dir/"), "dir");
         assert_eq!(destination(" /srv/drop/ ", Path::new("/tmp/a.tar")), "/srv/drop/a.tar");
         assert_eq!(destination("/", Path::new("/tmp/a.tar")), "/a.tar");
+    }
+
+    #[test]
+    fn browsing_starts_at_the_typed_directory_else_the_home_directory() {
+        let remote = UploadTarget::Remote { name: "me@host".to_owned(), user: "me".to_owned(), status: LinkStatus::Connected };
+        assert_eq!(browse_start("  /srv/drop ", &remote), "/srv/drop");
+        assert_eq!(browse_start("", &remote), "/home/me");
+        assert_eq!(browse_start("   ", &remote), "/home/me");
+        // Off ssh the tab shows no browser, and there is no home to fall back on.
+        assert_eq!(browse_start("", &UploadTarget::Local), "");
     }
 }
