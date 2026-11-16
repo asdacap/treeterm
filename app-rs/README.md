@@ -153,7 +153,9 @@ Done (tested against a real in-process daemon unless noted):
   title/branch refresh, Auto Open All Recent Worktrees (worktree registry shared with
   Electron), upstream warning before forking,
   force-unlock of a held session lock; session renaming (double-click its name; kept in
-  `ui-state.json` by connection target); session pane with info, logs, port forwards, a system
+  `ui-state.json` by connection target); the Open Workspace dialog's Recent Directories (kept
+  in `ui-state.json` by connection target; Electron's, from its localStorage, are added once
+  after the ones already listed); session pane with info, logs, port forwards, a system
   monitor, the session as JSON and its TTYs. Each session has an active workspace (its first
   one once loaded, a new or forked one at once): the window opens on it at start-up and
   after a remote connect, and disconnecting the shown session shows the next one's (or its

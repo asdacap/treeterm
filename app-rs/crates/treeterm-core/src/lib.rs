@@ -13,6 +13,7 @@ pub mod clock;
 pub mod concurrency;
 pub mod connection;
 pub mod daemon;
+pub mod electron_local_storage;
 pub mod exec;
 pub mod files;
 pub mod fs;

@@ -34,11 +34,14 @@ pub fn default_name(target: &ConnectionTarget) -> String {
 }
 
 impl SessionNames {
-    pub fn new(path: Option<PathBuf>) -> Self {
-        let Some(path) = path else {
+    /// From `ui-state.json` in Electron's userData directory, carrying over the Recent
+    /// Directories in Electron's localStorage there the first time.
+    pub fn new(user_data_dir: Option<PathBuf>) -> Self {
+        let Some(user_data_dir) = user_data_dir else {
             return Self { path: None, state: UiState::default() };
         };
-        let state = match ui_state::load(&path, SystemTime::now()) {
+        let path = ui_state::ui_state_path(&user_data_dir);
+        let mut state = match ui_state::load(&path, SystemTime::now()) {
             Ok(Loaded::Saved(state)) => state,
             // Electron dropped a corrupt stored value and overwrote it; the file is kept.
             Ok(Loaded::MovedAside { error, backup }) => {
@@ -55,7 +58,14 @@ impl SessionNames {
                 return Self { path: None, state: UiState::default() };
             }
         };
-        Self { path: Some(path), state }
+        let imported = ui_state::import_electron_recent_directories(&mut state, &user_data_dir);
+        let names = Self { path: Some(path), state };
+        match imported {
+            Ok(true) => names.save(),
+            Ok(false) => {}
+            Err(error) => tracing::warn!(%error, "Electron's recent directories not imported; tried again at the next start"),
+        }
+        names
     }
 
     /// The custom name, else the default.

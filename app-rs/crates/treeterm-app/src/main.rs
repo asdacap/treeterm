@@ -222,9 +222,7 @@ fn main() {
             }
         })
         .detach();
-        let names = cx.new(|_| {
-            treeterm_model::session_names::SessionNames::new(paths::user_data_dir().ok().map(|dir| dir.join("ui-state.json")))
-        });
+        let names = cx.new(|_| treeterm_model::session_names::SessionNames::new(paths::user_data_dir().ok()));
         let (window, view) = gpui_kit::open_window(options, cx, {
             let (keybindings, settings) = (keybindings.clone(), settings.clone());
             |window, cx| cx.new(|cx| AppView::new(store, keybindings, settings, names, window, cx))

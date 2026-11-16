@@ -43,11 +43,19 @@ icu_collator = "2.4"
 # Thai and Farsi dates, which Electron prints in the Buddhist and solar Hijri calendars
 # (arithmetic calendars, so no data).
 icu_calendar = { version = "2.4", default-features = false }
+# Electron's localStorage (Chromium's LevelDB), read once to carry its Recent Directories
+# over. Without `fs`: the files are read into its in-memory env, so Electron's are never
+# locked or written.
+rusty-leveldb = { version = "4", default-features = false }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Electron's locale is the preferred localization of its app bundle (`NSBundle`).
 core-foundation = "0.10"
 core-foundation-sys = "0.8"
+
+[features]
+# `electron_local_storage::testing`: Electron's localStorage written for other crates' tests.
+test-support = []
 
 [dev-dependencies]
 # The analyzer tests drive it with the real idle detector, as the GPUI model does.
