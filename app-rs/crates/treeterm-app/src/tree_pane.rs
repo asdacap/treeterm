@@ -154,6 +154,21 @@ impl TreePane {
         cx.notify();
     }
 
+    /// A row's Fork (`handleQuickFork`): the new child is shown, Loading first, as soon as
+    /// it is added (`createChildWithLoading` makes it the active workspace). A failure is
+    /// only logged, as in Electron.
+    pub fn quick_fork(&mut self, id: &str, cx: &mut Context<Self>) {
+        let forked = self.session.update(cx, |s, cx| s.quick_fork(id, cx));
+        cx.spawn(async move |pane, cx| match forked.await {
+            Ok(Ok(child)) => match pane.update(cx, |pane, cx| pane.select(child, cx)) {
+                Ok(()) | Err(_) => {} // Err: the pane closed
+            },
+            Ok(Err(error)) => tracing::error!(%error, "quick fork"),
+            Err(_) => tracing::debug!("quick fork dropped with the session store"),
+        })
+        .detach();
+    }
+
     /// "+": type or pick a directory and open it as a root workspace (`OpenWorkspaceDialog`).
     pub fn open_workspace(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let pane = cx.entity().downgrade();
@@ -615,10 +630,14 @@ impl TreePane {
                                 .map(|w| SharedString::from(w.read(cx).file().display_name().to_owned()))
                                 .unwrap_or_default();
                             let behind = behind_upstream(&session, &id, cx);
+                            let tree = cx.entity().downgrade();
                             upstream_guard(behind, label, window, cx, move |_, cx| {
-                                if let Err(error) = session.update(cx, |s, cx| s.quick_fork(&id, cx)) {
-                                    tracing::error!(%error, "quick fork");
-                                }
+                                // Not behind upstream, this runs at once, inside this
+                                // pane's own update: fork once that is done.
+                                let (tree, id) = (tree.clone(), id.clone());
+                                cx.defer(move |cx| match tree.update(cx, |tree, cx| tree.quick_fork(&id, cx)) {
+                                    Ok(()) | Err(_) => {} // Err: the pane closed
+                                });
                             });
                         })),
                 )

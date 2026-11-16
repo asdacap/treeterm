@@ -133,11 +133,10 @@ fn handle(line: &str, window: AnyWindowHandle, view: &Entity<AppView>, cx: &mut 
                 Ok(json!({ "ok": true }))
             }
             "fork" => {
-                // `fork <workspace-id>`: the tree row's Fork button, a child workspace on a
-                // new branch.
-                let session = view.read(cx).automation_session().ok_or("not connected")?;
-                session.update(cx, |session, cx| session.quick_fork(rest, cx))?;
-                Ok(json!({ "ok": true }))
+                // `fork <workspace-id>`: the tree row's Fork button (past the upstream
+                // warning), a child workspace on a new branch, shown once added.
+                let ok = view.update(cx, |view, cx| view.automation_fork(rest, cx));
+                Ok(json!({ "ok": ok }))
             }
             "fileopen" => {
                 let ok = view.update(cx, |view, cx| view.automation_open_file(rest, cx));

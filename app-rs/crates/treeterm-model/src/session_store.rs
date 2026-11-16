@@ -1838,37 +1838,41 @@ impl SessionStore {
     }
 
     /// `quickForkWorkspace`: a child with a readable random branch name that no local
-    /// branch has yet (three tries).
-    pub fn quick_fork(&mut self, workspace_id: &str, cx: &mut Context<Self>) -> Result<(), String> {
-        let root = self
-            .workspace_store(workspace_id)
-            .ok_or("Workspace not found")?
-            .read(cx)
-            .file()
-            .git_root_path
-            .clone()
-            .ok_or("Workspace has no git root path")?;
+    /// branch has yet (three tries). Resolves with the child's id once its placeholder is
+    /// added (it then loads as [`Self::add_child_workspace`] does), or why it was not.
+    /// Runs to the end even when the receiver is dropped.
+    pub fn quick_fork(&mut self, workspace_id: &str, cx: &mut Context<Self>) -> oneshot::Receiver<Result<String, String>> {
+        let (done, result) = oneshot::channel();
+        let root = match self.workspace_store(workspace_id).map(|store| store.read(cx).file().git_root_path.clone()) {
+            Some(Some(root)) => root,
+            Some(None) => {
+                report_fork(done, Err("Workspace has no git root path".to_owned()));
+                return result;
+            }
+            None => {
+                report_fork(done, Err("Workspace not found".to_owned()));
+                return result;
+            }
+        };
         let git = self.conn.git();
         let parent = workspace_id.to_owned();
         cx.spawn(async move |this, cx| {
-            let existing = match git.list_local_branches(&root).await {
-                Ok(branches) => branches,
-                Err(error) => return tracing::error!(%error, "quick fork: cannot list branches"),
+            let forked = match git.list_local_branches(&root).await {
+                Ok(existing) => match (0..3)
+                    .map(|_| treeterm_core::human_id::generate())
+                    .find(|candidate| !existing.contains(candidate))
+                {
+                    Some(name) => this
+                        .update(cx, |s, cx| s.add_child_workspace(&parent, name, false, None, cx))
+                        .unwrap_or_else(|_| Err("session store dropped".to_owned())),
+                    None => Err("Failed to generate unique branch name".to_owned()),
+                },
+                Err(error) => Err(error.to_string()),
             };
-            let Some(name) = (0..3)
-                .map(|_| treeterm_core::human_id::generate())
-                .find(|candidate| !existing.contains(candidate))
-            else {
-                return tracing::error!("quick fork: failed to generate a unique branch name");
-            };
-            match this.update(cx, |s, cx| s.add_child_workspace(&parent, name, false, None, cx)) {
-                Ok(Ok(_)) => {}
-                Ok(Err(error)) => tracing::error!(%error, "quick fork failed"),
-                Err(_) => {} // store dropped
-            }
+            report_fork(done, forked);
         })
         .detach();
-        Ok(())
+        result
     }
 
     /// Open an existing worktree of the parent's repository as a child workspace named after
@@ -2522,6 +2526,13 @@ fn adopted_metadata(description: Option<&str>, display_name: Option<&str>) -> st
         }
     }
     metadata
+}
+
+/// A quick fork's outcome to whoever waits for it; a failure nobody waits for is logged.
+fn report_fork(done: oneshot::Sender<Result<String, String>>, outcome: Result<String, String>) {
+    if let Err(Err(error)) = done.send(outcome) {
+        tracing::error!(%error, "quick fork");
+    }
 }
 
 /// Parents before children: an item comes once its parent (the root, an open workspace or

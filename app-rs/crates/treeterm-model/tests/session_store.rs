@@ -8,7 +8,7 @@ use treeterm_core::wire::workspace_file::{WorkspaceFile, WorkspaceStatus, Worktr
 use treeterm_model::review::{Processing, ReviewEvent};
 use treeterm_model::session_store::{AdoptOptions, RemoveMode, SessionState, SessionStore, WorkspaceEntry};
 use treeterm_model::settings_store::SettingsStore;
-use treeterm_model::tree_view_state::ChildEdge;
+use treeterm_model::tree_view_state::{ChildEdge, TreeViewState};
 use treeterm_model::workspace_store::{MergeState, TabContent, Workspace, WorkspaceStore};
 use treeterm_proto::treeterm::WorkspaceRef;
 
@@ -1147,6 +1147,72 @@ fn child_edges_link_loaded_workspaces_to_parents_in_the_session(cx: &mut TestApp
     // failed parent still has its loaded children.
     let edges = cx.read(|cx| store.read(cx).child_edges(cx));
     assert_eq!(edges, HashSet::from([edge("child", "root"), edge("kept", "broken")]));
+}
+
+#[gpui_kit::test]
+fn a_quick_fork_resolves_with_its_child_which_opens_a_collapsed_parent(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    publish(&h, &[]);
+    let repo = TempRepo::new(&h);
+    let store = open_store(cx, &h, "client-a");
+    let root = open_repo_workspace(cx, &store, &repo);
+    let mut view = TreeViewState::new(cx.read(|cx| store.read(cx).child_edges(cx)));
+    view.toggle(&root);
+
+    let forked = store.update(cx, |s, cx| s.quick_fork(&root, cx));
+    let child = recv(cx, forked).unwrap();
+    // Resolved once its placeholder is in the session, before git has made the worktree.
+    assert!(store.read_with(cx, |s, _| s.entry(&child).is_some()));
+    wait_child(cx, &store, &child);
+    let file = file_of(cx, &store, &child);
+    assert_eq!(file.parent_id.as_deref(), Some(root.as_str()));
+    assert!(file.is_worktree);
+    // A new branch named after the child, which no branch had before.
+    assert_eq!(file.git_branch.as_deref(), Some(file.name.as_str()));
+    assert_eq!(repo.git(&["branch", "--list", &file.name]).trim().trim_start_matches(['*', '+', ' ']), file.name);
+
+    let edges = cx.read(|cx| store.read(cx).child_edges(cx));
+    assert!(edges.contains(&edge(&child, &root)), "{edges:?}");
+    view.observe(edges);
+    assert!(!view.is_collapsed(&root));
+    wait_for_disk(cx, || h.daemon.workspaces_dir().join(format!("{child}.json")).exists());
+}
+
+#[gpui_kit::test]
+fn a_quick_fork_that_cannot_run_says_why_and_adds_nothing(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    let repo = TempRepo::new(&h);
+    let not_a_repo = h.daemon.root().join("plain");
+    std::fs::create_dir_all(&not_a_repo).unwrap();
+    let with_root = |name: &str, git_repo: bool, root: &std::path::Path| {
+        let mut json: serde_json::Value = serde_json::from_str(&body(name, None)).unwrap();
+        json["isGitRepo"] = git_repo.into();
+        json["gitRootPath"] = root.to_string_lossy().into_owned().into();
+        json.to_string()
+    };
+    let dir = h.daemon.workspaces_dir();
+    // `body` names no git root.
+    std::fs::write(dir.join("rootless.json"), body("rootless", None)).unwrap();
+    std::fs::write(dir.join("unlisted.json"), with_root("unlisted", true, &not_a_repo)).unwrap();
+    std::fs::write(dir.join("plain.json"), with_root("plain", false, &repo.path)).unwrap();
+    publish(&h, &["rootless", "unlisted", "plain"]);
+    let store = open_store(cx, &h, "client-a");
+    wait_until(cx, &store, |s| ["rootless", "unlisted", "plain"].iter().all(|id| loaded(s, id)));
+
+    let fork = |cx: &mut TestAppContext, id: &str| {
+        let forked = store.update(cx, |s, cx| s.quick_fork(id, cx));
+        recv(cx, forked)
+    };
+    assert_eq!(fork(cx, "ws-gone"), Err("Workspace not found".to_owned()));
+    assert_eq!(fork(cx, "rootless"), Err("Workspace has no git root path".to_owned()));
+    // The branches cannot be listed.
+    let unlisted = fork(cx, "unlisted").unwrap_err();
+    assert!(unlisted.starts_with("Not a git repository"), "{unlisted}");
+    // Listed, but the workspace itself is no repository to branch from.
+    assert_eq!(fork(cx, "plain"), Err("Parent workspace is not a git repository".to_owned()));
+    assert_eq!(store.read_with(cx, |s, _| s.workspace_ids().count()), 3);
 }
 
 /// Adopt `worktree` under `parent`; resolves with the child's id.

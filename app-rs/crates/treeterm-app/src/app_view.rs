@@ -2899,6 +2899,15 @@ impl AppView {
         store.update(cx, |w, cx| w.add_tab(&app, cx))
     }
 
+    /// The current session's tree forks `id` (its Fork button, past the upstream warning).
+    pub fn automation_fork(&mut self, id: &str, cx: &mut Context<Self>) -> bool {
+        let Some(connected) = self.current() else {
+            return false;
+        };
+        connected.tree.update(cx, |tree, cx| tree.quick_fork(id, cx));
+        true
+    }
+
     pub fn automation_session(&self) -> Option<Entity<SessionStore>> {
         self.current().map(|connected| connected.session.clone())
     }
