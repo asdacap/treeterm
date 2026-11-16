@@ -4,7 +4,7 @@
 use gpui_kit::component::input::{Escape, Input, InputEvent, InputState};
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    Context, Entity, EventEmitter, FontWeight, SharedString, Subscription, Window, div, px,
+    App, Context, Entity, EventEmitter, FontWeight, SharedString, Subscription, Window, div, px,
     relative,
 };
 use treeterm_core::fs::FsClient;
@@ -26,7 +26,7 @@ pub enum RemoteDirBrowserEvent {
 
 pub struct RemoteDirBrowserView {
     browser: Entity<DirBrowser>,
-    /// The editable path; Enter goes there.
+    /// The editable path; Enter goes there, and so does leaving it.
     path: Entity<InputState>,
     _subscriptions: [Subscription; 3],
 }
@@ -80,12 +80,17 @@ impl RemoteDirBrowserView {
                 .default_value(start.clone())
         });
         let browser = cx.new(|cx| DirBrowser::new(fs, start, cx));
-        // `handlePathKeyDown`: Enter submits the typed path.
-        let enter = cx.subscribe(&path, |view, input, event: &InputEvent, cx| {
-            if let InputEvent::PressEnter { .. } = event {
-                let typed = input.read(cx).value().to_string();
-                view.browser
-                    .update(cx, |browser, cx| browser.submit(&typed, cx));
+        // `handlePathKeyDown`: Enter submits the typed path; `onBlur` commits it.
+        let typed = cx.subscribe(&path, |view, input, event: &InputEvent, cx| {
+            let typed = input.read(cx).value().to_string();
+            match event {
+                InputEvent::PressEnter { .. } => view
+                    .browser
+                    .update(cx, |browser, cx| browser.submit(&typed, cx)),
+                InputEvent::Blur => view.browser.update(cx, |browser, cx| {
+                    browser.commit(&typed, cx);
+                }),
+                InputEvent::Change | InputEvent::Focus => {}
             }
         });
         let navigated = cx.subscribe_in(
@@ -102,13 +107,13 @@ impl RemoteDirBrowserView {
         Self {
             browser,
             path,
-            _subscriptions: [enter, navigated, changed],
+            _subscriptions: [typed, navigated, changed],
         }
     }
 
-    fn navigate(&mut self, path: String, cx: &mut Context<Self>) {
-        self.browser
-            .update(cx, |browser, cx| browser.navigate(path, cx));
+    /// The path field's text, which a button commits before acting.
+    fn typed(&self, cx: &App) -> String {
+        self.path.read(cx).value().to_string()
     }
 }
 
@@ -124,9 +129,8 @@ impl Render for RemoteDirBrowserView {
             c.bg_secondary,
         );
         let browser = self.browser.read(cx);
-        let (at_root, current, crumbs, listing) = (
+        let (at_root, crumbs, listing) = (
             browser.at_root(),
-            browser.current().to_owned(),
             browser.crumbs(),
             browser.listing().clone(),
         );
@@ -150,7 +154,9 @@ impl Render for RemoteDirBrowserView {
                 d.cursor_pointer()
                     .hover(move |d| d.bg(hover))
                     .on_click(cx.listener(|view, _, _, cx| {
-                        view.browser.update(cx, |browser, cx| browser.go_up(cx))
+                        let typed = view.typed(cx);
+                        view.browser
+                            .update(cx, |browser, cx| browser.go_up(&typed, cx))
                     }))
             });
         let path_input = gpui_kit::Styled::h(Input::new(&self.path), px(24.))
@@ -162,7 +168,8 @@ impl Render for RemoteDirBrowserView {
             .rounded(px(4.))
             .text_size(px(12.))
             .font_family(ui::MONO);
-        // `.remote-dir-breadcrumb`: each segment a link back up; the last one plain.
+        // `.remote-dir-breadcrumb`: each segment a link back up; the last one plain. Each is
+        // known by where it leads, as React keys them.
         let mut breadcrumb = div()
             .flex()
             .flex_wrap()
@@ -174,28 +181,30 @@ impl Render for RemoteDirBrowserView {
         for (i, crumb) in crumbs.into_iter().enumerate() {
             let last = i + 1 == count;
             let target = crumb.target;
-            breadcrumb =
-                breadcrumb.child(
-                    div()
-                        .id(SharedString::from(format!("crumb-{i}")))
-                        .px(px(2.))
-                        .py(px(1.))
-                        .rounded(px(2.))
-                        .font_family(BUTTON_FONT)
-                        .line_height(relative(1.2))
-                        .when(last, |d| {
-                            d.text_color(primary).font_weight(FontWeight::MEDIUM)
-                        })
-                        .when(!last, |d| {
-                            d.text_color(accent)
-                                .cursor_pointer()
-                                .hover(move |d| d.bg(hover))
-                                .on_click(cx.listener(move |view, _, _, cx| {
-                                    view.navigate(target.clone(), cx)
-                                }))
-                        })
-                        .child(crumb.label),
-                );
+            breadcrumb = breadcrumb.child(
+                div()
+                    .id(SharedString::from(format!("crumb-{target}")))
+                    .px(px(2.))
+                    .py(px(1.))
+                    .rounded(px(2.))
+                    .font_family(BUTTON_FONT)
+                    .line_height(relative(1.2))
+                    .when(last, |d| {
+                        d.text_color(primary).font_weight(FontWeight::MEDIUM)
+                    })
+                    .when(!last, |d| {
+                        d.text_color(accent)
+                            .cursor_pointer()
+                            .hover(move |d| d.bg(hover))
+                            .on_click(cx.listener(move |view, _, _, cx| {
+                                let typed = view.typed(cx);
+                                view.browser.update(cx, |browser, cx| {
+                                    browser.open_crumb(&typed, target.clone(), cx)
+                                })
+                            }))
+                    })
+                    .child(crumb.label),
+            );
             if !last {
                 breadcrumb = breadcrumb.child(div().text_color(secondary).child("/"));
             }
@@ -221,11 +230,11 @@ impl Render for RemoteDirBrowserView {
                 list.child(status("No subdirectories".to_owned(), secondary))
             }
             Listing::Loaded(dirs) => {
-                for (i, dir) in dirs.into_iter().enumerate() {
+                for dir in dirs {
                     let path = dir.path;
                     list = list.child(
                         div()
-                            .id(SharedString::from(format!("dir-{i}")))
+                            .id(SharedString::from(format!("dir-{path}")))
                             .flex()
                             .items_center()
                             .px(px(8.))
@@ -240,9 +249,12 @@ impl Render for RemoteDirBrowserView {
                             .cursor_pointer()
                             .hover(move |d| d.bg(hover).border_color(border))
                             .child(dir.name)
-                            .on_click(
-                                cx.listener(move |view, _, _, cx| view.navigate(path.clone(), cx)),
-                            ),
+                            .on_click(cx.listener(move |view, _, _, cx| {
+                                let typed = view.typed(cx);
+                                view.browser.update(cx, |browser, cx| {
+                                    browser.open_entry(&typed, path.clone(), cx)
+                                })
+                            })),
                     );
                 }
                 list
@@ -302,10 +314,82 @@ impl Render for RemoteDirBrowserView {
                             cx,
                         )
                         .font_family(BUTTON_FONT)
-                        .on_click(cx.listener(move |_, _, _, cx| {
-                            cx.emit(RemoteDirBrowserEvent::Selected(current.clone()));
+                        .on_click(cx.listener(|view, _, _, cx| {
+                            let typed = view.typed(cx);
+                            let dir = view
+                                .browser
+                                .update(cx, |browser, cx| browser.select(&typed, cx));
+                            cx.emit(RemoteDirBrowserEvent::Selected(dir));
                         })),
                     ),
             )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui_kit::{Entity, TestAppContext, VisualTestContext};
+    use treeterm_core::fs::FsClient;
+    use treeterm_core::rt::Rt;
+    use treeterm_core::transport::DaemonClient;
+
+    use super::RemoteDirBrowserView;
+
+    /// A browser of a host that never answers (its listing stays "Loading..."), from `/srv`.
+    fn browser<'a>(
+        tokio: &tokio::runtime::Runtime,
+        cx: &'a mut TestAppContext,
+    ) -> (Entity<RemoteDirBrowserView>, &'a mut VisualTestContext) {
+        cx.executor().allow_parking();
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            crate::theme::install(cx);
+        });
+        let channel = {
+            let _enter = tokio.enter();
+            tonic::transport::Endpoint::from_static("http://127.0.0.1:9").connect_lazy()
+        };
+        let fs = FsClient::new(Rt::new(tokio.handle().clone()), DaemonClient::new(channel));
+        cx.add_window_view(move |window, cx| {
+            RemoteDirBrowserView::new(fs, "/srv".to_owned(), window, cx)
+        })
+    }
+
+    fn draw(cx: &mut VisualTestContext) {
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.run_until_parked();
+    }
+
+    fn current(view: &Entity<RemoteDirBrowserView>, cx: &mut VisualTestContext) -> String {
+        cx.update(|_, cx| view.read(cx).browser.read(cx).current().to_owned())
+    }
+
+    /// `onBlur={handlePathSubmit}`: leaving the path field goes to the typed path.
+    #[gpui_kit::test]
+    fn leaving_the_path_field_goes_to_the_typed_path(cx: &mut TestAppContext) {
+        let tokio = tokio::runtime::Runtime::new().unwrap();
+        let (view, cx) = browser(&tokio, cx);
+        // Focus events only reach an active window.
+        cx.update(|window, _| window.activate_window());
+        draw(cx);
+
+        let path = cx.update(|_, cx| view.read(cx).path.clone());
+        cx.update(|window, cx| {
+            path.update(cx, |input, cx| {
+                input.focus(window, cx);
+                input.set_value(" /srv/app ", window, cx);
+            })
+        });
+        draw(cx);
+        assert_eq!(current(&view, cx), "/srv", "typing alone goes nowhere");
+
+        cx.update(|window, cx| window.blur(cx));
+        draw(cx);
+        assert_eq!(current(&view, cx), "/srv/app");
+        assert_eq!(
+            cx.update(|_, cx| path.read(cx).value().to_string()),
+            "/srv/app"
+        );
     }
 }

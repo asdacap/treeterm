@@ -48,3 +48,5 @@ tempfile.workspace = true
 futures.workspace = true
 # `TestAppContext`, to lay out views in tests.
 gpui-kit = { workspace = true, features = ["test-support"] }
+# A daemon channel that never connects, for views that only need an `FsClient` to exist.
+tonic.workspace = true
