@@ -151,19 +151,49 @@ struct AdoptTexts {
     unpicked: &'static str,
     processing: &'static str,
     failed: &'static str,
+    log: AdoptLog,
 }
 
 const EXISTING: AdoptTexts = AdoptTexts {
     unpicked: "Please select a worktree",
     processing: "Opening existing worktree...",
     failed: "Failed to open worktree",
+    log: AdoptLog::Existing,
 };
 
 const RECENT: AdoptTexts = AdoptTexts {
     unpicked: "Please select a recent workspace",
     processing: "Opening recent workspace...",
     failed: "Failed to open recent workspace",
+    log: AdoptLog::Recent,
 };
+
+/// What opening a worktree logs, as Electron's submit handlers did.
+#[derive(Clone, Copy)]
+enum AdoptLog {
+    /// `handleAdoptSubmit`: its start, its success and its failure.
+    Existing,
+    /// `handleRecentSubmit`: only its failure.
+    Recent,
+}
+
+impl AdoptLog {
+    fn started(self, path: &str) {
+        match self {
+            AdoptLog::Existing => tracing::info!("Adopting existing worktree: {path}"),
+            AdoptLog::Recent => {}
+        }
+    }
+
+    fn finished(self, outcome: &Result<String, String>) {
+        match (self, outcome) {
+            (AdoptLog::Existing, Ok(_)) => tracing::info!("Successfully adopted worktree"),
+            (AdoptLog::Existing, Err(error)) => tracing::error!("Failed to adopt worktree: {error}"),
+            (AdoptLog::Recent, Ok(_)) => {}
+            (AdoptLog::Recent, Err(error)) => tracing::error!("Failed to adopt recent workspace: {error}"),
+        }
+    }
+}
 
 /// An item a row is made from.
 trait Pickable: Clone {
@@ -595,7 +625,8 @@ impl ChildDialogModel {
 
     /// The tab's submit handler. A new child reports `Created` once its creation has started;
     /// an existing or recent worktree once it is open, while [`Self::processing`] shows.
-    /// Otherwise the error shows. Ignored while processing.
+    /// Otherwise the error shows. Ignored while processing. A creation's start and refusal are
+    /// logged as Electron's handlers did (a check that refuses the form is not).
     pub fn submit(&mut self, name: &str, description: &str, cx: &mut Context<Self>) -> Submitted {
         if self.processing().is_some() {
             return Submitted::Ignored;
@@ -604,7 +635,7 @@ impl ChildDialogModel {
         let description = Some(description.trim().to_owned()).filter(|d| !d.is_empty());
         let options = child_options(self.tab, self.detached, description, &self.app);
         let parent = self.parent_id.clone();
-        let source = match self.tab {
+        let (source, failure) = match self.tab {
             ChildTab::Create => {
                 if name.is_empty() {
                     return self.fail("Please enter a workspace name", cx);
@@ -612,7 +643,8 @@ impl ChildDialogModel {
                 if let Some(problem) = name_problem(&name) {
                     return self.fail(problem, cx);
                 }
-                ChildSource::NewBranch { name }
+                tracing::info!("Creating new worktree: {name}");
+                (ChildSource::NewBranch { name }, "Failed to create worktree")
             }
             ChildTab::Existing => {
                 let picked = self.existing.picked.as_ref().map(|w| w.info.clone());
@@ -623,15 +655,26 @@ impl ChildDialogModel {
                 return self.adopt(picked, name, options, RECENT, cx);
             }
             ChildTab::Branch => match &self.branches.picked {
-                Some(branch) => ChildSource::ExistingBranch { branch: branch.name.clone() },
+                Some(branch) => {
+                    tracing::info!("Creating worktree from branch: {}", branch.name);
+                    let source = ChildSource::ExistingBranch { branch: branch.name.clone() };
+                    (source, "Failed to create worktree from branch")
+                }
                 None => return self.fail("Please select a branch", cx),
             },
             ChildTab::Remote => match &self.remotes.picked {
-                Some(remote) => ChildSource::RemoteBranch { remote_branch: remote.name.clone() },
+                Some(remote) => {
+                    tracing::info!("Creating worktree from remote branch: {}", remote.name);
+                    (ChildSource::RemoteBranch { remote_branch: remote.name.clone() }, "Failed to create worktree")
+                }
                 None => return self.fail("Please select a remote branch", cx),
             },
             ChildTab::Pr => match &self.prs.picked {
-                Some(pr) => ChildSource::PullRequest { head_ref: pr.head_ref_name.clone(), title: pr.title.clone() },
+                Some(pr) => {
+                    tracing::info!("Creating worktree from PR: {} {}", pr.number, pr.head_ref_name);
+                    let (head_ref, title) = (pr.head_ref_name.clone(), pr.title.clone());
+                    (ChildSource::PullRequest { head_ref, title }, "Failed to create worktree from PR")
+                }
                 None => return self.fail("Please select a pull request", cx),
             },
         };
@@ -640,7 +683,10 @@ impl ChildDialogModel {
                 cx.emit(ChildDialogEvent::Created(id));
                 Submitted::Started
             }
-            Err(error) => self.fail(error, cx),
+            Err(error) => {
+                tracing::error!("{failure}: {error}");
+                self.fail(error, cx)
+            }
         }
     }
 
@@ -665,11 +711,13 @@ impl ChildDialogModel {
             default_application_id: options.default_application_id,
         };
         let parent = self.parent_id.clone();
+        texts.log.started(&info.path);
         let opened = self.session.update(cx, |s, cx| s.adopt_worktree(&parent, info, adopt, cx));
         let wait = cx.spawn(async move |this, cx| {
             // Canceled: the adopt went away with the session. (Its errors are never empty, so
             // Electron's `result.error || '…'` fallback shows only then.)
             let outcome = opened.await.unwrap_or_else(|_| Err(texts.failed.to_owned()));
+            texts.log.finished(&outcome);
             // Err: the dialog is gone (its task would have been dropped with it).
             match this.update(cx, |model, cx| {
                 model.adopting = Adopting::Idle;

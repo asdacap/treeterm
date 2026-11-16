@@ -362,7 +362,10 @@ fn enter_on_a_picker_tab_waits_for_a_pick(cx: &mut TestAppContext) {
 
     model.update(cx, |m, cx| m.pick("free", "", "", cx));
     assert!(model.read_with(cx, |m, _| m.enter_submits()));
+    let logs = treeterm_testkit::logs::capture();
     assert_eq!(model.update(cx, |m, cx| m.press_enter("", "", cx)), Submitted::Started);
+    let started = logs.line("Creating worktree from branch: free").unwrap_or_else(|| panic!("{}", logs.text()));
+    assert!(started.contains(" INFO "), "{started}");
     let child = events.created(cx);
     wait_until_app(cx, &f.store, |s, cx| {
         s.workspace_store(&child).is_some_and(|w| w.read(cx).workspace().path == inside.join("free").to_string_lossy())
@@ -381,18 +384,78 @@ fn enter_on_create_shows_its_checks_and_creates(cx: &mut TestAppContext) {
     let error = |cx: &mut TestAppContext| model.read_with(cx, |m, _| m.error().map(str::to_owned));
 
     assert!(model.read_with(cx, |m, _| m.enter_submits()), "even with no name");
+    let logs = treeterm_testkit::logs::capture();
     assert_eq!(model.update(cx, |m, cx| m.press_enter("  ", "", cx)), Submitted::Refused);
     assert_eq!(error(cx).as_deref(), Some("Please enter a workspace name"));
     assert_eq!(model.update(cx, |m, cx| m.press_enter("a/b", "", cx)), Submitted::Refused);
     assert_eq!(error(cx).as_deref(), Some("Name cannot contain \"/\" - use simple names only"));
     cx.run_until_parked();
     assert!(events.seen.borrow().is_empty());
+    assert_eq!(logs.line("worktree"), None, "the form's checks log nothing: {}", logs.text());
 
     assert_eq!(model.update(cx, |m, cx| m.press_enter("kid", "", cx)), Submitted::Started);
+    let started = logs.line("Creating new worktree: kid").unwrap_or_else(|| panic!("{}", logs.text()));
+    assert!(started.contains(" INFO "), "{started}");
     let child = events.created(cx);
     wait_until_app(cx, &f.store, |s, cx| {
         s.workspace_store(&child).is_some_and(|w| w.read(cx).workspace().path == inside.join("kid").to_string_lossy())
     });
+}
+
+/// Each tab's submit logs the creation it starts (Electron's `console.log`), and a creation
+/// the session refuses at once under the tab's own prefix (`console.error`).
+#[gpui_kit::test]
+fn each_tab_logs_the_creation_it_starts_and_a_refusal(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let f = Fixture::new(cx);
+    let github = Arc::new(FakeGitHub::default());
+    f.store.update(cx, |s, _| s.set_github_api(github.clone()));
+    let (repo, parent) = f.open_repo(cx);
+    git(&repo, &["branch", "free"]);
+    git(&repo, &["update-ref", "refs/remotes/origin/far", "HEAD"]);
+    let picked = |cx: &mut TestAppContext, tab: ChildTab, key: &str| {
+        let model = f.dialog(cx, &parent, tab);
+        loaded(cx, &model);
+        model.update(cx, |m, cx| m.pick(key, "", "", cx));
+        assert_eq!(model.read_with(cx, |m, _| m.selected_key()).as_deref(), Some(key));
+        model
+    };
+    let create = f.dialog(cx, &parent, ChildTab::Create);
+    let branch = picked(cx, ChildTab::Branch, "free");
+    let remote = picked(cx, ChildTab::Remote, "origin/far");
+    let reply = github.next_reply();
+    let pr = f.dialog(cx, &parent, ChildTab::Pr);
+    cx.run_until_parked();
+    let item = PrListItem {
+        number: 7,
+        title: "PR 7".into(),
+        author: String::new(),
+        head_ref_name: "team/feature-7".into(),
+        head_repo: HeadRepo::Origin,
+    };
+    reply.send(Ok(vec![item])).unwrap();
+    loaded(cx, &pr);
+    pr.update(cx, |m, cx| m.pick("7", "", "", cx));
+
+    // The parent goes before the submits: each is refused at once.
+    f.store.update(cx, |s, cx| s.remove_workspace(&parent, RemoveMode::KeepWorktreeAndBranch, cx));
+    wait_until(cx, &f.store, |s| s.workspace_store(&parent).is_none());
+    for (model, started, refused) in [
+        (&create, "Creating new worktree: kid", "Failed to create worktree"),
+        (&branch, "Creating worktree from branch: free", "Failed to create worktree from branch"),
+        (&remote, "Creating worktree from remote branch: origin/far", "Failed to create worktree"),
+        (&pr, "Creating worktree from PR: 7 team/feature-7", "Failed to create worktree from PR"),
+    ] {
+        let logs = treeterm_testkit::logs::capture();
+        assert_eq!(model.update(cx, |m, cx| m.submit("kid", "", cx)), Submitted::Refused);
+        let error = model.read_with(cx, |m, _| m.error().map(str::to_owned));
+        assert_eq!(error.as_deref(), Some("Parent workspace not found"));
+        let text = logs.text();
+        let line = logs.line(started).expect(&text);
+        assert!(line.contains(" INFO ") && line.ends_with(started), "{text}");
+        let line = logs.line("Failed to create").expect(&text);
+        assert!(line.contains("ERROR") && line.ends_with(&format!("{refused}: Parent workspace not found")), "{text}");
+    }
 }
 
 #[gpui_kit::test]
@@ -476,9 +539,13 @@ fn open_existing_waits_in_the_dialog_and_uses_the_chosen_application(cx: &mut Te
     });
     let events = events(cx, &model);
     let before = f.store.read_with(cx, |s, _| s.workspace_ids().count());
+    let logs = treeterm_testkit::logs::capture();
 
     assert!(model.read_with(cx, |m, _| m.enter_submits()), "picked");
     assert_eq!(model.update(cx, |m, cx| m.press_enter("", "  notes ", cx)), Submitted::Started);
+    let started = logs.line("Adopting existing worktree: ").unwrap_or_else(|| panic!("{}", logs.text()));
+    assert!(started.contains(" INFO ") && started.ends_with(&format!("worktree: {side}")), "{started}");
+    assert_eq!(logs.line("Successfully adopted worktree"), None, "not yet");
     model.read_with(cx, |m, _| {
         assert_eq!(m.processing(), Some("Opening existing worktree..."));
         assert_eq!(m.submit_label(), "Opening... Please wait");
@@ -495,6 +562,8 @@ fn open_existing_waits_in_the_dialog_and_uses_the_chosen_application(cx: &mut Te
 
     let file = adopted_file(cx, &f, &events);
     assert_eq!(events.seen.borrow().len(), 1, "added once");
+    let adopted = logs.line("Successfully adopted worktree").unwrap_or_else(|| panic!("{}", logs.text()));
+    assert!(adopted.contains(" INFO "), "{adopted}");
     assert_eq!(f.store.read_with(cx, |s, _| s.workspace_ids().count()), before + 1);
     // Named after the branch, with the dialog's description and default application.
     assert_eq!((file.name.as_str(), file.display_name()), ("side", "side"));
@@ -529,10 +598,13 @@ fn recent_workspace_keeps_a_typed_name_as_the_display_name(cx: &mut TestAppConte
     let name = fill.name.unwrap();
     assert_eq!(name, "team/plain");
     let events = events(cx, &model);
+    let logs = treeterm_testkit::logs::capture();
     model.update(cx, |m, cx| m.submit(&name, "", cx));
     assert_eq!(model.read_with(cx, |m, _| m.processing()), Some("Opening recent workspace..."));
     let file = adopted_file(cx, &f, &events);
     assert_eq!((file.name.as_str(), file.display_name()), ("team/plain", "team/plain"));
+    // `handleRecentSubmit` logs only a failure.
+    assert_eq!(logs.line("adopt"), None, "{}", logs.text());
     assert_eq!(file.settings.default_application_id, "", "no custom application chosen");
 
     // A remembered name is filled in and kept as the display name.
@@ -541,6 +613,16 @@ fn recent_workspace_keeps_a_typed_name_as_the_display_name(cx: &mut TestAppConte
     model.update(cx, |m, cx| m.submit(fill.name.as_deref().unwrap(), "", cx));
     let file = adopted_file(cx, &f, &events);
     assert_eq!((file.name.as_str(), file.display_name()), ("named", "Named"));
+
+    // Opened already: refused, and logged.
+    model.update(cx, |m, cx| m.pick(&named, "", "", cx));
+    model.update(cx, |m, cx| m.submit("", "", cx));
+    wait_until(cx, &model, |m| m.processing().is_none());
+    let error = model.read_with(cx, |m, _| m.error().map(str::to_owned));
+    assert_eq!(error.as_deref(), Some("This worktree is already open"));
+    let failed = logs.line("Failed to adopt recent workspace: ").unwrap_or_else(|| panic!("{}", logs.text()));
+    assert!(failed.contains("ERROR") && failed.ends_with(": This worktree is already open"), "{failed}");
+    assert_eq!(logs.line("Adopting existing worktree"), None);
 }
 
 #[gpui_kit::test]
@@ -561,6 +643,7 @@ fn a_refused_open_shows_its_error_and_lets_the_user_try_again(cx: &mut TestAppCo
         .unwrap()
         .unwrap();
     futures::executor::block_on(other.lock_session(Duration::from_secs(600))).unwrap().unwrap();
+    let logs = treeterm_testkit::logs::capture();
     model.update(cx, |m, cx| m.submit("", "", cx));
     assert!(model.read_with(cx, |m, _| m.processing().is_some()));
     wait_until(cx, &model, |m| m.processing().is_none());
@@ -568,6 +651,11 @@ fn a_refused_open_shows_its_error_and_lets_the_user_try_again(cx: &mut TestAppCo
         assert_eq!(m.error(), Some("Session is locked by another window"));
         assert!(!m.submit_disabled(""), "Open can be tried again");
     });
+    let failed = logs.line("Failed to adopt worktree: ").unwrap_or_else(|| panic!("{}", logs.text()));
+    let refused = "Failed to adopt worktree: Session is locked by another window";
+    assert!(failed.contains("ERROR") && failed.ends_with(refused), "{failed}");
+    assert_eq!(logs.line("Successfully adopted worktree"), None);
+    drop(logs);
     assert_eq!(ids(cx), before, "nothing was added");
 
     // Opened elsewhere meanwhile: refused, and the error replaces the last one.
@@ -575,10 +663,12 @@ fn a_refused_open_shows_its_error_and_lets_the_user_try_again(cx: &mut TestAppCo
     let info = WorktreeInfo { path: side.clone(), branch: "side".into() };
     let opened = f.store.update(cx, |s, cx| s.adopt_worktree(&parent, info, AdoptOptions::default(), cx));
     assert!(recv(cx, opened).is_ok());
+    let logs = treeterm_testkit::logs::capture();
     model.update(cx, |m, cx| m.submit("", "", cx));
     wait_until(cx, &model, |m| m.processing().is_none());
     assert_eq!(model.read_with(cx, |m, _| m.error().map(str::to_owned)).as_deref(), Some("This worktree is already open"));
     assert!(events.seen.borrow().is_empty());
+    assert!(logs.line("Failed to adopt worktree: This worktree is already open").is_some(), "{}", logs.text());
 }
 
 #[gpui_kit::test]
