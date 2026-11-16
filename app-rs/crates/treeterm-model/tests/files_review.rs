@@ -345,6 +345,37 @@ fn a_model_shown_again_is_read_again(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn a_files_tab_mounted_again_reads_its_file_again(cx: &mut TestAppContext) {
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let repo = TempRepo::new(&h);
+    repo.write("a.txt", "a\n");
+    repo.write("part.stl", "solid one\nendsolid one\n");
+    repo.commit_all("files");
+    let (_store, _workspace, browser) = open_browser(cx, &h, &repo, "a.txt");
+    let part = format!("{}/part.stl", repo.root());
+    browser.update(cx, |b, cx| b.select_file(&part, cx));
+    wait_until(cx, &browser, |b| matches!(b.view(), FileView::Model { .. }));
+    let reads = browser.read_with(cx, |b, _| b.reads());
+
+    // Its workspace shown again: the model as it is on disk now, in a new read, still the
+    // file selected.
+    repo.write("part.stl", "solid two\nendsolid two\n");
+    browser.update(cx, |b, cx| b.read_again(cx));
+    assert!(matches!(browser.read_with(cx, |b, _| b.view().clone()), FileView::Loading(path) if path == part));
+    wait_until(cx, &browser, |b| matches!(b.view(), FileView::Model { .. }));
+    match browser.read_with(cx, |b, _| b.view().clone()) {
+        FileView::Model { path, bytes, .. } => {
+            assert_eq!(path, part);
+            assert_eq!(bytes.as_slice(), b"solid two\nendsolid two\n");
+        }
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(browser.read_with(cx, |b, _| (b.reads(), b.selected().map(str::to_owned))), (reads + 1, Some(part)));
+}
+
+#[gpui_kit::test]
 fn a_folder_that_failed_to_load_loads_again_when_reopened(cx: &mut TestAppContext) {
     let _serial = serial();
     cx.executor().allow_parking();

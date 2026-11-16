@@ -574,15 +574,12 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   skips them, failing the merge or losing new files with the deleted worktree).
 - Review's Refresh also reloads the Commits list once it was shown, keeping as many commits
   as are listed and the picked commit (Electron never reloaded the list after its first load).
-- Review refreshes whenever its tab is shown, a switch between tabs of the same workspace
-  included. Electron keeps every tab of the workspace shown mounted and visible
-  (`tabEnableRenderOnDemand: false`), so it reloaded only when the workspace was shown again.
 - Review's find in the diff searches only files whose rows are drawn: a diff too large to draw
   is searched once "Load anyway" draws it. Electron listed its matches but could not show
   them (choosing one opened the file on the size notice).
-- Review reads the diffs of the files it has read again with each reload (Refresh, the tab
-  shown again, staging), keeping what they show until then; Electron kept a file's contents
-  once loaded until its own refresh button was pressed.
+- Review reads the diffs of the files it has read again with each reload (Refresh, its
+  workspace shown again, staging), keeping what they show until then; Electron kept a file's
+  contents once loaded until its own refresh button was pressed.
 - Review's find reads every file of the view's list, in list order, also the files the file
   filter or a folder filter hides; Electron read only the files shown, in the tree's order. Its
   count can read "…" a little longer while hidden files are read.

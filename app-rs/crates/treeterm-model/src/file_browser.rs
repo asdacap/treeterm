@@ -842,6 +842,15 @@ impl FileBrowser {
         }
     }
 
+    /// Read the selected file again and show it, as `FileViewer` reads its file when it is
+    /// mounted again (the tab's workspace shown again): the selection stays as it is, and
+    /// is not saved again.
+    pub fn read_again(&mut self, cx: &mut Context<Self>) {
+        if let Some(path) = self.selected.clone() {
+            self.show(&path, false, cx);
+        }
+    }
+
     /// [`Self::open`] without saving the selection in the tab state.
     fn show(&mut self, path: &str, allow_large: bool, cx: &mut Context<Self>) {
         self.drop_draft_unless(path);

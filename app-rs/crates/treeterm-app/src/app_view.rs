@@ -2360,7 +2360,8 @@ fn unmount_hidden_reviews(connected: &Connected, session_shown: bool, cx: &mut C
 /// No workspace's tabs are on screen (none picked, or the one picked was removed, is loading,
 /// failed or shows an operation's failure): the session's native webviews are hidden, and
 /// its Review and Files views too, so they refresh (Files read `HEAD`) when shown again; Files
-/// and Editor tabs save their scroll offset.
+/// and Editor tabs save their scroll offset. Files and Review tabs are unmounted, as Electron
+/// unmounts the tabs of a workspace not shown: their PDF / model webviews are dropped.
 fn hide_tab_views(connected: &Connected, cx: &mut Context<AppView>) {
     let browsers: Vec<Entity<crate::browser_view::BrowserView>> = connected.browser_views.values().map(|(_, view)| view.clone()).collect();
     for view in browsers {
@@ -2369,6 +2370,7 @@ fn hide_tab_views(connected: &Connected, cx: &mut Context<AppView>) {
     let files: Vec<Entity<crate::file_browser_view::FileBrowserView>> = connected.file_views.values().cloned().collect();
     for view in files {
         view.update(cx, |v, cx| {
+            v.set_mounted(false, cx);
             v.set_shown(false, cx);
             v.set_visible(false, cx);
         });
@@ -2603,6 +2605,22 @@ fn workspace_pane(
         view.update(cx, |v, cx| v.set_shown(shown, cx));
     }
     let contents: Vec<TabContent> = shown.iter().filter_map(|tab| workspace.read(cx).tab_content(tab)).collect();
+    // Electron keeps every tab of the workspace shown mounted, shown or not (flex-layout
+    // renders them all, `tabEnableRenderOnDemand: false`), and unmounts those of the other
+    // workspaces (`TabContentPortals`): the Files and Review tabs mounted.
+    let mounted: HashSet<EntityId> = {
+        let workspace = workspace.read(cx);
+        workspace
+            .file()
+            .app_states
+            .keys()
+            .filter_map(|tab| match workspace.tab_content(tab) {
+                Some(TabContent::Files(model)) => Some(model.entity_id()),
+                Some(TabContent::Review(model)) => Some(model.entity_id()),
+                Some(_) | None => None,
+            })
+            .collect()
+    };
     let shown_files: HashSet<EntityId> = contents
         .iter()
         .filter_map(|content| if let TabContent::Files(model) = content { Some(model.entity_id()) } else { None })
@@ -2610,10 +2628,12 @@ fn workspace_pane(
     let file_views: Vec<(EntityId, Entity<crate::file_browser_view::FileBrowserView>)> =
         connected.file_views.iter().map(|(k, v)| (*k, v.clone())).collect();
     // A Files tab hidden saves its scroll offset, and shown again reads `HEAD` again for its
-    // comments (Electron unmounts it, then mounts it again).
+    // comments (Electron unmounts it, then mounts it again). One of another workspace drops
+    // its PDF / model page until its workspace is shown again.
     for (model_id, view) in file_views {
         let visible = shown_files.contains(&model_id);
         view.update(cx, |v, cx| {
+            v.set_mounted(mounted.contains(&model_id), cx);
             v.set_shown(!dialog_open && visible, cx);
             v.set_visible(visible, cx);
         });
@@ -2630,8 +2650,9 @@ fn workspace_pane(
         view.update(cx, |v, cx| v.set_visible(shown_editors.contains(&model_id), cx));
     }
     // Review shows a favourite's file (a PDF or model in a webview) in place of the diff, and
-    // refreshes when it is shown again (whatever switched to it: the tab strip, a shortcut,
-    // the header's Review button, another workspace and back, a synced tab change).
+    // refreshes when its workspace is shown again (Electron mounts it again then; a switch to
+    // another tab of the workspace and back keeps it mounted, the favourite's PDF or model
+    // where it was).
     let shown_reviews: HashSet<EntityId> = contents
         .iter()
         .filter_map(|content| if let TabContent::Review(model) = content { Some(model.entity_id()) } else { None })
@@ -2642,7 +2663,7 @@ fn workspace_pane(
         let visible = shown_reviews.contains(&model_id);
         view.update(cx, |v, cx| {
             v.set_shown(!dialog_open && visible, cx);
-            v.set_visible(visible, cx);
+            v.set_visible(mounted.contains(&model_id), cx);
         });
     }
 

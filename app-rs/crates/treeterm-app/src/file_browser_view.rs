@@ -429,8 +429,11 @@ pub struct FileBrowserView {
     model: Entity<FileBrowser>,
     layout: Layout,
     /// The webview page showing a PDF, 3D model or AVIF image, and the read (its bytes) it
-    /// was built from. Dropped when anything else is shown ([`shows_page`]).
+    /// was built from. Dropped when anything else is shown ([`shows_page`]), and while the
+    /// tab is unmounted ([`Self::set_mounted`]).
     page: Option<(std::sync::Arc<Vec<u8>>, Entity<crate::browser_view::AssetPageView>)>,
+    /// The tab's workspace is shown ([`Self::set_mounted`]).
+    mounted: bool,
     /// The markdown file showing its preview (`viewMode`); a file opens on its source.
     markdown_preview: Option<String>,
     preview_scroll: gpui_kit::ScrollHandle,
@@ -608,21 +611,24 @@ fn pdf_toolbar(page: &Entity<crate::browser_view::AssetPageView>, cx: &App) -> A
         .into_any_element()
 }
 
-/// Whether `view` shows the read `built` in a webview page: a PDF, a 3D model or an image
-/// GPUI cannot decode, from those very bytes.
-fn shows_page(view: &FileView, built: &std::sync::Arc<Vec<u8>>) -> bool {
+/// The read `view` shows in a webview page: a PDF, a 3D model or an image GPUI cannot
+/// decode.
+fn page_read(view: &FileView) -> Option<&std::sync::Arc<Vec<u8>>> {
     match view {
-        FileView::Pdf { bytes, .. } | FileView::Model { bytes, .. } => std::sync::Arc::ptr_eq(bytes, built),
-        FileView::Image { bytes, format, .. } => {
-            image_drawing(*format) == ImageDrawing::Webview && std::sync::Arc::ptr_eq(bytes, built)
-        }
+        FileView::Pdf { bytes, .. } | FileView::Model { bytes, .. } => Some(bytes),
+        FileView::Image { bytes, format, .. } => (image_drawing(*format) == ImageDrawing::Webview).then_some(bytes),
         FileView::Nothing
         | FileView::Loading(_)
         | FileView::Text { .. }
         | FileView::Binary { .. }
         | FileView::TooLarge { .. }
-        | FileView::Failed { .. } => false,
+        | FileView::Failed { .. } => None,
     }
+}
+
+/// Whether `view` shows the read `built` in a webview page, from those very bytes.
+fn shows_page(view: &FileView, built: &std::sync::Arc<Vec<u8>>) -> bool {
+    page_read(view).is_some_and(|bytes| std::sync::Arc::ptr_eq(bytes, built))
 }
 
 fn file_name(path: &str) -> &str {
@@ -659,6 +665,7 @@ impl FileBrowserView {
             model,
             layout: Layout::Browser,
             page: None,
+            mounted: true,
             markdown_preview: None,
             preview_scroll: gpui_kit::ScrollHandle::new(),
             tree_scroll: gpui_kit::ScrollHandle::new(),
@@ -722,6 +729,22 @@ impl FileBrowserView {
         }
         self.visible = visible;
         self.model.update(cx, |m, cx| m.set_visible(visible, cx));
+    }
+
+    /// Whether the Files tab is mounted: Electron mounts every tab of the workspace shown,
+    /// shown or not (flex-layout renders them all, `tabEnableRenderOnDemand: false`), and
+    /// unmounts those of other workspaces and sessions (`TabContentPortals`). Unmounted, the
+    /// webview page is dropped, as `ModelViewer` disposes its stage and WebGL context; mounted
+    /// again, a file shown in a page is read again, as `FileViewer` reads its file on mount, so
+    /// it shows as it is now on a fresh page (a model framed afresh, Wireframe off, a PDF on
+    /// its first page). A tab switch within the workspace keeps the page.
+    pub fn set_mounted(&mut self, mounted: bool, cx: &mut Context<Self>) {
+        let was = std::mem::replace(&mut self.mounted, mounted);
+        if !mounted {
+            self.page = None;
+        } else if !was && page_read(self.model.read(cx).view()).is_some() {
+            self.model.update(cx, |model, cx| model.read_again(cx));
+        }
     }
 
     /// Drop the webview page once another file, or another read of the same file, is shown:
@@ -2092,6 +2115,21 @@ mod tests {
         assert_eq!(image_drawing(ImageFormat::Jpeg), ImageDrawing::Gpui(gpui_kit::ImageFormat::Jpeg));
         assert_eq!(image_drawing(ImageFormat::Svg), ImageDrawing::Gpui(gpui_kit::ImageFormat::Svg));
         assert_eq!(image_drawing(ImageFormat::Avif), ImageDrawing::Webview);
+    }
+
+    #[test]
+    fn pdfs_models_and_avif_images_are_shown_in_a_page() {
+        use std::sync::Arc;
+        use treeterm_core::files::ModelFormat;
+        let bytes = Arc::new(b"x".to_vec());
+        let path = String::from("/w/a");
+        let in_page = |view: FileView| page_read(&view).is_some_and(|read| Arc::ptr_eq(read, &bytes));
+        assert!(in_page(FileView::Pdf { path: path.clone(), bytes: bytes.clone() }));
+        assert!(in_page(FileView::Model { path: path.clone(), bytes: bytes.clone(), format: ModelFormat::Glb }));
+        assert!(in_page(FileView::Image { path: path.clone(), bytes: bytes.clone(), format: ImageFormat::Avif }));
+        assert!(!in_page(FileView::Image { path: path.clone(), bytes: bytes.clone(), format: ImageFormat::Ico }));
+        assert!(!in_page(FileView::Text { path: path.clone(), text: "x".into() }));
+        assert!(!in_page(FileView::Loading(path)));
     }
 
     #[test]

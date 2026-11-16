@@ -1370,12 +1370,13 @@ impl ReviewModel {
         cx.notify();
     }
 
-    /// The tab is on screen (the active tab of the workspace shown) or not. Shown again after
-    /// being hidden (a tab switch, back to the workspace), it refreshes (`ReviewBrowser`'s
-    /// visibility effect). Shown for the first time, it refreshes too unless what it loaded
-    /// when made is still loading: every Review tab of a session is made and loaded when the
-    /// session connects, and a view first shows it later (Electron mounts it, and so loads
-    /// it, when its workspace is shown).
+    /// The tab is mounted (a tab of the workspace shown, whichever tab is shown: flex-layout
+    /// renders them all) or not. Mounted again after being unmounted (back to the workspace),
+    /// it refreshes, as Electron mounts `ReviewBrowser` again and it loads; a switch to
+    /// another tab of the workspace and back keeps it as it is. Mounted for the first time,
+    /// it refreshes too unless what it loaded when made is still loading: every Review tab of
+    /// a session is made and loaded when the session connects, and a view first shows it
+    /// later (Electron mounts it, and so loads it, when its workspace is shown).
     pub fn set_visible(&mut self, visible: bool, cx: &mut Context<Self>) {
         let next = if visible { Visibility::Shown } else { Visibility::Hidden };
         let stale = match std::mem::replace(&mut self.visibility, next) {

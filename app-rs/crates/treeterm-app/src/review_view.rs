@@ -1086,8 +1086,13 @@ impl ReviewView {
         }
     }
 
-    /// The tab is on screen or not (a dialog over it aside): shown again, it refreshes.
+    /// The tab is mounted (its workspace shown, whichever of its tabs is) or not: mounted
+    /// again, it refreshes. Unmounted, the favourite's viewer goes with its PDF / model
+    /// webview, as Electron unmounts the `FileViewer`; the refresh reads the file again.
     pub fn set_visible(&mut self, visible: bool, cx: &mut Context<Self>) {
+        if !visible {
+            self.favourite_view = None;
+        }
         self.model.update(cx, |m, cx| m.set_visible(visible, cx));
     }
 
