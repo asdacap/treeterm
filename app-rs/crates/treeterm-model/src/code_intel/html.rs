@@ -22,9 +22,27 @@ fn element_name_len(text: &str, at: usize) -> usize {
     }
 }
 
-/// `nextAttributeName`: `[^\s"'`=<>\/]+`.
+/// JavaScript's `\s`: Unicode whitespace (but U+0085) and the byte order mark.
+fn is_js_space(c: char) -> bool {
+    (c.is_whitespace() && c != '\u{85}') || c == '\u{feff}'
+}
+
+/// `nextAttributeName`: `[^\s"'></=\x00-\x0F\x7F\x80-\x9F]*`.
 fn attribute_name_len(text: &str, at: usize) -> usize {
-    text[at..].find(|c: char| c.is_whitespace() || "\"'`=<>/".contains(c)).unwrap_or(text.len() - at)
+    let ends = |c: char| is_js_space(c) || "\"'></=".contains(c) || matches!(c, '\0'..='\x0F' | '\x7F' | '\u{80}'..='\u{9F}');
+    text[at..].find(ends).unwrap_or(text.len() - at)
+}
+
+/// An unquoted attribute value: `[^\s"'`=<>]+`.
+fn unquoted_value_len(text: &str, at: usize) -> usize {
+    text[at..].find(|c: char| is_js_space(c) || "\"'`=<>".contains(c)).unwrap_or(text.len() - at)
+}
+
+/// Past the character at byte `at` of `text`: the scanner steps over a character it cannot
+/// read in a tag (Unicode whitespace such as a no-break or ideographic space, a stray quote)
+/// whole.
+fn past_char(text: &str, at: usize) -> usize {
+    at + text[at..].chars().next().map_or(1, char::len_utf8)
 }
 
 fn is_void(tag: &str) -> bool {
@@ -43,74 +61,133 @@ enum Place {
     Attribute { tag: String, replace: Range<usize>, others: Vec<String> },
 }
 
+/// Where the HTML scanner is in a start tag: its `WithinTag`, `AfterAttributeName` and
+/// `BeforeAttributeValue` states. `spaced` is its `hasSpaceAfterTag`: an attribute name
+/// starts only after (ASCII) whitespace, not right after the tag name or a value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TagState {
+    Within { spaced: bool },
+    /// `=` gives the attribute a value.
+    AfterName { spaced: bool },
+    BeforeValue,
+}
+
+/// What the cursor is at in a start tag: the first token it is in or just after, as
+/// `doComplete` reads them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum TagCursor {
+    /// Past the tag.
+    Past,
+    /// An attribute name being typed, or none yet after whitespace.
+    AttributeName(Range<usize>),
+    /// An attribute value, or a character the scanner cannot read in a tag ("Unexpected
+    /// character in tag."): no names are completed there.
+    Elsewhere,
+}
+
 /// What a start tag holds, read from its name to its end.
 struct StartTag {
     attributes: Vec<(Range<usize>, String)>,
     /// Just past its `>` (or where it stops without one).
     end: usize,
     self_closing: bool,
-    /// An attribute name at the cursor: being typed, or none yet after a space.
-    attribute_at: Option<Range<usize>>,
-    /// The cursor is in an attribute value.
-    in_value: bool,
+    cursor: TagCursor,
 }
 
+impl StartTag {
+    /// The scanner read the token `range`: it holds the cursor (byte `offset`) unless an
+    /// earlier one did.
+    fn token(&mut self, range: Range<usize>, offset: usize, cursor: TagCursor) {
+        if self.cursor == TagCursor::Past && range.start <= offset && offset <= range.end {
+            self.cursor = cursor;
+        }
+    }
+}
+
+/// The start tag from `pos`, just past its name, as vscode-html-languageservice's scanner
+/// reads it.
 fn read_start_tag(text: &str, mut pos: usize, offset: usize) -> StartTag {
     let bytes = text.as_bytes();
-    let mut tag = StartTag { attributes: Vec::new(), end: text.len(), self_closing: false, attribute_at: None, in_value: false };
+    let mut tag = StartTag { attributes: Vec::new(), end: text.len(), self_closing: false, cursor: TagCursor::Past };
+    let mut state = TagState::Within { spaced: false };
     loop {
-        let space = pos;
+        let start = pos;
         while pos < bytes.len() && bytes[pos].is_ascii_whitespace() {
             pos += 1;
         }
-        if space < offset && offset <= pos && space < pos {
-            tag.attribute_at = Some(offset..offset);
+        if start < pos {
+            let cursor = match state {
+                TagState::Within { .. } => {
+                    state = TagState::Within { spaced: true };
+                    TagCursor::AttributeName(offset..offset)
+                }
+                TagState::AfterName { .. } => {
+                    state = TagState::AfterName { spaced: true };
+                    TagCursor::AttributeName(offset..offset)
+                }
+                TagState::BeforeValue => TagCursor::Elsewhere,
+            };
+            tag.token(start..pos, offset, cursor);
+            continue;
         }
-        match bytes.get(pos) {
-            None => return tag,
-            Some(b'>') => {
-                tag.end = pos + 1;
-                return tag;
-            }
-            Some(b'/') if bytes.get(pos + 1) == Some(&b'>') => {
-                tag.end = pos + 2;
-                tag.self_closing = true;
-                return tag;
-            }
-            // A new tag: this one was never closed.
-            Some(b'<') => {
-                tag.end = pos;
-                return tag;
-            }
-            Some(b'=') => {
-                let value_start = pos;
-                pos += 1;
-                while pos < bytes.len() && bytes[pos].is_ascii_whitespace() {
+        let Some(&byte) = bytes.get(pos) else {
+            return tag;
+        };
+        match state {
+            TagState::AfterName { spaced } => {
+                if byte == b'=' {
                     pos += 1;
+                    tag.token(start..pos, offset, TagCursor::Elsewhere);
+                    state = TagState::BeforeValue;
+                } else {
+                    state = TagState::Within { spaced };
                 }
-                let value_end = match bytes.get(pos) {
-                    Some(&quote @ (b'"' | b'\'')) => text[pos + 1..].find(quote as char).map_or(text.len(), |end| pos + 1 + end + 1),
-                    Some(_) | None => {
-                        text[pos..].find(|c: char| c.is_whitespace() || c == '>').map_or(text.len(), |end| pos + end)
-                    }
-                };
-                if value_start < offset && offset <= value_end {
-                    tag.in_value = true;
-                }
-                pos = value_end.max(pos + 1).min(text.len());
             }
-            Some(_) => {
-                let length = attribute_name_len(text, pos);
-                if length == 0 {
-                    pos += 1;
+            TagState::BeforeValue => {
+                let mut length = unquoted_value_len(text, pos);
+                // `<a href=x/>`: the `/` closes the tag.
+                if length > 0 && bytes.get(pos + length) == Some(&b'>') && bytes[pos + length - 1] == b'/' {
+                    length -= 1;
+                }
+                if length > 0 {
+                    pos += length;
+                    tag.token(start..pos, offset, TagCursor::Elsewhere);
+                } else if byte == b'"' || byte == b'\'' {
+                    pos = text[pos + 1..].find(byte as char).map_or(text.len(), |end| pos + 1 + end + 1);
+                    tag.token(start..pos, offset, TagCursor::Elsewhere);
+                }
+                state = TagState::Within { spaced: false };
+            }
+            TagState::Within { spaced } => {
+                let length = if spaced { attribute_name_len(text, pos) } else { 0 };
+                if length > 0 {
+                    let name = pos..pos + length;
+                    tag.token(name.clone(), offset, TagCursor::AttributeName(name.clone()));
+                    tag.attributes.push((name.clone(), text[name.clone()].to_owned()));
+                    pos = name.end;
+                    state = TagState::AfterName { spaced: false };
                     continue;
                 }
-                let name = pos..pos + length;
-                if name.start <= offset && offset <= name.end {
-                    tag.attribute_at = Some(name.clone());
+                match byte {
+                    b'/' if bytes.get(pos + 1) == Some(&b'>') => {
+                        tag.end = pos + 2;
+                        tag.self_closing = true;
+                        return tag;
+                    }
+                    b'>' => {
+                        tag.end = pos + 1;
+                        return tag;
+                    }
+                    // A new tag: this one was never closed.
+                    b'<' => {
+                        tag.end = pos;
+                        return tag;
+                    }
+                    _ => {
+                        pos = past_char(text, pos);
+                        tag.token(start..pos, offset, TagCursor::Elsewhere);
+                    }
                 }
-                tag.attributes.push((name.clone(), text[name.clone()].to_owned()));
-                pos = name.end;
             }
         }
     }
@@ -183,10 +260,11 @@ fn place(text: &str, offset: usize) -> Option<(Place, Vec<String>)> {
                 open.push(name.clone());
             }
             pos = tag.end;
-            // Script and style hold text up to their end tag.
+            // Script and style hold text up to their end tag (in any ASCII case: lowering the
+            // case of other characters may change their length).
             if name == "script" || name == "style" {
                 let end_tag = format!("</{name}");
-                let content_end = text[pos..].to_lowercase().find(&end_tag).map_or(text.len(), |end| pos + end);
+                let content_end = text[pos..].to_ascii_lowercase().find(&end_tag).map_or(text.len(), |end| pos + end);
                 if content_end >= offset {
                     return None;
                 }
@@ -194,10 +272,9 @@ fn place(text: &str, offset: usize) -> Option<(Place, Vec<String>)> {
             }
             continue;
         }
-        if tag.in_value {
+        let TagCursor::AttributeName(replace) = tag.cursor else {
             return None;
-        }
-        let replace = tag.attribute_at?;
+        };
         let others = tag.attributes.into_iter().filter(|(range, _)| *range != replace).map(|(_, name)| name).collect();
         return Some((Place::Attribute { tag: name, replace, others }, open));
     }
@@ -336,6 +413,54 @@ mod tests {
         assert!(items.contains(&item("download", "download=\"\"")));
         assert!(items.contains(&item("data-", "data-")));
         assert_eq!(offered("<a href=\"x\" |", Trigger::Typing, 1), None);
+    }
+
+    /// An attribute name starts only after ASCII whitespace; Unicode whitespace (a no-break or
+    /// ideographic space) is a character the scanner cannot read in a tag. As Monaco's HTML
+    /// worker completes (checked against vscode-html-languageservice).
+    #[test]
+    fn unicode_whitespace_in_a_start_tag_is_read_as_the_scanner_reads_it() {
+        // Before the cursor.
+        let (replace, items) = offered("<div\u{3000}class=\"x\">\n<a\u{a0}href=y>\n<a hr|", Trigger::Typing, 1).expect("attributes");
+        assert_eq!((replace.as_str(), &items[..]), ("hr", &[item("href", "href=\"\"")][..]));
+        let (replace, items) = offered("<ul\u{a0}id=x>\n</|", Trigger::Typing, 5).expect("end tag");
+        assert_eq!((replace.as_str(), &items[..]), ("/", &[item("/ul", "/ul>")][..]));
+        let (_, items) = offered("<ul\u{3000}id=x>\n<|", Trigger::Typing, 1).expect("tags");
+        assert_eq!(items, [item("/ul", "/ul>")]);
+        // At it: no name follows the tag's without whitespace between.
+        assert_eq!(offered("<a\u{a0}hr|", Trigger::Typing, 1), None);
+        assert_eq!(offered("<a\u{3000}hr|", Trigger::Invoked, 1), None);
+        assert_eq!(offered("<a\u{3000}|", Trigger::Invoked, 1), None);
+        assert_eq!(offered("<div\u{3000}|class=\"x\">", Trigger::Invoked, 1), None);
+        let (replace, items) = offered("<a \u{a0}hr|", Trigger::Typing, 1).expect("attributes");
+        assert_eq!((replace.as_str(), &items[..]), ("hr", &[item("href", "href=\"\"")][..]));
+        let (replace, _) = offered("<a hr| \u{a0}", Trigger::Typing, 1).expect("attributes");
+        assert_eq!(replace, "hr");
+        // A value cannot start with one: what follows is not an attribute.
+        let (replace, items) = offered("<a href=\u{3000}x |", Trigger::Invoked, 500).expect("attributes");
+        assert_eq!(replace, "");
+        assert!(!items.iter().any(|(label, _)| label == "href"));
+        assert!(items.contains(&item("target", "target=\"\"")));
+    }
+
+    #[test]
+    fn a_start_tag_is_read_as_the_scanner_reads_it() {
+        // No attribute right after a value; a name after whitespace is not the one typed.
+        let (replace, items) = offered("<a href=\"x\"title=\"y\" |", Trigger::Invoked, 500).expect("attributes");
+        assert_eq!(replace, "");
+        assert!(items.contains(&item("title", "title=\"\"")) && !items.iter().any(|(label, _)| label == "href"));
+        let (replace, items) = offered("<a |href=\"x\">", Trigger::Invoked, 500).expect("attributes");
+        assert_eq!(replace, "");
+        assert!(!items.iter().any(|(label, _)| label == "href"));
+        // `=` without a name is a stray character; `/>` after an unquoted value closes the tag.
+        let (_, items) = offered("<a =\"x\" |", Trigger::Invoked, 1).expect("attributes");
+        assert_eq!(items, [item("accesskey", "accesskey=\"\"")]);
+        let (_, items) = offered("<ul><a href=/>\n<|", Trigger::Typing, 1).expect("tags");
+        assert_eq!(items, [item("/ul", "/ul>")]);
+        // Script text whose lower case is longer.
+        let script = format!("<script>{}</script><di|", "İ".repeat(12));
+        let (replace, items) = offered(&script, Trigger::Typing, 1).expect("tags");
+        assert_eq!((replace.as_str(), &items[..]), ("di", &[item("dialog", "dialog")][..]));
     }
 
     #[test]
