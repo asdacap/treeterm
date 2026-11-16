@@ -197,25 +197,17 @@ fn main() {
             return;
         }
         cli::Command::ShutdownDaemon => {
-            let socket = spec.socket_path.clone();
-            let result = tokio.block_on(async {
-                let conn = treeterm_core::daemon::DaemonConnection::connect(rt.clone(), socket)
-                    .await
-                    .map_err(|e| format!("daemon is not running: {e}"))?;
-                match conn.shutdown().await {
-                    Ok(Ok(())) => Ok(()),
-                    Ok(Err(error)) => Err(error.to_string()),
-                    Err(lost) => Err(lost.to_string()),
+            let result = tokio.block_on(treeterm_core::daemon::shutdown_daemon(&rt, &spec.socket_path));
+            let error = match result {
+                Ok(Ok(())) => {
+                    println!("Daemon shut down");
+                    return;
                 }
-            });
-            match result {
-                Ok(()) => println!("Daemon shut down"),
-                Err(error) => {
-                    eprintln!("{error}");
-                    std::process::exit(1);
-                }
-            }
-            return;
+                Ok(Err(error)) => error.to_string(),
+                Err(lost) => lost.to_string(),
+            };
+            eprintln!("{error}");
+            std::process::exit(1);
         }
         cli::Command::CrashScreen { report } => {
             let report = match CrashReport::read(&report) {

@@ -224,20 +224,6 @@ impl DaemonConnection {
         })
     }
 
-    /// Stop the daemon. It exits while answering, so a dropped connection counts as done.
-    pub fn shutdown(&self) -> Fut<Result<(), ApiError>> {
-        let mut client = self.main.clone();
-        self.rt.run(async move {
-            match unary(client.shutdown(Empty {})).await {
-                Ok(Empty {}) => Ok(()),
-                Err(ApiError::Status(status)) if status.code() == tonic::Code::Unavailable
-                    || status.code() == tonic::Code::Unknown
-                    || status.code() == tonic::Code::Internal => Ok(()),
-                Err(other) => Err(other),
-            }
-        })
-    }
-
     /// The runtime this connection's I/O runs on (for other clients the app builds, e.g.
     /// GitHub over HTTP).
     pub fn rt(&self) -> &Rt {
@@ -334,6 +320,39 @@ fn create_pty_request(params: CreatePty) -> CreatePtyRequest {
         startup_command: params.startup_command,
         handle: params.handle,
     }
+}
+
+/// Why [`shutdown_daemon`] failed.
+#[derive(Debug, thiserror::Error)]
+pub enum ShutdownError {
+    /// Nothing answers on the socket.
+    #[error("daemon is not running: {0}")]
+    NotRunning(ConnectError),
+    #[error(transparent)]
+    Call(#[from] ApiError),
+}
+
+/// Stop the daemon on `socket_path` through a connection of its own, closed once it has
+/// answered (Electron's temporary client in `quitAndKillDaemon`, and the CLI's
+/// `shutdown-daemon`), whatever the app's connections to it are doing; none is started. The
+/// daemon exits while answering, so a dropped connection counts as done.
+pub fn shutdown_daemon(rt: &Rt, socket_path: &Path) -> Fut<Result<(), ShutdownError>> {
+    let (connect_rt, socket_path) = (rt.clone(), socket_path.to_owned());
+    rt.run(async move {
+        let connection = DaemonConnection::connect(connect_rt, socket_path)
+            .await
+            .map_err(ShutdownError::NotRunning)?;
+        let mut client = connection.main.clone();
+        match unary(client.shutdown(Empty {})).await {
+            Ok(Empty {}) => Ok(()),
+            Err(ApiError::Status(status))
+                if matches!(status.code(), tonic::Code::Unavailable | tonic::Code::Unknown | tonic::Code::Internal) =>
+            {
+                Ok(())
+            }
+            Err(other) => Err(other.into()),
+        }
+    })
 }
 
 /// Flatten "start a server-streaming call" + "its messages" into one stream of results.

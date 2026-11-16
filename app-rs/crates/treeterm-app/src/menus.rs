@@ -181,14 +181,13 @@ pub fn install(store: Entity<AppStore>, zoom: ZoomStore, cx: &mut App) {
     bind_keys(mac, KeyOptions::for_host(), cx);
 
     cx.on_action(move |_: &QuitAndKillDaemon, cx| {
-        let shutdown = store.read(cx).shutdown_daemon(cx);
+        tracing::info!("shutting down the daemon before quitting");
+        let shutdown = store.read(cx).shutdown_daemon();
         cx.spawn(async move |cx| {
-            if let Some(shutdown) = shutdown {
-                match shutdown.await {
-                    Ok(Ok(())) => tracing::info!("daemon shut down"),
-                    Ok(Err(error)) => tracing::error!(%error, "daemon shutdown failed"),
-                    Err(lost) => tracing::error!(%lost, "daemon shutdown failed"),
-                }
+            match shutdown.await {
+                Ok(Ok(())) => tracing::info!("daemon shut down"),
+                Ok(Err(error)) => tracing::error!(%error, "failed to shut down the daemon"),
+                Err(lost) => tracing::error!(%lost, "failed to shut down the daemon"),
             }
             cx.update(|cx| cx.quit());
         })

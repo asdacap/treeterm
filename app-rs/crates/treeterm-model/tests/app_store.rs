@@ -540,6 +540,43 @@ fn with_no_session_shown_the_window_shows_the_start_up_until_the_local_session_l
     assert_eq!(idle(cx, &app), IdlePane::SelectWorkspace, "no connection left");
 }
 
+/// Exit and Kill Daemon reaches the local daemon through a client of its own, also while the
+/// local connection has failed (`quitAndKillDaemon`'s temporary client). With nothing on the
+/// socket it fails with why; a daemon that drops the call as it exits has shut down.
+#[gpui_kit::test]
+fn exit_and_kill_daemon_reaches_the_local_daemon_while_its_connection_has_failed(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    isolated_home();
+    let h = harness();
+    let dir = tempfile::Builder::new()
+        .prefix("tt")
+        .tempdir_in("/tmp")
+        .unwrap();
+    let socket = dir.path().join("p.sock");
+    let app = app(cx, &h, Some(&socket));
+    wait_for_local(cx, &app, |state| matches!(state, ConnState::Failed { .. }));
+    let shut_down = |cx: &mut TestAppContext| {
+        let shutdown = app.app.read_with(cx, |a, _| a.shutdown_daemon());
+        futures::executor::block_on(shutdown).expect("the shutdown ran").map_err(|error| error.to_string())
+    };
+
+    assert_eq!(
+        shut_down(cx),
+        Err(format!("daemon is not running: Daemon socket not found at {}", socket.display()))
+    );
+
+    // A daemon answers on the socket now, while the connection stays failed.
+    let (refusing, _conn) = refusing_daemon(tonic::Status::permission_denied("not you"));
+    let proxy = DaemonProxy::start(&socket, refusing.socket_path());
+    assert_eq!(shut_down(cx), Err("7 PERMISSION_DENIED: not you".to_owned()));
+    drop(proxy);
+
+    let (exiting, _conn) = refusing_daemon(tonic::Status::unavailable("Connection reset by peer"));
+    let _proxy = DaemonProxy::start(&socket, exiting.socket_path());
+    assert_eq!(shut_down(cx), Ok(()));
+    assert!(matches!(local_state(cx, &app), ConnState::Failed { .. }));
+}
+
 /// [`remote_config`] with a saved port forward.
 fn config_with_a_forward() -> SshConnectionConfig {
     SshConnectionConfig {

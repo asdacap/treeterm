@@ -13,6 +13,7 @@
 //! Where the window lands once a connection's session is restored is decided here too
 //! (`local:connect`, `addRemoteSession`): see [`AppEvent::ShowSession`].
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use futures::StreamExt as _;
@@ -25,10 +26,10 @@ use treeterm_core::connection::{
     ConnectPhase, ConnectionErrorKind, ConnectionId, ConnectionInfo, ConnectionManager, ConnectionStatus,
     ConnectionTarget, OutdatedDaemon, SshEnvironment, WatchFailure,
 };
-use treeterm_core::daemon::DaemonConnection;
+use treeterm_core::daemon::{DaemonConnection, ShutdownError};
 use treeterm_core::exec::ExecApi;
 use treeterm_core::local_daemon::LocalDaemonSpec;
-use treeterm_core::rt::Rt;
+use treeterm_core::rt::{Fut, Rt};
 use treeterm_core::settings::SshConnectionConfig;
 use treeterm_core::wire::workspace_file::WorktreeSettings;
 
@@ -203,6 +204,9 @@ pub struct AppStore {
     client_id: String,
     manager: ConnectionManager<GrpcDialer>,
     sessions: IndexMap<ConnectionId, SessionSlot>,
+    /// Where Exit and Kill Daemon reaches the local daemon, on `rt`.
+    rt: Rt,
+    local_socket: PathBuf,
     _status: Task<()>,
 }
 
@@ -239,7 +243,8 @@ impl AppStore {
                 None
             }
         };
-        let mut manager = ConnectionManager::new(rt.clone(), GrpcDialer::new(rt, spec), spawner, ssh);
+        let local_socket = spec.socket_path.clone();
+        let mut manager = ConnectionManager::new(rt.clone(), GrpcDialer::new(rt.clone(), spec), spawner, ssh);
         // Subscribe before connecting so no status is missed.
         let mut updates = manager.status_changes();
         let status = cx.spawn(async move |this, cx| {
@@ -256,6 +261,8 @@ impl AppStore {
             client_id: uuid::Uuid::new_v4().to_string(),
             manager,
             sessions: IndexMap::new(),
+            rt,
+            local_socket,
             _status: status,
         };
         store.insert_slot(local.id().clone(), ConnectionTarget::Local, cx);
@@ -702,12 +709,10 @@ impl AppStore {
         });
     }
 
-    /// "Exit and Kill Daemon": stop the local daemon (and with it every local PTY).
-    pub fn shutdown_daemon(
-        &self,
-        cx: &gpui_kit::App,
-    ) -> Option<treeterm_core::rt::Fut<Result<(), treeterm_core::daemon::ApiError>>> {
-        self.local_session().map(|session| session.read(cx).connection().shutdown())
+    /// Exit and Kill Daemon: stop the local daemon (and with it every local PTY), also while
+    /// the local connection is down or failed (`quitAndKillDaemon`'s temporary client).
+    pub fn shutdown_daemon(&self) -> Fut<Result<(), ShutdownError>> {
+        treeterm_core::daemon::shutdown_daemon(&self.rt, &self.local_socket)
     }
 }
 
