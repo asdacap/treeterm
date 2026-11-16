@@ -17,13 +17,15 @@ use crate::transport::{ConnectError, DaemonClient, connect_unix_metered, daemon_
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum ApiError {
-    #[error("daemon call failed: {0}")]
+    /// Shown as grpc-js's error message, `<code> <NAME>: <details>`, as Electron shows it.
+    #[error("{}", grpc_message(.0))]
     Status(Box<tonic::Status>),
     #[error(transparent)]
     TaskLost(#[from] TaskLost),
     #[error("daemon protocol violation: {0}")]
     Protocol(&'static str),
-    #[error("daemon did not answer within {}s", .0.as_secs())]
+    /// grpc-js's text for a passed call deadline (it appends timing diagnostics after a comma).
+    #[error("4 DEADLINE_EXCEEDED: Deadline exceeded after {:.3}s", .0.as_secs_f64())]
     DeadlineExceeded(Duration),
     /// The daemon carried out the call and reported failure.
     #[error("{0}")]
@@ -55,6 +57,35 @@ pub(crate) async fn unary<T>(
 impl From<tonic::Status> for ApiError {
     fn from(status: tonic::Status) -> Self {
         ApiError::Status(Box::new(status))
+    }
+}
+
+/// grpc-js's `callErrorFromStatus` message: `13 INTERNAL: spawn failed`.
+fn grpc_message(status: &tonic::Status) -> String {
+    let code = status.code();
+    format!("{} {}: {}", i32::from(code), grpc_code_name(code), status.message())
+}
+
+/// The `Status` enum names of grpc-js (and of the gRPC spec).
+fn grpc_code_name(code: tonic::Code) -> &'static str {
+    match code {
+        tonic::Code::Ok => "OK",
+        tonic::Code::Cancelled => "CANCELLED",
+        tonic::Code::Unknown => "UNKNOWN",
+        tonic::Code::InvalidArgument => "INVALID_ARGUMENT",
+        tonic::Code::DeadlineExceeded => "DEADLINE_EXCEEDED",
+        tonic::Code::NotFound => "NOT_FOUND",
+        tonic::Code::AlreadyExists => "ALREADY_EXISTS",
+        tonic::Code::PermissionDenied => "PERMISSION_DENIED",
+        tonic::Code::ResourceExhausted => "RESOURCE_EXHAUSTED",
+        tonic::Code::FailedPrecondition => "FAILED_PRECONDITION",
+        tonic::Code::Aborted => "ABORTED",
+        tonic::Code::OutOfRange => "OUT_OF_RANGE",
+        tonic::Code::Unimplemented => "UNIMPLEMENTED",
+        tonic::Code::Internal => "INTERNAL",
+        tonic::Code::Unavailable => "UNAVAILABLE",
+        tonic::Code::DataLoss => "DATA_LOSS",
+        tonic::Code::Unauthenticated => "UNAUTHENTICATED",
     }
 }
 
@@ -273,4 +304,54 @@ fn server_stream<T: Send + 'static>(
     call.map_ok(tonic::Response::into_inner)
         .try_flatten_stream()
         .map(|item| item.map_err(ApiError::from))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn statuses_read_as_grpc_js_errors() {
+        let internal = ApiError::from(tonic::Status::internal("spawn failed"));
+        assert_eq!(internal.to_string(), "13 INTERNAL: spawn failed");
+        let unavailable = ApiError::from(tonic::Status::unavailable("transport error"));
+        assert_eq!(unavailable.to_string(), "14 UNAVAILABLE: transport error");
+    }
+
+    #[test]
+    fn every_code_has_its_grpc_name() {
+        let messages: Vec<String> = (0..=16)
+            .map(|code| ApiError::from(tonic::Status::new(tonic::Code::from(code), "x")).to_string())
+            .collect();
+        assert_eq!(
+            messages,
+            [
+                "0 OK: x",
+                "1 CANCELLED: x",
+                "2 UNKNOWN: x",
+                "3 INVALID_ARGUMENT: x",
+                "4 DEADLINE_EXCEEDED: x",
+                "5 NOT_FOUND: x",
+                "6 ALREADY_EXISTS: x",
+                "7 PERMISSION_DENIED: x",
+                "8 RESOURCE_EXHAUSTED: x",
+                "9 FAILED_PRECONDITION: x",
+                "10 ABORTED: x",
+                "11 OUT_OF_RANGE: x",
+                "12 UNIMPLEMENTED: x",
+                "13 INTERNAL: x",
+                "14 UNAVAILABLE: x",
+                "15 DATA_LOSS: x",
+                "16 UNAUTHENTICATED: x",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_passed_deadline_reads_as_grpc_js_deadline_error() {
+        assert_eq!(
+            ApiError::DeadlineExceeded(UNARY_DEADLINE).to_string(),
+            "4 DEADLINE_EXCEEDED: Deadline exceeded after 30.000s"
+        );
+    }
 }
