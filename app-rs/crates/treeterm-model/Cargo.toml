@@ -21,12 +21,11 @@ uuid = { version = "1", features = ["v4"] }
 url = "2.5"
 # Monaco's per-language word patterns (`words`).
 regex = "1"
-# Syntax errors of TypeScript, JavaScript and CSS files (`code_intel::syntax`): the grammars
-# GPUI Kit highlights them with.
+# Syntax errors of TypeScript and JavaScript files (`code_intel::syntax`): the grammars GPUI
+# Kit highlights them with.
 tree-sitter = "0.26"
 tree-sitter-typescript = "0.23"
 tree-sitter-javascript = "0.23"
-tree-sitter-css = "0.23"
 
 [dev-dependencies]
 dirs = "6"

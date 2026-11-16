@@ -9327,7 +9327,6 @@ dependencies = [
  "tonic",
  "tracing",
  "tree-sitter",
- "tree-sitter-css",
  "tree-sitter-javascript",
  "tree-sitter-typescript",
  "treeterm-core",
