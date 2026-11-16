@@ -19,6 +19,7 @@ use treeterm_model::app_store::AppStore;
 use treeterm_model::zoom::ZoomStore;
 use treeterm_term::keys::KeyOptions;
 
+use crate::active_processes_view::CloseAnyway;
 use crate::app_view::AppView;
 use crate::terminal_view;
 use crate::theme::colors;
@@ -176,23 +177,9 @@ fn menus(mac: bool) -> Vec<Menu> {
 /// The shortcuts, the menu bar and the commands that need no window, with `zoom` as the app's
 /// zoom. Runs before the window opens: off macOS the window draws the menu bar from what this
 /// sets.
-pub fn install(store: Entity<AppStore>, zoom: ZoomStore, cx: &mut App) {
+pub fn install(zoom: ZoomStore, cx: &mut App) {
     let mac = cfg!(target_os = "macos");
     bind_keys(mac, KeyOptions::for_host(), cx);
-
-    cx.on_action(move |_: &QuitAndKillDaemon, cx| {
-        tracing::info!("shutting down the daemon before quitting");
-        let shutdown = store.read(cx).shutdown_daemon();
-        cx.spawn(async move |cx| {
-            match shutdown.await {
-                Ok(Ok(())) => tracing::info!("daemon shut down"),
-                Ok(Err(error)) => tracing::error!(%error, "failed to shut down the daemon"),
-                Err(lost) => tracing::error!(%lost, "failed to shut down the daemon"),
-            }
-            cx.update(|cx| cx.quit());
-        })
-        .detach();
-    });
     install_zoom(zoom, cx);
     cx.on_action(|_: &Hide, cx| cx.hide());
     cx.on_action(|_: &HideOthers, cx| cx.hide_other_apps());
@@ -247,9 +234,12 @@ pub fn in_window_bar(bar: &Entity<AppMenuBar>, cx: &App) -> AnyElement {
 }
 
 /// The commands that act on the window, sent to its view (Electron's
-/// `BrowserWindow.getFocusedWindow()`). Once the window has closed only Quit does anything.
-pub fn route_to_window(window: AnyWindowHandle, view: WeakEntity<AppView>, cx: &mut App) {
+/// `BrowserWindow.getFocusedWindow()`). Once the window has closed only Quit, and Exit and
+/// Kill Daemon on `store`'s local daemon, do anything (with no window, nothing asks first).
+pub fn route_to_window(window: AnyWindowHandle, view: WeakEntity<AppView>, store: Entity<AppStore>, cx: &mut App) {
     route::<Quit, _>(window, view.clone(), AppView::quit, |cx| cx.quit(), cx);
+    let kill = CloseAnyway::KillDaemonAndQuit(store);
+    route::<QuitAndKillDaemon, _>(window, view.clone(), AppView::quit_and_kill_daemon, move |cx| kill.run(cx), cx);
     route::<CloseWindow, _>(window, view.clone(), AppView::close_window, |_| {}, cx);
     route::<OpenSettings, _>(window, view.clone(), AppView::open_settings, |_| {}, cx);
     route::<ActiveProcesses, _>(window, view.clone(), AppView::open_active_processes, |_| {}, cx);

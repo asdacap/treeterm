@@ -263,7 +263,7 @@ fn main() {
                 ZoomStore::in_memory()
             }
         };
-        menus::install(store.clone(), zoom, cx);
+        menus::install(zoom, cx);
         let options = window_options(cx);
         let initial_keys = keybinding_settings(settings.read(cx).settings());
         let keybindings = cx.new(|_| KeybindingStore::new(initial_keys));
@@ -279,12 +279,12 @@ fn main() {
         .detach();
         let names = cx.new(|_| treeterm_model::session_names::SessionNames::new(paths::user_data_dir().ok()));
         let (window, view) = gpui_kit::open_window(options, cx, {
-            let (keybindings, settings) = (keybindings.clone(), settings.clone());
+            let (store, keybindings, settings) = (store.clone(), keybindings.clone(), settings.clone());
             |window, cx| cx.new(|cx| AppView::new(store, keybindings, settings, names, window, cx))
         })
         .expect("open the main window");
         intercept_shortcuts(keybindings, view.clone(), cx);
-        menus::route_to_window(window, view.downgrade(), cx);
+        menus::route_to_window(window, view.downgrade(), store, cx);
         if let Some(path) = initial_workspace {
             view.update(cx, |v, cx| v.open_on_start(path.to_string_lossy().into_owned(), cx));
         }

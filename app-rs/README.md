@@ -400,6 +400,10 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   expired lock); Electron shows it as long as the daemon still reports the lock.
 - A stale local daemon socket is replaced at once (Electron waited up to 5 s for it to
   answer). Connections to use still wait up to 5 s for the daemon, as in Electron.
+- Exit and Kill Daemon asks about unmerged workspaces before it stops the daemon, so Cancel
+  leaves everything running; Electron stopped the daemon first and asked after, so Cancel left
+  the window on a dead daemon. Pressed while Quit's confirmation is up, it makes that
+  confirmation's Close Anyway stop the daemon too.
 - A remote daemon that has no SessionWatch at all (`UNIMPLEMENTED`) is reported as outdated
   too; Electron only recognised a `NOT_FOUND` error about the session. A Reconnect from the
   error waits for the session again, so it stops at the error once more instead of

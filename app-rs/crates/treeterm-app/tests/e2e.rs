@@ -460,3 +460,55 @@ fn quit_asks_about_unmerged_workspaces_once_while_a_dialog_has_focus() {
     assert!(app.child.try_wait().expect("the app's status").is_none(), "the app quit without asking");
     app.quit();
 }
+
+/// The platform's Exit and Kill Daemon shortcut.
+const KILL: &str = if cfg!(target_os = "macos") { "key cmd-shift-q" } else { "key ctrl-shift-q" };
+
+#[test]
+#[ignore = "opens the app window; run with --ignored"]
+fn exit_and_kill_daemon_stops_the_daemon_and_quits() {
+    let sandbox = Sandbox::new();
+    let mut app = sandbox.launch();
+    let daemon = sandbox.daemon_pid().expect("the app started a daemon");
+    // Nothing is unmerged, so nothing asks first.
+    app.command(KILL);
+    let deadline = Instant::now() + WAIT;
+    while app.child.try_wait().expect("the app's status").is_none() || alive(daemon) {
+        assert!(Instant::now() < deadline, "the app or its daemon is still running");
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+#[test]
+#[ignore = "opens the app window; run with --ignored"]
+fn exit_and_kill_daemon_asks_about_unmerged_workspaces_before_it_stops_the_daemon() {
+    let sandbox = Sandbox::new();
+    let app = sandbox.launch();
+    let daemon = sandbox.daemon_pid().expect("the app started a daemon");
+    let root = app.command("state")["active"].as_str().expect("the open workspace").to_owned();
+    app.command(&format!("fork {root}"));
+    app.wait_for("the forked workspace", |state| {
+        state["workspaces"]
+            .as_array()
+            .is_some_and(|workspaces| workspaces.iter().filter(|w| w["entry"]["name"].is_string()).count() == 2)
+    });
+
+    app.command(KILL);
+    app.wait_for("the Unmerged Workspaces confirmation", |state| state["dialogs"]["closeConfirm"] == true);
+    assert!(alive(daemon), "the daemon was stopped before asking");
+
+    // Cancel stops nothing.
+    app.command("key escape");
+    app.wait_for("the confirmation to close", |state| state["dialogs"]["closeConfirm"] == false);
+    std::thread::sleep(Duration::from_secs(1));
+    assert!(alive(daemon), "Cancel stopped the daemon");
+
+    // Exit and Kill Daemon while Quit's confirmation is up: still the one dialog.
+    app.command(QUIT);
+    app.wait_for("Quit's confirmation", |state| state["dialogs"]["closeConfirm"] == true);
+    app.command(KILL);
+    let state = app.command("state");
+    assert_eq!(dialogs(&state), 1, "{state}");
+    assert!(alive(daemon), "the daemon was stopped before Close Anyway");
+    app.quit();
+}

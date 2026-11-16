@@ -18,6 +18,7 @@ use treeterm_model::session_store::{SessionEvent, SessionStore, WorkspaceEntry};
 use treeterm_model::traffic::TrafficMeter;
 use treeterm_model::workspace_store::{ActivityStyle as _, PageHost, TabContent, WorkspaceStore};
 
+use crate::active_processes_view::CloseAnyway;
 use crate::terminal_view::{Focus, TerminalView};
 use crate::theme::colors;
 use gpui_kit::assets::IconName;
@@ -65,7 +66,7 @@ pub struct AppView {
     processes_dialog: ProcessesDialog,
     /// The unmerged-workspaces confirmation while it is up: Quit or Close again does not
     /// stack a second one.
-    close_confirm: std::rc::Weak<crate::active_processes_view::Unmerged>,
+    close_confirm: std::rc::Weak<crate::active_processes_view::CloseConfirm>,
     menu_bar: MenuBar,
     /// Where the sound toggle was laid out last (window coordinates): its save status shows
     /// under it. `None` until it is first drawn.
@@ -1211,12 +1212,20 @@ impl AppView {
     /// Whether the window may close now; when child workspaces of any connection are
     /// unmerged, asks first (and quits if the user confirms).
     pub fn request_close(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        self.ask_before(CloseAnyway::Quit, window, cx)
+    }
+
+    /// Whether nothing holds up `close_anyway`: when child workspaces of any connection are
+    /// unmerged, asks first, and its Close Anyway does `close_anyway`. While it is open it is
+    /// asked again, not stacked.
+    fn ask_before(&mut self, close_anyway: CloseAnyway, window: &mut Window, cx: &mut Context<Self>) -> bool {
         let unmerged = self.store.read(cx).unmerged_sub_workspaces(cx);
         if unmerged.is_empty() {
             return true;
         }
-        if self.close_confirm.strong_count() == 0 {
-            self.close_confirm = crate::active_processes_view::confirm_close(unmerged, window, cx);
+        match self.close_confirm.upgrade() {
+            Some(open) => open.ask_again(close_anyway),
+            None => self.close_confirm = crate::active_processes_view::confirm_close(unmerged, close_anyway, window, cx),
         }
         false
     }
@@ -1225,6 +1234,15 @@ impl AppView {
     pub fn quit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.request_close(window, cx) {
             cx.quit();
+        }
+    }
+
+    /// Exit and Kill Daemon (Cmd+Shift+Q, Ctrl+Shift+Q): asks first as Quit does, then stops
+    /// the local daemon and quits (`quitAndKillDaemon`, which stopped it before asking).
+    pub fn quit_and_kill_daemon(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let kill = CloseAnyway::KillDaemonAndQuit(self.store.clone());
+        if self.ask_before(kill.clone(), window, cx) {
+            kill.run(cx);
         }
     }
 
@@ -3483,7 +3501,7 @@ mod tests {
     fn settings_save_is_ignored_while_one_is_written(cx: &mut TestAppContext) {
         let cx = window(cx);
         let unmerged = vec![("child".to_owned(), Some("child".to_owned()))];
-        let below = cx.update(|window, cx| crate::active_processes_view::confirm_close(unmerged, window, cx));
+        let below = cx.update(|window, cx| crate::active_processes_view::confirm_close(unmerged, CloseAnyway::Quit, window, cx));
         let dir = tempfile::tempdir().expect("temp dir");
         let (store, view) = open_settings(cx, dir.path());
         assert_eq!(cx.update(|window, cx| window.active_dialog_count(cx)), 2);
@@ -3613,7 +3631,7 @@ mod tests {
     fn the_close_confirmation_handle_lives_while_its_dialog_is_open(cx: &mut TestAppContext) {
         let cx = window(cx);
         let unmerged = vec![("child".to_owned(), Some("child".to_owned()))];
-        let confirm = cx.update(|window, cx| crate::active_processes_view::confirm_close(unmerged, window, cx));
+        let confirm = cx.update(|window, cx| crate::active_processes_view::confirm_close(unmerged, CloseAnyway::Quit, window, cx));
         cx.run_until_parked();
         assert_eq!(confirm.strong_count(), 1, "open");
 
@@ -3621,6 +3639,44 @@ mod tests {
         cx.update(|window, cx| window.close_dialog(cx));
         cx.run_until_parked();
         assert_eq!(confirm.strong_count(), 0, "closed");
+    }
+
+    /// An app store whose local daemon is nowhere (its connection fails at once), on a runtime
+    /// that outlives the test.
+    fn app_store(cx: &mut VisualTestContext, dir: &std::path::Path) -> Entity<AppStore> {
+        static RUNTIME: std::sync::LazyLock<tokio::runtime::Runtime> =
+            std::sync::LazyLock::new(|| tokio::runtime::Runtime::new().expect("a tokio runtime"));
+        let rt = treeterm_core::rt::Rt::new(RUNTIME.handle().clone());
+        let spec = treeterm_core::local_daemon::LocalDaemonSpec {
+            socket_path: dir.join("none.sock"),
+            binary: dir.join("never-spawned"),
+            log_path: dir.join("daemon.log"),
+            pid_file: dir.join("daemon.pid"),
+        };
+        cx.update(|_, cx| {
+            let settings = cx.new(|_| SettingsStore::in_memory(Default::default()));
+            cx.new(|cx| AppStore::new(rt, spec, settings, cx))
+        })
+    }
+
+    /// Exit and Kill Daemon while the close confirmation is open asks it again: its Close
+    /// Anyway stops the daemon too, and a Quit after that leaves it so.
+    #[gpui_kit::test]
+    fn exit_and_kill_daemon_while_the_close_confirmation_is_open_makes_it_stop_the_daemon(cx: &mut TestAppContext) {
+        let cx = window(cx);
+        let dir = tempfile::tempdir().expect("temp dir");
+        let store = app_store(cx, dir.path());
+        let unmerged = vec![("child".to_owned(), Some("child".to_owned()))];
+        let confirm = cx.update(|window, cx| crate::active_processes_view::confirm_close(unmerged, CloseAnyway::Quit, window, cx));
+        cx.run_until_parked();
+        let open = confirm.upgrade().expect("open");
+        assert!(matches!(open.close_anyway(), CloseAnyway::Quit));
+
+        open.ask_again(CloseAnyway::KillDaemonAndQuit(store.clone()));
+        assert!(matches!(open.close_anyway(), CloseAnyway::KillDaemonAndQuit(kills) if kills == store));
+        open.ask_again(CloseAnyway::Quit);
+        assert!(matches!(open.close_anyway(), CloseAnyway::KillDaemonAndQuit(kills) if kills == store));
+        assert_eq!(cx.update(|window, cx| window.active_dialog_count(cx)), 1, "still the one dialog");
     }
 
     /// Sessions "a" (0–100px) and "b" (100–200px), stacked as in the sidebar.

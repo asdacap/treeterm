@@ -1,10 +1,14 @@
 //! "Window → Active Processes" dialog. Port of `ActiveProcessesDialog.tsx`; the live view
 //! is the native terminal (Electron's `PtyViewer`).
 
+use std::cell::RefCell;
+use std::rc::{Rc, Weak};
+
 use gpui_kit::component::WindowExt as _;
 use gpui_kit::prelude::*;
 use gpui_kit::{AnyElement, App, Context, Entity, SharedString, Subscription, Window, div, px};
 use treeterm_model::active_processes::{ActiveProcesses, ProcessList, display_name, relative_time, workspace_labels};
+use treeterm_model::app_store::AppStore;
 use treeterm_model::session_store::SessionStore;
 
 use crate::terminal_view::TerminalView;
@@ -208,11 +212,67 @@ pub fn open(
 /// The unmerged child workspaces a close asks about, as `(name, branch)`.
 pub type Unmerged = Vec<(String, Option<String>)>;
 
-/// Ask before closing when child workspaces are still unmerged (`CloseConfirmDialog.tsx`).
-/// Only the dialog keeps the list, so the handle returned upgrades while it is open.
-pub fn confirm_close(unmerged: Unmerged, window: &mut Window, cx: &mut App) -> std::rc::Weak<Unmerged> {
-    let unmerged = std::rc::Rc::new(unmerged);
-    let open = std::rc::Rc::downgrade(&unmerged);
+/// What the close confirmation's Close Anyway does.
+#[derive(Clone)]
+pub enum CloseAnyway {
+    /// Quit: asked by Quit, Close Window or the window's close button.
+    Quit,
+    /// Stop the local daemon, then quit: asked by Exit and Kill Daemon.
+    KillDaemonAndQuit(Entity<AppStore>),
+}
+
+impl CloseAnyway {
+    /// Quit; for Exit and Kill Daemon, once the local daemon is stopped or could not be
+    /// (`quitAndKillDaemon` logs why and quits anyway).
+    pub fn run(&self, cx: &mut App) {
+        match self {
+            CloseAnyway::Quit => cx.quit(),
+            CloseAnyway::KillDaemonAndQuit(store) => {
+                tracing::info!("shutting down the daemon before quitting");
+                let shutdown = store.read(cx).shutdown_daemon();
+                cx.spawn(async move |cx| {
+                    match shutdown.await {
+                        Ok(Ok(())) => tracing::info!("daemon shut down"),
+                        Ok(Err(error)) => tracing::error!(%error, "failed to shut down the daemon"),
+                        Err(lost) => tracing::error!(%lost, "failed to shut down the daemon"),
+                    }
+                    cx.update(|cx| cx.quit());
+                })
+                .detach();
+            }
+        }
+    }
+}
+
+/// The close confirmation while it is open: only its dialog keeps it.
+pub struct CloseConfirm {
+    /// Shared with its Close Anyway button, whose listener outlives a frame.
+    close_anyway: Rc<RefCell<CloseAnyway>>,
+}
+
+impl CloseConfirm {
+    /// What its Close Anyway does now.
+    #[cfg(test)]
+    pub fn close_anyway(&self) -> CloseAnyway {
+        self.close_anyway.borrow().clone()
+    }
+
+    /// Asked again while it is open (it stays the one dialog): after Exit and Kill Daemon its
+    /// Close Anyway stops the daemon too, which a later Quit or Close leaves as it is.
+    pub fn ask_again(&self, close_anyway: CloseAnyway) {
+        match close_anyway {
+            CloseAnyway::Quit => {}
+            kill @ CloseAnyway::KillDaemonAndQuit(_) => *self.close_anyway.borrow_mut() = kill,
+        }
+    }
+}
+
+/// Ask before closing when child workspaces are still unmerged (`CloseConfirmDialog.tsx`);
+/// Close Anyway does `close_anyway`. Only the dialog keeps the confirmation, so the handle
+/// returned upgrades while it is open.
+pub fn confirm_close(unmerged: Unmerged, close_anyway: CloseAnyway, window: &mut Window, cx: &mut App) -> Weak<CloseConfirm> {
+    let confirm = Rc::new(CloseConfirm { close_anyway: Rc::new(RefCell::new(close_anyway)) });
+    let open = Rc::downgrade(&confirm);
     window.open_dialog(cx, move |dialog, _, cx| {
         let c = colors(cx);
         // `.close-confirm-list`: bg-tertiary, 4px radius, 8px 12px padding, at most 200px.
@@ -272,8 +332,13 @@ pub fn confirm_close(unmerged: Unmerged, window: &mut Window, cx: &mut App) -> s
                     .on_click(|_, window, cx| window.close_dialog(cx)),
             )
             .child(
-                ui::dialog_button("close-anyway", "Close Anyway", ui::ButtonKind::Warning, false, cx)
-                    .on_click(|_, _, cx| cx.quit()),
+                ui::dialog_button("close-anyway", "Close Anyway", ui::ButtonKind::Warning, false, cx).on_click({
+                    let close_anyway = confirm.close_anyway.clone();
+                    move |_, _, cx| {
+                        let now = close_anyway.borrow().clone();
+                        now.run(cx)
+                    }
+                }),
             );
         ui::dialog_frame(dialog, 450., cx).child(
             ui::dialog_root(cx)
