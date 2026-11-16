@@ -272,9 +272,49 @@ pub fn in_file_first(matches: Vec<DiffMatch>, file: &str) -> Vec<DiffMatch> {
     first
 }
 
+/// What the diff's right-click menu offers (`contextTarget`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiffMenu {
+    /// "Copy": the selection, else the word under the pointer.
+    pub copy: String,
+    /// "Search “…”": a one-line selection (trimmed), else the word under the pointer; empty:
+    /// no Search item.
+    pub search: String,
+}
+
+impl DiffMenu {
+    /// The menu over `selected` (the diff's selected text) and `word` (the word under the
+    /// pointer, or empty); `None`, no menu, when neither has text.
+    pub fn new(selected: &str, word: &str) -> Option<Self> {
+        let copy = if selected.is_empty() { word } else { selected };
+        if copy.is_empty() {
+            return None;
+        }
+        let trimmed = selected.trim();
+        let search = if trimmed.is_empty() || trimmed.contains('\n') { word } else { trimmed };
+        Some(Self { copy: copy.to_owned(), search: search.to_owned() })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_diff_menu_copies_the_selection_else_the_word_and_searches_one_line() {
+        let menu = |copy: &str, search: &str| Some(DiffMenu { copy: copy.to_owned(), search: search.to_owned() });
+        // A one-line selection is searched trimmed and copied as it is, whatever the word.
+        assert_eq!(DiffMenu::new("  needle ", "word"), menu("  needle ", "needle"));
+        // A multi-line selection is copied; the word is searched.
+        assert_eq!(DiffMenu::new("two\nlines", "word"), menu("two\nlines", "word"));
+        assert_eq!(DiffMenu::new("two\nlines", ""), menu("two\nlines", ""));
+        // Blank selected: copied; the word is searched.
+        assert_eq!(DiffMenu::new("  ", "word"), menu("  ", "word"));
+        // No selection: the word, for both.
+        assert_eq!(DiffMenu::new("", "word"), menu("word", "word"));
+        // Neither: no menu.
+        assert_eq!(DiffMenu::new("", ""), None);
+    }
 
     const SPLIT_FOLDED: DiffLayout = DiffLayout { style: DiffStyle::Split, unchanged: UnchangedRegions::Collapsed };
     const UNIFIED_FOLDED: DiffLayout = DiffLayout { style: DiffStyle::Unified, unchanged: UnchangedRegions::Collapsed };

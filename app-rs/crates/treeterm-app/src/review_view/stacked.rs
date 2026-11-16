@@ -308,7 +308,7 @@ impl ReviewView {
                     }))),
             );
         let diff = self.diff_element(&state, &patch, diffs, &order, viewed, comments, window, cx);
-        let diff = self.with_diff_menu(diff, &state, cx);
+        let diff = self.with_diff_menu(diff, &state);
         let find = self.find_panel(&state, &patch, &listed, window, cx);
         v_flex().size_full().child(header).child(div().flex_1().min_h_0().child(diff)).children(find).into_any_element()
     }
@@ -788,6 +788,7 @@ fn file_header(
     v_flex()
         .mx(-pad)
         .my(-pad)
+        .on_mouse_down(MouseButton::Right, keep_right_button)
         .child(header_row(header, state, view, model, cx))
         .children(body)
         .into_any_element()
@@ -826,8 +827,16 @@ fn sticky_header(
         .border_t_1()
         .border_b_1()
         .border_color(colors(cx).border)
+        .on_mouse_down(MouseButton::Right, keep_right_button)
         .child(header_row(header, state, view, model, cx))
         .into_any_element()
+}
+
+/// A file header, with its image, and a line's comments sit outside Pierre's viewer in
+/// Electron, so a right-click there opens no Search / Copy menu (`contextTarget`): the diff's
+/// menu does not see it. The comment box's own menu and "Viewed" come first.
+fn keep_right_button(_: &gpui_kit::MouseDownEvent, _: &mut Window, cx: &mut App) {
+    cx.stop_propagation();
 }
 
 /// `.file-diff-header`: chevron, status, path, stats, Stage / Unstage, refresh, Viewed.
@@ -1106,6 +1115,7 @@ fn comment_group(
         .my(-pad)
         .px(px(8.))
         .py(px(4.))
+        .on_mouse_down(MouseButton::Right, keep_right_button)
         .bg(colors(cx).bg_secondary)
         .font_family(super::parts::MONO)
         .children(comments.iter().map(|comment| comment_display(comment, &Placement::Diff, &actions, cx)));
@@ -1434,6 +1444,103 @@ mod tests {
         assert_eq!(header_top(&state, "a.txt", cx), None);
         assert_eq!(header_top(&state, "c.txt", cx), None);
         assert_eq!(header_top(&state, "missing.txt", cx), None);
+    }
+
+    /// `file.txt` with its second line `two` changed to `fresh words` (shown unified).
+    fn one_change(cx: &mut gpui_kit::TestAppContext) -> (Entity<DiffState>, &mut gpui_kit::VisualTestContext) {
+        shown("diff --git a/file.txt b/file.txt\n--- a/file.txt\n+++ b/file.txt\n@@ -1,2 +1,2 @@\n one\n-two\n+fresh words\n", cx)
+    }
+
+    type TextAt = Option<(DiffLinePosition, SharedString, usize)>;
+
+    /// The points along the row of `file.txt`'s new line `line`, a pixel apart from its line
+    /// number to the right edge, and the text under each.
+    fn along(state: &Entity<DiffState>, line: usize, cx: &mut gpui_kit::VisualTestContext) -> Vec<(gpui_kit::Point<Pixels>, TextAt)> {
+        use gpui_kit::test::TestQueryExt as _;
+        let number = cx.update(|window, _| window.find_by_label(&format!("Select Modified line {line}")).bounds());
+        let (left, y) = (f32::from(number.left()) as usize, number.center().y);
+        (left..400)
+            .map(|x| {
+                let at = gpui_kit::point(px(x as f32), y);
+                (at, cx.update(|_, cx| state.read(cx).text_at(at)))
+            })
+            .collect()
+    }
+
+    #[gpui_kit::test]
+    fn the_text_under_a_point_is_a_character_of_its_line_and_none_beside_it(cx: &mut gpui_kit::TestAppContext) {
+        let (state, cx) = one_change(cx);
+        let row = along(&state, 2, cx);
+        assert_eq!(row[0].1, None, "the line number is no text");
+        // Nor is the row's space after the line's text (well over 100px of it).
+        let end = row.iter().rposition(|(_, hit)| hit.is_some()).expect("painted");
+        assert!(row.len() - end > 100, "the text ends {} px before the edge", row.len() - end);
+        let line = DiffLinePosition::new("file.txt", DiffSide::Modified, 2);
+        let mut offsets: Vec<usize> = row
+            .iter()
+            .filter_map(|(_, hit)| hit.clone())
+            .map(|(position, text, offset)| {
+                assert_eq!((position, text.as_ref()), (line.clone(), "fresh words"));
+                offset
+            })
+            .collect();
+        // Left to right, each character in turn.
+        offsets.dedup();
+        assert_eq!(offsets, (0.."fresh words".len()).collect::<Vec<_>>());
+    }
+
+    #[gpui_kit::test]
+    fn a_right_click_offers_the_selection_else_the_word_on_a_files_rows(cx: &mut gpui_kit::TestAppContext) {
+        use treeterm_model::review_find::DiffMenu;
+        let (state, cx) = one_change(cx);
+        let row = along(&state, 2, cx);
+        let on_words = row.iter().find(|(_, hit)| hit.as_ref().is_some_and(|(_, _, offset)| *offset == 8)).expect("painted").0;
+        let end = row.iter().rposition(|(_, hit)| hit.is_some()).expect("painted");
+        let after = row[end + 20].0;
+        assert_eq!(row[end + 20].1, None);
+        let below = gpui_kit::point(px(200.), px(295.));
+        let menu = |at, cx: &mut gpui_kit::VisualTestContext| cx.update(|_, cx| super::super::find::diff_menu_at(&state, at, cx));
+        let offer = |copy: &str, search: &str| Some((SharedString::from("file.txt"), DiffMenu { copy: copy.into(), search: search.into() }));
+        let selected = |cx: &mut gpui_kit::VisualTestContext| cx.update(|_, cx| state.read(cx).selected_text(cx));
+
+        // Nothing selected: the word under the pointer, else no menu.
+        assert_eq!(menu(on_words, cx), offer("words", "words"));
+        assert_eq!(menu(after, cx), None);
+        assert_eq!(menu(below, cx), None);
+
+        // Lines selected: copied wherever the file's rows are right-clicked; the word is searched.
+        state.update(cx, |s, cx| s.set_selected_lines(Some(DiffLineRange::new("file.txt", DiffSide::Modified, 1, 2)), cx));
+        let lines = selected(cx);
+        assert!(lines.trim().contains('\n'), "{lines:?}");
+        assert_eq!(menu(after, cx), offer(&lines, ""));
+        assert_eq!(menu(on_words, cx), offer(&lines, "words"));
+        assert_eq!(menu(below, cx), None, "below the files");
+
+        // One line selected: searched too.
+        state.update(cx, |s, cx| s.set_selected_lines(Some(DiffLineRange::new("file.txt", DiffSide::Modified, 2, 2)), cx));
+        let line = selected(cx);
+        assert_eq!(menu(on_words, cx), offer(&line, "fresh words"));
+    }
+
+    #[gpui_kit::test]
+    fn the_file_under_a_point_is_the_one_whose_row_is_there(cx: &mut gpui_kit::TestAppContext) {
+        let (state, cx) = three_files(cx);
+        // b.txt's header 100px down: a.txt's last rows above it.
+        for _ in 0..2 {
+            state.update(cx, |s, cx| s.scroll_file_header_to("b.txt", px(100.), cx));
+            draw(cx);
+        }
+        let file_at = |y: f32, cx: &mut gpui_kit::VisualTestContext| {
+            cx.update(|_, cx| state.read(cx).file_at(gpui_kit::point(px(200.), px(y))).map(|p| p.to_string()))
+        };
+        // The rows start under the diff's 1px border.
+        assert_eq!(file_at(0., cx), None, "on the border");
+        assert_eq!(file_at(1., cx).as_deref(), Some("a.txt"));
+        assert_eq!(file_at(100., cx).as_deref(), Some("a.txt"));
+        assert_eq!(file_at(101., cx).as_deref(), Some("b.txt"));
+        assert_eq!(file_at(298., cx).as_deref(), Some("b.txt"));
+        assert_eq!(file_at(299., cx), None, "below the rows");
+        assert_eq!(cx.update(|_, cx| state.read(cx).file_at(gpui_kit::point(px(400.), px(50.)))), None, "beside them");
     }
 
     fn band(state: &Entity<DiffState>, cx: &mut gpui_kit::VisualTestContext) -> Vec<String> {

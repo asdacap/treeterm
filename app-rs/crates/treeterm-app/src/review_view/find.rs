@@ -1,19 +1,23 @@
 //! Find in the diff (`StackedDiffList`'s find bar): Cmd/Ctrl+F opens [`crate::search_panel`]
 //! under the diff, over the matches the model finds; the chosen match is scrolled to and
 //! selected in the diff. The diff's context menu offers "Search" and "Copy" for the
-//! selected text.
+//! selected text or the word under the pointer.
 
+use std::cell::Cell;
 use std::rc::Rc;
 
 use gpui_kit::component::diff::{DiffLineRange, DiffLinePosition, DiffSide, DiffState};
 use gpui_kit::component::input::{InputEvent, InputState, Search};
 use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenu, PopupMenuItem};
 use gpui_kit::prelude::*;
-use gpui_kit::{AnyElement, App, ClipboardItem, Context, Entity, KeyBinding, Window, actions, div};
+use gpui_kit::{
+    AnyElement, App, ClipboardItem, Context, Entity, KeyBinding, MouseButton, MouseDownEvent, Pixels, Point, SharedString, Window,
+    actions, div,
+};
 use treeterm_core::review::Side;
-use treeterm_core::search::{DiffStyle, UnchangedRegions};
+use treeterm_core::search::{DiffStyle, UnchangedRegions, word_at};
 use treeterm_model::review::DiffFind;
-use treeterm_model::review_find::DiffLayout;
+use treeterm_model::review_find::{DiffLayout, DiffMenu};
 
 use super::ReviewView;
 
@@ -33,12 +37,6 @@ fn diff_side(side: Side) -> DiffSide {
         Side::Original => DiffSide::Original,
         Side::Modified => DiffSide::Modified,
     }
-}
-
-/// A single-line selection to search for (`searchText`); empty when there is none.
-fn search_text(selected: &str) -> &str {
-    let trimmed = selected.trim();
-    if trimmed.contains('\n') { "" } else { trimmed }
 }
 
 impl ReviewView {
@@ -167,48 +165,50 @@ impl ReviewView {
     }
 
     /// The diff with its right-click menu (`contextTarget`): "Search “…”" for a one-line
-    /// selection and "Copy" for any. GPUI Kit's diff does not say which word is under the
-    /// pointer, so without a selection there is no menu.
-    pub(super) fn with_diff_menu(&self, diff: AnyElement, state: &Entity<DiffState>, cx: &Context<Self>) -> AnyElement {
-        let (state, model, this) = (state.clone(), self.model.clone(), cx.weak_entity());
+    /// selection, else the word under the pointer, its "In this file" the file right-clicked;
+    /// "Copy" for the selection, else that word. With neither, or below the files, there is
+    /// no menu; file headers and comments have none (they keep the right button).
+    pub(super) fn with_diff_menu(&self, diff: AnyElement, state: &Entity<DiffState>) -> AnyElement {
+        // What the press under way points at, for the menu the Kit builds after it.
+        let pressed: Rc<Cell<Option<(SharedString, DiffMenu)>>> = Rc::default();
+        let (target, state, model) = (pressed.clone(), state.clone(), self.model.clone());
         div()
             .id("review-diff")
             .size_full()
             .child(diff)
-            .context_menu(move |menu: PopupMenu, _, cx| {
-                let selected = state.read(cx).selected_text(cx);
-                if selected.is_empty() {
-                    return menu;
+            .on_mouse_down(MouseButton::Right, move |event: &MouseDownEvent, _, cx| {
+                let found = diff_menu_at(&state, event.position, cx);
+                if found.is_none() {
+                    // No menu: the Kit's would open empty, and hold focus unseen.
+                    cx.stop_propagation();
                 }
-                let query = search_text(&selected).to_owned();
-                let file = match this.upgrade() {
-                    Some(view) => view.read(cx).reading(cx),
-                    None => String::new(),
+                pressed.set(found);
+            })
+            .context_menu(move |menu: PopupMenu, _, _| {
+                let Some((file, DiffMenu { copy, search })) = target.take() else {
+                    return menu;
                 };
                 let model = model.clone();
-                let menu = if query.is_empty() {
+                let menu = if search.is_empty() {
                     menu
                 } else {
-                    menu.item(PopupMenuItem::new(format!("Search \u{201c}{query}\u{201d}")).on_click(move |_, _, cx| {
-                        model.update(cx, |m, cx| m.search_in_diff(&query, &file, cx));
+                    menu.item(PopupMenuItem::new(format!("Search \u{201c}{search}\u{201d}")).on_click(move |_, _, cx| {
+                        model.update(cx, |m, cx| m.search_in_diff(&search, &file, cx));
                     }))
                 };
                 menu.item(PopupMenuItem::new("Copy").on_click(move |_, _, cx| {
-                    cx.write_to_clipboard(ClipboardItem::new_string(selected.clone()));
+                    cx.write_to_clipboard(ClipboardItem::new_string(copy.clone()));
                 }))
             })
             .into_any_element()
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn only_a_one_line_selection_is_searched() {
-        assert_eq!(search_text("  needle "), "needle");
-        assert_eq!(search_text("two\nlines"), "");
-        assert_eq!(search_text(""), "");
-    }
+/// The diff's menu for a right-click at `point` (window coordinates), and the file it is
+/// on: the selection and the word under the pointer, on a file's rows.
+pub(super) fn diff_menu_at(state: &Entity<DiffState>, point: Point<Pixels>, cx: &App) -> Option<(SharedString, DiffMenu)> {
+    let state = state.read(cx);
+    let file = state.file_at(point)?;
+    let word = state.text_at(point).map(|(_, text, offset)| word_at(&text, offset).to_owned()).unwrap_or_default();
+    DiffMenu::new(&state.selected_text(cx), &word).map(|menu| (file, menu))
 }

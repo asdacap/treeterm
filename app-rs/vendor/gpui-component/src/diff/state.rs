@@ -8,8 +8,8 @@ use std::{
 
 use gpui::{
     App, AppContext as _, Context, ElementId, EventEmitter, FocusHandle, Focusable, HighlightStyle,
-    ListAlignment, ListOffset, ListState, Pixels, ScrollHandle, SharedString, Size, Subscription,
-    Task, Window, WindowId, point, px,
+    ListAlignment, ListOffset, ListState, Pixels, Point, ScrollHandle, SharedString, Size,
+    Subscription, Task, Window, WindowId, point, px,
 };
 use gpui_base::{TextSelection, TextSelectionContentKey, TextSelectionEvent, TextSelectionHandle};
 
@@ -1026,6 +1026,39 @@ impl DiffState {
         });
         self.list.scroll_by(-top);
         cx.notify();
+    }
+
+    /// TreeTerm patch: the source line whose text was painted under `point` (window
+    /// coordinates) at the last paint, its text and the byte offset in it of the character
+    /// there. `None` off the code text: a gutter, a header, a fold, the space after a line.
+    pub fn text_at(&self, point: Point<Pixels>) -> Option<(DiffLinePosition, SharedString, usize)> {
+        let (file, side, line_ix, display_ix) = self.geometry.borrow().text_at(point)?;
+        let line = self.files.get(file)?.lines(side).get(line_ix)?;
+        Some((
+            self.position(file, side, line_ix),
+            line.text().clone(),
+            line.source_offset(display_ix),
+        ))
+    }
+
+    /// TreeTerm patch: the path of the file whose row was laid out under `point` (window
+    /// coordinates) at the last layout; `None` outside the rows.
+    pub fn file_at(&self, point: Point<Pixels>) -> Option<SharedString> {
+        let viewport = self.list.viewport_bounds();
+        if !viewport.contains(&point) {
+            return None;
+        }
+        let mut ix = self.list.logical_scroll_top().item_ix;
+        while let (Some(row), Some(bounds)) = (self.rows.get(ix), self.list.bounds_for_item(ix)) {
+            if bounds.top() > point.y {
+                break;
+            }
+            if bounds.contains(&point) {
+                return Some(self.files[row.file()].path().clone());
+            }
+            ix += 1;
+        }
+        None
     }
 
     /// Moves to the next changed group after the current viewport, across files,

@@ -96,6 +96,20 @@ impl SelectionGeometry {
         ))
     }
 
+    /// TreeTerm patch: the character painted under `point` (window coordinates): its file,
+    /// side, line index and display offset in that line. Unlike [`Self::key_at`] there is
+    /// no nearest run: a gutter, a header or the space after a line has none.
+    pub fn text_at(&self, point: Point<Pixels>) -> Option<(usize, DiffSide, usize, usize)> {
+        let run = self.runs.iter().find(|run| run.bounds.contains(&point))?;
+        let ix = run.layout.index_for_position(point).ok()?;
+        Some((
+            run.file,
+            run.side,
+            run.line_ix,
+            run.display_range.start + ix,
+        ))
+    }
+
     fn run_at(&self, point: Point<Pixels>, side: Option<DiffSide>) -> Option<&CodeRun> {
         let side = side.or_else(|| {
             self.runs
