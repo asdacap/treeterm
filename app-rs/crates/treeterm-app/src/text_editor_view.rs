@@ -33,14 +33,12 @@ actions!(text_editor, [Save, ChangeAllOccurrences]);
 const CONTEXT: &str = "TextEditor";
 
 /// Cmd/Ctrl+S saves. Monaco's replace is Cmd+Alt+F on macOS (GPUI Kit's Cmd+Shift+F
-/// stays); elsewhere it is Ctrl+H, as in the Kit. F12 goes to the definition, Cmd/Ctrl+F2
-/// changes all occurrences, and Ctrl+Space or Cmd/Ctrl+I (Alt+Escape on macOS) ask for
-/// suggestions, as in Monaco.
+/// stays); elsewhere it is Ctrl+H, as in the Kit. F12 goes to the definition
+/// ([`crate::file_browser_view::definition_keys`]), Cmd/Ctrl+F2 changes all occurrences, and
+/// Ctrl+Space or Cmd/Ctrl+I (Alt+Escape on macOS) ask for suggestions, as in Monaco.
 pub fn bind_keys(cx: &mut gpui_kit::App) {
-    cx.bind_keys([
-        KeyBinding::new("f12", GoToDefinition, Some(CONTEXT)),
-        KeyBinding::new("ctrl-space", ShowCompletions, Some(CONTEXT)),
-    ]);
+    cx.bind_keys(crate::file_browser_view::definition_keys(CONTEXT));
+    cx.bind_keys([KeyBinding::new("ctrl-space", ShowCompletions, Some(CONTEXT))]);
     if cfg!(target_os = "macos") {
         cx.bind_keys([
             KeyBinding::new("cmd-s", Save, Some(CONTEXT)),
@@ -355,6 +353,46 @@ mod tests {
         fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
             div().key_context(CONTEXT).w(px(400.)).h(px(300.)).child(Editor::new(&self.editor).h_full())
         }
+    }
+
+    /// A code editor in the Editor tab's key context, counting go to definition.
+    struct DefinitionHost {
+        editor: Entity<EditorState>,
+        gone: usize,
+    }
+
+    impl Render for DefinitionHost {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .key_context(CONTEXT)
+                .on_action(cx.listener(|host, _: &GoToDefinition, _, _| host.gone += 1))
+                .w(px(400.))
+                .h(px(300.))
+                .child(Editor::new(&self.editor).h_full())
+        }
+    }
+
+    #[gpui_kit::test]
+    fn monacos_go_to_definition_and_open_to_the_side_keys_go_to_the_definition(cx: &mut gpui_kit::TestAppContext) {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            bind_keys(cx);
+        });
+        let text = "fn main() {}\n";
+        let (host, cx) = cx.add_window_view(|window, cx| DefinitionHost {
+            editor: cx.new(|cx| EditorState::new(window, cx).language("rust").default_value(text)),
+            gone: 0,
+        });
+        let editor = cx.update(|_, cx| host.read(cx).editor.clone());
+        cx.update(|window, cx| editor.update(cx, |editor, cx| editor.focus(window, cx)));
+        cx.run_until_parked();
+        let secondary = if cfg!(target_os = "macos") { "cmd" } else { "ctrl" };
+        for keys in ["f12".to_owned(), format!("{secondary}-f12"), format!("{secondary}-k f12"), format!("{secondary}-k {secondary}-f12")]
+        {
+            cx.simulate_keystrokes(&keys);
+        }
+        assert_eq!(cx.update(|_, cx| host.read(cx).gone), 4);
+        assert_eq!(cx.update(|_, cx| editor.read(cx).value().to_string()), text);
     }
 
     #[gpui_kit::test]

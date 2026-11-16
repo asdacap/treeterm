@@ -257,6 +257,11 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   and strings), there are no hovers or error squiggles, and its right-click menu has no Go to
   References, Peek, Format Document or Command Palette. Tab indents while suggestions are
   open (Enter takes one, as in Monaco).
+- Neither the Files viewer nor the Editor tab has Monaco's Peek Definition (Alt+F12, and
+  the Peek submenu of the right-click menu): GPUI Kit's editor has no view zones to show a
+  peek in. Open Definition to the Side (Cmd/Ctrl+K F12) goes to the definition as F12
+  does, as in Electron, whose editor opener opened it in a new Editor tab (there is no
+  split editor in either app).
 - With the sidebar collapsed the header keeps clear of the macOS window buttons (Electron's
   title runs under them).
 - GPUI cannot decode AVIF, so the Files viewer shows `.avif` images in a webview (WebKit

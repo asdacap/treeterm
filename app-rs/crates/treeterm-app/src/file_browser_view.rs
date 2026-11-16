@@ -55,8 +55,22 @@ const VIEWER_CONTEXT: &str = "FileViewer";
 /// The viewer's keys, and Monaco's `vs-dark` colours for the code editors (the viewer and
 /// the Editor tab), installed over the theme at start-up.
 pub fn bind_keys(cx: &mut App) {
-    cx.bind_keys([KeyBinding::new("f12", GoToDefinition, Some(VIEWER_CONTEXT))]);
+    cx.bind_keys(definition_keys(VIEWER_CONTEXT));
     gpui_kit::component::Theme::global_mut(cx).highlight_theme = vs_dark::theme();
+}
+
+/// Monaco's go to definition keys in a code editor's key `context`: F12 and Cmd/Ctrl+F12,
+/// and Open Definition to the Side's Cmd/Ctrl+K F12 and Cmd/Ctrl+K Cmd/Ctrl+F12, which go
+/// to the definition as well: Electron's editor opener opened it in a new Editor tab, never
+/// at the side. Monaco adds the Cmd/Ctrl+F12 forms in a browser, which Electron's renderer
+/// is to it (it has no Node `process`).
+pub(crate) fn definition_keys(context: &'static str) -> [KeyBinding; 4] {
+    let keys = if cfg!(target_os = "macos") {
+        ["f12", "cmd-f12", "cmd-k f12", "cmd-k cmd-f12"]
+    } else {
+        ["f12", "ctrl-f12", "ctrl-k f12", "ctrl-k ctrl-f12"]
+    };
+    keys.map(|keys| KeyBinding::new(keys, GoToDefinition, Some(context)))
 }
 
 /// Go-to-definition progress, failures and the pick list, over a code editor (the Files
