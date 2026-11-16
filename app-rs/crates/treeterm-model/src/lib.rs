@@ -22,6 +22,7 @@ pub mod navigation;
 pub mod pty_writer;
 pub mod review;
 pub mod review_find;
+pub mod review_patch;
 pub mod review_tree;
 pub mod search_panel;
 pub mod session_info;

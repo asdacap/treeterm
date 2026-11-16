@@ -230,9 +230,14 @@ pub fn focus_ring(input: Div, radius: f32) -> Div {
 
 /// A spinning `LoaderCircle` (`.spinning`).
 pub fn spinner(size: f32, color: impl Into<Hsla>) -> AnyElement {
+    spinning_icon(IconName::LoaderCircle, size, color)
+}
+
+/// `icon` spinning (`.spinning`).
+pub fn spinning_icon(icon: IconName, size: f32, color: impl Into<Hsla>) -> AnyElement {
     use gpui_kit::component::Sizable as _;
     gpui_kit::component::spinner::Spinner::new()
-        .icon(gpui_kit::component::Icon::new(IconName::LoaderCircle))
+        .icon(gpui_kit::component::Icon::new(icon))
         .with_size(px(size))
         .color(color.into())
         .into_any_element()

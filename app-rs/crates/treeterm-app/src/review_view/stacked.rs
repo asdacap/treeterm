@@ -1,7 +1,8 @@
 //! The diff beside the file list (`StackedDiffList` / `FileDiffSection` /
 //! `PierreDiffViewer`): "N/M viewed" and "Collapse all" above GPUI Kit's `Diff`, whose file
 //! headers are drawn here (collapse chevron, status, path, stats, Stage, refresh, Viewed),
-//! with image files shown under their header and comments under their lines.
+//! with image files, binary files and files whose diff is loading or failed shown under their
+//! header, and comments under their lines.
 
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
@@ -23,10 +24,11 @@ use treeterm_core::files::image_format;
 use treeterm_core::git::{FileChangeStats, FileChangeStatus, Staging, UncommittedFile};
 use treeterm_core::review::{ReviewComment, Side};
 use treeterm_model::review::{CollapseAll, CommentDraft, DiffList, GitOp, ImageSides, ReviewMode, ReviewModel, StageTarget};
+use treeterm_model::review_patch::{FileDiff, FileDiffs};
 
 use super::ReviewView;
 use crate::comment_ui::{CommentActions, Placement, comment_display, comment_input};
-use super::parts::{change_stats, checkbox, disabled_checkbox, outline_button, plain_icon, spinner, status_badge};
+use super::parts::{change_stats, checkbox, disabled_checkbox, outline_button, plain_icon, spinner, spinning_icon, status_badge};
 use crate::file_browser_view::{ImageDrawing, image_drawing, language_for};
 use crate::theme::colors;
 use treeterm_model::review_find::{DIFF_CONTEXT, MIN_COLLAPSED_LINES};
@@ -75,21 +77,24 @@ fn list_change(cached: Option<(&DiffList, &str, &[String])>, list: &DiffList, ke
 struct Parsed {
     files: Vec<DiffFile>,
     shown: Vec<String>,
-    binary: HashSet<String>,
+    /// The files whose body the view draws: binary files, and files whose diff is loading
+    /// or failed (a bare header in `FileDiffs::patch`).
+    drawn: HashSet<String>,
 }
 
-fn parse_listed(patch: &str, order: &[ListedFile]) -> Result<Parsed, String> {
+fn parse_listed(patch: &str, diffs: &FileDiffs, order: &[ListedFile]) -> Result<Parsed, String> {
     let mut parsed: HashMap<String, DiffFile> = HashMap::new();
     for file in DiffFile::parse(patch).map_err(|e| e.to_string())? {
         let path = file.path().to_string();
         let language = language_for(&path);
         parsed.entry(path).or_insert_with(|| file.with_language(language));
     }
-    let mut listed = Parsed { files: Vec::new(), shown: Vec::new(), binary: HashSet::new() };
+    let mut listed = Parsed { files: Vec::new(), shown: Vec::new(), drawn: HashSet::new() };
     for file in order {
         if let Some(diff) = parsed.remove(&file.path) {
-            if diff.is_binary() {
-                listed.binary.insert(file.path.clone());
+            let read = matches!(diffs.get(&file.path), Some(FileDiff::Loaded(_)) | None);
+            if diff.is_binary() || !read {
+                listed.drawn.insert(file.path.clone());
             }
             listed.files.push(diff);
             listed.shown.push(file.path.clone());
@@ -113,9 +118,10 @@ pub struct DiffCache {
     key: String,
     pub state: Entity<DiffState>,
     order: Vec<String>,
-    /// Binary files: always collapsed in the `DiffState` (no "binary file" notice); the
-    /// view folds them itself (`ReviewView::closed_binary`).
-    binary: HashSet<String>,
+    /// Files whose body the view draws (binary, or a diff loading or failed): always
+    /// collapsed in the `DiffState` (no "binary file" notice); the view folds them itself
+    /// (`ReviewView::closed_drawn`).
+    drawn: HashSet<String>,
     /// Viewed files already collapsed (a file collapses when it becomes viewed).
     collapsed_viewed: HashSet<String>,
     /// An open file just checked off from its header's "Viewed", and how far below the top
@@ -191,23 +197,35 @@ enum Annotated {
 }
 
 struct Header {
-    /// A binary file and whether the view has it folded.
-    binary: Option<bool>,
+    /// The body the view draws under it, and whether the view has it folded (`None`: the
+    /// `DiffState` draws its rows).
+    body: Option<(Body, bool)>,
     file: ListedFile,
     /// Uncommitted files: the lists it is in, in list order (a button each).
     staging: Vec<Staging>,
     viewed: bool,
     /// The files above it (right-click "Viewed" marks them).
     above: Vec<String>,
-    image: Option<ImageSides>,
+    /// Its diff is being read: its refresh button spins, disabled.
+    loading: bool,
+}
+
+/// What the view draws under a file's header (`FileDiffSection`'s body).
+enum Body {
+    /// `.file-diff-loading`.
+    Loading,
+    /// `.file-diff-error`: why its diff could not be read.
+    Failed(String),
+    /// An image's sides, else `.file-diff-placeholder`.
+    Binary(Option<ImageSides>),
 }
 
 impl ReviewView {
-    /// The stacked diff of `patch`, limited to `files` (already filtered), in tree order.
+    /// The stacked diff of `diffs`, limited to `files` (already filtered), in tree order.
     /// `comments`: the Committed and Uncommitted views take comments, a commit's diff does not.
     pub(super) fn stacked(
         &mut self,
-        patch: &str,
+        diffs: &FileDiffs,
         files: &[ListedFile],
         viewed: &HashSet<String>,
         comments: bool,
@@ -217,7 +235,8 @@ impl ReviewView {
         let c = colors(cx);
         let (secondary, primary, border, bg_primary) = (c.text_secondary, c.text_primary, c.border, c.bg_primary);
         let order = tree_sorted(files);
-        let state = match self.diff_state(patch, &order, viewed, window, cx) {
+        let patch = diffs.patch();
+        let state = match self.diff_state(&patch, diffs, &order, viewed, window, cx) {
             Ok(state) => state,
             Err(text) => return Self::message(format!("Cannot show this diff: {text}"), rgb(super::parts::ERROR_RED).into(), 20.),
         };
@@ -273,37 +292,40 @@ impl ReviewView {
                         view.collapse_all = view.collapse_all.toggled();
                         let collapsed = view.collapse_all == CollapseAll::Collapsed;
                         if let Some(diff) = &view.diff {
-                            let (paths, binary) = (diff.paths(), diff.binary.clone());
+                            let (paths, drawn) = (diff.paths(), diff.drawn.clone());
                             diff.state.update(cx, |s, cx| {
-                                for path in paths.iter().filter(|p| !binary.contains(*p)) {
+                                for path in paths.iter().filter(|p| !drawn.contains(*p)) {
                                     s.set_file_collapsed(path, collapsed, cx);
                                 }
                             });
                             if collapsed {
-                                view.closed_binary.extend(binary);
+                                view.closed_drawn.extend(drawn);
                             } else {
-                                view.closed_binary.clear();
+                                view.closed_drawn.clear();
                             }
                         }
                         cx.notify();
                     }))),
             );
-        let diff = self.diff_element(&state, patch, &order, viewed, comments, window, cx);
+        let diff = self.diff_element(&state, &patch, diffs, &order, viewed, comments, window, cx);
         let diff = self.with_diff_menu(diff, &state, cx);
-        let find = self.find_panel(&state, patch, &listed, window, cx);
+        let find = self.find_panel(&state, &patch, &listed, window, cx);
         v_flex().size_full().child(header).child(div().flex_1().min_h_0().child(diff)).children(find).into_any_element()
     }
 
     /// The cached `DiffState`. A list of another view (or another commit) is a new one;
-    /// when the patch or the listed files change, the files are replaced in place, keeping
-    /// the scroll, each file's collapse and its opened folds (`StackedDiffList` keys its
-    /// sections by path). A file listed for the first time starts collapsed when viewed,
-    /// then follows the last "Collapse all" / "Expand all" (`FileDiffSection`). A file
-    /// clicked or jumped to is scrolled to (`scrollToFile`), else a new list starts at its
-    /// first file.
+    /// when the patch (`diffs.patch()`) or the listed files change, the files are replaced in
+    /// place, keeping the scroll, each file's collapse and its opened folds (`StackedDiffList`
+    /// keys its sections by path); a file whose body moves between the view and the
+    /// `DiffState` (its diff loading, read or failed) keeps its fold. A file listed for the
+    /// first time starts collapsed when viewed, then follows the last "Collapse all" /
+    /// "Expand all" (`FileDiffSection`). A file clicked or jumped to is scrolled to
+    /// (`scrollToFile`), else a new list starts at its first file.
+    #[allow(clippy::too_many_arguments)]
     fn diff_state(
         &mut self,
         patch: &str,
+        diffs: &FileDiffs,
         order: &[ListedFile],
         viewed: &HashSet<String>,
         window: &mut Window,
@@ -321,25 +343,45 @@ impl ReviewView {
         let fresh = match change {
             ListChange::Same => Vec::new(),
             ListChange::Files(previous) => {
-                let parsed = parse_listed(patch, order)?;
+                let parsed = parse_listed(patch, diffs, order)?;
                 let fresh: Vec<String> = parsed.shown.iter().filter(|p| !previous.contains(*p)).cloned().collect();
-                let collapsed = self.start_listed(&fresh, &parsed.binary, viewed);
+                let collapsed = self.start_listed(&fresh, &parsed.drawn, viewed);
                 let Some(diff) = &mut self.diff else {
                     unreachable!("matched above")
                 };
-                // Binary files stay collapsed in the `DiffState` (the view folds them).
+                // A file whose body the view draws from now on takes its fold along, and one
+                // the `DiffState` draws again gets it back.
+                let mut undrawn: Vec<(String, bool)> = Vec::new();
+                for path in parsed.shown.iter().filter(|p| previous.contains(*p)) {
+                    match (diff.drawn.contains(path), parsed.drawn.contains(path)) {
+                        (false, true) if diff.state.read(cx).is_file_collapsed(path) => {
+                            self.closed_drawn.insert(path.clone());
+                        }
+                        (false, true) => {
+                            self.closed_drawn.remove(path);
+                        }
+                        (true, false) => undrawn.push((path.clone(), self.closed_drawn.remove(path))),
+                        (true, true) | (false, false) => {}
+                    }
+                }
+                // Drawn files stay collapsed in the `DiffState` (the view folds them).
                 let collapsed: Vec<SharedString> =
-                    collapsed.into_iter().chain(parsed.binary.iter().cloned()).map(SharedString::from).collect();
-                diff.state.update(cx, |s, cx| s.update_files(parsed.files, collapsed, cx));
+                    collapsed.into_iter().chain(parsed.drawn.iter().cloned()).map(SharedString::from).collect();
+                diff.state.update(cx, |s, cx| {
+                    s.update_files(parsed.files, collapsed, cx);
+                    for (path, closed) in &undrawn {
+                        s.set_file_collapsed(path, *closed, cx);
+                    }
+                });
                 diff.key = key;
                 diff.order = parsed.shown;
-                diff.binary = parsed.binary;
+                diff.drawn = parsed.drawn;
                 fresh
             }
             ListChange::New => {
-                let parsed = parse_listed(patch, order)?;
+                let parsed = parse_listed(patch, diffs, order)?;
                 let fresh = parsed.shown.clone();
-                let collapsed = self.start_listed(&fresh, &parsed.binary, viewed);
+                let collapsed = self.start_listed(&fresh, &parsed.drawn, viewed);
                 let mode = if self.split { DiffMode::Split } else { DiffMode::Unified };
                 let state = cx.new(|cx| DiffState::new(parsed.files, cx)
                         .with_mode(mode)
@@ -347,7 +389,7 @@ impl ReviewView {
                         .with_min_collapsed_lines(MIN_COLLAPSED_LINES));
                 let (top, hide_unchanged) = (parsed.shown.first().cloned(), self.hide_unchanged);
                 state.update(cx, |s, cx| {
-                    for path in collapsed.iter().chain(&parsed.binary) {
+                    for path in collapsed.iter().chain(&parsed.drawn) {
                         s.set_file_collapsed(path, true, cx);
                     }
                     if !hide_unchanged {
@@ -376,7 +418,7 @@ impl ReviewView {
                     key,
                     state,
                     order: parsed.shown,
-                    binary: parsed.binary,
+                    drawn: parsed.drawn,
                     collapsed_viewed: HashSet::new(),
                     viewed_anchor: None,
                     _events: events,
@@ -405,9 +447,9 @@ impl ReviewView {
         let anchor = diff.viewed_anchor.take();
         if !newly.is_empty() {
             diff.collapsed_viewed.extend(newly.iter().cloned());
-            let binary = diff.binary.clone();
+            let drawn = diff.drawn.clone();
             diff.state.update(cx, |s, cx| {
-                for path in newly.iter().filter(|p| !binary.contains(*p)) {
+                for path in newly.iter().filter(|p| !drawn.contains(*p)) {
                     s.set_file_collapsed(path, true, cx);
                 }
             });
@@ -415,29 +457,29 @@ impl ReviewView {
                 && let Some(next) = diff.order.iter().skip_while(|p| **p != path).nth(1).cloned()
             {
                 // A text file's header row keeps its height, so the next header goes there
-                // now. An image or binary placeholder folds with its header, a row measured
-                // open: that header stays put until it is laid out folded.
-                let now = if binary.contains(&path) { path } else { next.clone() };
+                // now. A body the view draws folds with its header, a row measured open: that
+                // header stays put until it is laid out folded.
+                let now = if drawn.contains(&path) { path } else { next.clone() };
                 diff.state.update(cx, |s, cx| s.scroll_file_header_to(&now, top, cx));
                 let state = diff.state.clone();
                 window.on_next_frame(move |_, cx| state.update(cx, |s, cx| s.scroll_file_header_to(&next, top, cx)));
             }
-            self.closed_binary.extend(newly.into_iter().filter(|p| binary.contains(p)));
+            self.closed_drawn.extend(newly.into_iter().filter(|p| drawn.contains(p)));
         }
         Ok(diff.state.clone())
     }
 
-    /// Files listed for the first time: binary ones fold in the view, and the text files
-    /// that start collapsed are returned (`CollapseAll::initial_collapsed`).
-    fn start_listed(&mut self, fresh: &[String], binary: &HashSet<String>, viewed: &HashSet<String>) -> Vec<String> {
+    /// Files listed for the first time: those whose body the view draws fold in the view, and
+    /// the others that start collapsed are returned (`CollapseAll::initial_collapsed`).
+    fn start_listed(&mut self, fresh: &[String], drawn: &HashSet<String>, viewed: &HashSet<String>) -> Vec<String> {
         let mut collapsed = Vec::new();
         for path in fresh {
             let closed = self.collapse_all.initial_collapsed(viewed.contains(path));
-            if binary.contains(path) {
+            if drawn.contains(path) {
                 if closed {
-                    self.closed_binary.insert(path.clone());
+                    self.closed_drawn.insert(path.clone());
                 } else {
-                    self.closed_binary.remove(path);
+                    self.closed_drawn.remove(path);
                 }
             } else if closed {
                 collapsed.push(path.clone());
@@ -483,6 +525,7 @@ impl ReviewView {
         &mut self,
         state: &Entity<DiffState>,
         patch: &str,
+        diffs: &FileDiffs,
         order: &[ListedFile],
         viewed: &HashSet<String>,
         with_comments: bool,
@@ -491,21 +534,29 @@ impl ReviewView {
     ) -> AnyElement {
         let mut annotations: Vec<DiffAnnotation> = Vec::new();
         let mut items: HashMap<ElementId, Annotated> = HashMap::new();
-        let binary = self.diff.as_ref().map(|diff| diff.binary.clone()).unwrap_or_default();
+        let drawn = self.diff.as_ref().map(|diff| diff.drawn.clone()).unwrap_or_default();
         let model = self.model.read(cx);
         for (index, staging) in file_headers(order) {
             let file = &order[index];
             let id = ElementId::from(SharedString::from(format!("header-{}", file.path)));
             annotations.push(DiffAnnotation::file(id.clone(), file.path.clone()));
+            let body = drawn.contains(&file.path).then(|| {
+                let body = match diffs.get(&file.path) {
+                    Some(FileDiff::Loading) => Body::Loading,
+                    Some(FileDiff::Failed(error)) => Body::Failed(error.clone()),
+                    Some(FileDiff::Loaded(_)) | None => Body::Binary(model.image(&file.path).cloned()),
+                };
+                (body, self.closed_drawn.contains(&file.path))
+            });
             items.insert(
                 id,
                 Annotated::Header(Header {
-                    binary: binary.contains(&file.path).then(|| self.closed_binary.contains(&file.path)),
+                    body,
                     file: file.clone(),
                     staging,
                     viewed: viewed.contains(&file.path),
                     above: order[..index].iter().map(|f| f.path.clone()).collect(),
-                    image: model.image(&file.path).cloned(),
+                    loading: diffs.is_loading(&file.path),
                 }),
             );
         }
@@ -708,8 +759,9 @@ impl Element for RemScope {
     }
 }
 
-/// A file's header in the diff (an annotation of its first row), with an image file's
-/// sides or a binary file's placeholder under it.
+/// A file's header in the diff (an annotation of its first row), with the body the view
+/// draws under it when open: its diff loading or failed, an image file's sides or a binary
+/// file's placeholder.
 fn file_header(
     header: &Header,
     state: &Entity<DiffState>,
@@ -723,18 +775,42 @@ fn file_header(
     // content: the header fills the padding and the borders are its own. (Pierre's 8px above
     // the code would sit above the bottom border, so it is left out.)
     let pad = window.rem_size() * 0.75;
+    let body = match &header.body {
+        Some((_, true)) | None => None,
+        Some((Body::Loading, false)) => Some(div().bg(bg_primary).child(loading_diff(cx)).into_any_element()),
+        Some((Body::Failed(error), false)) => Some(div().bg(bg_primary).child(diff_error(error.clone())).into_any_element()),
+        Some((Body::Binary(Some(sides)), false)) => Some(image_diff(&header.file.path, sides.clone(), cx)),
+        // `.file-diff-placeholder`.
+        Some((Body::Binary(None), false)) => Some(
+            div().px(px(12.)).py(px(16.)).bg(bg_primary).text_size(px(12.)).italic().text_color(secondary).child("Binary file \u{2014} diff not shown").into_any_element(),
+        ),
+    };
     v_flex()
         .mx(-pad)
         .my(-pad)
         .child(header_row(header, state, view, model, cx))
-        .when(header.binary == Some(false), |d| match header.image.clone() {
-            Some(sides) => d.child(image_diff(&header.file.path, sides, cx)),
-            // `.file-diff-placeholder`.
-            None => d.child(
-                div().px(px(12.)).py(px(16.)).bg(bg_primary).text_size(px(12.)).italic().text_color(secondary).child("Binary file \u{2014} diff not shown"),
-            ),
-        })
+        .children(body)
         .into_any_element()
+}
+
+/// `.file-diff-loading`: a spinning `Loader2` and "Loading diff...".
+fn loading_diff(cx: &App) -> AnyElement {
+    let secondary = colors(cx).text_secondary;
+    h_flex()
+        .gap(px(6.))
+        .items_center()
+        .px(px(12.))
+        .py(px(16.))
+        .text_size(px(12.))
+        .text_color(secondary)
+        .child(spinner(16., secondary))
+        .child("Loading diff...")
+        .into_any_element()
+}
+
+/// `.file-diff-error` (`#f85149`) in a `.file-diff-body` (`min-height: 40px`).
+fn diff_error(error: String) -> AnyElement {
+    div().min_h(px(40.)).p(px(12.)).text_size(px(12.)).text_color(rgb(0xf85149)).child(error).into_any_element()
 }
 
 /// The header pinned over the top of the diff while its file scrolls under it: the row
@@ -766,20 +842,20 @@ fn header_row(
     let (secondary, primary, accent, hover, tertiary, border) =
         (c.text_secondary, c.text_primary, c.accent, c.bg_hover, c.bg_tertiary, c.border);
     let file = &header.file;
-    let collapsed = match header.binary {
-        Some(closed) => closed,
+    let collapsed = match &header.body {
+        Some((_, closed)) => *closed,
         None => state.read(cx).is_file_collapsed(&file.path),
     };
-    let refreshing = model.read(cx).is_refreshing();
+    let loading = header.loading;
     let staging_busy = model.read(cx).staging() == &GitOp::Running;
     let toggle = {
-        let (state, path, view, binary) = (state.clone(), file.path.clone(), view.clone(), header.binary.is_some());
+        let (state, path, view, drawn) = (state.clone(), file.path.clone(), view.clone(), header.body.is_some());
         move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
-            if binary {
+            if drawn {
                 let path = path.clone();
                 match view.update(cx, |view, cx| {
-                    if !view.closed_binary.remove(&path) {
-                        view.closed_binary.insert(path);
+                    if !view.closed_drawn.remove(&path) {
+                        view.closed_drawn.insert(path);
                     }
                     cx.notify();
                 }) {
@@ -811,8 +887,9 @@ fn header_row(
             })
         })
         .collect();
+    // `.file-diff-refresh-btn`: reads this file's diff again, disabled while it is read.
     let refresh = {
-        let model = model.clone();
+        let (model, path) = (model.clone(), file.path.clone());
         div()
             .id(SharedString::from(format!("header-refresh-{}", file.path)))
             .flex()
@@ -825,12 +902,20 @@ fn header_row(
             .border_color(border)
             .rounded(px(3.))
             .text_color(secondary)
-            .when(refreshing, |d| d.opacity(0.5))
-            .when(!refreshing, |d| d.cursor_pointer().hover(move |d| d.bg(hover).text_color(primary)))
-            .child(if refreshing { spinner(12., secondary) } else { plain_icon(IconName::RefreshCw, 12.).into_any_element() })
+            .tooltip(|window, cx| Tooltip::new("Refresh this file's diff").build(window, cx))
+            .when(loading, |d| d.opacity(0.5))
+            .when(!loading, |d| d.cursor_pointer().hover(move |d| d.bg(hover).text_color(primary)))
+            .child(if loading {
+                spinning_icon(IconName::RefreshCw, 12., secondary)
+            } else {
+                plain_icon(IconName::RefreshCw, 12.).into_any_element()
+            })
             .on_click(move |_, _, cx| {
+                // A disabled button still keeps the click from the header.
                 cx.stop_propagation();
-                model.update(cx, |m, cx| m.refresh(cx));
+                if !loading {
+                    model.update(cx, |m, cx| m.refresh_file(&path, cx));
+                }
             })
     };
     let viewed = {
@@ -978,18 +1063,9 @@ fn image_diff(path: &str, sides: ImageSides, cx: &App) -> AnyElement {
                 None => div().p(px(24.)).text_size(px(12.)).italic().text_color(secondary).child("No file").into_any_element(),
             })
     };
-    let failed = |error: String| div().p(px(12.)).text_size(px(12.)).text_color(rgb(0xf85149)).child(error).into_any_element();
+    let failed = diff_error;
     let body = match sides {
-        ImageSides::Loading => h_flex()
-            .gap(px(6.))
-            .items_center()
-            .px(px(12.))
-            .py(px(16.))
-            .text_size(px(12.))
-            .text_color(secondary)
-            .child(spinner(16., secondary))
-            .child("Loading diff...")
-            .into_any_element(),
+        ImageSides::Loading => loading_diff(cx),
         ImageSides::Failed(error) => failed(error),
         ImageSides::Loaded { before, after } => match image_format(path) {
             Ok(format) => h_flex()
@@ -1494,15 +1570,25 @@ mod tests {
     fn the_listed_files_are_parsed_in_list_order_once() {
         let patch: String = [rewritten("a.txt", ""), rewritten("b.txt", ""), rewritten("c.txt", "")].concat();
         let order = [listed("c.txt", None), listed("a.txt", Some(Staging::Staged)), listed("a.txt", Some(Staging::Unstaged))];
-        let got = parse_listed(&patch, &order).expect("a valid patch");
+        let read = FileDiffs::default();
+        let got = parse_listed(&patch, &read, &order).expect("a valid patch");
         // b.txt is not listed (say, filtered out); a.txt is listed twice, shown once.
         assert_eq!(got.shown, ["c.txt", "a.txt"]);
         assert_eq!(got.files.iter().map(|f| f.path().to_string()).collect::<Vec<_>>(), ["c.txt", "a.txt"]);
-        assert!(got.binary.is_empty());
+        assert!(got.drawn.is_empty());
         let binary = "diff --git a/logo.png b/logo.png\nindex 1..2 100644\nBinary files a/logo.png and b/logo.png differ\n";
-        let got = parse_listed(binary, &[listed("logo.png", None)]).expect("a valid patch");
-        assert_eq!(got.binary, HashSet::from(["logo.png".to_owned()]));
-        assert!(parse_listed("diff --git a/x\n@@ nonsense", &order).is_err());
+        let got = parse_listed(binary, &read, &[listed("logo.png", None)]).expect("a valid patch");
+        assert_eq!(got.drawn, HashSet::from(["logo.png".to_owned()]));
+        assert!(parse_listed("diff --git a/x\n@@ nonsense", &read, &order).is_err());
+
+        // A file whose diff is loading or failed has a section, its body drawn by the view.
+        let mut diffs = FileDiffs::loading(["c.txt", "b.txt"]);
+        diffs.set("b.txt", FileDiff::Failed("fatal: bad object".to_owned()));
+        diffs.add("a.txt", FileDiff::Loaded(rewritten("a.txt", "")));
+        let order = [listed("a.txt", None), listed("b.txt", None), listed("c.txt", None)];
+        let got = parse_listed(&diffs.patch(), &diffs, &order).expect("a valid patch");
+        assert_eq!(got.shown, ["a.txt", "b.txt", "c.txt"]);
+        assert_eq!(got.drawn, HashSet::from(["b.txt".to_owned(), "c.txt".to_owned()]));
 
         let tree: Vec<String> = tree_sorted(&[listed("z.txt", None), listed("dir/b.txt", None), listed("a.txt", None)])
             .into_iter()

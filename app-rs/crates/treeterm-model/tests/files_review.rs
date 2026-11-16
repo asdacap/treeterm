@@ -1065,9 +1065,9 @@ fn review_find_lists_the_diffs_matches_this_file_first_and_steps_through_them(cx
     let store = open_store(cx, &h);
     let workspace = open_repo_workspace(cx, &h, &store, &repo);
     let review = open_review(cx, &workspace);
-    wait_review(cx, &review, "loaded", |r, _| matches!(r.content(), ReviewContent::Uncommitted(_)));
+    wait_review(cx, &review, "loaded", |r, _| matches!(r.content(), ReviewContent::Uncommitted(u) if u.diffs.is_complete()));
     let ReviewContent::Uncommitted(uncommitted) = review.read_with(cx, |r, _| r.content().clone()) else { unreachable!() };
-    let patch = uncommitted.patch.clone();
+    let patch = uncommitted.diffs.patch();
     let files = vec!["a.txt".to_owned(), "b.txt".to_owned()];
     let layout = DiffLayout { style: DiffStyle::Split, unchanged: UnchangedRegions::Collapsed };
     let matches = |review: &Entity<ReviewModel>, cx: &mut TestAppContext| {
@@ -1198,17 +1198,20 @@ fn review_counts_views_lists_commits_and_shows_a_commits_changes(cx: &mut TestAp
 
     // Every view's count arrives whatever is shown; the summary names both branches.
     wait_review(cx, &review, "counts", |r, _| r.overview().committed == 2 && r.overview().uncommitted == 1);
-    wait_review(cx, &review, "committed", |r, _| matches!(r.content(), ReviewContent::Committed(_)));
+    wait_review(cx, &review, "committed", |r, _| matches!(r.content(), ReviewContent::Committed(c) if c.diffs.is_complete()));
     let ReviewContent::Committed(committed) = review.read_with(cx, |r, _| r.content().clone()) else { unreachable!() };
     assert_eq!((committed.base_branch.as_str(), committed.head_branch.as_str()), ("main", "feature"));
     assert_eq!((committed.total_additions, committed.total_deletions), (3, 2));
     // Patches carry whole files (here all of `a.txt`), so unchanged lines can be revealed.
-    assert!(committed.patch.contains("@@ -1,2 +1,2 @@\n-one\n-two\n+one  \n+TWO"), "{}", committed.patch);
+    let patch = committed.diffs.patch();
+    assert!(patch.contains("@@ -1,2 +1,2 @@\n-one\n-two\n+one  \n+TWO"), "{patch}");
     assert!(review.read_with(cx, |r, cx| r.is_base_overridden(cx)));
 
     // Whitespace-only changes drop out with `-w`.
     review.update(cx, |r, cx| r.set_ignore_whitespace(true, cx));
-    wait_review(cx, &review, "-w", |r, _| matches!(r.content(), ReviewContent::Committed(c) if !c.patch.contains("+one  ")));
+    wait_review(cx, &review, "-w", |r, _| {
+        matches!(r.content(), ReviewContent::Committed(c) if c.diffs.is_complete() && !c.diffs.patch().contains("+one  "))
+    });
     assert!(review.read_with(cx, |r, _| r.ignore_whitespace()));
     review.update(cx, |r, cx| r.set_ignore_whitespace(false, cx));
 
@@ -1220,10 +1223,13 @@ fn review_counts_views_lists_commits_and_shows_a_commits_changes(cx: &mut TestAp
     let ReviewContent::Commits(commits) = review.read_with(cx, |r, _| r.content().clone()) else { unreachable!() };
     assert_eq!(commits[0].message, "second");
     review.update(cx, |r, cx| r.select_commit(&commits[1].hash, cx));
-    wait_review(cx, &review, "commit diff", |r, _| matches!(r.selected_commit().map(|s| &s.diff), Some(Loaded::Ready(_))));
-    let Some(Loaded::Ready(CommitDiff { files, patch })) = review.read_with(cx, |r, _| r.selected_commit().map(|s| s.diff.clone())) else {
+    wait_review(cx, &review, "commit diff", |r, _| {
+        matches!(r.selected_commit().map(|s| &s.diff), Some(Loaded::Ready(d)) if d.diffs.is_complete())
+    });
+    let Some(Loaded::Ready(CommitDiff { files, diffs })) = review.read_with(cx, |r, _| r.selected_commit().map(|s| s.diff.clone())) else {
         unreachable!()
     };
+    let patch = diffs.patch();
     let mut paths: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
     paths.sort();
     assert_eq!(paths, ["a.txt", "dir/b.txt"]);
@@ -1237,7 +1243,7 @@ fn review_counts_views_lists_commits_and_shows_a_commits_changes(cx: &mut TestAp
     // `-w` reads the picked commit's changes again, which stay shown meanwhile (the diff
     // keeps its place).
     let shown = |r: &ReviewModel, whitespace: bool| {
-        matches!(r.selected_commit().map(|s| &s.diff), Some(Loaded::Ready(d)) if d.patch.contains("+one  ") == whitespace)
+        matches!(r.selected_commit().map(|s| &s.diff), Some(Loaded::Ready(d)) if d.diffs.is_complete() && d.diffs.patch().contains("+one  ") == whitespace)
     };
     review.update(cx, |r, cx| r.select_commit(&commits[0].hash, cx));
     wait_review(cx, &review, "the second commit", |r, _| shown(r, true));
@@ -1897,4 +1903,202 @@ fn the_review_header_takes_the_child_actions_from_the_tabs_parent_id(cx: &mut Te
     assert!(header.has_parent && header.parent_branch.is_none(), "{header:?}");
     assert!(!blank.read_with(cx, |r, cx| r.header(cx)).has_parent);
     assert!(!top.read_with(cx, |r, cx| r.header(cx)).has_parent);
+}
+
+/// The diffs of the list the review shows.
+fn shown_diffs(review: &ReviewModel) -> treeterm_model::review_patch::FileDiffs {
+    use treeterm_model::review::Loaded;
+    match review.content() {
+        ReviewContent::Committed(committed) => committed.diffs,
+        ReviewContent::Uncommitted(uncommitted) => uncommitted.diffs,
+        ReviewContent::Commits(_) => match review.selected_commit().map(|s| s.diff.clone()) {
+            Some(Loaded::Ready(diff)) => diff.diffs,
+            Some(Loaded::Loading | Loaded::Failed(_)) | None => Default::default(),
+        },
+        ReviewContent::Loading | ReviewContent::Failed(_) => Default::default(),
+    }
+}
+
+/// `path`'s diff in the list shown.
+fn file_diff(cx: &mut TestAppContext, review: &Entity<ReviewModel>, path: &str) -> Option<treeterm_model::review_patch::FileDiff> {
+    review.read_with(cx, |r, _| shown_diffs(r).get(path).cloned())
+}
+
+fn set_mode(path: &std::path::Path, mode: u32) {
+    use std::os::unix::fs::PermissionsExt as _;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap();
+}
+
+#[gpui_kit::test]
+fn a_file_git_cannot_read_fails_in_its_own_section_while_the_others_show(cx: &mut TestAppContext) {
+    use treeterm_model::review_patch::FileDiff;
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let repo = TempRepo::new(&h);
+    repo.write("a.txt", "one\n");
+    repo.commit_all("base");
+    repo.write("a.txt", "ONE\n");
+    // Past 200 untracked files the list reads no sizes, so it lists one git cannot read.
+    for index in 0..201 {
+        repo.write(&format!("new/{index:03}.txt"), &format!("line {index}\n"));
+    }
+    let locked = repo.path.join("new/000.txt");
+    set_mode(&locked, 0o000);
+    if std::fs::read(&locked).is_ok() {
+        eprintln!("skipped: the file is still readable (running as root)");
+        set_mode(&locked, 0o644);
+        return;
+    }
+    let store = open_store(cx, &h);
+    let workspace = open_repo_workspace(cx, &h, &store, &repo);
+    let review = open_review(cx, &workspace);
+    let seen = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let record = seen.clone();
+    let _observe = cx.update(|cx| cx.observe(&review, move |review, cx| record.borrow_mut().push(shown_diffs(review.read(cx)))));
+    wait_review(cx, &review, "read", |r, _| matches!(r.content(), ReviewContent::Uncommitted(u) if u.diffs.is_complete()));
+    set_mode(&locked, 0o644);
+
+    // The list shows first, each file loading; then each file shows its diff or its error.
+    let listed = |diffs: &treeterm_model::review_patch::FileDiffs| diffs.iter().count() == 202;
+    assert!(
+        seen.borrow().iter().any(|diffs| listed(diffs) && diffs.iter().all(|(_, diff)| *diff == FileDiff::Loading)),
+        "the list never showed loading"
+    );
+    let failed = file_diff(cx, &review, "new/000.txt");
+    assert!(matches!(&failed, Some(FileDiff::Failed(error)) if error.contains("Permission denied")), "{failed:?}");
+    assert!(matches!(file_diff(cx, &review, "new/001.txt"), Some(FileDiff::Loaded(section)) if section.contains("+line 1\n")));
+    assert!(matches!(file_diff(cx, &review, "a.txt"), Some(FileDiff::Loaded(section)) if section.contains("+ONE")));
+}
+
+#[gpui_kit::test]
+fn a_files_refresh_reads_that_file_alone(cx: &mut TestAppContext) {
+    use treeterm_model::review_patch::FileDiff;
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let repo = TempRepo::new(&h);
+    repo.write("a.txt", "one\n");
+    repo.write("b.txt", "bee\n");
+    repo.write("c.txt", "a file moved\nwith its lines\n");
+    repo.commit_all("base");
+    repo.git(&["checkout", "-q", "-b", "feature"]);
+    repo.write("a.txt", "ONE\n");
+    repo.write("b.txt", "BEE\n");
+    repo.git(&["mv", "c.txt", "d.txt"]);
+    repo.commit_all("feature");
+    let store = open_store(cx, &h);
+    let workspace = open_repo_workspace(cx, &h, &store, &repo);
+    let (_, review) =
+        open_review_with(cx, &workspace, serde_json::json!({ "viewMode": "committed", "baseBranchOverride": "main" }));
+    wait_review(cx, &review, "read", |r, _| matches!(r.content(), ReviewContent::Committed(c) if c.diffs.is_complete()));
+    let before = review.read_with(cx, |r, _| shown_diffs(r));
+    let listed = |cx: &mut TestAppContext| match review.read_with(cx, |r, _| r.content()) {
+        ReviewContent::Committed(committed) => committed.files,
+        other => panic!("{other:?}"),
+    };
+    let files = listed(cx);
+
+    // The branch moves on in both files: the refreshed one reads its diff alone, loading
+    // meanwhile; the other, and the list, stay as they were read.
+    repo.write("a.txt", "ONE\nmore\n");
+    repo.write("b.txt", "BEE again\n");
+    repo.commit_all("more");
+    review.update(cx, |r, cx| r.refresh_file("a.txt", cx));
+    assert!(review.read_with(cx, |r, _| r.is_file_loading("a.txt") && !r.is_file_loading("b.txt")));
+    assert_eq!(file_diff(cx, &review, "a.txt"), Some(FileDiff::Loading));
+    wait_review(cx, &review, "a.txt read", |r, _| !r.is_file_loading("a.txt"));
+    let a = file_diff(cx, &review, "a.txt");
+    assert!(matches!(&a, Some(FileDiff::Loaded(section)) if section.contains("+more")), "{a:?}");
+    assert_eq!(file_diff(cx, &review, "b.txt").as_ref(), before.get("b.txt"));
+    assert_eq!(listed(cx), files);
+    assert!(!review.read_with(cx, |r, _| r.is_refreshing()));
+
+    // A renamed file is read with the path it came from: still a rename.
+    review.update(cx, |r, cx| r.refresh_file("d.txt", cx));
+    wait_review(cx, &review, "d.txt read", |r, _| !r.is_file_loading("d.txt"));
+    assert_eq!(file_diff(cx, &review, "d.txt").as_ref(), before.get("d.txt"));
+    assert!(matches!(before.get("d.txt"), Some(FileDiff::Loaded(section)) if section.contains("rename from c.txt")));
+
+    // A whole reload started after a file's own read reads that file too.
+    repo.write("a.txt", "ONE\nthird\n");
+    repo.commit_all("third");
+    review.update(cx, |r, cx| {
+        r.refresh_file("a.txt", cx);
+        r.refresh(cx);
+    });
+    assert!(review.read_with(cx, |r, _| r.is_file_loading("a.txt")));
+    wait_review(cx, &review, "reloaded", |r, _| !r.is_refreshing() && !r.is_file_loading("a.txt"));
+    assert!(matches!(file_diff(cx, &review, "a.txt"), Some(FileDiff::Loaded(section)) if section.contains("+third")));
+    assert!(matches!(file_diff(cx, &review, "b.txt"), Some(FileDiff::Loaded(section)) if section.contains("+BEE again")));
+
+    // Not listed: nothing to read.
+    review.update(cx, |r, cx| r.refresh_file("nope.txt", cx));
+    assert!(!review.read_with(cx, |r, _| r.is_file_loading("nope.txt")));
+}
+
+#[gpui_kit::test]
+fn a_files_refresh_reads_its_staged_unstaged_untracked_or_commit_diff(cx: &mut TestAppContext) {
+    use treeterm_model::review::{Loaded, ReviewMode};
+    use treeterm_model::review_patch::FileDiff;
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let repo = TempRepo::new(&h);
+    repo.write("a.txt", "a\n");
+    repo.write("b.txt", "b\n");
+    repo.commit_all("base");
+    repo.write("a.txt", "A\n");
+    repo.git(&["add", "a.txt"]);
+    repo.write("b.txt", "B\n");
+    repo.write("u.txt", "u\n");
+    let store = open_store(cx, &h);
+    let workspace = open_repo_workspace(cx, &h, &store, &repo);
+    let review = open_review(cx, &workspace);
+    wait_review(cx, &review, "read", |r, _| matches!(r.content(), ReviewContent::Uncommitted(u) if u.diffs.is_complete()));
+    let refreshed = |cx: &mut TestAppContext, path: &str| {
+        review.update(cx, |r, cx| r.refresh_file(path, cx));
+        assert!(review.read_with(cx, |r, _| r.is_file_loading(path)));
+        wait_review(cx, &review, "read again", |r, _| !r.is_file_loading(path));
+        file_diff(cx, &review, path)
+    };
+    let loaded = |diff: Option<FileDiff>, text: &str| matches!(&diff, Some(FileDiff::Loaded(section)) if section.contains(text));
+
+    // Staged: the index's change, not the working tree's.
+    repo.write("a.txt", "A2\n");
+    repo.git(&["add", "a.txt"]);
+    repo.write("a.txt", "A3\n");
+    assert!(loaded(refreshed(cx, "a.txt"), "+A2"));
+    // Unstaged, and untracked.
+    repo.write("b.txt", "B2\n");
+    assert!(loaded(refreshed(cx, "b.txt"), "+B2"));
+    repo.write("u.txt", "u2\n");
+    assert!(loaded(refreshed(cx, "u.txt"), "+u2"));
+    // One git cannot read fails alone.
+    let others = (file_diff(cx, &review, "a.txt"), file_diff(cx, &review, "b.txt"));
+    let locked = repo.path.join("u.txt");
+    set_mode(&locked, 0o000);
+    if std::fs::read(&locked).is_err() {
+        let failed = refreshed(cx, "u.txt");
+        set_mode(&locked, 0o644);
+        assert!(matches!(&failed, Some(FileDiff::Failed(error)) if error.contains("Permission denied")), "{failed:?}");
+        assert_eq!((file_diff(cx, &review, "a.txt"), file_diff(cx, &review, "b.txt")), others);
+    }
+    set_mode(&locked, 0o644);
+
+    // A commit's file, in Commits.
+    repo.commit_all("more");
+    review.update(cx, |r, cx| r.set_mode(ReviewMode::Commits, cx));
+    wait_review(cx, &review, "commits", |r, _| matches!(r.content(), ReviewContent::Commits(c) if !c.is_empty()));
+    let hash = review.read_with(cx, |r, _| match r.content() {
+        ReviewContent::Commits(commits) => commits[0].hash.clone(),
+        other => panic!("{other:?}"),
+    });
+    review.update(cx, |r, cx| r.select_commit(&hash, cx));
+    wait_review(cx, &review, "commit read", |r, _| {
+        matches!(r.selected_commit().map(|s| &s.diff), Some(Loaded::Ready(d)) if d.diffs.is_complete())
+    });
+    let shown = file_diff(cx, &review, "b.txt");
+    assert!(loaded(shown.clone(), "+B2"), "{shown:?}");
+    assert_eq!(refreshed(cx, "b.txt"), shown);
 }

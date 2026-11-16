@@ -27,6 +27,7 @@ use treeterm_model::review::{
     CollapseAll, ConflictCheck, FavouriteSelection, GitOp, Loaded, Notice, Processing, ReviewBase, ReviewContent, ReviewEvent,
     ReviewHeader, ReviewMode, ReviewModel, StageTarget,
 };
+use treeterm_model::review_patch::FileDiffs;
 use treeterm_model::session_store::AfterMerge;
 use treeterm_model::workspace_store::{MergeOutput, MergeState, WorkspaceStore};
 
@@ -68,8 +69,9 @@ pub struct ReviewView {
     query: String,
     /// Directories folded in the file tree (all start open).
     closed_dirs: HashSet<String>,
-    /// Binary files folded in the diff (their `DiffState` entry stays collapsed).
-    closed_binary: HashSet<String>,
+    /// Files whose body the view draws (binary, or a diff loading or failed) folded in the
+    /// diff (their `DiffState` entry stays collapsed).
+    closed_drawn: HashSet<String>,
     /// The diff list's last "Collapse all" / "Expand all" (`collapseAll`).
     collapse_all: CollapseAll,
     /// The commit message box.
@@ -132,7 +134,7 @@ impl ReviewView {
             search: None,
             query: String::new(),
             closed_dirs: HashSet::new(),
-            closed_binary: HashSet::new(),
+            closed_drawn: HashSet::new(),
             collapse_all: CollapseAll::Untouched,
             message: None,
             message_text: String::new(),
@@ -1189,7 +1191,7 @@ impl ReviewView {
         }
         let right = match self.favourite_pane(cx) {
             Some(pane) => pane,
-            None if has_changes => self.stacked(&committed.patch, &shown, &viewed, true, window, cx),
+            None if has_changes => self.stacked(&committed.diffs, &shown, &viewed, true, window, cx),
             None => Self::empty("No committed changes to show", secondary),
         };
         column.child(self.content_row(list, right, cx)).into_any_element()
@@ -1269,7 +1271,7 @@ impl ReviewView {
         }
         let right = match self.favourite_pane(cx) {
             Some(pane) => pane,
-            None if has_changes => self.stacked(&uncommitted.patch, &shown_all, &viewed, true, window, cx),
+            None if has_changes => self.stacked(&uncommitted.diffs, &shown_all, &viewed, true, window, cx),
             None => Self::empty("No uncommitted changes", secondary),
         };
         column = column.child(self.content_row(list.into_any_element(), right, cx));
@@ -1431,9 +1433,9 @@ impl ReviewView {
             let viewed = self.viewed(cx);
             // While the commit's diff loads (or after it failed), the list is empty: its header
             // reads "0/0 viewed" (`commitDiffFiles` is `[]`).
-            let (listed, patch): (Vec<ListedFile>, String) = match &selected.diff {
-                Loaded::Ready(diff) => (diff.files.iter().map(ListedFile::committed).collect(), diff.patch.clone()),
-                Loaded::Loading | Loaded::Failed(_) => (Vec::new(), String::new()),
+            let (listed, diffs): (Vec<ListedFile>, FileDiffs) = match &selected.diff {
+                Loaded::Ready(diff) => (diff.files.iter().map(ListedFile::committed).collect(), diff.diffs.clone()),
+                Loaded::Loading | Loaded::Failed(_) => (Vec::new(), FileDiffs::default()),
             };
             let shown = self.filtered(&listed);
             let shown_viewed = listed.iter().filter(|f| viewed.contains(&f.path)).count();
@@ -1455,7 +1457,7 @@ impl ReviewView {
             let list = v_flex().child(search).children(files::favourites(self, &listed, cx)).child(tree).into_any_element();
             let right = match self.favourite_pane(cx) {
                 Some(pane) => pane,
-                None => self.stacked(&patch, &shown, &viewed, false, window, cx),
+                None => self.stacked(&diffs, &shown, &viewed, false, window, cx),
             };
             column = column.child(self.content_row(list, right, cx));
         } else {

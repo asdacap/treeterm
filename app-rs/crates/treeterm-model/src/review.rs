@@ -6,7 +6,8 @@
 //! Views (Electron's `viewMode`): `committed` — the branch against its parent's branch
 //! (merge-base, `parent...HEAD`); `uncommitted` — the working tree against `HEAD`,
 //! including untracked files; `commits` — the branch's commits since the parent.
-//! The patch is plain unified diff text, rendered by the view.
+//! Each listed file's part of the patch (plain unified diff text, rendered by the view) loads,
+//! fails and is refreshed on its own ([`FileDiffs`]).
 //!
 //! Comments and viewed marks live in workspace metadata (`reviewComments`,
 //! `reviewViewedFiles`), in Electron's format, so both apps share them.
@@ -19,7 +20,8 @@ use indexmap::{IndexMap, IndexSet};
 use serde_json::{Value, json};
 use treeterm_core::exec::{ExecClient, ExecRequest, ExecTimeout};
 use treeterm_core::git::{
-    ConflictInfo, DiffFile, FileChangeStats, GitApi, GitLogCommit, LogScope, Staging, UncommittedChanges,
+    ConflictInfo, DiffFile, DiffResult, FileChangeStats, FileChangeStatus, GitApi, GitLogCommit, LogScope, Staging,
+    UncommittedChanges,
 };
 use treeterm_core::review::{
     CommitAnchor, MetadataError, NewReviewComment, REVIEW_COMMENTS_KEY, REVIEW_VIEWED_FILES_KEY, Resolution,
@@ -31,6 +33,7 @@ use treeterm_core::files::{FavouriteFile, is_image_path};
 
 use crate::file_browser::FileBrowser;
 use crate::review_find::{DiffLayout, DiffMatch, find_in_patch, in_file_first};
+use crate::review_patch::{FileDiff, FileDiffs, rename_from};
 use crate::search_panel::{RepoResults, SearchRow, count_label, push_repo_section, spawn_repo_search};
 use crate::review_metadata::{Blame, Later, Now};
 use crate::session_store::AfterMerge;
@@ -62,14 +65,14 @@ impl ReviewMode {
 }
 
 /// What the current view shows ([`ReviewModel::content`]). Each view keeps what it loaded
-/// while another is shown, and a reload keeps it on screen until the new answer arrives, so
-/// `Loading` shows only before a view's first answer.
+/// while another is shown, and a reload keeps it on screen until the new answer is complete,
+/// so `Loading` shows only before a view's first list of files (its files' diffs then load).
 #[derive(Debug, Clone)]
 pub enum ReviewContent {
     Loading,
-    /// The branch since it left its parent: changed files and their patch.
+    /// The branch since it left its parent: changed files and their diffs.
     Committed(Committed),
-    /// The working tree: changed files (staged and unstaged) and their patch, staged first.
+    /// The working tree: changed files (staged and unstaged) and their diffs.
     Uncommitted(Uncommitted),
     Commits(Vec<GitLogCommit>),
     Failed(String),
@@ -78,7 +81,7 @@ pub enum ReviewContent {
 #[derive(Debug, Clone)]
 pub struct Committed {
     pub files: Vec<DiffFile>,
-    pub patch: String,
+    pub diffs: FileDiffs,
     /// `diff-summary`: the compared branches and the totals.
     pub base_branch: String,
     pub head_branch: String,
@@ -89,7 +92,8 @@ pub struct Committed {
 #[derive(Debug, Clone)]
 pub struct Uncommitted {
     pub changes: UncommittedChanges,
-    pub patch: String,
+    /// A file both staged and unstaged shows its staged part.
+    pub diffs: FileDiffs,
 }
 
 impl Uncommitted {
@@ -123,6 +127,25 @@ impl<T> Slot<T> {
         match self {
             Slot::Ready(value) => Some(value),
             Slot::NotLoaded | Slot::Loading | Slot::Failed(_) => None,
+        }
+    }
+
+    fn ready_mut(&mut self) -> Option<&mut T> {
+        match self {
+            Slot::Ready(value) => Some(value),
+            Slot::NotLoaded | Slot::Loading | Slot::Failed(_) => None,
+        }
+    }
+
+    /// A load's list of files arrived: it shows at once (its files' diffs loading), unless
+    /// what is shown stays until the load is complete (a reload). Whether it shows.
+    fn show_listed(&mut self, listed: impl FnOnce() -> T) -> bool {
+        match self {
+            Slot::Ready(_) => false,
+            Slot::NotLoaded | Slot::Loading | Slot::Failed(_) => {
+                *self = Slot::Ready(listed());
+                true
+            }
         }
     }
 
@@ -377,7 +400,7 @@ pub struct SelectedCommit {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommitDiff {
     pub files: Vec<DiffFile>,
-    pub patch: String,
+    pub diffs: FileDiffs,
 }
 
 /// What the view tabs count (`hasUncommitted`, the tab badges), from what each view loaded.
@@ -432,6 +455,9 @@ pub struct ReviewModel {
     committed_load: Option<Task<()>>,
     uncommitted_load: Option<Task<()>>,
     commits_load: Option<Task<()>>,
+    /// Files read again on their own (a header's refresh), by list. A load of the whole list
+    /// drops those started before it, and keeps those started since loading.
+    file_loads: HashMap<(DiffList, String), Task<()>>,
     staging: GitOp,
     commit: GitOp,
     /// The workspace whose metadata holds the comments and viewed marks.
@@ -461,7 +487,7 @@ pub struct ReviewModel {
     _favourites: Option<Task<()>>,
     /// Both sides of each image file shown.
     images: HashMap<String, ImageSides>,
-    _images: Vec<Task<()>>,
+    _images: HashMap<String, Task<()>>,
     conflicts: Conflicts,
     /// Local and remote branches for the base picker, loaded when it opens.
     branches: Loaded<Vec<String>>,
@@ -538,7 +564,7 @@ pub fn band_active<'a>(previous: &[String], band: &'a [String]) -> Option<&'a st
 
 /// Which list of files the diff shows (`StackedDiffList`): each view mounts its own, and in
 /// Commits it lists the picked commit's files (another commit's replace them).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum DiffList {
     Committed,
     Uncommitted,
@@ -638,6 +664,7 @@ impl ReviewModel {
             committed_load: None,
             uncommitted_load: None,
             commits_load: None,
+            file_loads: HashMap::new(),
             staging: GitOp::Idle,
             commit: GitOp::Idle,
             workspace: workspace.downgrade(),
@@ -657,7 +684,7 @@ impl ReviewModel {
             _find: None,
             _favourites: None,
             images: HashMap::new(),
-            _images: Vec::new(),
+            _images: HashMap::new(),
             conflicts: Conflicts::default(),
             branches: Loaded::Loading,
             selected_commit: None,
@@ -915,40 +942,72 @@ impl ReviewModel {
         self.load_commit_diff(cx);
     }
 
-    /// Read the selected commit's changes (none selected: nothing to read).
+    /// Read the selected commit's changes (none selected: nothing to read): its files, which
+    /// show at once the first time, then their diffs.
     fn load_commit_diff(&mut self, cx: &mut Context<Self>) {
+        self.drop_file_loads(|list| matches!(list, DiffList::Commit(_)));
         let Some(selected) = &self.selected_commit else {
             return;
         };
         let (git, path, hash) = (self.git.clone(), self.path.clone(), selected.commit.hash.clone());
-        let mut args = vec!["show", "--no-color", "-M", FULL_CONTEXT, "--format="];
-        if self.ignore_whitespace {
-            args.push("-w");
-        }
-        args.push(&hash);
-        let request = self.git_request(&args);
+        let request = self.show_request(&hash, &[]);
         let exec = self.exec.clone();
         self._commit = Some(cx.spawn(async move |this, cx| {
-            let files = git.get_commit_diff(&path, &hash).await;
-            let diff = match files {
-                Ok(files) => match patch_of(exec.run(request).await) {
-                    Ok(patch) => Loaded::Ready(CommitDiff { files, patch }),
-                    Err(error) => Loaded::Failed(error),
-                },
-                Err(error) => Loaded::Failed(format!("Failed to load commit diff: {error}")),
-            };
-            match this.update(cx, |model, cx| {
-                if let Some(selected) = &mut model.selected_commit
-                    && selected.commit.hash == hash
-                {
-                    selected.diff = diff;
-                    model.load_images(cx);
-                    cx.notify();
+            let files = match git.get_commit_diff(&path, &hash).await {
+                Ok(files) => files,
+                Err(error) => {
+                    let failed = Loaded::Failed(format!("Failed to load commit diff: {error}"));
+                    match this.update(cx, |model, cx| model.commit_diff_read(&hash, failed, true, cx)) {
+                        Ok(()) | Err(_) => {} // Err: tab closed
+                    }
+                    return;
                 }
+            };
+            let paths = || files.iter().map(|file| file.path.as_str());
+            let listed = Loaded::Ready(CommitDiff { files: files.clone(), diffs: FileDiffs::loading(paths()) });
+            let shown = match this.update(cx, |model, cx| {
+                let first = model.selected_commit.as_ref().is_some_and(|s| !matches!(s.diff, Loaded::Ready(_)));
+                if first {
+                    model.commit_diff_read(&hash, listed, true, cx);
+                }
+                first
+            }) {
+                Ok(shown) => shown,
+                Err(_) => return, // tab closed
+            };
+            let diffs = FileDiffs::read(paths(), &patch_of(exec.run(request).await));
+            match this.update(cx, |model, cx| {
+                let diffs = model.with_file_loads(&DiffList::Commit(hash.clone()), diffs);
+                model.commit_diff_read(&hash, Loaded::Ready(CommitDiff { files, diffs }), !shown, cx);
             }) {
                 Ok(()) | Err(_) => {} // Err: tab closed
             }
         }));
+    }
+
+    /// The picked commit `hash`'s changes as read (another commit picked since: dropped);
+    /// `listed`: other files than shown, whose images load.
+    fn commit_diff_read(&mut self, hash: &str, diff: Loaded<CommitDiff>, listed: bool, cx: &mut Context<Self>) {
+        if let Some(selected) = &mut self.selected_commit
+            && selected.commit.hash == hash
+        {
+            selected.diff = diff;
+            if listed {
+                self.load_images(cx);
+            }
+            cx.notify();
+        }
+    }
+
+    /// `git show` of a commit's changes, with the view's options, limited to `paths`.
+    fn show_request(&self, hash: &str, paths: &[&str]) -> ExecRequest {
+        let mut args = vec!["show", "--no-color", "-M", FULL_CONTEXT, "--format="];
+        if self.ignore_whitespace {
+            args.push("-w");
+        }
+        args.push(hash);
+        args.extend_from_slice(paths);
+        self.git_request(&args)
     }
 
     /// The next page of commits, appended (the list's infinite scroll).
@@ -1300,6 +1359,120 @@ impl ReviewModel {
         self.refreshing
     }
 
+    /// A file's diff is being read, in the list shown: its section shows "Loading diff..." and
+    /// its header's refresh button spins, disabled.
+    pub fn is_file_loading(&self, path: &str) -> bool {
+        self.diff_list().and_then(|list| self.diffs(&list)).is_some_and(|diffs| diffs.is_loading(path))
+    }
+
+    /// A file header's refresh (`onRefresh`): that file's diff alone (and an image's sides) is
+    /// read again in the list shown, its section "Loading diff..." meanwhile. Not while it is
+    /// being read (the button is disabled).
+    pub fn refresh_file(&mut self, path: &str, cx: &mut Context<Self>) {
+        let Some(list) = self.diff_list() else {
+            return;
+        };
+        let Some((request, read)) = self.file_request(&list, path) else {
+            return;
+        };
+        if let Some(diffs) = self.diffs_mut(&list) {
+            diffs.set(path, FileDiff::Loading);
+        }
+        // An image's sides are read again too.
+        if self.images.contains_key(path) {
+            self.load_image(path.to_owned(), cx);
+        }
+        let (exec, key) = (self.exec.clone(), (list.clone(), path.to_owned()));
+        let path = path.to_owned();
+        let load = cx.spawn(async move |this, cx| {
+            let diff = FileDiff::of(&path, &read(exec.run(request).await));
+            match this.update(cx, |model, cx| {
+                model.file_loads.remove(&(list.clone(), path.clone()));
+                if let Some(diffs) = model.diffs_mut(&list) {
+                    diffs.set(&path, diff);
+                }
+                cx.notify();
+            }) {
+                Ok(()) | Err(_) => {} // Err: tab closed
+            }
+        });
+        self.file_loads.insert(key, load);
+        cx.notify();
+    }
+
+    /// The command reading `path`'s diff alone in `list` (it was renamed: with the path it
+    /// came from, or it would read as added), and how its output is read. `None`: not listed,
+    /// or being read.
+    fn file_request(&self, list: &DiffList, path: &str) -> Option<(ExecRequest, ReadPatch)> {
+        let renamed = match self.diffs(list)?.get(path)? {
+            FileDiff::Loading => return None,
+            FileDiff::Loaded(section) => rename_from(section),
+            FileDiff::Failed(_) => None,
+        };
+        let paths: Vec<&str> = ["--", path].into_iter().chain(renamed.as_deref()).collect();
+        let read: ReadPatch = patch_of;
+        match list {
+            DiffList::Committed => {
+                let ReviewBase::Branch(branch) = &self.base else {
+                    return None;
+                };
+                let range = format!("{branch}...HEAD");
+                Some((self.diff_request(&[&[range.as_str()][..], &paths].concat()), read))
+            }
+            DiffList::Uncommitted => {
+                let uncommitted = self.uncommitted.ready()?;
+                // Its first listing's diff: staged, else unstaged.
+                let listed = |staging| uncommitted.changes.files.iter().find(|f| f.entry.path == path && f.entry.staged == staging);
+                match (listed(Staging::Staged), listed(Staging::Unstaged)) {
+                    (Some(_), _) => Some((self.diff_request(&[&["--cached"][..], &paths].concat()), read)),
+                    (None, Some(file)) if file.entry.status == FileChangeStatus::Untracked => {
+                        Some((untracked_request(&self.path, path), untracked_patch))
+                    }
+                    (None, Some(_)) => Some((self.diff_request(&paths), read)),
+                    (None, None) => None,
+                }
+            }
+            DiffList::Commit(hash) => Some((self.show_request(hash, &paths), read)),
+        }
+    }
+
+    /// The diffs of `list`'s files, as loaded.
+    fn diffs(&self, list: &DiffList) -> Option<&FileDiffs> {
+        match list {
+            DiffList::Committed => self.committed.ready().map(|committed| &committed.diffs),
+            DiffList::Uncommitted => self.uncommitted.ready().map(|uncommitted| &uncommitted.diffs),
+            DiffList::Commit(hash) => match &self.selected_commit {
+                Some(SelectedCommit { commit, diff: Loaded::Ready(diff) }) if commit.hash == *hash => Some(&diff.diffs),
+                Some(_) | None => None,
+            },
+        }
+    }
+
+    fn diffs_mut(&mut self, list: &DiffList) -> Option<&mut FileDiffs> {
+        match list {
+            DiffList::Committed => self.committed.ready_mut().map(|committed| &mut committed.diffs),
+            DiffList::Uncommitted => self.uncommitted.ready_mut().map(|uncommitted| &mut uncommitted.diffs),
+            DiffList::Commit(hash) => match &mut self.selected_commit {
+                Some(SelectedCommit { commit, diff: Loaded::Ready(diff) }) if commit.hash == *hash => Some(&mut diff.diffs),
+                Some(_) | None => None,
+            },
+        }
+    }
+
+    /// A whole list loads again: the files read on their own before it are read by it.
+    fn drop_file_loads(&mut self, of: impl Fn(&DiffList) -> bool) {
+        self.file_loads.retain(|(list, _), _| !of(list));
+    }
+
+    /// A whole list's diffs as read, with the files read on their own since it started still
+    /// loading: their own read is the later one.
+    fn with_file_loads(&self, list: &DiffList, mut diffs: FileDiffs) -> FileDiffs {
+        for (_, path) in self.file_loads.keys().filter(|(loading, _)| loading == list) {
+            diffs.set(path, FileDiff::Loading);
+        }
+        diffs
+    }
+
     /// Something is being read from git for the views: a view's data, `HEAD` or the
     /// conflict check.
     pub fn is_loading(&self) -> bool {
@@ -1334,6 +1507,7 @@ impl ReviewModel {
     fn reload_all(&mut self, cx: &mut Context<Self>) {
         self.selected_commit = None;
         self._commit = None;
+        self.drop_file_loads(|list| matches!(list, DiffList::Commit(_)));
         self._more = None;
         self.commits = Slot::NotLoaded;
         self.commits_load = None;
@@ -1355,9 +1529,10 @@ impl ReviewModel {
         cx.notify();
     }
 
-    /// `loadDiff`: the branch against its base (none without a base). Its viewed marks are
-    /// reconciled with it, whatever view is shown.
+    /// `loadDiff`: the branch against its base (none without a base), its files then their
+    /// diffs. Its viewed marks are reconciled with it, whatever view is shown.
     fn load_committed(&mut self, cx: &mut Context<Self>) {
+        self.drop_file_loads(|list| *list == DiffList::Committed);
         let ReviewBase::Branch(branch) = self.base.clone() else {
             self.committed = Slot::NotLoaded;
             self.committed_load = None;
@@ -1367,64 +1542,107 @@ impl ReviewModel {
         let (exec, git, path) = (self.exec.clone(), self.git.clone(), self.path.clone());
         let request = self.diff_request(&[&format!("{branch}...HEAD")]);
         self.committed_load = Some(cx.spawn(async move |this, cx| {
-            let loaded = match git.get_diff(&path, &branch).await {
-                Ok(diff) => match patch_of(exec.run(request).await) {
-                    Ok(patch) => Slot::Ready(Committed {
-                        files: diff.files,
-                        patch,
-                        base_branch: diff.base_branch,
-                        head_branch: diff.head_branch,
-                        total_additions: diff.total_additions,
-                        total_deletions: diff.total_deletions,
-                    }),
-                    Err(error) => Slot::Failed(error),
-                },
-                Err(error) => Slot::Failed(format!("Failed to load diff: {error}")),
+            let diff = match git.get_diff(&path, &branch).await {
+                Ok(diff) => diff,
+                Err(error) => {
+                    match this.update(cx, |model, cx| {
+                        model.committed_load = None;
+                        model.committed = Slot::Failed(format!("Failed to load diff: {error}"));
+                        model.view_loaded(ReviewMode::Committed, cx);
+                    }) {
+                        Ok(()) | Err(_) => {} // Err: tab closed
+                    }
+                    return;
+                }
             };
+            let paths = || diff.files.iter().map(|file| file.path.as_str());
+            let files = viewed_entries(diff.files.iter().map(ViewedFile::from));
+            let shown = match this.update(cx, |model, cx| {
+                let shown = model.committed.show_listed(|| committed(&diff, FileDiffs::loading(paths())));
+                if shown {
+                    model.listed(ReviewMode::Committed, &files, cx);
+                }
+                shown
+            }) {
+                Ok(shown) => shown,
+                Err(_) => return, // tab closed
+            };
+            let diffs = FileDiffs::read(paths(), &patch_of(exec.run(request).await));
             match this.update(cx, |model, cx| {
                 model.committed_load = None;
-                let files = loaded.ready().map(|committed| viewed_entries(committed.files.iter().map(ViewedFile::from)));
-                model.committed = loaded;
-                if let Some(files) = files {
-                    model.reconcile_viewed(&files, cx);
-                }
-                model.view_loaded(ReviewMode::Committed, cx);
+                let diffs = model.with_file_loads(&DiffList::Committed, diffs);
+                model.committed = Slot::Ready(committed(&diff, diffs));
+                model.diffs_read(ReviewMode::Committed, (!shown).then_some(&files), cx);
             }) {
                 Ok(()) | Err(_) => {} // Err: tab closed
             }
         }));
     }
 
-    /// `loadUncommittedChanges`: the working tree against `HEAD`, staged first, untracked
-    /// files as added. Its viewed marks are reconciled with it, whatever view is shown.
+    /// `loadUncommittedChanges`: the working tree against `HEAD`, its files then their diffs
+    /// (staged, unstaged, untracked as added). Its viewed marks are reconciled with it,
+    /// whatever view is shown.
     fn load_uncommitted(&mut self, cx: &mut Context<Self>) {
+        self.drop_file_loads(|list| *list == DiffList::Uncommitted);
         self.uncommitted.start();
         let (exec, git, path) = (self.exec.clone(), self.git.clone(), self.path.clone());
         let staged = self.diff_request(&["--cached"]);
         let unstaged = self.diff_request(&[]);
-        let untracked = self.git_request(&["ls-files", "--others", "--exclude-standard", "-z"]);
         self.uncommitted_load = Some(cx.spawn(async move |this, cx| {
-            let loaded = match git.get_uncommitted_changes(&path).await {
-                Ok(changes) => match uncommitted_patch(&exec, &path, staged, unstaged, untracked).await {
-                    Ok(patch) => Slot::Ready(Uncommitted { changes, patch }),
-                    Err(error) => Slot::Failed(error),
-                },
-                Err(error) => Slot::Failed(format!("Failed to load uncommitted changes: {error}")),
+            let changes = match git.get_uncommitted_changes(&path).await {
+                Ok(changes) => changes,
+                Err(error) => {
+                    match this.update(cx, |model, cx| {
+                        model.uncommitted_load = None;
+                        model.uncommitted = Slot::Failed(format!("Failed to load uncommitted changes: {error}"));
+                        model.view_loaded(ReviewMode::Uncommitted, cx);
+                    }) {
+                        Ok(()) | Err(_) => {} // Err: tab closed
+                    }
+                    return;
+                }
             };
+            let files = viewed_entries(changes.files.iter().map(ViewedFile::from));
+            let shown = match this.update(cx, |model, cx| {
+                let loading = FileDiffs::loading(changes.files.iter().map(|file| file.entry.path.as_str()));
+                let shown = model.uncommitted.show_listed(|| Uncommitted { changes: changes.clone(), diffs: loading });
+                if shown {
+                    model.listed(ReviewMode::Uncommitted, &files, cx);
+                }
+                shown
+            }) {
+                Ok(shown) => shown,
+                Err(_) => return, // tab closed
+            };
+            let diffs = uncommitted_diffs(&exec, &path, &changes, staged, unstaged).await;
             match this.update(cx, |model, cx| {
                 model.uncommitted_load = None;
-                let files = loaded
-                    .ready()
-                    .map(|uncommitted| viewed_entries(uncommitted.changes.files.iter().map(ViewedFile::from)));
-                model.uncommitted = loaded;
-                if let Some(files) = files {
-                    model.reconcile_viewed(&files, cx);
-                }
-                model.view_loaded(ReviewMode::Uncommitted, cx);
+                let diffs = model.with_file_loads(&DiffList::Uncommitted, diffs);
+                model.uncommitted = Slot::Ready(Uncommitted { changes, diffs });
+                model.diffs_read(ReviewMode::Uncommitted, (!shown).then_some(&files), cx);
             }) {
                 Ok(()) | Err(_) => {} // Err: tab closed
             }
         }));
+    }
+
+    /// `mode`'s list of files (`files`, as the viewed marks key them) shows: its viewed marks
+    /// are reconciled with it.
+    fn listed(&mut self, mode: ReviewMode, files: &[(String, FileChangeStats)], cx: &mut Context<Self>) {
+        self.reconcile_viewed(files, cx);
+        self.view_loaded(mode, cx);
+    }
+
+    /// `mode`'s diffs were read. With `files`, its list was too, and shows with them;
+    /// without, it already shows.
+    fn diffs_read(&mut self, mode: ReviewMode, files: Option<&Vec<(String, FileChangeStats)>>, cx: &mut Context<Self>) {
+        match files {
+            Some(files) => self.listed(mode, files, cx),
+            None => {
+                self.settle_refresh();
+                cx.notify();
+            }
+        }
     }
 
     /// `loadCommits`: the first `count` commits since the base. A picked commit stays while
@@ -1802,9 +2020,17 @@ impl ReviewModel {
         self.images.clear();
         self._images.clear();
         for path in paths {
-            let sides = self.image_sides(&path);
-            self.images.insert(path.clone(), ImageSides::Loading);
-            self._images.push(cx.spawn(async move |this, cx| {
+            self.load_image(path, cx);
+        }
+    }
+
+    /// Load both sides of image file `path` (again).
+    fn load_image(&mut self, path: String, cx: &mut Context<Self>) {
+        let sides = self.image_sides(&path);
+        self.images.insert(path.clone(), ImageSides::Loading);
+        let load = cx.spawn({
+            let path = path.clone();
+            async move |this, cx| {
                 let sides = sides.await;
                 match this.update(cx, |model, cx| {
                     if let Some(shown) = model.images.get_mut(&path) {
@@ -1814,8 +2040,9 @@ impl ReviewModel {
                 }) {
                     Ok(()) | Err(_) => {} // Err: tab closed
                 }
-            }));
-        }
+            }
+        });
+        self._images.insert(path, load);
     }
 
     /// Both sides of an image change: the base against the branch in Committed, the
@@ -2263,7 +2490,24 @@ fn log_scope(base: &ReviewBase) -> LogScope {
     }
 }
 
-fn patch_of(result:Result<treeterm_core::exec::CommandOutput, treeterm_core::exec::ExecError>) -> Result<String, String> {
+/// The branch's changes as listed, with its files' diffs.
+fn committed(diff: &DiffResult, diffs: FileDiffs) -> Committed {
+    Committed {
+        files: diff.files.clone(),
+        diffs,
+        base_branch: diff.base_branch.clone(),
+        head_branch: diff.head_branch.clone(),
+        total_additions: diff.total_additions,
+        total_deletions: diff.total_deletions,
+    }
+}
+
+type ExecResult = Result<treeterm_core::exec::CommandOutput, treeterm_core::exec::ExecError>;
+
+/// How a command's output is read as a patch (git's message when it failed).
+type ReadPatch = fn(ExecResult) -> Result<String, String>;
+
+fn patch_of(result: ExecResult) -> Result<String, String> {
     match result {
         Ok(output) if output.exit_code == 0 => Ok(String::from_utf8_lossy(&output.stdout).into_owned()),
         Ok(output) => Err(String::from_utf8_lossy(&output.stderr).trim().to_owned()),
@@ -2271,40 +2515,50 @@ fn patch_of(result:Result<treeterm_core::exec::CommandOutput, treeterm_core::exe
     }
 }
 
-/// Staged changes, unstaged changes, then each untracked file as an added file.
-async fn uncommitted_patch(
+/// `--no-index` exits 1 when the files differ, which they always do for an untracked file.
+fn untracked_patch(result: ExecResult) -> Result<String, String> {
+    match result {
+        Ok(output) if output.exit_code <= 1 => Ok(String::from_utf8_lossy(&output.stdout).into_owned()),
+        other => patch_of(other),
+    }
+}
+
+/// An untracked file as added.
+fn untracked_request(cwd: &str, file: &str) -> ExecRequest {
+    ExecRequest {
+        cwd: cwd.to_owned(),
+        command: "git".to_owned(),
+        args: vec!["diff".into(), "--no-color".into(), "--no-index".into(), "/dev/null".into(), file.to_owned()],
+        env: HashMap::new(),
+        timeout: ExecTimeout::After(GIT_TIMEOUT),
+    }
+}
+
+/// Each listed file's diff in the working tree: its staged part, else its unstaged part,
+/// else (untracked) the file as added, read one file at a time. A command that fails fails
+/// the files it reads, each showing its message.
+async fn uncommitted_diffs(
     exec: &ExecClient,
-    path: &str,
+    cwd: &str,
+    changes: &UncommittedChanges,
     staged: ExecRequest,
     unstaged: ExecRequest,
-    untracked: ExecRequest,
-) -> Result<String, String> {
-    let mut patch = String::new();
-    for request in [staged, unstaged] {
-        patch.push_str(&patch_of(exec.run(request).await)?);
-    }
-    let listed = match exec.run(untracked).await {
-        Ok(output) if output.exit_code == 0 => output.stdout,
-        Ok(output) => return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned()),
-        Err(error) => return Err(error.to_string()),
+) -> FileDiffs {
+    let untracked = |file: &&treeterm_core::git::UncommittedFile| file.entry.status == FileChangeStatus::Untracked;
+    let tracked = |staging: Staging| {
+        changes.files.iter().filter(move |file| file.entry.staged == staging && !untracked(file)).map(|file| file.entry.path.as_str())
     };
-    for file in listed.split(|b| *b == 0).filter(|f| !f.is_empty()) {
-        let file = String::from_utf8_lossy(file).into_owned();
-        let request = ExecRequest {
-            cwd: path.to_owned(),
-            command: "git".to_owned(),
-            args: vec!["diff".into(), "--no-color".into(), "--no-index".into(), "/dev/null".into(), file],
-            env: HashMap::new(),
-            timeout: ExecTimeout::After(GIT_TIMEOUT),
-        };
-        // `--no-index` exits 1 when the files differ, which they always do here.
-        match exec.run(request).await {
-            Ok(output) if output.exit_code <= 1 => patch.push_str(&String::from_utf8_lossy(&output.stdout)),
-            Ok(output) => return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned()),
-            Err(error) => return Err(error.to_string()),
+    let mut diffs = FileDiffs::default();
+    diffs.add_read(tracked(Staging::Staged), &patch_of(exec.run(staged).await));
+    diffs.add_read(tracked(Staging::Unstaged), &patch_of(exec.run(unstaged).await));
+    for file in changes.files.iter().filter(untracked) {
+        let path = file.entry.path.as_str();
+        if diffs.get(path).is_none() {
+            let patch = untracked_patch(exec.run(untracked_request(cwd, path)).await);
+            diffs.add(path, FileDiff::of(path, &patch));
         }
     }
-    Ok(patch)
+    diffs
 }
 
 #[cfg(test)]

@@ -106,7 +106,8 @@ Done (tested against a real in-process daemon unless noted):
   definition, review comments (click a line number; commented lines marked in the glyph
   margin); editor tab.
 - **Review (M7):** committed / uncommitted / commits views, stage/unstage/commit, inline
-  comments (Electron's metadata format), viewed files, image diffs (before / after),
+  comments (Electron's metadata format), viewed files, image diffs (before / after), each
+  file's diff loading, failing and refreshed (its header's refresh button) on its own,
   favourites outside the diff shown in the Files viewer (with its comments) in the diff's place,
   find in the diff (Cmd/Ctrl+F: matches in the file being read, then the rest of the diff,
   then the repo; the diff's menu searches or copies the selected text), prompting the AI
