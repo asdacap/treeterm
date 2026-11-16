@@ -964,6 +964,10 @@ impl AppView {
                         workspace.overall_activity(),
                         shown.as_deref() == Some(id.as_str()),
                         conn.clone(),
+                        // `PrIndicators`, as in the tree.
+                        session
+                            .git_controller(id)
+                            .map_or_else(Vec::new, |git| crate::tree_pane::pr_indicators(git.read(cx).status())),
                     ));
                 }
             }
@@ -986,7 +990,7 @@ impl AppView {
                 .child(div().text_size(px(12.)).line_height(px(12.)).text_color(secondary).child("★"))
                 .child(crate::ui::caps_title("Favourites", cx)),
         );
-        for (id, name, is_worktree, unread, pending, flash, activity, is_shown, conn) in rows {
+        for (id, name, is_worktree, unread, pending, flash, activity, is_shown, conn, pr) in rows {
             let icon = if activity == treeterm_model::workspace_store::ActivityState::Idle {
                 crate::ui::icon(if is_worktree { IconName::GitBranch } else { IconName::Folder }, 16., secondary).into_any_element()
             } else {
@@ -1005,6 +1009,7 @@ impl AppView {
                     .when(!is_shown, |d| d.hover(move |d| d.bg(hover)))
                     .when(unread, |d| d.border_l(px(2.)).border_color(accent))
                     .child(div().mr(px(8.)).flex_shrink_0().child(icon))
+                    .children(pr)
                     .child(div().flex_1().min_w_0().truncate().text_size(px(crate::ui::BODY)).text_color(primary).child(name))
                     .when(unread, |d| d.child(div().mx(px(4.)).text_size(px(10.)).text_color(accent).child("●")))
                     .when(pending, |d| d.child(crate::ui::attention_saving(primary)))

@@ -427,15 +427,7 @@ impl TreePane {
                     has_parent: session
                         .workspace_store(&row.id)
                         .is_some_and(|w| w.read(cx).file().parent_id.as_deref().is_some_and(|p| !p.is_empty())),
-                    pr: session.git_controller(&row.id).and_then(|git| {
-                        let status = git.read(cx).status();
-                        match &status.pull_request {
-                            treeterm_core::git_status::PullRequest::Found(pr) => {
-                                Some((pr.number, pr_state_color(pr), treeterm_model::git_controller::pr_signal(status)))
-                            }
-                            treeterm_core::git_status::PullRequest::None => None,
-                        }
-                    }),
+                    pr: session.git_controller(&row.id).map_or_else(Vec::new, |git| pr_indicators(git.read(cx).status())),
                     git_repo: session.workspace_store(&row.id).is_some_and(|w| w.read(cx).file().is_git_repo),
                     label: Label::of(session.entry(&row.id)?, cx),
                     id: row.id,
@@ -741,32 +733,7 @@ impl TreePane {
                     }),
             )
             .child(div().mr(px(8.)).flex_shrink_0().flex().items_center().child(icon))
-            .when_some(pr, |row, (number, state_color, signal)| {
-                use treeterm_model::git_controller::PrSignal;
-                let signal = match signal {
-                    PrSignal::None => None,
-                    PrSignal::MergeConflict => Some(ui::icon(IconName::TriangleAlert, 12., gpui_kit::rgb(0xd29922)).into_any_element()),
-                    PrSignal::CiFailure => Some(ui::icon(IconName::CircleX, 12., gpui_kit::rgb(0xb62324)).into_any_element()),
-                    PrSignal::CiRunning => Some(
-                        gpui_kit::component::spinner::Spinner::new()
-                            .icon(gpui_kit::component::Icon::new(IconName::LoaderCircle))
-                            .with_size(px(12.))
-                            .color(gpui_kit::rgb(0xd29922).into())
-                            .into_any_element(),
-                    ),
-                    PrSignal::ReadyToMerge => Some(ui::icon(IconName::CircleCheck, 12., gpui_kit::rgb(0x238636)).into_any_element()),
-                };
-                row.child(
-                    div()
-                        .mr(px(4.))
-                        .flex_shrink_0()
-                        .text_size(px(12.))
-                        .font_weight(gpui_kit::FontWeight::SEMIBOLD)
-                        .text_color(gpui_kit::rgb(state_color))
-                        .child(format!("#{number}")),
-                )
-                .children(signal.map(|signal| div().mr(px(4.)).flex_shrink_0().child(signal)))
-            })
+            .children(pr)
             .child(div().flex_1().min_w_0().truncate().text_size(px(ui::BODY)).text_color(primary).child(label.clone()))
             .when(unread, |row| {
                 row.child(
@@ -922,8 +889,8 @@ struct RowData {
     favourite: bool,
     /// A child worktree (it has a parent): its title and branch can be re-suggested.
     has_parent: bool,
-    /// The PR's number, its state's colour and what it needs (`PrIndicators`).
-    pr: Option<(u64, u32, treeterm_model::git_controller::PrSignal)>,
+    /// `PrIndicators`: the PR's number and what it needs.
+    pr: Vec<AnyElement>,
     /// Shows the Fork button.
     git_repo: bool,
     activity: treeterm_model::workspace_store::ActivityState,
@@ -1059,6 +1026,42 @@ fn status_line(text: impl Into<SharedString>, color: gpui_kit::Hsla) -> AnyEleme
         .text_color(color)
         .child(text.into())
         .into_any_element()
+}
+
+/// `PrIndicators`, for a tree or favourite row: the PR's number in its state's colour when
+/// there is a PR, then the icon of what it needs (`getPrSignal`), which shows without a PR
+/// too when the workspace conflicts with its parent.
+pub(crate) fn pr_indicators(status: &treeterm_core::git_status::GitStatus) -> Vec<AnyElement> {
+    use treeterm_core::git_status::PullRequest;
+    use treeterm_model::git_controller::PrSignal;
+    let number = match &status.pull_request {
+        PullRequest::Found(pr) => Some(
+            div()
+                .mr(px(4.))
+                .flex_shrink_0()
+                .text_size(px(12.))
+                .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                .text_color(gpui_kit::rgb(pr_state_color(pr)))
+                .child(format!("#{}", pr.number))
+                .into_any_element(),
+        ),
+        PullRequest::None => None,
+    };
+    let signal = match treeterm_model::git_controller::pr_signal(status) {
+        PrSignal::None => None,
+        PrSignal::MergeConflict => Some(ui::icon(IconName::TriangleAlert, 12., gpui_kit::rgb(0xd29922)).into_any_element()),
+        PrSignal::CiFailure => Some(ui::icon(IconName::CircleX, 12., gpui_kit::rgb(0xb62324)).into_any_element()),
+        PrSignal::CiRunning => Some(
+            Spinner::new()
+                .icon(gpui_kit::component::Icon::new(IconName::LoaderCircle))
+                .with_size(px(12.))
+                .color(gpui_kit::rgb(0xd29922).into())
+                .into_any_element(),
+        ),
+        PrSignal::ReadyToMerge => Some(ui::icon(IconName::CircleCheck, 12., gpui_kit::rgb(0x238636)).into_any_element()),
+    };
+    let signal = signal.map(|signal| div().mr(px(4.)).flex_shrink_0().child(signal).into_any_element());
+    number.into_iter().chain(signal).collect()
 }
 
 /// `PR_STATE_CLASS`: open green, closed red, merged purple.
