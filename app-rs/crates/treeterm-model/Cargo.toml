@@ -17,6 +17,7 @@ serde.workspace = true
 indexmap = "2"
 base64 = "0.22"
 tracing.workspace = true
+thiserror.workspace = true
 uuid = { version = "1", features = ["v4"] }
 url = "2.5"
 # Monaco's per-language word patterns (`words`).

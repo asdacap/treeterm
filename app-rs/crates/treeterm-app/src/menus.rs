@@ -16,7 +16,7 @@ use gpui_kit::{
     OsAction, SystemMenuType, WeakEntity, Window, actions, deferred, div, px,
 };
 use treeterm_model::app_store::AppStore;
-use treeterm_model::zoom::Zoom;
+use treeterm_model::zoom::ZoomStore;
 use treeterm_term::keys::KeyOptions;
 
 use crate::app_view::AppView;
@@ -173,9 +173,10 @@ fn menus(mac: bool) -> Vec<Menu> {
     }
 }
 
-/// The shortcuts, the menu bar and the commands that need no window. Runs before the
-/// window opens: off macOS the window draws the menu bar from what this sets.
-pub fn install(store: Entity<AppStore>, cx: &mut App) {
+/// The shortcuts, the menu bar and the commands that need no window, with `zoom` as the app's
+/// zoom. Runs before the window opens: off macOS the window draws the menu bar from what this
+/// sets.
+pub fn install(store: Entity<AppStore>, zoom: ZoomStore, cx: &mut App) {
     let mac = cfg!(target_os = "macos");
     bind_keys(mac, KeyOptions::for_host(), cx);
 
@@ -193,7 +194,7 @@ pub fn install(store: Entity<AppStore>, cx: &mut App) {
         })
         .detach();
     });
-    install_zoom(cx);
+    install_zoom(zoom, cx);
     cx.on_action(|_: &Hide, cx| cx.hide());
     cx.on_action(|_: &HideOthers, cx| cx.hide_other_apps());
     cx.on_action(|_: &ShowAll, cx| cx.unhide_other_apps());
@@ -210,12 +211,12 @@ pub fn install(store: Entity<AppStore>, cx: &mut App) {
 }
 
 /// View > Actual Size, Zoom In and Zoom Out: one level for every window, which terminals
-/// draw their text at (see `treeterm_model::zoom`).
-fn install_zoom(cx: &mut App) {
-    cx.set_global(Zoom::default());
-    cx.on_action(|_: &ResetZoom, cx| cx.update_global::<Zoom, _>(|zoom, _| zoom.reset()));
-    cx.on_action(|_: &ZoomIn, cx| cx.update_global::<Zoom, _>(|zoom, _| zoom.zoom_in()));
-    cx.on_action(|_: &ZoomOut, cx| cx.update_global::<Zoom, _>(|zoom, _| zoom.zoom_out()));
+/// draw their text at, saved at every change (see `treeterm_model::zoom`).
+fn install_zoom(zoom: ZoomStore, cx: &mut App) {
+    cx.set_global(zoom);
+    cx.on_action(|_: &ResetZoom, cx| cx.update_global::<ZoomStore, _>(|zoom, _| zoom.reset()));
+    cx.on_action(|_: &ZoomIn, cx| cx.update_global::<ZoomStore, _>(|zoom, _| zoom.zoom_in()));
+    cx.on_action(|_: &ZoomOut, cx| cx.update_global::<ZoomStore, _>(|zoom, _| zoom.zoom_out()));
 }
 
 /// The menus, for the system menu bar and for GPUI Kit's `AppMenuBar`: off macOS GPUI only
@@ -289,6 +290,7 @@ mod tests {
         IntoElement, OperatingSystem, OwnedMenu, OwnedMenuItem, Render,
         TestAppContext, VisualTestContext, WindowOptions, div,
     };
+    use treeterm_model::zoom::Zoom;
 
     use super::*;
 
@@ -572,7 +574,7 @@ mod tests {
         let (window, terminal) = cx.update(|cx| {
             gpui_kit::init(cx);
             bind_keys(false, linux, cx);
-            install_zoom(cx);
+            install_zoom(ZoomStore::in_memory(), cx);
             gpui_kit::open_window(WindowOptions::default(), cx, |_, cx| {
                 cx.new(|cx| Terminal { focus: cx.focus_handle(), keys: Vec::new(), commands: Vec::new() })
             })
@@ -621,7 +623,7 @@ mod tests {
     /// Presses Zoom In's two keys, then Zoom Out's and Actual Size's, checking the app's zoom
     /// after each.
     fn assert_zoom_keys(cx: &mut VisualTestContext, [zoom_in, zoom_in_too, zoom_out, actual_size]: [&str; 4]) {
-        let zoom = |cx: &mut VisualTestContext| cx.update(|_, cx| *cx.global::<Zoom>());
+        let zoom = |cx: &mut VisualTestContext| cx.update(|_, cx| cx.global::<ZoomStore>().zoom());
         let mut once = Zoom::default();
         once.zoom_in();
         let mut twice = once;
@@ -634,13 +636,14 @@ mod tests {
     }
 
     /// The zoom is the app's, as Electron's roles zoom whatever page the window shows: its keys
-    /// work while a dialog has focus.
+    /// work while a dialog has focus. Each change is saved for the next start.
     #[gpui_kit::test]
     fn the_zoom_keys_work_while_a_dialog_has_focus(cx: &mut TestAppContext) {
+        let user_data = tempfile::tempdir().expect("a user data directory");
         let window = cx.update(|cx| {
             gpui_kit::init(cx);
             bind_keys(true, KeyOptions::for_host(), cx);
-            install_zoom(cx);
+            install_zoom(ZoomStore::load(user_data.path()), cx);
             gpui_kit::open_window(WindowOptions::default(), cx, |_, cx| cx.new(|_| Probe::default()))
                 .expect("open a window")
                 .0
@@ -652,5 +655,12 @@ mod tests {
         assert_zoom_keys(cx, ["cmd-+", "cmd-=", "cmd--", "cmd-0"]);
         assert!(cx.update(|window, cx| window.has_active_dialog(cx)), "the dialog stays open");
         assert!(cx.update(|_, cx| cx.is_action_available(&ZoomIn)), "the menu item stays enabled");
+
+        assert_eq!(ZoomStore::load(user_data.path()).zoom(), Zoom::default(), "Actual Size saved");
+        cx.simulate_keystrokes("cmd-+");
+        cx.run_until_parked();
+        let zoomed = cx.update(|_, cx| cx.global::<ZoomStore>().zoom());
+        assert_ne!(zoomed, Zoom::default());
+        assert_eq!(ZoomStore::load(user_data.path()).zoom(), zoomed, "Zoom In saved");
     }
 }

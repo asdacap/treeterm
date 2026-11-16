@@ -50,6 +50,7 @@ use treeterm_core::local_daemon::LocalDaemonSpec;
 use treeterm_core::paths::{self, process_env};
 use treeterm_core::rt::Rt;
 use treeterm_model::app_store::AppStore;
+use treeterm_model::zoom::ZoomStore;
 
 use crate::app_view::AppView;
 
@@ -195,7 +196,15 @@ fn main() {
         if let Some(config) = initial_ssh {
             store.update(cx, |s, cx| s.connect_remote(*config, treeterm_core::connection::OutdatedDaemon::Report, cx));
         }
-        menus::install(store.clone(), cx);
+        // View > Zoom's level from the last run.
+        let zoom = match paths::user_data_dir() {
+            Ok(dir) => ZoomStore::load(&dir),
+            Err(error) => {
+                tracing::error!(%error, "the zoom level is not saved");
+                ZoomStore::in_memory()
+            }
+        };
+        menus::install(store.clone(), zoom, cx);
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
                 None,

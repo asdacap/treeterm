@@ -21,7 +21,7 @@ use gpui_kit::{
 use treeterm_model::terminal::{
     CellPoint, LinkPress, Overlay, Pointer, SelectionKind, TerminalEvent, TerminalModel,
 };
-use treeterm_model::zoom::Zoom;
+use treeterm_model::zoom::ZoomStore;
 use treeterm_term::alacritty_terminal::vte::ansi::Rgb;
 use treeterm_term::fit::WidthLimit;
 use treeterm_term::keys::{KeyInput, KeyOptions, Modifiers, encode_key};
@@ -147,7 +147,7 @@ impl TerminalView {
         let subscriptions = vec![
             cx.observe(&model, |_, _, cx| cx.notify()),
             // View > Zoom: the text is drawn at the new size, and the grid refits to it.
-            cx.observe_global::<Zoom>(|_, cx| cx.notify()),
+            cx.observe_global::<ZoomStore>(|_, cx| cx.notify()),
             cx.subscribe(&model, |_, _, event: &TerminalEvent, cx| match event {
                 TerminalEvent::Clipboard(text) => {
                     cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
@@ -238,7 +238,7 @@ impl TerminalView {
         TermFont {
             family: family.into(),
             fallbacks: families,
-            size: px(settings.font_size * cx.global::<Zoom>().factor()),
+            size: px(settings.font_size * cx.global::<ZoomStore>().zoom().factor()),
         }
     }
 
