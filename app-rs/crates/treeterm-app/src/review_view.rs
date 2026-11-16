@@ -101,7 +101,8 @@ pub struct ReviewView {
     /// The bar opening and the chosen match last applied (`focus`, `seq`).
     find_focused: u64,
     find_revealed: u64,
-    /// The line the chosen match selected in the diff, unselected when no match is chosen.
+    /// The line the chosen match selected in the diff, unselected when no match is chosen and
+    /// selected again after a click on a line number.
     find_selection: Option<gpui_kit::component::diff::DiffLineRange>,
     _observe: Subscription,
     _events: Subscription,

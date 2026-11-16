@@ -594,6 +594,12 @@ impl DiffState {
     pub fn selected_lines(&self) -> Option<DiffLineRange> {
         self.selected_lines.clone()
     }
+    /// TreeTerm patch: the line the selection was last moved to (the line number pressed or
+    /// dragged to, or the line Shift+Up/Down reached), which a Shift-click that extends a
+    /// selection does not tell apart from its anchor in [`Self::selected_lines`].
+    pub fn selection_cursor(&self) -> Option<DiffLinePosition> {
+        self.selection_cursor.clone()
+    }
     /// Whether the file at `path` shows only its header.
     pub fn is_file_collapsed(&self, path: &str) -> bool {
         self.collapsed.contains(path)

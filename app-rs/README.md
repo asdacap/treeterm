@@ -240,6 +240,9 @@ are not ours). Its changes are marked `TreeTerm patch` (`grep -rn "TreeTerm patc
 - `src/diff/state.rs`: `DiffState::scroll_to_line_at` parks a line part of the way down the
   viewport, so a find match sits a third of the way down, clear of the pinned file header,
   as in Electron; `scroll_to_line` puts it at the very top, under that header.
+- `src/diff/state.rs`: `DiffState::selection_cursor`, the line a line-number press is on,
+  so Review knows which line a Shift-click that extends a selection was on and opens the
+  comment box there, as Electron's `onLineNumberClick` does for any click.
 - `src/highlighter/languages.rs`: TSX is highlighted with the Kit's TypeScript query, as
   TypeScript is. The Kit used `tree_sitter_typescript::HIGHLIGHTS_QUERY`, which only adds
   TypeScript's captures to the JavaScript query, so `.tsx` files (in the Files viewer, the
