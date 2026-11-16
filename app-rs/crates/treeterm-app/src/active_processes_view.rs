@@ -105,7 +105,7 @@ impl ActiveProcessesView {
                             .child(session.id.chars().take(8).collect::<String>())
                             .child(relative_time(session.created_at, now)),
                     )
-                    .on_click(cx.listener(move |view, _, _, cx| view.model.update(cx, |m, cx| m.select(&id, cx)))),
+                    .on_click(cx.listener(move |view, _, _, cx| view.model.update(cx, |m, cx| m.select_and_relist(&id, cx)))),
             );
         }
         list.into_any_element()

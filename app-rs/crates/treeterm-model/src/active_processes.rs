@@ -102,6 +102,18 @@ impl ActiveProcesses {
         cx.notify();
     }
 
+    /// Click a row of the Active Processes list: [`Self::select`] it, then list again, so
+    /// PTYs started or exited since show up or go (the dialog's list effect depends on
+    /// `selectedId`). The old list stays shown meanwhile. The row already shown lists
+    /// nothing.
+    pub fn select_and_relist(&mut self, id: &str, cx: &mut Context<Self>) {
+        if self.selected.as_ref().is_some_and(|(shown, _)| shown == id) {
+            return;
+        }
+        self.select(id, cx);
+        self.refresh(cx);
+    }
+
     /// Kill the selected PTY, then re-list.
     pub fn stop(&mut self, cx: &mut Context<Self>) {
         let Some((id, _)) = self.selected.take() else {

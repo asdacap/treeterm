@@ -1,14 +1,138 @@
-//! "Window → Active Processes" against a real in-process daemon: processes are named after
-//! the session's workspaces as they are now.
+//! "Window → Active Processes" against a real in-process daemon: the list follows the
+//! daemon's PTYs on every row click, and processes are named after the session's
+//! workspaces as they are now.
+
+use std::collections::HashMap;
+use std::time::Duration;
 
 use gpui_kit::{AppContext as _, Entity, TestAppContext};
-use treeterm_model::active_processes::workspace_labels;
+use treeterm_core::pty::CreatePty;
+use treeterm_core::settings::TerminalSettings;
+use treeterm_model::active_processes::{ActiveProcesses, ProcessList, workspace_labels};
 use treeterm_model::session_store::{SessionStore, WorkspaceEntry};
 use treeterm_model::settings_store::SettingsStore;
 use treeterm_proto::treeterm::WorkspaceRef;
 
 mod common;
 use common::{Harness, harness, wait_until, wait_until_app};
+
+/// A shell with an empty config dir, so the user's dotfiles stay out of the test.
+fn spawn_shell(h: &Harness) -> String {
+    let mut env = HashMap::new();
+    env.insert(
+        "ZDOTDIR".to_owned(),
+        h.daemon.root().to_string_lossy().into_owned(),
+    );
+    futures::executor::block_on(h.conn.create_pty(CreatePty {
+        cwd: h.daemon.root().to_string_lossy().into_owned(),
+        env,
+        size: Some((80, 24)),
+        ..CreatePty::default()
+    }))
+    .unwrap()
+    .unwrap()
+}
+
+fn kill(h: &Harness, id: &str) {
+    futures::executor::block_on(h.conn.kill_pty(id))
+        .unwrap()
+        .unwrap();
+}
+
+fn open(cx: &mut TestAppContext, h: &Harness) -> Entity<ActiveProcesses> {
+    let conn = h.conn.clone();
+    cx.new(|cx| ActiveProcesses::new(conn, TerminalSettings::default(), cx))
+}
+
+/// The listed PTY ids, sorted; `None` while not loaded.
+fn listed(m: &ActiveProcesses) -> Option<Vec<String>> {
+    match m.list() {
+        ProcessList::Loaded(sessions) => {
+            let mut ids: Vec<String> = sessions.iter().map(|s| s.id.clone()).collect();
+            ids.sort();
+            Some(ids)
+        }
+        ProcessList::Loading | ProcessList::Failed(_) => None,
+    }
+}
+
+fn sorted(ids: &[&str]) -> Vec<String> {
+    let mut ids: Vec<String> = ids.iter().map(|id| (*id).to_owned()).collect();
+    ids.sort();
+    ids
+}
+
+fn selected(cx: &mut TestAppContext, model: &Entity<ActiveProcesses>) -> Option<String> {
+    model.read_with(cx, |m, _| m.selected().map(|(id, _)| id.to_owned()))
+}
+
+#[gpui_kit::test]
+fn clicking_another_row_lists_again_keeping_the_old_list_meanwhile(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    let a = spawn_shell(&h);
+    let model = open(cx, &h);
+    wait_until(cx, &model, |m| listed(m) == Some(sorted(&[&a])));
+
+    // A PTY started while the dialog is open shows up on the next click.
+    let b = spawn_shell(&h);
+    model.update(cx, |m, cx| m.select_and_relist(&a, cx));
+    assert_eq!(
+        model.read_with(cx, |m, _| listed(m)),
+        Some(sorted(&[&a])),
+        "no Loading state"
+    );
+    wait_until(cx, &model, |m| listed(m) == Some(sorted(&[&a, &b])));
+    assert_eq!(selected(cx, &model).as_deref(), Some(a.as_str()));
+
+    // One that exited goes.
+    kill(&h, &a);
+    model.update(cx, |m, cx| m.select_and_relist(&b, cx));
+    wait_until(cx, &model, |m| listed(m) == Some(sorted(&[&b])));
+    assert_eq!(selected(cx, &model).as_deref(), Some(b.as_str()));
+}
+
+#[gpui_kit::test]
+fn clicking_a_row_whose_process_exited_clears_the_selection(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    let a = spawn_shell(&h);
+    let b = spawn_shell(&h);
+    let model = open(cx, &h);
+    wait_until(cx, &model, |m| listed(m) == Some(sorted(&[&a, &b])));
+
+    kill(&h, &b);
+    model.update(cx, |m, cx| m.select_and_relist(&b, cx));
+    assert_eq!(selected(cx, &model).as_deref(), Some(b.as_str()));
+    wait_until(cx, &model, |m| listed(m) == Some(sorted(&[&a])));
+    assert_eq!(selected(cx, &model), None);
+}
+
+#[gpui_kit::test]
+fn clicking_the_selected_row_does_not_list_again(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    let a = spawn_shell(&h);
+    let b = spawn_shell(&h);
+    let model = open(cx, &h);
+    model.update(cx, |m, cx| m.select_and_relist(&a, cx));
+    wait_until(cx, &model, |m| listed(m) == Some(sorted(&[&a, &b])));
+
+    let c = spawn_shell(&h);
+    model.update(cx, |m, cx| m.select_and_relist(&a, cx));
+    for _ in 0..30 {
+        cx.run_until_parked();
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(
+        model.read_with(cx, |m, _| listed(m)),
+        Some(sorted(&[&a, &b]))
+    );
+
+    // Another row does, and the daemon has the new PTY.
+    model.update(cx, |m, cx| m.select_and_relist(&b, cx));
+    wait_until(cx, &model, |m| listed(m) == Some(sorted(&[&a, &b, &c])));
+}
 
 /// A session member: `id`'s body is named `name`, its ref points at `<root>/<id>`.
 fn member(h: &Harness, id: &str, name: &str) -> (WorkspaceRef, String) {
