@@ -434,7 +434,7 @@ fn read_prefix_mode(mut f: Fields, d: PrefixModeConfig) -> PrefixModeConfig {
     PrefixModeConfig {
         enabled: f.take("enabled", d.enabled),
         prefix_key: f.take("prefixKey", d.prefix_key),
-        timeout: f.take_millis("timeout", d.timeout),
+        timeout_ms: f.take("timeout", d.timeout_ms),
         extra: f.rest(),
     }
 }

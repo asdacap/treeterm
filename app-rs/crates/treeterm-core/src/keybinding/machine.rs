@@ -937,6 +937,22 @@ mod tests {
                 assert_eq!(kb.remaining_fraction(t0), 0.0);
             }
 
+            /// A timeout of no time (a negative one in `settings.json`) ends prefix mode at
+            /// once, as Electron's `setTimeout` does: the key after the prefix is typing.
+            #[test]
+            fn a_timeout_of_no_time_ends_prefix_mode_at_once() {
+                let t0 = Instant::now();
+                let mut kb = Keybindings::new(KeybindingSettings {
+                    timeout: Duration::ZERO,
+                    ..KeybindingSettings::default()
+                });
+                assert_eq!(kb.handle_key(&ctrl_b(), t0), KeyOutcome::Consumed);
+                assert_eq!(kb.deadline(), Deadline::At(t0));
+                assert_eq!(kb.remaining_fraction(t0), 0.0);
+                assert_eq!(kb.handle_key(&key("c"), t0), KeyOutcome::PassThrough);
+                assert_eq!(kb.state(), &PrefixState::Idle);
+            }
+
             #[test]
             fn a_timeout_too_large_for_the_clock_never_expires() {
                 let t0 = Instant::now();

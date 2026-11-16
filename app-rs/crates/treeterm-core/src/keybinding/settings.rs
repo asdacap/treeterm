@@ -184,7 +184,8 @@ pub struct KeybindingSettings {
     /// `prefixMode.prefixKey`. While it matches nothing, prefix mode cannot start; Cmd/Ctrl+1–9
     /// still work.
     pub prefix_key: Binding<Shortcut>,
-    /// `prefixMode.timeout`: how long prefix mode (and workspace focus) waits for a key.
+    /// `prefixMode.timeout`: how long prefix mode (and workspace focus) waits for a key. Zero
+    /// for a negative one: Electron's `setTimeout` runs a negative delay at once.
     pub timeout: Duration,
     pub actions: ActionKeys,
 }
@@ -218,7 +219,7 @@ impl KeybindingSettings {
     pub fn from_settings(settings: &Settings, os: Os) -> Self {
         Self {
             prefix_key: Binding::prefix(settings.prefix_mode.prefix_key.as_str(), os),
-            timeout: settings.prefix_mode.timeout,
+            timeout: Duration::from_millis(settings.prefix_mode.timeout_ms.max(0).unsigned_abs()),
             actions: ActionKeys::from_settings(&settings.keybindings),
         }
     }
@@ -292,6 +293,16 @@ mod tests {
             ]
         );
         assert_eq!(settings.problems(), []);
+    }
+
+    /// Electron stores a pasted negative timeout as typed, and its `setTimeout` ends prefix
+    /// mode at once.
+    #[test]
+    fn a_negative_timeout_is_no_time() {
+        for timeout in [-5, 0] {
+            let settings = read(json!({ "prefixMode": { "timeout": timeout } }), Os::MacOs);
+            assert_eq!(settings.timeout, Duration::ZERO, "{timeout}");
+        }
     }
 
     #[test]

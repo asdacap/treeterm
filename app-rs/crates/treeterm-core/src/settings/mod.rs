@@ -345,9 +345,11 @@ pub struct PrefixModeConfig {
     pub enabled: bool,
     /// e.g. `Control+B`.
     pub prefix_key: String,
-    /// How long prefix mode waits for the next key (`timeout`, in ms on disk).
-    #[serde(serialize_with = "millis")]
-    pub timeout: Duration,
+    /// How long prefix mode waits for the next key, in milliseconds (`timeout`). Signed, as
+    /// Electron's: its Settings field stores a pasted negative number as typed, and its
+    /// `setTimeout` ends prefix mode at once for one (see `KeybindingSettings::timeout`).
+    #[serde(rename = "timeout")]
+    pub timeout_ms: i64,
     #[serde(flatten)]
     pub extra: Extra,
 }
@@ -357,7 +359,7 @@ impl Default for PrefixModeConfig {
         Self {
             enabled: true,
             prefix_key: "Control+B".to_owned(),
-            timeout: Duration::from_millis(1500),
+            timeout_ms: 1500,
             extra: Extra::new(),
         }
     }

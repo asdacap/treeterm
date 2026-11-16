@@ -589,7 +589,7 @@ mod settings_store {
         assert_eq!(settings.terminal.font_size, 18.0);
         assert_eq!(settings.terminal.font_family, "Menlo");
         assert_eq!(settings.appearance.theme, Theme::Light);
-        assert_eq!(settings.prefix_mode.timeout, Duration::from_millis(1500));
+        assert_eq!(settings.prefix_mode.timeout_ms, 1500);
     }
 
     /// The store falls back to its defaults when loading throws. Load errors reach the
@@ -687,7 +687,7 @@ mod interop {
         assert_eq!(settings.browser.instances[0].url, "http://localhost:3000/");
         assert!(!settings.notifications.sound_enabled);
         assert_eq!(settings.appearance.theme, Theme::System);
-        assert_eq!(settings.prefix_mode.timeout, Duration::from_millis(2500));
+        assert_eq!(settings.prefix_mode.timeout_ms, 2500);
         assert_eq!(settings.keybindings.workspace_focus, "f");
         assert_eq!(settings.keybindings.extra["splitPane"], "s");
         assert_eq!(settings.daemon.scrollback_lines, 500);
@@ -804,7 +804,7 @@ mod lenient_reads {
         assert_eq!(settings.terminal.instances, Vec::new());
         assert_eq!(settings.sandbox, defaults.sandbox);
         assert_eq!(settings.appearance.theme, Theme::Dark);
-        assert_eq!(settings.prefix_mode.timeout, Duration::from_millis(1500));
+        assert_eq!(settings.prefix_mode.timeout_ms, 1500);
         assert_eq!(settings.keybindings.new_tab, "c");
         let [harness] = &settings.ai_harness.instances[..] else { panic!("one harness") };
         assert_eq!(harness.id, "a");
@@ -816,6 +816,18 @@ mod lenient_reads {
         assert_eq!(settings.terminal_analyzer.reasoning_effort, ReasoningEffort::Low);
         assert_eq!(settings.terminal_analyzer.safe_paths, ["/tmp"]);
         assert_eq!(settings.recent_directories, Vec::<String>::new());
+    }
+
+    /// Electron's Settings stores a pasted negative prefix timeout as typed: it reads, and is
+    /// written back, as it is.
+    #[test]
+    fn a_negative_prefix_timeout_is_kept() {
+        let dir = user_data_with(&json!({ "prefixMode": { "timeout": -5 } }));
+        let settings = load(dir.path()).unwrap();
+        assert_eq!(settings.prefix_mode.timeout_ms, -5);
+
+        save(dir.path(), &settings).unwrap();
+        assert!(read_back(dir.path()).contains("\n    \"timeout\": -5\n"));
     }
 
     #[test]

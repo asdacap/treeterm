@@ -138,7 +138,7 @@ impl Texts {
             idle_debounce: analyzer.idle_debounce.as_millis().to_string(),
             idle_debounce_unread: analyzer.idle_debounce_unread.as_millis().to_string(),
             prefix_key: settings.prefix_mode.prefix_key.clone(),
-            prefix_timeout: settings.prefix_mode.timeout.as_millis().to_string(),
+            prefix_timeout: settings.prefix_mode.timeout_ms.to_string(),
             action_keys: PrefixAction::ALL.map(|action| action.stored_key(&settings.keybindings).to_owned()),
             github_pat: settings.github.pat.clone(),
         }
@@ -182,8 +182,9 @@ impl Texts {
         // The keys as recorded, a Space action key (` `) included: one that matches no key
         // press only disables itself (`KeybindingSettings`), as in Electron.
         settings.prefix_mode.prefix_key = self.prefix_key.clone();
-        // A pasted negative timeout (Electron stores it, and prefix mode ends at once) is 0.
-        settings.prefix_mode.timeout = Duration::from_millis(prefix_timeout_ms(&self.prefix_timeout).max(0.) as u64);
+        // A pasted negative timeout is stored as typed, as Electron's is (prefix mode then ends
+        // at once). Whole milliseconds; one too large for an `i64` is the largest.
+        settings.prefix_mode.timeout_ms = prefix_timeout_ms(&self.prefix_timeout) as i64;
         for (action, key) in PrefixAction::ALL.iter().zip(&self.action_keys) {
             *action_key_mut(&mut settings.keybindings, *action) = key.clone();
         }
@@ -365,9 +366,9 @@ pub fn apply_owned(edited: Settings, current: &mut Settings) {
     let AppearanceSettings { theme, extra: _ } = appearance;
     current.appearance.theme = theme;
 
-    let PrefixModeConfig { enabled: _, prefix_key, timeout, extra: _ } = prefix_mode;
+    let PrefixModeConfig { enabled: _, prefix_key, timeout_ms, extra: _ } = prefix_mode;
     current.prefix_mode.prefix_key = prefix_key;
-    current.prefix_mode.timeout = timeout;
+    current.prefix_mode.timeout_ms = timeout_ms;
 
     let Keybindings { new_tab, close_tab, next_tab, prev_tab, open_settings, workspace_focus, extra: _ } = keybindings;
     let k = &mut current.keybindings;
@@ -626,7 +627,7 @@ mod tests {
         assert_eq!(settings.terminal_analyzer.safe_paths, ["/tmp", "/work"]);
         assert_eq!(settings.terminal_analyzer.idle_debounce, Duration::ZERO);
         assert_eq!(settings.terminal_analyzer.criteria.working, "busy");
-        assert_eq!(settings.prefix_mode.timeout, Duration::from_millis(900));
+        assert_eq!(settings.prefix_mode.timeout_ms, 900);
         assert_eq!(settings.keybindings.workspace_focus, "W");
         assert_eq!(settings.llm.api_key, "sk-1");
     }
@@ -724,16 +725,23 @@ mod tests {
         }
     }
 
-    /// Save never refuses the timeout; a pasted negative one ends prefix mode at once.
+    /// Save never refuses the timeout, and stores a pasted negative one as typed (prefix mode
+    /// then ends at once), which Settings shows again when it reopens.
     #[test]
     fn the_prefix_timeout_is_saved_as_electron_stores_it() {
         let mut settings = Settings::default();
-        for (text, ms) in [("", 1500), ("0", 1500), ("1500.7", 1500), ("5", 5), ("-5", 0), ("9000", 9000)] {
+        let cases = [("", 1500), ("0", 1500), ("1500.7", 1500), ("5", 5), ("-5", -5), ("9000", 9000)];
+        for (text, ms) in cases {
             let mut texts = texts();
             texts.prefix_timeout = text.into();
             texts.apply(&mut settings).unwrap();
-            assert_eq!(settings.prefix_mode.timeout, Duration::from_millis(ms), "{text:?}");
+            assert_eq!(settings.prefix_mode.timeout_ms, ms, "{text:?}");
+            assert_eq!(Texts::from_settings(&settings).prefix_timeout, ms.to_string(), "{text:?}");
         }
+        let mut texts = texts();
+        texts.prefix_timeout = "99999999999999999999".into();
+        texts.apply(&mut settings).unwrap();
+        assert_eq!(settings.prefix_mode.timeout_ms, i64::MAX);
     }
 
     /// An edit to the texts, the section it belongs to, and how the error starts.
