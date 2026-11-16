@@ -6,7 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::prelude::*;
-use gpui_kit::{AnyElement, App, Context, Entity, SharedString, Subscription, Window, div, px, rgb, rgba};
+use gpui_kit::{AnyElement, App, BorderStyle, Context, Entity, SharedString, Subscription, Window, div, px, rgb, rgba};
 
 use super::form::{SandboxSupport, new_id};
 use super::instance::{InstanceForm, fit_icon};
@@ -203,7 +203,7 @@ pub fn render<T: InstanceForm>(
         );
     }
     let add_id = SharedString::from(format!("{}-add", T::ID_PREFIX));
-    // `.settings-btn.add-app`: full width, dashed border, 12px below.
+    // `.settings-btn.add-app`: full width, dashed border (solid on hover), 12px below.
     let add = div()
         .id(add_id)
         .flex()
@@ -219,7 +219,10 @@ pub fn render<T: InstanceForm>(
         .text_size(px(ui::BODY))
         .line_height(px(16.))
         .cursor_pointer()
-        .hover(move |d| d.bg(hover_bg))
+        .hover(move |mut d| {
+            d.border_style = Some(BorderStyle::Solid);
+            d.bg(hover_bg)
+        })
         .child(T::ADD_LABEL)
         .on_click(cx.listener(move |view, _, window, cx| {
             pick(view).add(window, cx);
