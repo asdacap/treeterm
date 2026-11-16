@@ -107,8 +107,8 @@ Done (tested against a real in-process daemon unless noted):
   by `assets/model-viewer/build.sh`), download, search panel (in file / in repo), find, go to
   definition (F12, Cmd/Ctrl+click, the context menu; a word with a definition is underlined
   while Cmd/Ctrl is held over it), review comments (click a line number; commented lines
-  marked in the glyph margin); editor tab with go to definition and Change All Occurrences
-  (Cmd/Ctrl+F2).
+  marked in the glyph margin); editor tab with go to definition, Change All Occurrences
+  (Cmd/Ctrl+F2) and word suggestions while typing (Ctrl+Space asks).
 - **Review (M7):** committed / uncommitted / commits views, stage/unstage/commit, inline
   comments (Electron's metadata format), viewed files, image diffs (before / after), each
   file's diff loading, failing and refreshed (its header's refresh button) on its own,
@@ -220,6 +220,10 @@ are not ours). Its changes are marked `TreeTerm patch` (`grep -rn "TreeTerm patc
   `@local.reference`, `@_name`, …) are dropped before captures of one range are merged.
   The merge keeps the first name, so Scala's `(comment) @spell @comment` left comments
   plain.
+- `src/input/popovers/completion_menu.rs`: a key the open completion menu takes (Enter,
+  Escape, Up, Down) stops there, as in Monaco's suggest widget. The Kit let it propagate,
+  so the window went on to type it: Enter took the Editor tab's suggestion and also typed a
+  newline.
 
 When `gpui-kit` is upgraded, copy the new `gpui-component` over this directory and re-apply
 the marked changes (or drop the patch if the Kit gained the option).
@@ -247,8 +251,12 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   grammar: `.r` files are plain, and `.xml`, `.less` and `.dockerfile` files are coloured
   with the HTML, CSS and shell grammars. The word underlined under Cmd/Ctrl keeps the
   text's colour (Monaco's link is `#4E94CE`).
-- The Editor tab has no language services: its right-click menu has no Go to References,
-  Peek, Format Document or Command Palette.
+- The Editor tab has no language services: its suggestions are the file's own words (Monaco
+  also takes words from other open files of the same language, offers TypeScript /
+  JavaScript, JSON, CSS and HTML IntelliSense, and suggests nothing while typing in comments
+  and strings), there are no hovers or error squiggles, and its right-click menu has no Go to
+  References, Peek, Format Document or Command Palette. Tab indents while suggestions are
+  open (Enter takes one, as in Monaco).
 - With the sidebar collapsed the header keeps clear of the macOS window buttons (Electron's
   title runs under them).
 - GPUI cannot decode AVIF, so the Files viewer shows `.avif` images in a webview (WebKit

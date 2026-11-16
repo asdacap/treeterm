@@ -5,12 +5,15 @@
 //!
 //! As in Monaco: F12, Cmd/Ctrl+click and the context menu go to the definition of the word
 //! under the cursor (holding Cmd/Ctrl over a word with one underlines it); Cmd/Ctrl+F2
-//! puts a cursor on every occurrence of the word or selection (Change All Occurrences).
+//! puts a cursor on every occurrence of the word or selection (Change All Occurrences);
+//! typing a word suggests the document's words that start with it (Ctrl+Space asks).
 
 use std::cell::Cell;
 use std::rc::Rc;
 
-use gpui_kit::component::input::{Copy as CopyText, Cut, Editor, EditorState, InputEvent, Paste, Replace};
+use gpui_kit::component::input::{
+    Copy as CopyText, Cut, Editor, EditorState, InputEvent, Paste, Replace, ShowCompletions,
+};
 use gpui_kit::component::v_flex;
 use gpui_kit::component::h_flex;
 use gpui_kit::prelude::*;
@@ -29,20 +32,27 @@ actions!(text_editor, [Save, ChangeAllOccurrences]);
 const CONTEXT: &str = "TextEditor";
 
 /// Cmd/Ctrl+S saves. Monaco's replace is Cmd+Alt+F on macOS (GPUI Kit's Cmd+Shift+F
-/// stays); elsewhere it is Ctrl+H, as in the Kit. F12 goes to the definition and
-/// Cmd/Ctrl+F2 changes all occurrences, as in Monaco.
+/// stays); elsewhere it is Ctrl+H, as in the Kit. F12 goes to the definition, Cmd/Ctrl+F2
+/// changes all occurrences, and Ctrl+Space or Cmd/Ctrl+I (Alt+Escape on macOS) ask for
+/// suggestions, as in Monaco.
 pub fn bind_keys(cx: &mut gpui_kit::App) {
-    cx.bind_keys([KeyBinding::new("f12", GoToDefinition, Some(CONTEXT))]);
+    cx.bind_keys([
+        KeyBinding::new("f12", GoToDefinition, Some(CONTEXT)),
+        KeyBinding::new("ctrl-space", ShowCompletions, Some(CONTEXT)),
+    ]);
     if cfg!(target_os = "macos") {
         cx.bind_keys([
             KeyBinding::new("cmd-s", Save, Some(CONTEXT)),
             KeyBinding::new("cmd-alt-f", Replace, Some(CONTEXT)),
             KeyBinding::new("cmd-f2", ChangeAllOccurrences, Some(CONTEXT)),
+            KeyBinding::new("cmd-i", ShowCompletions, Some(CONTEXT)),
+            KeyBinding::new("alt-escape", ShowCompletions, Some(CONTEXT)),
         ]);
     } else {
         cx.bind_keys([
             KeyBinding::new("ctrl-s", Save, Some(CONTEXT)),
             KeyBinding::new("ctrl-f2", ChangeAllOccurrences, Some(CONTEXT)),
+            KeyBinding::new("ctrl-i", ShowCompletions, Some(CONTEXT)),
         ]);
     }
 }
@@ -106,6 +116,7 @@ impl TextEditorView {
             }
         };
         crate::editor_hooks::install_definitions(&editor, probe, self.definition_clicked.clone(), go, cx);
+        crate::editor_hooks::install_word_suggestions(&editor, cx);
         self.editor = Some(editor.clone());
         Some(editor)
     }
@@ -362,5 +373,44 @@ mod tests {
             (search.open, search.replace_mode)
         });
         assert!(open && replace, "open {open}, replace {replace}");
+    }
+
+    #[gpui_kit::test]
+    fn typing_a_word_suggests_the_documents_words_and_enter_takes_one(cx: &mut gpui_kit::TestAppContext) {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            bind_keys(cx);
+        });
+        let text = "fn food() {}\n";
+        let (host, cx) = cx.add_window_view(|window, cx| Host {
+            editor: cx.new(|cx| EditorState::new(window, cx).language("rust").default_value(text)),
+        });
+        let editor = cx.update(|_, cx| host.read(cx).editor.clone());
+        cx.update(|window, cx| {
+            crate::editor_hooks::install_word_suggestions(&editor, cx);
+            editor.update(cx, |editor, cx| {
+                editor.focus(window, cx);
+                editor.set_selected_range(text.len()..text.len(), cx);
+            });
+        });
+        cx.run_until_parked();
+        cx.simulate_keystrokes("f o");
+        cx.run_until_parked();
+        let labels = cx.update(|_, cx| {
+            let menu = editor.read(cx).completion_menu_state();
+            menu.open.then(|| menu.items.iter().map(|item| item.label.clone()).collect::<Vec<_>>())
+        });
+        assert_eq!(labels, Some(vec!["food".to_owned()]));
+        // Enter takes the word in place of what was typed, and adds no line.
+        cx.simulate_keystrokes("enter");
+        cx.run_until_parked();
+        assert_eq!(cx.update(|_, cx| editor.read(cx).value().to_string()), "fn food() {}\nfood");
+        // Typing past the word closes the suggestions.
+        cx.simulate_keystrokes("space f");
+        cx.run_until_parked();
+        assert!(cx.update(|_, cx| editor.read(cx).completion_menu_state().open));
+        cx.simulate_keystrokes("x");
+        cx.run_until_parked();
+        assert!(!cx.update(|_, cx| editor.read(cx).completion_menu_state().open));
     }
 }

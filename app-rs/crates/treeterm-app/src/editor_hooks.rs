@@ -1,14 +1,19 @@
 //! Monaco's language features in the code editors, through GPUI Kit's LSP hooks: the
 //! underline under a word with a definition while Cmd/Ctrl is held over it, which a click
-//! follows. The model answers it ([`treeterm_model::definition`]).
+//! follows (both editors), and word suggestions while typing (the Editor tab). The model
+//! answers both ([`treeterm_model::definition`], [`treeterm_model::words`]).
 
 use std::cell::Cell;
 use std::rc::Rc;
 
-use gpui_kit::component::input::{DefinitionProvider, EditorState, Rope, RopeExt as _};
+use gpui_kit::component::input::{CompletionProvider, DefinitionProvider, EditorState, Rope, RopeExt as _};
 use gpui_kit::{App, Entity, Task, Window};
-use lsp_types::{LocationLink, Range, ShowDocumentParams, Uri};
+use lsp_types::{
+    CompletionContext, CompletionItem, CompletionItemKind, CompletionResponse, CompletionTextEdit,
+    CompletionTriggerKind, LocationLink, Range, ShowDocumentParams, TextEdit, Uri,
+};
 use treeterm_model::definition::DefinitionProbe;
+use treeterm_model::words::{self, Trigger};
 
 /// The underline's target: the byte offset of the word, which a click looks up as go to
 /// definition does (the Kit has no way to say "this word" otherwise).
@@ -115,6 +120,55 @@ pub(crate) fn drop_underline_on_release(
             editor.update(cx, |editor, cx| editor.clear_hover_state(cx));
         }
     })
+}
+
+/// Monaco's word-based suggestions (the base editor worker's `textualSuggest`).
+struct WordSuggestions;
+
+impl CompletionProvider for WordSuggestions {
+    fn completions(
+        &self,
+        text: &Rope,
+        offset: usize,
+        trigger: CompletionContext,
+        _: &mut Window,
+        cx: &mut App,
+    ) -> Task<gpui_kit::Result<CompletionResponse>> {
+        let trigger = match trigger.trigger_kind {
+            CompletionTriggerKind::INVOKED => Trigger::Invoked,
+            _ => Trigger::Typing,
+        };
+        let text = text.clone();
+        cx.background_executor().spawn(async move {
+            let suggestions = words::suggestions(&text.to_string(), offset, trigger);
+            let replace = Range::new(
+                text.offset_to_position(suggestions.replace.start),
+                text.offset_to_position(suggestions.replace.end),
+            );
+            let items = suggestions
+                .words
+                .into_iter()
+                .map(|word| CompletionItem {
+                    label: word.clone(),
+                    kind: Some(CompletionItemKind::TEXT),
+                    text_edit: Some(CompletionTextEdit::Edit(TextEdit { range: replace, new_text: word })),
+                    ..CompletionItem::default()
+                })
+                .collect();
+            Ok(CompletionResponse::Array(items))
+        })
+    }
+
+    /// Every typed character: a word character asks for suggestions, anything else closes
+    /// them (it leaves no word being typed). Pasted text does not, as in Monaco.
+    fn is_completion_trigger(&self, _: usize, new_text: &str, _: &mut App) -> bool {
+        new_text.chars().count() == 1
+    }
+}
+
+/// Give `editor` Monaco's word-based suggestions.
+pub(crate) fn install_word_suggestions(editor: &Entity<EditorState>, cx: &mut App) {
+    editor.update(cx, |editor, _| editor.lsp_mut().completion_provider = Some(Rc::new(WordSuggestions)));
 }
 
 #[cfg(test)]

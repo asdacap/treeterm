@@ -301,7 +301,9 @@ impl CompletionMenu {
             return false;
         }
 
-        cx.propagate();
+        // TreeTerm patch: a key the menu takes stops at it, as in Monaco's suggest widget.
+        // The Kit let the action propagate, so the key went on to the window as text: Enter
+        // took the suggestion and also typed a newline.
         if input::Enter::is_primary(&*action) {
             self.on_action_enter(window, cx);
         } else if action.partial_eq(&input::Escape) {
