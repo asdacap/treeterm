@@ -1,18 +1,20 @@
 //! Open tabs follow the tab state another window (or Electron) writes, as Electron's
 //! components read it live: the Files tab's selection, expanded directories and
-//! `scrollToLine`, and the Editor tab's text, unsaved mark and view mode. Two windows on one
-//! workspace of a real in-process daemon.
+//! `scrollToLine`, the Editor tab's text, unsaved mark and view mode, and the ports Web App
+//! and Browser tabs saved. Two windows on one workspace of a real in-process daemon.
 
 use std::time::Duration;
 
 use gpui_kit::{AppContext as _, Entity, TestAppContext};
 use serde_json::{Value, json};
 use treeterm_core::wire::stable_json::sha256_hex;
+use treeterm_model::browser_page::{BrowserPageModel, BrowserPhase};
 use treeterm_model::file_browser::{FileBrowser, FileView, Listing};
 use treeterm_model::session_store::{SessionState, SessionStore, WorkspaceEntry};
 use treeterm_model::settings_store::SettingsStore;
 use treeterm_model::text_editor::{EditorDoc, TextEditor};
 use treeterm_model::traffic::ConnectionTraffic;
+use treeterm_model::web_app::WebAppModel;
 use treeterm_model::workspace_store::{TabContent, WorkspaceStore};
 use treeterm_proto::treeterm::WorkspaceRef;
 
@@ -39,6 +41,15 @@ struct Windows {
 }
 
 fn open_windows(cx: &mut TestAppContext, files: &[(&str, &str)]) -> Windows {
+    open_windows_with(cx, files, Default::default())
+}
+
+/// [`open_windows`] with these settings in both windows.
+fn open_windows_with(
+    cx: &mut TestAppContext,
+    files: &[(&str, &str)],
+    settings: treeterm_core::settings::Settings,
+) -> Windows {
     let h = harness();
     let dir = h.daemon.root().join(ID);
     for (path, text) in files {
@@ -65,7 +76,7 @@ fn open_windows(cx: &mut TestAppContext, files: &[(&str, &str)]) -> Windows {
         .unwrap();
     let mut open = |client: &str| {
         let (conn, client) = (h.conn.clone(), client.to_owned());
-        let settings = cx.new(|_| SettingsStore::in_memory(Default::default()));
+        let settings = cx.new(|_| SettingsStore::in_memory(settings.clone()));
         let session = cx.new(|cx| {
             SessionStore::new(
                 conn,
@@ -192,6 +203,28 @@ fn editor_of(
     match workspace.read_with(cx, |w, _| w.tab_content(tab)) {
         Some(TabContent::Editor(editor)) => editor,
         _ => panic!("not an Editor tab"),
+    }
+}
+
+fn web_app_of(
+    cx: &mut TestAppContext,
+    workspace: &Entity<WorkspaceStore>,
+    tab: &str,
+) -> Entity<WebAppModel> {
+    match workspace.read_with(cx, |w, _| w.tab_content(tab)) {
+        Some(TabContent::WebApp { app, .. }) => app,
+        _ => panic!("not a Web App tab"),
+    }
+}
+
+fn page_of(
+    cx: &mut TestAppContext,
+    workspace: &Entity<WorkspaceStore>,
+    tab: &str,
+) -> Entity<BrowserPageModel> {
+    match workspace.read_with(cx, |w, _| w.tab_content(tab)) {
+        Some(TabContent::Browser { page, .. }) => page,
+        _ => panic!("not a Browser tab"),
     }
 }
 
@@ -526,4 +559,74 @@ fn a_stale_copy_of_the_editors_own_text_is_not_taken(cx: &mut TestAppContext) {
     wait_until(cx, &mine, |e| current(e) == Some("ay"));
     w.quiet(cx);
     assert_eq!(w.disk_state(&tab)["currentContent"], json!("ay"));
+}
+
+#[gpui_kit::test]
+fn web_app_and_browser_tabs_take_the_ports_another_window_saves(cx: &mut TestAppContext) {
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let settings = treeterm_core::settings::from_value(json!({
+        "webApp": { "instances": [{
+            "id": "py", "name": "Py", "icon": "P", "command": "sleep 300",
+            "isDefault": false, "keepOnExit": false
+        }]},
+        "browser": { "instances": [{
+            "id": "docs", "name": "Docs", "icon": "B", "url": "http://localhost:3000/",
+            "isDefault": false
+        }]}
+    }))
+    .unwrap();
+    let w = open_windows_with(cx, &[], settings);
+    // A server on port 1, where nothing answers: its start-up waits for it.
+    let web = w.add_tab(
+        cx,
+        "webapp-py",
+        json!({ "port": { "status": "assigned", "port": 1 } }),
+    );
+    let page = w.add_tab(cx, "browser-docs", json!({}));
+    let (app, browser) = (web_app_of(cx, &w.a, &web), page_of(cx, &w.a, &page));
+    let ports = |cx: &mut TestAppContext| {
+        (
+            app.read_with(cx, |a, _| (a.port(), a.local_port())),
+            browser.read_with(cx, |p, _| p.local_port()),
+        )
+    };
+    assert_eq!(ports(cx), ((Some(1), None), None));
+    let phases = |cx: &mut TestAppContext| {
+        (
+            app.read_with(cx, |a, _| a.phase().clone()),
+            browser.read_with(cx, |p, _| p.phase().clone()),
+        )
+    };
+    let before_phases = phases(cx);
+    assert_eq!(
+        before_phases.1,
+        BrowserPhase::Ready {
+            home: "http://localhost:3000/".into()
+        }
+    );
+    let before = sha256_hex(&w.raw());
+
+    // The other window saves its ports: the next start (and the next forward) takes them,
+    // the running one goes on as it was, and taking them writes nothing.
+    let assigned = |port: u16| json!({ "status": "assigned", "port": port });
+    w.b_writes(cx, &web, |state| {
+        state["port"] = assigned(2);
+        state["localPort"] = assigned(23456);
+    });
+    wait_until(cx, &app, |a| a.local_port() == Some(23456));
+    w.quiet(cx);
+    assert_eq!(w.disk()["parentHash"], json!(before));
+    w.b_writes(cx, &page, |state| state["localPort"] = assigned(23457));
+    wait_until(cx, &browser, |p| p.local_port() == Some(23457));
+    assert_eq!(ports(cx), ((Some(2), Some(23456)), Some(23457)));
+    assert_eq!(phases(cx), before_phases);
+
+    // Ports it sets back to unassigned are forgotten too.
+    let unassigned = json!({ "status": "unassigned" });
+    w.b_writes(cx, &web, |state| state["localPort"] = unassigned.clone());
+    w.b_writes(cx, &page, |state| state["localPort"] = unassigned.clone());
+    wait_until(cx, &browser, |p| p.local_port().is_none());
+    assert_eq!(ports(cx), ((Some(2), None), None));
+    assert_eq!(phases(cx), before_phases);
 }

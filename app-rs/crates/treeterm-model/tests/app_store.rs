@@ -25,7 +25,7 @@ use treeterm_model::settings_store::SettingsStore;
 use treeterm_model::system_monitor::{Metrics, POLL_INTERVAL, SystemMonitor};
 use treeterm_model::tool_tabs::ssh_upload::{LinkStatus, SshUpload, SshUploadEvent, UploadState, UploadTarget};
 use treeterm_model::traffic::{ConnectionTraffic, Reading, TrafficMeter};
-use treeterm_model::web_app::RemoteHost;
+use treeterm_model::web_app::{RemoteHost, WebAppModel, WebAppPhase};
 use treeterm_model::workspace_store::{TabContent, WorkspaceStore};
 use treeterm_proto::treeterm::WorkspaceRef;
 use treeterm_testkit::fake_ssh::{Proxy, fake_ssh_response, remote_config, ssh_env};
@@ -1638,6 +1638,96 @@ fn a_remote_browser_page_opens_anew_on_its_forward_after_a_restart(cx: &mut Test
     );
     assert_eq!(mount(cx), 2);
     page.update(cx, |p, cx| p.close(cx));
+}
+
+#[gpui_kit::test]
+fn a_remote_browser_page_restarts_its_forward_on_the_local_port_another_window_saved(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    isolated_home();
+    let h = harness();
+    let app = app(cx, &h, None);
+    app.connect(cx);
+    app.restored(cx);
+    let remote = remote_host(cx, &app);
+    let home = "http://localhost:3000/app/".to_owned();
+    let page = cx.new(|cx| BrowserPageModel::new(home, "tab-1".to_owned(), None, Some(remote), cx));
+    let ready = wait_for_page(cx, &page, |phase| matches!(phase, BrowserPhase::Ready { .. }));
+    let first = forward_local_ports(&app);
+    assert_eq!(page.read_with(cx, |p, _| p.local_port()), Some(first[0]));
+
+    // Another window saves another local port: the page stays on its forward...
+    let saved = if first[0] == 23457 { 23458 } else { 23457 };
+    let state = serde_json::json!({ "localPort": { "status": "assigned", "port": saved } });
+    page.update(cx, |p, _| p.follow_state(&state));
+    assert_eq!(page.read_with(cx, |p, _| p.phase().clone()), ready);
+    // ...and its next start tries that one first (`readState` at each start).
+    page.update(cx, |p, cx| p.restart_forward(cx));
+    assert_eq!(
+        wait_for_page(cx, &page, |phase| matches!(phase, BrowserPhase::Ready { .. })),
+        BrowserPhase::Ready {
+            home: format!("http://localhost:{saved}/app/")
+        }
+    );
+    assert_eq!(forward_local_ports(&app), [first[0], saved]);
+    page.update(cx, |p, cx| p.close(cx));
+}
+
+/// A server on a free local port that answers every request with an empty 200.
+fn http_server() -> u16 {
+    use std::io::{Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let mut stream = stream.expect("accept");
+            let mut request = [0u8; 4096];
+            if stream.read(&mut request).expect("read the request") == 0 {
+                continue;
+            }
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                .expect("answer");
+        }
+    });
+    port
+}
+
+#[gpui_kit::test]
+fn a_remote_web_app_forwards_from_the_local_port_saved_while_its_server_started(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    isolated_home();
+    let h = harness();
+    let app = app(cx, &h, None);
+    app.connect(cx);
+    app.restored(cx);
+    let server = http_server();
+    let remote = remote_host(cx, &app);
+    let exec = h.conn.exec_client();
+    let web = cx.new(|cx| WebAppModel::new(exec, "tab-1".to_owned(), Some(server), None, Some(remote), cx));
+    cx.run_until_parked();
+    assert_eq!(web.read_with(cx, |w, _| w.phase().clone()), WebAppPhase::AllocatingPort);
+
+    // While its server starts, another window saves a local port: the forward, made after
+    // the server answers, tries it first (`afterServer = readState()`).
+    let state = serde_json::json!({
+        "port": { "status": "assigned", "port": server },
+        "localPort": { "status": "assigned", "port": 23456 }
+    });
+    web.update(cx, |w, _| w.follow_state(&state));
+    web.update(cx, |w, _| w.server_pty_settled(Ok(())));
+    let mut phase = WebAppPhase::AllocatingPort;
+    for _ in 0..500 {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        cx.executor().advance_clock(std::time::Duration::from_millis(500));
+        cx.run_until_parked();
+        phase = web.read_with(cx, |w, _| w.phase().clone());
+        if matches!(phase, WebAppPhase::Ready { .. } | WebAppPhase::Error(_)) {
+            break;
+        }
+    }
+    assert_eq!(phase, WebAppPhase::Ready { home: "http://localhost:23456/".to_owned() });
+    assert_eq!(forward_local_ports(&app), [23456]);
+    web.update(cx, |w, cx| w.close(cx));
 }
 
 /// The local ports of the TCP forwards started so far, in order.

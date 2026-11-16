@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use futures::channel::oneshot;
 use gpui_kit::{AsyncApp, Context, Entity, EventEmitter, Task, WeakEntity};
+use serde_json::Value;
 use treeterm_core::connection::{
     ConnectionId, Persistence, PortForwardConfig, PortForwardId, PortForwardStatus,
 };
@@ -39,6 +40,16 @@ pub fn port_from(random: u128) -> u16 {
 
 fn random_port() -> u16 {
     port_from(uuid::Uuid::new_v4().as_u128())
+}
+
+/// The port a tab's state saves under `key` (`port`, `localPort`): `None` while it is
+/// `{ status: 'unassigned' }`.
+pub(crate) fn saved_port(state: &Value, key: &str) -> Option<u16> {
+    let port = state.get(key)?;
+    (port.get("status").and_then(Value::as_str) == Some("assigned"))
+        .then(|| port.get("port").and_then(Value::as_u64))
+        .flatten()
+        .and_then(|p| u16::try_from(p).ok())
 }
 
 /// The forward's id (`forwardIdForTab`).
@@ -150,6 +161,18 @@ impl WebAppModel {
         self.port
     }
 
+    /// The local end of the ssh forward the next forward tries first.
+    pub fn local_port(&self) -> Option<u16> {
+        self.local_port
+    }
+
+    /// The tab's state as it is now, another window's ports included: Electron re-reads
+    /// `port` at each start and `localPort` right before forwarding (`readState`).
+    pub fn follow_state(&mut self, state: &Value) {
+        self.port = saved_port(state, "port");
+        self.local_port = saved_port(state, "localPort");
+    }
+
     /// Which opening of the page this is: a new number wants a fresh page.
     pub fn page_mount(&self) -> u64 {
         self.mount
@@ -207,8 +230,8 @@ impl WebAppModel {
     fn start(&mut self, cx: &mut Context<Self>) {
         self.pty_waiter = None;
         self.set_phase(WebAppPhase::AllocatingPort, cx);
-        let (exec, known_port, remote, tab_id, preferred) =
-            (self.exec.clone(), self.port, self.remote.clone(), self.tab_id.clone(), self.local_port);
+        let (exec, known_port, remote, tab_id) =
+            (self.exec.clone(), self.port, self.remote.clone(), self.tab_id.clone());
         let executor = cx.background_executor().clone();
         self._run = Some(cx.spawn(async move |this, cx| {
             let result: Result<(), String> = async {
@@ -251,6 +274,9 @@ impl WebAppModel {
                     Some(remote) => {
                         this.update(cx, |model, cx| model.set_phase(WebAppPhase::Forwarding { port }, cx))
                             .map_err(|_| "closed".to_owned())?;
+                        // The latest one saved, perhaps by another window while the server
+                        // started (`afterServer`).
+                        let preferred = this.read_with(cx, |model, _| model.local_port).map_err(|_| "closed".to_owned())?;
                         let local = ensure_forward(remote, &tab_id, port, preferred, &executor, cx).await?;
                         this.update(cx, |model, cx| {
                             model.local_port = Some(local);

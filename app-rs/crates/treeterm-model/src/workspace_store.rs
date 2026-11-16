@@ -1005,7 +1005,8 @@ impl WorkspaceStore {
     /// Tabs whose components read their state live in Electron follow it as another writer
     /// left it: the Files tab (`FilesystemBrowser`), the Editor tab (`FileEditor`) and System
     /// Prompt Debuggers (`bufferText`, which SystemPromptDebugger re-reads on every store
-    /// change).
+    /// change). Web App and Browser tabs take its saved ports, which Electron re-reads as
+    /// they start (`readState`).
     fn follow_tab_states(&self, cx: &mut Context<Self>) {
         for (tab_id, tab) in &self.tabs {
             let state = &self.workspace.file.app_states[tab_id].state;
@@ -1015,8 +1016,13 @@ impl WorkspaceStore {
                 TabRef::Tool(crate::tool_tabs::ToolTab::PromptDebugger { model, .. }) => {
                     model.update(cx, |model, cx| model.follow_state(state, cx));
                 }
-                TabRef::Terminal(_) | TabRef::Review { .. } | TabRef::Browser { .. } | TabRef::Tool(_) => {}
+                TabRef::Browser { page, .. } => page.update(cx, |page, _| page.follow_state(state)),
+                TabRef::Terminal(_) | TabRef::Review { .. } | TabRef::Tool(_) => {}
             }
+        }
+        for (tab_id, web_app) in &self.web_apps {
+            let state = &self.workspace.file.app_states[tab_id].state;
+            web_app.model.update(cx, |app, _| app.follow_state(state));
         }
     }
 
@@ -1067,14 +1073,8 @@ impl WorkspaceStore {
         let startup_command = app.startup_command(&self.workspace.path);
         match &app.kind {
             AppKind::WebApp { command, .. } => {
-                let assigned = |key: &str| {
-                    let port = tab.state.get(key)?;
-                    (port.get("status").and_then(Value::as_str) == Some("assigned"))
-                        .then(|| port.get("port").and_then(Value::as_u64))
-                        .flatten()
-                        .and_then(|p| u16::try_from(p).ok())
-                };
-                let (port, local_port) = (assigned("port"), assigned("localPort"));
+                let port = crate::web_app::saved_port(&tab.state, "port");
+                let local_port = crate::web_app::saved_port(&tab.state, "localPort");
                 let pty = tab.state.get("ptyId").and_then(Value::as_str).map(str::to_owned);
                 let (exec, owned, remote) = (self.conn.exec_client(), tab_id.to_owned(), self.remote.clone());
                 let model = cx.new(|cx| crate::web_app::WebAppModel::new(exec, owned, port, local_port, remote, cx));
@@ -1109,12 +1109,7 @@ impl WorkspaceStore {
                 self.tabs.insert(tab_id.to_owned(), TabRef::Files { model, _events: events });
             }
             AppKind::Browser { url } => {
-                let local_port = tab
-                    .state
-                    .get("localPort")
-                    .filter(|port| port.get("status").and_then(Value::as_str) == Some("assigned"))
-                    .and_then(|port| port.get("port").and_then(Value::as_u64))
-                    .and_then(|port| u16::try_from(port).ok());
+                let local_port = crate::web_app::saved_port(&tab.state, "localPort");
                 let (home, owned, remote) = (url.clone(), tab_id.to_owned(), self.remote.clone());
                 let page = cx.new(|cx| crate::browser_page::BrowserPageModel::new(home, owned, local_port, remote, cx));
                 let owned_tab = tab_id.to_owned();

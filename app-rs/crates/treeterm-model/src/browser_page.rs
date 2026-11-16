@@ -3,9 +3,10 @@
 //! session (the page is on the ssh host's localhost).
 
 use gpui_kit::{Context, EventEmitter, Task};
+use serde_json::Value;
 
 use crate::apps::{forwarded_url, parse_local_url, target_port};
-use crate::web_app::{RemoteHost, WebAppEvent, ensure_forward, forward_id_for_tab};
+use crate::web_app::{RemoteHost, WebAppEvent, ensure_forward, forward_id_for_tab, saved_port};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BrowserPhase {
@@ -55,6 +56,17 @@ impl BrowserPageModel {
     /// Which opening of the page this is: a new number wants a fresh page.
     pub fn page_mount(&self) -> u64 {
         self.mount
+    }
+
+    /// The local end of the ssh forward the next start tries first.
+    pub fn local_port(&self) -> Option<u16> {
+        self.local_port
+    }
+
+    /// The tab's state as it is now, another window's `localPort` included: Electron reads
+    /// it at each start.
+    pub fn follow_state(&mut self, state: &Value) {
+        self.local_port = saved_port(state, "localPort");
     }
 
     fn set_phase(&mut self, phase: BrowserPhase, cx: &mut Context<Self>) {
