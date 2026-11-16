@@ -501,6 +501,41 @@ fn a_width_limit_flip_in_another_window_reaches_the_live_terminal(cx: &mut TestA
 }
 
 #[gpui_kit::test]
+fn an_ai_harness_set_to_disable_scrollbar_draws_none(cx: &mut TestAppContext) {
+    use treeterm_model::terminal::ScrollbarVisibility;
+    cx.executor().allow_parking();
+    let h = harness();
+    std::fs::write(h.daemon.workspaces_dir().join("a.json"), body("a", None)).unwrap();
+    publish(&h, &["a"]);
+    let settings = treeterm_core::settings::from_value(serde_json::json!({
+        "aiHarness": { "instances": [{
+            "id": "bot", "name": "Bot", "icon": "B", "command": "sleep 60",
+            "isDefault": false, "enableSandbox": true, "allowNetwork": false,
+            "backgroundColor": "#1a1a24", "disableScrollbar": true, "keepOnExit": true
+        }]}
+    }))
+    .unwrap();
+    let settings = cx.new(|_| SettingsStore::in_memory(settings));
+    let conn = h.conn.clone();
+    let store = cx.new(|cx| SessionStore::new(conn, "client-a".into(), settings.clone(), None, cx));
+    wait_until(cx, &store, |s| loaded(s, "a"));
+    let workspace = store.read_with(cx, |s, _| ws(s, "a"));
+    let bot = workspace.update(cx, |w, cx| w.add_tab("aiharness-bot", cx)).unwrap();
+    let shell = workspace.update(cx, |w, cx| w.add_tab("terminal", cx)).unwrap();
+    wait_until(cx, &workspace, |w| terminal_of(w, &bot).is_some() && terminal_of(w, &shell).is_some());
+    let (bot_terminal, shell_terminal) =
+        workspace.read_with(cx, |w, _| (terminal_of(w, &bot).unwrap(), terminal_of(w, &shell).unwrap()));
+    assert_eq!(bot_terminal.read_with(cx, |t, _| t.options().scrollbar), ScrollbarVisibility::Hidden);
+    assert_eq!(shell_terminal.read_with(cx, |t, _| t.options().scrollbar), ScrollbarVisibility::Shown);
+
+    // Turned off in the settings: the harness's live terminal draws it again.
+    settings.update(cx, |s, cx| {
+        s.update(|settings| settings.ai_harness.instances[0].disable_scrollbar = false, cx)
+    });
+    wait_until(cx, &bot_terminal, |t| t.options().scrollbar == ScrollbarVisibility::Shown);
+}
+
+#[gpui_kit::test]
 fn opening_a_directory_adds_a_root_workspace_with_git_info_and_a_terminal(cx: &mut TestAppContext) {
     cx.executor().allow_parking();
     let h = harness();

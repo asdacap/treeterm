@@ -299,6 +299,10 @@ The chrome was matched to Electron's computed styles, measured side by side on o
 - In a strip too full to show every tab, tabs scrolled out of view are no drop target: a tab
   dropped past the last tab shown lands after it. flex-layout also counted the hidden tabs'
   places past the strip's edge, so a drop over "+" could land among them, out of sight.
+- An AI harness set to Disable Scrollbar draws no scrollbar on its terminals. Electron's
+  `disable-scrollbar` rule targets `.xterm-viewport`, which no longer holds the scrollbar
+  since xterm.js 6, so the bar still shows there. In both apps the wheel scrolls the
+  scrollback (or goes to a program that asked for mouse events).
 - The attention ding is the system bell (Electron synthesised an 880 Hz tone).
 - The analyzer reads the tab's own terminal; Electron attached a second, headless one.
 - The code editors colour files Electron shows as plain text: Makefile, Dockerfile,

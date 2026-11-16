@@ -9,7 +9,7 @@ use gpui_kit::{AppContext as _, Entity, Subscription, TestAppContext};
 use treeterm_core::pty::CreatePty;
 use treeterm_core::settings::TerminalSettings;
 use treeterm_model::terminal::{
-    BADGE_DOUBLE_CLICK, Overlay, TerminalEvent, TerminalModel, TerminalOptions,
+    BADGE_DOUBLE_CLICK, Overlay, ScrollbarVisibility, TerminalEvent, TerminalModel, TerminalOptions,
 };
 use treeterm_term::core::GridSize;
 use treeterm_term::fit::WidthLimit;
@@ -45,6 +45,7 @@ fn options(pty_id: String) -> TerminalOptions {
         settings: TerminalSettings::default(),
         keep_on_exit: false,
         width_limit: WidthLimit::Capped(160),
+        scrollbar: ScrollbarVisibility::Shown,
         idle_timeout: None,
         traffic: treeterm_core::traffic::ByteCounter::default(),
     }

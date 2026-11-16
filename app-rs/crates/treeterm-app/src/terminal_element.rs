@@ -15,7 +15,7 @@ use gpui_kit::{
     LayoutId, Pixels, Point, Rgba, ShapedLine, SharedString, Size, StrikethroughStyle, Style,
     TextAlign, TextRun, UnderlineStyle, Window, fill, point, px, relative, size,
 };
-use treeterm_model::terminal::TerminalModel;
+use treeterm_model::terminal::{ScrollbarVisibility, TerminalModel};
 use treeterm_term::alacritty_terminal::grid::Dimensions;
 use treeterm_term::alacritty_terminal::index::{Column, Line, Point as GridPoint};
 use treeterm_term::alacritty_terminal::term::cell::Flags;
@@ -40,7 +40,8 @@ pub struct Geometry {
     pub scrollbar: Option<Scrollbar>,
 }
 
-/// The scrollback scrollbar: shown whenever there is scrollback.
+/// The scrollback scrollbar: shown whenever there is scrollback, unless the terminal's
+/// application disables it.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Scrollbar {
     pub track: Bounds<Pixels>,
@@ -310,7 +311,12 @@ impl Element for TerminalElement {
         let content = term.renderable_content();
         let cols = term.columns();
         let rows = term.screen_lines();
-        let scrollbar = Scrollbar::new(bounds, rows, term.history_size(), term.grid().display_offset());
+        let scrollbar = match model.options().scrollbar {
+            ScrollbarVisibility::Shown => {
+                Scrollbar::new(bounds, rows, term.history_size(), term.grid().display_offset())
+            }
+            ScrollbarVisibility::Hidden => None,
+        };
         let geometry = Geometry {
             origin: inner.origin,
             cell,

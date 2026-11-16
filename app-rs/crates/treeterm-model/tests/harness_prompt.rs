@@ -17,7 +17,7 @@ use treeterm_model::analyzer::LlmService;
 use treeterm_model::harness_prompts::{self, HarnessPrompt};
 use treeterm_model::session_store::{SessionState, SessionStore, WorkspaceEntry};
 use treeterm_model::settings_store::SettingsStore;
-use treeterm_model::terminal::{Overlay, TerminalModel, TerminalOptions};
+use treeterm_model::terminal::{Overlay, ScrollbarVisibility, TerminalModel, TerminalOptions};
 use treeterm_model::workspace_store::{TabContent, WorkspaceStore};
 use treeterm_proto::treeterm::WorkspaceRef;
 use treeterm_term::fit::WidthLimit;
@@ -156,6 +156,7 @@ fn viewer(cx: &mut TestAppContext, h: &Harness, pty_id: &str) -> Entity<Terminal
         settings: TerminalSettings::default(),
         keep_on_exit: true,
         width_limit: WidthLimit::Capped(160),
+        scrollbar: ScrollbarVisibility::Shown,
         idle_timeout: None,
         traffic: treeterm_core::traffic::ByteCounter::default(),
     };

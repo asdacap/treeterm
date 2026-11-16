@@ -27,7 +27,7 @@ use treeterm_term::palette::{DEFAULT_BACKGROUND, SANDBOX_BACKGROUND};
 use crate::analyzer::{AnalyzerEvent, AnalyzerModel, LlmService};
 use crate::apps::{AI_HARNESS_PREFIX, AppKind, AppRegistry};
 use crate::pty_writer::PtyWriter;
-use crate::terminal::{TerminalEvent, TerminalModel, TerminalOptions};
+use crate::terminal::{ScrollbarVisibility, TerminalEvent, TerminalModel, TerminalOptions};
 
 /// A workspace as the app uses it: the file body joined with its ref.
 #[derive(Debug, Clone, PartialEq)]
@@ -784,16 +784,31 @@ impl WorkspaceStore {
         }
     }
 
-    /// Live terminals take what their tab's state now says, whoever changed it:
-    /// BaseTerminal re-reads `widthLimitDisabled` on every store change, so a flip made in
-    /// another window refits it.
+    /// Whether the tab's terminal draws its scrollbar, as its application says. A tab whose
+    /// application went away keeps the default.
+    fn scrollbar(&self, tab_id: &str) -> ScrollbarVisibility {
+        let app = self
+            .workspace
+            .file
+            .app_states
+            .get(tab_id)
+            .and_then(|tab| self.registry.get(&tab.application_id));
+        match app {
+            Some(app) => app.scrollbar(),
+            None => ScrollbarVisibility::Shown,
+        }
+    }
+
+    /// Live terminals take what their tab's state and application now say, whoever changed
+    /// them: BaseTerminal re-reads `widthLimitDisabled` on every store change, so a flip
+    /// made in another window refits it, and mounts again on a settings change.
     fn sync_terminal_options(&mut self, cx: &mut Context<Self>) {
-        let terminals: Vec<(Entity<TerminalModel>, WidthLimit)> = self
+        let terminals: Vec<(Entity<TerminalModel>, WidthLimit, ScrollbarVisibility)> = self
             .tabs
             .iter()
             .filter_map(|(tab_id, tab)| match tab {
                 TabRef::Terminal(TerminalTab::Attached { model, .. }) => {
-                    Some((model.clone(), self.width_limit(tab_id)))
+                    Some((model.clone(), self.width_limit(tab_id), self.scrollbar(tab_id)))
                 }
                 TabRef::Terminal(TerminalTab::Creating { .. } | TerminalTab::Failed(_))
                 | TabRef::Files { .. }
@@ -803,8 +818,11 @@ impl WorkspaceStore {
                 | TabRef::Tool(_) => None,
             })
             .collect();
-        for (model, width_limit) in terminals {
-            model.update(cx, |model, cx| model.set_width_limit(width_limit, cx));
+        for (model, width_limit, scrollbar) in terminals {
+            model.update(cx, |model, cx| {
+                model.set_width_limit(width_limit, cx);
+                model.set_scrollbar(scrollbar, cx);
+            });
         }
     }
 
@@ -1068,6 +1086,7 @@ impl WorkspaceStore {
             settings: settings.terminal.clone(),
             keep_on_exit: flag("keepOnExit"),
             width_limit: self.width_limit(tab_id),
+            scrollbar: self.scrollbar(tab_id),
             // Always detecting: the per-tab switch gates only the Working edge, read when it
             // fires, so turning it off still lets a pending Idle land.
             idle_timeout: Some(self.idle_timeout()),
@@ -1861,7 +1880,8 @@ impl WorkspaceStore {
     }
 
     /// New settings: the registry decides which tabs are native and how new ones start;
-    /// live terminals take the emulator and font settings.
+    /// live terminals take the emulator and font settings and their application's Disable
+    /// Scrollbar.
     pub fn apply_settings(&mut self, registry: Rc<AppRegistry>, settings: Rc<Settings>, cx: &mut Context<Self>) {
         self.registry = registry;
         self.settings = settings;
@@ -1875,6 +1895,7 @@ impl WorkspaceStore {
                 }
             }
         }
+        self.sync_terminal_options(cx);
         self.sync_idle_timeouts(cx);
         // Tabs of applications that just appeared (a new AI harness instance) start now.
         let tab_ids: Vec<String> = self.workspace.file.app_states.keys().cloned().collect();

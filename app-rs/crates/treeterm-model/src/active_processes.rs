@@ -9,7 +9,7 @@ use treeterm_term::fit::WidthLimit;
 use treeterm_term::palette::DEFAULT_BACKGROUND;
 
 use crate::session_store::SessionStore;
-use crate::terminal::{TerminalModel, TerminalOptions};
+use crate::terminal::{ScrollbarVisibility, TerminalModel, TerminalOptions};
 
 #[derive(Debug, Clone)]
 pub enum ProcessList {
@@ -91,6 +91,7 @@ impl ActiveProcesses {
             settings: self.settings.clone(),
             keep_on_exit: true,
             width_limit: WidthLimit::Off,
+            scrollbar: ScrollbarVisibility::Shown,
             idle_timeout: None,
             // A viewer, not a workspace: nobody meters it.
             traffic: treeterm_core::traffic::ByteCounter::default(),

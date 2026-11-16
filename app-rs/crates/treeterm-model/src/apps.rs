@@ -8,6 +8,8 @@ use serde_json::{Value, json};
 use treeterm_core::pty::Sandbox;
 use treeterm_core::settings::Settings;
 
+use crate::terminal::ScrollbarVisibility;
+
 /// What every AI-harness application id starts with (`aiharness-<instance>`).
 pub const AI_HARNESS_PREFIX: &str = "aiharness-";
 
@@ -22,6 +24,8 @@ pub enum AppKind {
         keep_on_exit: bool,
         enable_sandbox: bool,
         allow_network: bool,
+        /// Its terminals draw no scrollbar (`disableScrollbar`).
+        disable_scrollbar: bool,
     },
     /// A command template run in a PTY (`{{workspace_path}}` expanded at start).
     CustomRunner { command_template: String },
@@ -200,6 +204,23 @@ impl AppDef {
             | AppKind::Review
             | AppKind::Browser { .. }
             | AppKind::Tool(_) => None,
+        }
+    }
+
+    /// Whether a terminal of this application draws its scrollbar: an AI harness set to
+    /// "Disable Scrollbar" scrolls itself.
+    pub fn scrollbar(&self) -> ScrollbarVisibility {
+        match &self.kind {
+            AppKind::AiHarness { disable_scrollbar: true, .. } => ScrollbarVisibility::Hidden,
+            AppKind::AiHarness { disable_scrollbar: false, .. }
+            | AppKind::Terminal { .. }
+            | AppKind::CustomRunner { .. }
+            | AppKind::WebApp { .. }
+            | AppKind::Files
+            | AppKind::Editor
+            | AppKind::Review
+            | AppKind::Browser { .. }
+            | AppKind::Tool(_) => ScrollbarVisibility::Shown,
         }
     }
 
@@ -474,6 +495,7 @@ impl AppRegistry {
                     keep_on_exit: instance.keep_on_exit,
                     enable_sandbox: instance.enable_sandbox,
                     allow_network: instance.allow_network,
+                    disable_scrollbar: instance.disable_scrollbar,
                 },
                 can_close: true,
                 show_in_new_tab_menu: true,
@@ -747,6 +769,26 @@ mod tests {
         );
         // Terminals send none, whatever their state holds.
         assert_eq!(terminal.sandbox(&state), None);
+    }
+
+    #[test]
+    fn an_ai_harness_set_to_disable_scrollbar_hides_its_terminals_scrollbar() {
+        let harness = |id: &str, disable_scrollbar: bool| {
+            json!({
+                "id": id, "name": id, "icon": "✦", "command": "claude",
+                "isDefault": false, "enableSandbox": false, "allowNetwork": true,
+                "backgroundColor": "#1a1a24", "disableScrollbar": disable_scrollbar, "keepOnExit": false
+            })
+        };
+        let settings = treeterm_core::settings::from_value(json!({
+            "aiHarness": { "instances": [harness("bare", true), harness("framed", false)] }
+        }))
+        .unwrap();
+        let registry = AppRegistry::from_settings(&settings);
+        let scrollbar = |id: &str| registry.get(id).unwrap().scrollbar();
+        assert_eq!(scrollbar("aiharness-bare"), ScrollbarVisibility::Hidden);
+        assert_eq!(scrollbar("aiharness-framed"), ScrollbarVisibility::Shown);
+        assert_eq!(scrollbar("terminal"), ScrollbarVisibility::Shown);
     }
 
     #[test]

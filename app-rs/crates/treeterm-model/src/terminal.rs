@@ -53,10 +53,20 @@ pub struct TerminalOptions {
     /// Keep the tab (with a "Process exited" line) when the program exits.
     pub keep_on_exit: bool,
     pub width_limit: WidthLimit,
+    pub scrollbar: ScrollbarVisibility,
     /// `None` turns activity detection off for this terminal (e.g. one analysed by an LLM).
     pub idle_timeout: Option<Duration>,
     /// Output bytes are added here (the workspace's download meter).
     pub traffic: ByteCounter,
+}
+
+/// Whether the scrollback scrollbar is drawn (and can be dragged). The wheel scrolls the
+/// scrollback either way, as it does in Electron since xterm.js 6.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScrollbarVisibility {
+    Shown,
+    /// An AI harness set to "Disable Scrollbar" (`disable-scrollbar`): it scrolls itself.
+    Hidden,
 }
 
 /// What covers the terminal, if anything.
@@ -501,6 +511,15 @@ impl TerminalModel {
         }
         self.options.width_limit = limit;
         self.fit.forget_fit();
+        cx.notify();
+    }
+
+    /// The application's "Disable Scrollbar" changed.
+    pub fn set_scrollbar(&mut self, scrollbar: ScrollbarVisibility, cx: &mut Context<Self>) {
+        if self.options.scrollbar == scrollbar {
+            return;
+        }
+        self.options.scrollbar = scrollbar;
         cx.notify();
     }
 
