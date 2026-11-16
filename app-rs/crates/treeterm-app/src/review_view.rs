@@ -24,7 +24,7 @@ use gpui_kit::{
 };
 use treeterm_core::git::{GitLogCommit, Staging};
 use treeterm_model::review::{
-    ConflictCheck, FavouriteSelection, GitOp, Loaded, Notice, Processing, ReviewBase, ReviewContent, ReviewEvent,
+    CollapseAll, ConflictCheck, FavouriteSelection, GitOp, Loaded, Notice, Processing, ReviewBase, ReviewContent, ReviewEvent,
     ReviewHeader, ReviewMode, ReviewModel, StageTarget,
 };
 use treeterm_model::session_store::AfterMerge;
@@ -33,6 +33,12 @@ use treeterm_model::workspace_store::{MergeOutput, MergeState, WorkspaceStore};
 use crate::theme::colors;
 use parts::{ERROR_RED, MONO, action_button, branch_pill, plain_icon, spinner, toolbar_button, totals};
 use stacked::{DiffCache, ListedFile};
+
+/// The paths of `files` in the file tree's order (`sortFilesAsTree`), where Previous /
+/// Next unviewed walk.
+fn tree_paths(files: &[ListedFile]) -> Rc<[String]> {
+    stacked::tree_sorted(files).into_iter().map(|f| f.path).collect()
+}
 
 /// The advance of 12px Menlo (0.6em).
 const MONO_12_ADVANCE: f32 = 7.224;
@@ -64,8 +70,8 @@ pub struct ReviewView {
     closed_dirs: HashSet<String>,
     /// Binary files folded in the diff (their `DiffState` entry stays collapsed).
     closed_binary: HashSet<String>,
-    /// The last "Collapse all" / "Expand all" (`collapseAll.collapsed`).
-    all_collapsed: bool,
+    /// The diff list's last "Collapse all" / "Expand all" (`collapseAll`).
+    collapse_all: CollapseAll,
     /// The commit message box.
     message: Option<(Entity<InputState>, Subscription)>,
     message_text: String,
@@ -127,7 +133,7 @@ impl ReviewView {
             query: String::new(),
             closed_dirs: HashSet::new(),
             closed_binary: HashSet::new(),
-            all_collapsed: false,
+            collapse_all: CollapseAll::Untouched,
             message: None,
             message_text: String::new(),
             clear_message: false,
@@ -259,7 +265,6 @@ impl ReviewView {
     fn choose_base(&mut self, branch: Option<String>, cx: &mut Context<Self>) {
         self.base_picker = None;
         self.base_query.clear();
-        self.diff = None;
         self.model.update(cx, |m, cx| m.set_base(branch, cx));
     }
 
@@ -828,8 +833,9 @@ impl ReviewView {
             .line_height(px(15.))
     }
 
-    /// `DiffToolbar`.
-    fn toolbar(&self, viewed: (usize, usize), comments: usize, navigate: bool, cx: &mut Context<Self>) -> AnyElement {
+    /// `DiffToolbar`. `navigate`: the files listed, in the tree's order, which Previous / Next
+    /// unviewed walk (the Commits view has neither).
+    fn toolbar(&self, viewed: (usize, usize), comments: usize, navigate: Option<Rc<[String]>>, cx: &mut Context<Self>) -> AnyElement {
         let c = colors(cx);
         let (secondary, primary, accent, hover) = (c.text_secondary, c.text_primary, c.accent, c.bg_hover);
         let (done, total) = viewed;
@@ -885,13 +891,18 @@ impl ReviewView {
                 )
             });
         let mut controls = h_flex().gap(px(4.)).items_center();
-        if navigate {
+        if let Some(order) = navigate {
+            let previous = order.clone();
             controls = controls
                 .child(toolbar_button("prev-unviewed", IconName::ChevronUp, false, unviewed, cx).when(unviewed, |d| {
-                    d.on_click(cx.listener(|view, _: &ClickEvent, _, cx| view.jump_unviewed(treeterm_model::review::Direction::Previous, cx)))
+                    d.on_click(cx.listener(move |view, _: &ClickEvent, _, cx| {
+                        view.jump_unviewed(&previous, treeterm_model::review::Direction::Previous, cx);
+                    }))
                 }))
                 .child(toolbar_button("next-unviewed", IconName::ChevronDown, false, unviewed, cx).when(unviewed, |d| {
-                    d.on_click(cx.listener(|view, _: &ClickEvent, _, cx| view.jump_unviewed(treeterm_model::review::Direction::Next, cx)))
+                    d.on_click(cx.listener(move |view, _: &ClickEvent, _, cx| {
+                        view.jump_unviewed(&order, treeterm_model::review::Direction::Next, cx);
+                    }))
                 }));
         }
         let ignore = self.model.read(cx).ignore_whitespace();
@@ -906,7 +917,6 @@ impl ReviewView {
             )
             .child(
                 toolbar_button("toggle-whitespace", IconName::Space, ignore, true, cx).on_click(cx.listener(move |view, _: &ClickEvent, _, cx| {
-                    view.diff = None;
                     view.model.update(cx, |m, cx| m.set_ignore_whitespace(!ignore, cx));
                 })),
             )
@@ -955,31 +965,16 @@ impl ReviewView {
         cx.notify();
     }
 
-    fn jump_unviewed(&mut self, direction: treeterm_model::review::Direction, cx: &mut Context<Self>) {
-        let Some(diff) = &self.diff else {
-            return;
-        };
-        // `navigateUnviewed` walks the files in the diff's (tree, filtered) order.
-        let order = diff.paths();
-        let viewed = self.model.read(cx).viewed_files(cx).unwrap_or_default();
-        let current = self.model.read(cx).focused_file().map(str::to_owned);
-        let target = treeterm_model::review::unviewed_from(&order, &viewed, current.as_deref(), direction).map(str::to_owned);
-        if let Some(path) = target {
-            self.select_file(&path, cx);
-        }
+    /// Previous / Next unviewed, over `order` (the files listed, in the tree's order): the
+    /// file it finds is selected (none: nothing left that way, or the marks' error notice).
+    fn jump_unviewed(&mut self, order: &[String], direction: treeterm_model::review::Direction, cx: &mut Context<Self>) {
+        self.model.update(cx, |m, cx| m.jump_unviewed(order, direction, cx));
     }
 
-    /// A click in the file list (or a jump): the diff scrolls to the file, expanded.
+    /// A click in the file list: the diff (back in the pane) scrolls to the file once it
+    /// shows.
     fn select_file(&mut self, path: &str, cx: &mut Context<Self>) {
-        self.model.update(cx, |m, cx| {
-            m.show_diff(cx);
-            m.focus_file(path, cx);
-        });
-        if let Some(diff) = &self.diff {
-            let path = path.to_owned();
-            diff.state.update(cx, |s, cx| s.scroll_to_file(&path, cx));
-        }
-        cx.notify();
+        self.model.update(cx, |m, cx| m.select_file(path, cx));
     }
 
     /// `.review-loading` / `.review-error` / `.diff-empty`.
@@ -1167,6 +1162,7 @@ impl ReviewView {
         let mut column = v_flex().size_full();
         if has_changes {
             let shown_viewed = listed.iter().filter(|f| viewed.contains(&f.path)).count();
+            let order = tree_paths(&shown);
             column = column
                 .child(
                     self.summary(cx)
@@ -1181,10 +1177,10 @@ impl ReviewView {
                                 .children(totals(committed.total_additions, committed.total_deletions)),
                         ),
                 )
-                .child(self.toolbar((shown_viewed, listed.len()), comments, true, cx));
+                .child(self.toolbar((shown_viewed, listed.len()), comments, Some(order), cx));
         }
         let search = self.search_box(window, cx);
-        let tree = files::tree(self, "committed", &shown, &viewed, None, false, cx);
+        let tree = files::tree(self, files::Tree::Committed, &shown, &viewed, None, false, cx);
         let favourites = files::favourites(self, &listed, cx);
         let list = v_flex().child(search).children(favourites).when(has_changes, |d| d.child(tree)).into_any_element();
         let right = match self.favourite_pane(cx) {
@@ -1208,6 +1204,16 @@ impl ReviewView {
         let listed: Vec<ListedFile> = changes.files.iter().map(ListedFile::uncommitted).collect();
         let viewed = self.viewed(cx);
         let comments = self.model.read(cx).comments(cx).map(|c| c.len()).unwrap_or(0);
+        // Each list's files the filters keep: staged, then unstaged.
+        let sections: Vec<(&'static str, files::Tree, Vec<ListedFile>)> =
+            [("Staged", files::Tree::Staged, Staging::Staged), ("Unstaged", files::Tree::Unstaged, Staging::Unstaged)]
+                .into_iter()
+                .map(|(title, tree, side)| {
+                    let section: Vec<ListedFile> = listed.iter().filter(|f| f.staged == Some(side)).cloned().collect();
+                    (title, tree, self.filtered(&section))
+                })
+                .collect();
+        let shown_all: Vec<ListedFile> = sections.iter().flat_map(|(_, _, shown)| shown.iter().cloned()).collect();
         let mut column = v_flex().size_full();
         if has_changes {
             let shown_viewed = listed.iter().filter(|f| viewed.contains(&f.path)).count();
@@ -1243,19 +1249,15 @@ impl ReviewView {
                     },
                     |d, text| d.child(div().text_size(px(13.)).child(text)),
                 )
-                .child(self.toolbar((shown_viewed, listed.len()), comments, true, cx));
+                .child(self.toolbar((shown_viewed, listed.len()), comments, Some(tree_paths(&shown_all)), cx));
         }
         let search = self.search_box(window, cx);
         let mut list = v_flex().child(search).children(files::favourites(self, &listed, cx));
-        let mut shown_all: Vec<ListedFile> = Vec::new();
-        for (title, side) in [("Staged", Staging::Staged), ("Unstaged", Staging::Unstaged)] {
-            let section: Vec<ListedFile> = listed.iter().filter(|f| f.staged == Some(side)).cloned().collect();
-            let shown = self.filtered(&section);
+        for (title, tree, shown) in &sections {
             if shown.is_empty() {
                 continue;
             }
-            list = list.child(files::section_title(title, cx)).child(files::tree(self, title, &shown, &viewed, Some(busy), true, cx));
-            shown_all.extend(shown);
+            list = list.child(files::section_title(title, cx)).child(files::tree(self, *tree, shown, &viewed, Some(busy), true, cx));
         }
         let right = match self.favourite_pane(cx) {
             Some(pane) => pane,
@@ -1388,7 +1390,6 @@ impl ReviewView {
                         .child(div().flex_shrink_0().text_size(px(11.)).text_color(secondary).child(commit.author.clone()))
                         .child(div().flex_shrink_0().text_size(px(11.)).text_color(secondary).child(stacked::locale_date(&commit.date)))
                         .on_click(cx.listener(move |view, _: &ClickEvent, _, cx| {
-                            view.diff = None;
                             view.model.update(cx, |m, cx| m.select_commit(&hash, cx));
                         })),
                 );
@@ -1428,7 +1429,7 @@ impl ReviewView {
             };
             let shown = self.filtered(&listed);
             let shown_viewed = listed.iter().filter(|f| viewed.contains(&f.path)).count();
-            column = column.child(self.toolbar((shown_viewed, listed.len()), 0, false, cx));
+            column = column.child(self.toolbar((shown_viewed, listed.len()), 0, None, cx));
             let search = self.search_box(window, cx);
             let tree = match &selected.diff {
                 Loaded::Loading => div()
@@ -1441,7 +1442,7 @@ impl ReviewView {
                     .child("Loading...")
                     .into_any_element(),
                 Loaded::Failed(error) => Self::message(error.clone(), rgb(ERROR_RED).into(), 20.),
-                Loaded::Ready(_) => files::tree(self, "commit", &shown, &viewed, None, false, cx),
+                Loaded::Ready(_) => files::tree(self, files::Tree::Commit, &shown, &viewed, None, false, cx),
             };
             let list = v_flex().child(search).children(files::favourites(self, &listed, cx)).child(tree).into_any_element();
             let right = match self.favourite_pane(cx) {
@@ -1468,6 +1469,12 @@ impl ReviewView {
     }
 
     fn body(&mut self, mode: ReviewMode, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        // Each view mounts its own list (`StackedDiffList`): its files start afresh, at the
+        // top, and "Collapse all" untouched (`collapseAll` nonce 0).
+        if self.diff.as_ref().is_some_and(|diff| diff.mode() != mode) {
+            self.diff = None;
+            self.collapse_all = CollapseAll::Untouched;
+        }
         let secondary = colors(cx).text_secondary;
         let content = self.model.read(cx).content();
         match content {

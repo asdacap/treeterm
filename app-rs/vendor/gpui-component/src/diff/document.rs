@@ -552,6 +552,42 @@ impl DiffFile {
         self
     }
 
+    /// TreeTerm patch: whether `other` shows the same file the same way: path, status,
+    /// language, headers and every supplied line, numbered and paired alike (a conflicted
+    /// file only when it is this very file).
+    pub(crate) fn same_content(&self, other: &Self) -> bool {
+        if Arc::ptr_eq(&self.inner, &other.inner) {
+            return self.language == other.language;
+        }
+        let (a, b) = (&*self.inner, &*other.inner);
+        let numbers = |side: &FileSide| {
+            side.lines
+                .iter()
+                .map(|line| line.line_number)
+                .collect::<Vec<_>>()
+        };
+        let side_eq = |x: &FileSide, y: &FileSide| {
+            x.path == y.path && x.source == y.source && numbers(x) == numbers(y)
+        };
+        let hunk_eq = |x: &Hunk, y: &Hunk| {
+            x.pairs == y.pairs
+                && x.original == y.original
+                && x.modified == y.modified
+                && x.label == y.label
+        };
+        self.language == other.language
+            && a.path == b.path
+            && a.status == b.status
+            && a.status != DiffFileStatus::Conflicted
+            && a.binary == b.binary
+            && a.extended_headers == b.extended_headers
+            && a.pairs == b.pairs
+            && a.hunks.len() == b.hunks.len()
+            && a.hunks.iter().zip(&b.hunks).all(|(x, y)| hunk_eq(x, y))
+            && side_eq(&a.original, &b.original)
+            && side_eq(&a.modified, &b.modified)
+    }
+
     pub(crate) fn lines_count(&self, side: DiffSide) -> usize {
         self.lines(side).len()
     }

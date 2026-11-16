@@ -798,6 +798,8 @@ fn render_diff(
                             if state.record_paint(bounds.size, painted) || rehinted {
                                 cx.notify();
                             }
+                            // TreeTerm patch: the rows are laid out for this frame.
+                            state.report_top_band(cx);
                         });
                     }
                 },

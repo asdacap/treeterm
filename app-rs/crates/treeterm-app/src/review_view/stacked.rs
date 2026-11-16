@@ -21,7 +21,7 @@ use gpui_kit::{
 };
 use treeterm_core::git::{FileChangeStats, FileChangeStatus, Staging, UncommittedFile};
 use treeterm_core::review::{ReviewComment, Side};
-use treeterm_model::review::{CommentDraft, GitOp, ImageSides, ReviewModel, StageTarget};
+use treeterm_model::review::{CollapseAll, CommentDraft, GitOp, ImageSides, ReviewMode, ReviewModel, StageTarget};
 
 use super::ReviewView;
 use crate::comment_ui::{CommentActions, Placement, comment_display, comment_input};
@@ -50,8 +50,61 @@ impl ListedFile {
     }
 }
 
+/// Which list a `DiffState` shows: a view's, and in Commits a commit's. Electron mounts a
+/// `StackedDiffList` per view; a commit's files replace the last commit's after none.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ListId {
+    mode: ReviewMode,
+    commit: Option<String>,
+}
+
+/// How the list to show differs from the cached one.
+enum ListChange {
+    Same,
+    /// Other files or another patch: the paths listed before.
+    Files(HashSet<String>),
+    New,
+}
+
+/// The listed files of a patch, in list order (a path listed twice, once).
+struct Parsed {
+    files: Vec<DiffFile>,
+    shown: Vec<String>,
+    binary: HashSet<String>,
+}
+
+fn parse_listed(patch: &str, order: &[ListedFile]) -> Result<Parsed, String> {
+    let mut parsed: HashMap<String, DiffFile> = HashMap::new();
+    for file in DiffFile::parse(patch).map_err(|e| e.to_string())? {
+        let path = file.path().to_string();
+        let language = language_for(&path);
+        parsed.entry(path).or_insert_with(|| file.with_language(language));
+    }
+    let mut listed = Parsed { files: Vec::new(), shown: Vec::new(), binary: HashSet::new() };
+    for file in order {
+        if let Some(diff) = parsed.remove(&file.path) {
+            if diff.is_binary() {
+                listed.binary.insert(file.path.clone());
+            }
+            listed.files.push(diff);
+            listed.shown.push(file.path.clone());
+        }
+    }
+    Ok(listed)
+}
+
+/// `sortFilesAsTree`: the files in the file tree's order.
+pub fn tree_sorted(files: &[ListedFile]) -> Vec<ListedFile> {
+    let entries: Vec<(&str, FileChangeStats)> = files.iter().map(|f| (f.path.as_str(), f.stats)).collect();
+    treeterm_model::review_tree::tree_order(&treeterm_model::review_tree::build_tree(&entries))
+        .into_iter()
+        .map(|index| files[index].clone())
+        .collect()
+}
+
 /// The parsed patch shown, for one patch and one filtered, tree-ordered file list.
 pub struct DiffCache {
+    list: ListId,
     key: String,
     pub state: Entity<DiffState>,
     order: Vec<String>,
@@ -72,6 +125,11 @@ impl DiffCache {
     /// The files in the diff's order.
     pub fn paths(&self) -> Vec<String> {
         self.order.clone()
+    }
+
+    /// The view whose list this is.
+    pub fn mode(&self) -> ReviewMode {
+        self.list.mode
     }
 }
 
@@ -153,11 +211,7 @@ impl ReviewView {
     ) -> AnyElement {
         let c = colors(cx);
         let (secondary, primary, border, bg_primary) = (c.text_secondary, c.text_primary, c.border, c.bg_primary);
-        let entries: Vec<(&str, FileChangeStats)> = files.iter().map(|f| (f.path.as_str(), f.stats)).collect();
-        let order: Vec<ListedFile> = treeterm_model::review_tree::tree_order(&treeterm_model::review_tree::build_tree(&entries))
-            .into_iter()
-            .map(|index| files[index].clone())
-            .collect();
+        let order = tree_sorted(files);
         let state = match self.diff_state(patch, &order, viewed, window, cx) {
             Ok(state) => state,
             Err(text) => return Self::message(format!("Cannot show this diff: {text}"), rgb(super::parts::ERROR_RED).into(), 20.),
@@ -206,13 +260,13 @@ impl ReviewView {
                     .rounded(px(4.))
                     .bg(bg_primary)
                     .text_color(primary)
-                    .child(if self.all_collapsed { "Expand all" } else { "Collapse all" })
+                    .child(self.collapse_all.label())
                     // `:disabled { opacity: 0.5; cursor: default }`.
                     .when(!enabled, |d| d.opacity(0.5))
                     .when(enabled, |d| d.cursor_pointer())
                     .when(enabled, |d| d.on_click(cx.listener(|view, _: &ClickEvent, _, cx| {
-                        view.all_collapsed = !view.all_collapsed;
-                        let collapsed = view.all_collapsed;
+                        view.collapse_all = view.collapse_all.toggled();
+                        let collapsed = view.collapse_all == CollapseAll::Collapsed;
                         if let Some(diff) = &view.diff {
                             let (paths, binary) = (diff.paths(), diff.binary.clone());
                             diff.state.update(cx, |s, cx| {
@@ -235,8 +289,13 @@ impl ReviewView {
         v_flex().size_full().child(header).child(div().flex_1().min_h_0().child(diff)).children(find).into_any_element()
     }
 
-    /// The cached `DiffState`, rebuilt when the patch or the listed files change. New
-    /// viewed files collapse (`FileDiffSection` starts collapsed when viewed).
+    /// The cached `DiffState`. A list of another view (or another commit) is a new one;
+    /// when the patch or the listed files change, the files are replaced in place, keeping
+    /// the scroll, each file's collapse and its opened folds (`StackedDiffList` keys its
+    /// sections by path). A file listed for the first time starts collapsed when viewed,
+    /// then follows the last "Collapse all" / "Expand all" (`FileDiffSection`). A file
+    /// clicked or jumped to is scrolled to (`scrollToFile`), else a new list starts at its
+    /// first file.
     fn diff_state(
         &mut self,
         patch: &str,
@@ -245,66 +304,100 @@ impl ReviewView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<Entity<DiffState>, String> {
+        let list = {
+            let model = self.model.read(cx);
+            ListId { mode: model.mode(), commit: model.selected_commit().map(|s| s.commit.hash.clone()) }
+        };
         let key = format!("{patch}\u{0}{}", order.iter().map(|f| f.path.as_str()).collect::<Vec<_>>().join("\u{0}"));
-        if self.diff.as_ref().is_none_or(|diff| diff.key != key) {
-            let mut parsed: HashMap<String, DiffFile> = HashMap::new();
-            for file in DiffFile::parse(patch).map_err(|e| e.to_string())? {
-                let path = file.path().to_string();
-                let language = language_for(&path);
-                parsed.entry(path).or_insert_with(|| file.with_language(language));
+        // Another view's list is dropped as it shows (`ReviewView::body`); another commit's
+        // files are a new `DiffState` that keeps "Collapse all" (the list stays mounted).
+        let change = match &self.diff {
+            Some(diff) if diff.list == list && diff.key == key => ListChange::Same,
+            Some(diff) if diff.list == list => ListChange::Files(diff.order.iter().cloned().collect()),
+            Some(_) | None => ListChange::New,
+        };
+        let relisted = !matches!(change, ListChange::Same);
+        let fresh = match change {
+            ListChange::Same => Vec::new(),
+            ListChange::Files(previous) => {
+                let parsed = parse_listed(patch, order)?;
+                let fresh: Vec<String> = parsed.shown.iter().filter(|p| !previous.contains(*p)).cloned().collect();
+                let collapsed = self.start_listed(&fresh, &parsed.binary, viewed);
+                let Some(diff) = &mut self.diff else {
+                    unreachable!("matched above")
+                };
+                // Binary files stay collapsed in the `DiffState` (the view folds them).
+                let collapsed: Vec<SharedString> =
+                    collapsed.into_iter().chain(parsed.binary.iter().cloned()).map(SharedString::from).collect();
+                diff.state.update(cx, |s, cx| s.update_files(parsed.files, collapsed, cx));
+                diff.key = key;
+                diff.order = parsed.shown;
+                diff.binary = parsed.binary;
+                fresh
             }
-            let mut files = Vec::new();
-            let mut shown = Vec::new();
-            let mut binary = HashSet::new();
-            for listed in order {
-                if let Some(file) = parsed.remove(&listed.path) {
-                    if file.is_binary() {
-                        binary.insert(listed.path.clone());
+            ListChange::New => {
+                let parsed = parse_listed(patch, order)?;
+                let fresh = parsed.shown.clone();
+                let collapsed = self.start_listed(&fresh, &parsed.binary, viewed);
+                let mode = if self.split { DiffMode::Split } else { DiffMode::Unified };
+                let state = cx.new(|cx| DiffState::new(parsed.files, cx)
+                        .with_mode(mode)
+                        .with_context_lines(Some(DIFF_CONTEXT))
+                        .with_min_collapsed_lines(MIN_COLLAPSED_LINES));
+                let (top, hide_unchanged) = (parsed.shown.first().cloned(), self.hide_unchanged);
+                state.update(cx, |s, cx| {
+                    for path in collapsed.iter().chain(&parsed.binary) {
+                        s.set_file_collapsed(path, true, cx);
                     }
-                    files.push(file);
-                    shown.push(listed.path.clone());
-                }
+                    if !hide_unchanged {
+                        s.expand_unchanged(cx);
+                    }
+                    // Folding re-anchors on the first code row; start at the first header.
+                    if let Some(top) = &top {
+                        s.scroll_to_file(top, cx);
+                    }
+                });
+                let mut press = LinePress::Idle;
+                let events = cx.subscribe(&state, move |view, state, event: &DiffEvent, cx| {
+                    if let DiffEvent::TopBandChanged(band) = event {
+                        let band: Vec<String> = band.iter().map(|p| p.to_string()).collect();
+                        view.model.update(cx, |m, cx| m.follow_scroll(&band, cx));
+                    }
+                    // A click on a line number (`onLineNumberClick`) starts a comment there; the
+                    // line does not stay selected.
+                    if let Some((path, side, line)) = press.follow(event) {
+                        state.update(cx, |s, cx| s.set_selected_lines(None, cx));
+                        view.model.update(cx, |m, cx| m.start_comment(&path, side, line, cx));
+                    }
+                });
+                self.diff = Some(DiffCache {
+                    list,
+                    key,
+                    state,
+                    order: parsed.shown,
+                    binary: parsed.binary,
+                    collapsed_viewed: HashSet::new(),
+                    viewed_anchor: None,
+                    _events: events,
+                });
+                fresh
             }
-            let mode = if self.split { DiffMode::Split } else { DiffMode::Unified };
-            let state = cx.new(|cx| DiffState::new(files, cx)
-                    .with_mode(mode)
-                    .with_context_lines(Some(DIFF_CONTEXT))
-                    .with_min_collapsed_lines(MIN_COLLAPSED_LINES));
-            let top = shown.first().cloned();
-            state.update(cx, |s, cx| {
-                for path in &binary {
-                    s.set_file_collapsed(path, true, cx);
-                }
-                // Folding re-anchors on the first code row; start at the first header.
-                if let Some(top) = &top {
-                    s.scroll_to_file(top, cx);
-                }
-            });
-            if !self.hide_unchanged {
-                state.update(cx, |s, cx| s.expand_unchanged(cx));
-            }
-            let mut press = LinePress::Idle;
-            let comments = cx.subscribe(&state, move |view, state, event: &DiffEvent, cx| {
-                // A click on a line number (`onLineNumberClick`) starts a comment there; the
-                // line does not stay selected.
-                if let Some((path, side, line)) = press.follow(event) {
-                    state.update(cx, |s, cx| s.set_selected_lines(None, cx));
-                    view.model.update(cx, |m, cx| m.start_comment(&path, side, line, cx));
-                }
-            });
-            self.diff = Some(DiffCache {
-                key,
-                state,
-                order: shown,
-                binary,
-                collapsed_viewed: HashSet::new(),
-                viewed_anchor: None,
-                _events: comments,
-            });
-        }
+        };
         let Some(diff) = &mut self.diff else {
             unreachable!("made above")
         };
+        // Files listed for the first time start collapsed when viewed: not again below.
+        diff.collapsed_viewed.extend(fresh.iter().filter(|p| viewed.contains(*p)).cloned());
+        if relisted {
+            // The observer watches the files listed now (it re-subscribes when they change).
+            self.model.update(cx, |m, _| m.reobserve_scroll());
+        }
+        // The file clicked or jumped to, once a list shows; one it does not list is dropped.
+        if let Some(path) = self.model.update(cx, |m, _| m.take_scroll_request())
+            && diff.order.contains(&path)
+        {
+            diff.state.update(cx, |s, cx| s.scroll_to_file(&path, cx));
+        }
         let newly: Vec<String> =
             diff.order.iter().filter(|p| viewed.contains(*p) && !diff.collapsed_viewed.contains(*p)).cloned().collect();
         diff.collapsed_viewed.retain(|p| viewed.contains(p));
@@ -331,6 +424,25 @@ impl ReviewView {
             self.closed_binary.extend(newly.into_iter().filter(|p| binary.contains(p)));
         }
         Ok(diff.state.clone())
+    }
+
+    /// Files listed for the first time: binary ones fold in the view, and the text files
+    /// that start collapsed are returned (`CollapseAll::initial_collapsed`).
+    fn start_listed(&mut self, fresh: &[String], binary: &HashSet<String>, viewed: &HashSet<String>) -> Vec<String> {
+        let mut collapsed = Vec::new();
+        for path in fresh {
+            let closed = self.collapse_all.initial_collapsed(viewed.contains(path));
+            if binary.contains(path) {
+                if closed {
+                    self.closed_binary.insert(path.clone());
+                } else {
+                    self.closed_binary.remove(path);
+                }
+            } else if closed {
+                collapsed.push(path.clone());
+            }
+        }
+        collapsed
     }
 
     /// The draft's comment box, made when the draft changes.
@@ -949,15 +1061,34 @@ mod tests {
         cx.update(|window, cx| window.draw(cx).clear(cx));
     }
 
+    /// `name` with its 40 lines replaced by `new 0`, `new 1`, …, each prefixed by `prefix`.
+    fn rewritten(name: &str, prefix: &str) -> String {
+        let mut patch = format!("diff --git a/{name} b/{name}\n--- a/{name}\n+++ b/{name}\n@@ -1,40 +1,40 @@\n");
+        patch.extend((0..40).map(|line| format!("-old {line}\n")));
+        patch.extend((0..40).map(|line| format!("+{prefix}new {line}\n")));
+        patch
+    }
+
+    /// `name` whose 41st line becomes `change` after 40 unchanged lines (the Kit folds them).
+    fn folded(name: &str, change: &str) -> String {
+        let mut patch = format!("diff --git a/{name} b/{name}\n--- a/{name}\n+++ b/{name}\n@@ -1,41 +1,41 @@\n");
+        patch.extend((0..40).map(|line| format!(" same {line}\n")));
+        patch.push_str(&format!("-old\n+{change}\n"));
+        patch
+    }
+
+    fn parsed(patch: &str) -> Vec<DiffFile> {
+        DiffFile::parse(patch).expect("a valid patch")
+    }
+
     fn three_files(cx: &mut gpui_kit::TestAppContext) -> (Entity<DiffState>, &mut gpui_kit::VisualTestContext) {
+        let patch: String = ["a.txt", "b.txt", "c.txt"].iter().map(|name| rewritten(name, "")).collect();
+        shown(&patch, cx)
+    }
+
+    fn shown<'a>(patch: &str, cx: &'a mut gpui_kit::TestAppContext) -> (Entity<DiffState>, &'a mut gpui_kit::VisualTestContext) {
         cx.update(gpui_kit::init);
-        let mut patch = String::new();
-        for name in ["a.txt", "b.txt", "c.txt"] {
-            patch.push_str(&format!("diff --git a/{name} b/{name}\n--- a/{name}\n+++ b/{name}\n@@ -1,40 +1,40 @@\n"));
-            patch.extend((0..40).map(|line| format!("-old {line}\n")));
-            patch.extend((0..40).map(|line| format!("+new {line}\n")));
-        }
-        let files = DiffFile::parse(&patch).expect("a valid patch");
+        let files = parsed(patch);
         let state = cx.new(|cx| DiffState::new(files, cx));
         let (_, cx) = cx.add_window_view({
             let state = state.clone();
@@ -1135,5 +1266,156 @@ mod tests {
         assert_eq!(header_top(&state, "a.txt", cx), None);
         assert_eq!(header_top(&state, "c.txt", cx), None);
         assert_eq!(header_top(&state, "missing.txt", cx), None);
+    }
+
+    fn band(state: &Entity<DiffState>, cx: &mut gpui_kit::VisualTestContext) -> Vec<String> {
+        cx.update(|_, cx| state.read(cx).top_band().iter().map(|p| p.to_string()).collect())
+    }
+
+    /// The bands `state` reports from now on.
+    fn reports(state: &Entity<DiffState>, cx: &mut gpui_kit::VisualTestContext) -> (Rc<std::cell::RefCell<Vec<Vec<String>>>>, Subscription) {
+        let reported = Rc::new(std::cell::RefCell::new(Vec::new()));
+        let seen = reported.clone();
+        let subscription = cx.update(|_, cx| {
+            cx.subscribe(state, move |_, event: &DiffEvent, _| {
+                if let DiffEvent::TopBandChanged(band) = event {
+                    seen.borrow_mut().push(band.iter().map(|p| p.to_string()).collect());
+                }
+            })
+        });
+        (reported, subscription)
+    }
+
+    #[gpui_kit::test]
+    fn the_files_in_the_top_tenth_of_the_diff_are_reported(cx: &mut gpui_kit::TestAppContext) {
+        let (state, cx) = three_files(cx);
+        assert_eq!(band(&state, cx), ["a.txt"]);
+        let (reported, _subscription) = reports(&state, cx);
+
+        // b.txt's header 10px down: the top 30px hold a.txt's last rows and b.txt's header.
+        for _ in 0..2 {
+            state.update(cx, |s, cx| s.scroll_file_header_to("b.txt", px(10.), cx));
+            draw(cx);
+        }
+        assert_eq!(header_top(&state, "b.txt", cx), Some(px(10.)));
+        assert_eq!(band(&state, cx), ["a.txt", "b.txt"]);
+        assert_eq!(reported.borrow().last().cloned(), Some(vec!["a.txt".to_owned(), "b.txt".to_owned()]));
+
+        // Scrolled into b.txt: b.txt alone. A scroll within it reports nothing more.
+        state.update(cx, |s, cx| s.scroll_file_header_to("b.txt", px(-60.), cx));
+        draw(cx);
+        assert_eq!(band(&state, cx), ["b.txt"]);
+        let count = reported.borrow().len();
+        state.update(cx, |s, cx| s.scroll_file_header_to("b.txt", px(-120.), cx));
+        draw(cx);
+        draw(cx);
+        assert_eq!(reported.borrow().len(), count);
+        assert_eq!(reported.borrow().last().cloned(), Some(vec!["b.txt".to_owned()]));
+
+        // A jump counts too.
+        state.update(cx, |s, cx| s.scroll_to_file("c.txt", cx));
+        draw(cx);
+        assert_eq!(band(&state, cx), ["c.txt"]);
+        assert_eq!(reported.borrow().last().cloned(), Some(vec!["c.txt".to_owned()]));
+    }
+
+    #[gpui_kit::test]
+    fn replaced_files_keep_the_place_collapse_and_selection(cx: &mut gpui_kit::TestAppContext) {
+        let (state, cx) = three_files(cx);
+        // a.txt collapsed by hand, c.txt's header 100px down (b.txt's rows above it), and
+        // lines of b.txt selected.
+        let selected = DiffLineRange::new("b.txt", DiffSide::Modified, 2, 3);
+        state.update(cx, |s, cx| {
+            s.set_file_collapsed("a.txt", true, cx);
+            s.set_selected_lines(Some(selected.clone()), cx);
+        });
+        for _ in 0..2 {
+            state.update(cx, |s, cx| s.scroll_file_header_to("c.txt", px(100.), cx));
+            draw(cx);
+        }
+        assert_eq!(header_top(&state, "c.txt", cx), Some(px(100.)));
+        let (reported, _subscription) = reports(&state, cx);
+
+        // a.txt changes, d.txt comes in collapsed and e.txt open.
+        let patch: String = [rewritten("a.txt", "x"), rewritten("b.txt", ""), rewritten("c.txt", ""), rewritten("d.txt", ""), rewritten("e.txt", "")].concat();
+        state.update(cx, |s, cx| s.update_files(parsed(&patch), [SharedString::from("d.txt")], cx));
+        draw(cx);
+        draw(cx);
+        assert_eq!(header_top(&state, "c.txt", cx), Some(px(100.)), "the same row of b.txt at the top");
+        let collapsed = |path: &str, cx: &mut gpui_kit::VisualTestContext| cx.update(|_, cx| state.read(cx).is_file_collapsed(path));
+        assert!(collapsed("a.txt", cx));
+        assert!(collapsed("d.txt", cx));
+        assert!(!collapsed("e.txt", cx));
+        assert_eq!(cx.update(|_, cx| state.read(cx).selected_lines()), Some(selected), "b.txt did not change");
+        // The band is reported afresh, though it is the same.
+        assert_eq!(*reported.borrow(), [vec!["b.txt".to_owned()]]);
+
+        // b.txt changes: its selection goes.
+        let patch: String = [rewritten("a.txt", "x"), rewritten("b.txt", "x"), rewritten("c.txt", "")].concat();
+        state.update(cx, |s, cx| s.update_files(parsed(&patch), [], cx));
+        draw(cx);
+        assert_eq!(cx.update(|_, cx| state.read(cx).selected_lines()), None);
+        assert!(collapsed("a.txt", cx));
+
+        // b.txt goes: the next file still listed comes to the top.
+        let patch: String = [rewritten("a.txt", "x"), rewritten("c.txt", "")].concat();
+        state.update(cx, |s, cx| s.update_files(parsed(&patch), [], cx));
+        draw(cx);
+        assert_eq!(header_top(&state, "c.txt", cx), Some(px(0.)));
+        // And with none after it, the last one before it.
+        state.update(cx, |s, cx| s.update_files(parsed(&rewritten("a.txt", "x")), [], cx));
+        draw(cx);
+        assert_eq!(header_top(&state, "a.txt", cx), Some(px(0.)));
+    }
+
+    #[gpui_kit::test]
+    fn an_unchanged_file_keeps_its_opened_folds(cx: &mut gpui_kit::TestAppContext) {
+        let (state, cx) = shown(&[folded("a.txt", "new"), folded("b.txt", "new")].concat(), cx);
+        assert!(header_top(&state, "b.txt", cx).is_some(), "a.txt folds its unchanged lines");
+        // Opening a.txt's fold pushes b.txt off the screen.
+        state.update(cx, |s, cx| s.scroll_to_line(DiffLinePosition::new("a.txt", DiffSide::Modified, 1), cx));
+        state.update(cx, |s, cx| s.scroll_to_file("a.txt", cx));
+        draw(cx);
+        assert_eq!(header_top(&state, "b.txt", cx), None);
+
+        // b.txt changes: a.txt's fold stays open.
+        state.update(cx, |s, cx| s.update_files(parsed(&[folded("a.txt", "new"), folded("b.txt", "newer")].concat()), [], cx));
+        draw(cx);
+        assert_eq!(header_top(&state, "a.txt", cx), Some(px(0.)));
+        assert_eq!(header_top(&state, "b.txt", cx), None);
+        // a.txt changes: folded again.
+        state.update(cx, |s, cx| s.update_files(parsed(&[folded("a.txt", "newer"), folded("b.txt", "newer")].concat()), [], cx));
+        draw(cx);
+        assert!(header_top(&state, "b.txt", cx).is_some());
+
+        // Every unchanged line shown: a file that changes shows all of its own too.
+        state.update(cx, |s, cx| s.expand_unchanged(cx));
+        state.update(cx, |s, cx| s.scroll_to_file("a.txt", cx));
+        draw(cx);
+        assert_eq!(header_top(&state, "b.txt", cx), None);
+        state.update(cx, |s, cx| s.update_files(parsed(&[folded("a.txt", "newest"), folded("b.txt", "newer")].concat()), [], cx));
+        draw(cx);
+        assert_eq!(header_top(&state, "b.txt", cx), None);
+    }
+
+    #[test]
+    fn the_listed_files_are_parsed_in_list_order_once() {
+        let patch: String = [rewritten("a.txt", ""), rewritten("b.txt", ""), rewritten("c.txt", "")].concat();
+        let order = [listed("c.txt", None), listed("a.txt", Some(Staging::Staged)), listed("a.txt", Some(Staging::Unstaged))];
+        let got = parse_listed(&patch, &order).expect("a valid patch");
+        // b.txt is not listed (say, filtered out); a.txt is listed twice, shown once.
+        assert_eq!(got.shown, ["c.txt", "a.txt"]);
+        assert_eq!(got.files.iter().map(|f| f.path().to_string()).collect::<Vec<_>>(), ["c.txt", "a.txt"]);
+        assert!(got.binary.is_empty());
+        let binary = "diff --git a/logo.png b/logo.png\nindex 1..2 100644\nBinary files a/logo.png and b/logo.png differ\n";
+        let got = parse_listed(binary, &[listed("logo.png", None)]).expect("a valid patch");
+        assert_eq!(got.binary, HashSet::from(["logo.png".to_owned()]));
+        assert!(parse_listed("diff --git a/x\n@@ nonsense", &order).is_err());
+
+        let tree: Vec<String> = tree_sorted(&[listed("z.txt", None), listed("dir/b.txt", None), listed("a.txt", None)])
+            .into_iter()
+            .map(|f| f.path)
+            .collect();
+        assert_eq!(tree, ["dir/b.txt", "a.txt", "z.txt"], "folders first, as the tree");
     }
 }

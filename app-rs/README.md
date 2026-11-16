@@ -168,6 +168,16 @@ are not ours). Its changes are marked `TreeTerm patch` (`grep -rn "TreeTerm patc
   header, in the list or pinned, was drawn) and `DiffState::scroll_file_header_to`, so
   checking "Viewed" on an open file brings the next file's header to where the checked one
   was, its "Viewed" under the pointer, as Electron's `FileDiffSection` does.
+- `src/diff/state.rs`, `src/diff/document.rs`: `DiffState::update_files` replaces the files
+  keeping the reader's place: the row at the top of the viewport stays (the same line or file
+  header, as far scrolled past), files still listed stay collapsed, and files whose content
+  did not change keep their opened folds and highlighting (after `expand_unchanged`, new and
+  changed files show every line too), as Electron's `StackedDiffList` keys its sections by
+  path; `set_files` resets all of that and scrolls to the top.
+- `src/diff/state.rs`, `src/diff/mod.rs`: `DiffEvent::TopBandChanged` reports, after each
+  layout, the files with a row in the top tenth of the viewport (`DiffState::top_band`), the
+  band Electron's `IntersectionObserver` watches to make a file the active one (the file
+  tree's highlight, where Previous / Next unviewed start).
 - `src/highlighter/languages.rs`: TSX is highlighted with the Kit's TypeScript query, as
   TypeScript is. The Kit used `tree_sitter_typescript::HIGHLIGHTS_QUERY`, which only adds
   TypeScript's captures to the JavaScript query, so `.tsx` files (in the Files viewer, the
@@ -227,9 +237,9 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   out, zoom level, Zoom in and Print (100% is the width WebKit fits the pages to, not the
   pages' own size). There is no page box, thumbnails, fit or rotate; those need a bundled
   PDF viewer (pdf.js).
-- Review's find: GPUI Kit's diff does not report the word under the pointer or the file at
-  the top of the scroll, so the right-click menu needs a selection (double-click a word) and
-  "In this file" is the file last under the pointer (else the one last selected).
+- Review's find: GPUI Kit's diff does not report the word under the pointer, so the
+  right-click menu needs a selection (double-click a word), and "In this file" is the file
+  last under the pointer (else the one at the top of the diff).
 
 ## Known differences from Electron (deliberate)
 

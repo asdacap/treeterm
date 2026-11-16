@@ -441,10 +441,14 @@ pub struct ReviewModel {
     /// Adding the draft.
     adding: GitOp,
     notice: Notice,
-    /// The file last selected or jumped to, where "next unviewed" starts from.
-    focused_file: Option<String>,
-    /// Both sides of an image file (`ImageDiffViewer`), when one is selected.
-    image_diff: Option<ImageDiff>,
+    /// The file at the top of the diff (`activeFile`): the tree highlights it and "next
+    /// unviewed" starts from it. It follows the scroll, a click and a jump.
+    active_file: Option<String>,
+    /// The files in the diff's top band at its last report (see [`Self::follow_scroll`]).
+    scroll_band: Vec<String>,
+    /// The file the diff scrolls to once a list shows (`scrollToFile`): the one clicked or
+    /// jumped to, or the tab state's `selectedFilePath` when the tab opens.
+    scroll_request: Option<String>,
     /// The workspace's favourite files (`FavouriteFileSection`), its ancestors' included, and
     /// the paths they were resolved from.
     favourites: crate::file_browser::Favourites,
@@ -473,7 +477,6 @@ pub struct ReviewModel {
     _branches: Option<Task<()>>,
     _commit: Option<Task<()>>,
     _more: Option<Task<()>>,
-    _image: Option<Task<()>>,
     _op: Option<Task<()>>,
     head_load: Option<Task<()>>,
     _add: Option<Task<()>>,
@@ -482,13 +485,6 @@ pub struct ReviewModel {
 
 /// Git commands for review must not hang the tab forever on a huge repo.
 const GIT_TIMEOUT: Duration = Duration::from_secs(60);
-
-/// An image file's two sides in Review.
-#[derive(Debug, Clone)]
-pub struct ImageDiff {
-    pub path: String,
-    pub sides: ImageSides,
-}
 
 #[derive(Debug, Clone)]
 pub enum ImageSides {
@@ -531,6 +527,50 @@ pub fn unviewed_from<'a>(
         (Direction::Previous, None) => order.iter().rev().find(unviewed),
     }
     .map(String::as_str)
+}
+
+/// The file Electron's `IntersectionObserver` makes active when the diff's top band goes
+/// from `previous` to `band` (both in list order): of the files that entered it, the last
+/// one reported.
+pub fn newly_entered<'a>(previous: &[String], band: &'a [String]) -> Option<&'a str> {
+    band.iter().rev().find(|path| !previous.contains(path)).map(String::as_str)
+}
+
+/// The last "Collapse all" / "Expand all" of a list (`collapseAll`). It lasts as long as
+/// the list: files listed later follow it. Another view's list starts untouched.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CollapseAll {
+    Untouched,
+    Collapsed,
+    Expanded,
+}
+
+impl CollapseAll {
+    /// The button's label.
+    pub fn label(self) -> &'static str {
+        match self {
+            CollapseAll::Collapsed => "Expand all",
+            CollapseAll::Untouched | CollapseAll::Expanded => "Collapse all",
+        }
+    }
+
+    /// After a click on the button.
+    pub fn toggled(self) -> Self {
+        match self {
+            CollapseAll::Collapsed => CollapseAll::Expanded,
+            CollapseAll::Untouched | CollapseAll::Expanded => CollapseAll::Collapsed,
+        }
+    }
+
+    /// Whether a file newly listed starts collapsed (`FileDiffSection`): a viewed one does,
+    /// then the last collapse-all applies.
+    pub fn initial_collapsed(self, viewed: bool) -> bool {
+        match self {
+            CollapseAll::Untouched => viewed,
+            CollapseAll::Collapsed => true,
+            CollapseAll::Expanded => false,
+        }
+    }
 }
 
 impl ReviewModel {
@@ -584,8 +624,10 @@ impl ReviewModel {
             draft: None,
             adding: GitOp::Idle,
             notice: Notice::Clear,
-            focused_file: None,
-            image_diff: None,
+            active_file: None,
+            scroll_band: Vec::new(),
+            // A Review opened again comes back to the file last clicked in Committed.
+            scroll_request: state.get("selectedFilePath").and_then(Value::as_str).filter(|p| !p.is_empty()).map(str::to_owned),
             favourites: crate::file_browser::Favourites::Empty,
             favourite_paths: Vec::new(),
             favourite: FavouriteSelection::None,
@@ -606,7 +648,6 @@ impl ReviewModel {
             _branches: None,
             _commit: None,
             _more: None,
-            _image: None,
             _op: None,
             head_load: None,
             _add: None,
@@ -665,8 +706,8 @@ impl ReviewModel {
         &self.notice
     }
 
-    pub fn focused_file(&self) -> Option<&str> {
-        self.focused_file.as_deref()
+    pub fn active_file(&self) -> Option<&str> {
+        self.active_file.as_deref()
     }
 
     pub fn overview(&self) -> Overview {
@@ -821,9 +862,9 @@ impl ReviewModel {
         self.ignore_whitespace = ignore;
         self.load_committed(cx);
         self.load_uncommitted(cx);
-        if let Some(hash) = self.selected_commit.as_ref().map(|s| s.commit.hash.clone()) {
-            self.select_commit(&hash, cx);
-        }
+        // The commit's changes stay shown until they are read again (Electron's sections
+        // re-read their contents, keeping the list).
+        self.load_commit_diff(cx);
     }
 
     /// Show a listed commit's changes below the list (`loadCommitDiff`).
@@ -834,7 +875,20 @@ impl ReviewModel {
         let Some(commit) = list.commits.iter().find(|c| c.hash == hash).cloned() else {
             return;
         };
-        let (git, path, hash) = (self.git.clone(), self.path.clone(), commit.hash.clone());
+        self.selected_commit = Some(SelectedCommit { commit, diff: Loaded::Loading });
+        // Another commit's files: the band is watched afresh.
+        self.active_file = None;
+        self.scroll_band.clear();
+        cx.notify();
+        self.load_commit_diff(cx);
+    }
+
+    /// Read the selected commit's changes (none selected: nothing to read).
+    fn load_commit_diff(&mut self, cx: &mut Context<Self>) {
+        let Some(selected) = &self.selected_commit else {
+            return;
+        };
+        let (git, path, hash) = (self.git.clone(), self.path.clone(), selected.commit.hash.clone());
         let mut args = vec!["show", "--no-color", "-M", FULL_CONTEXT, "--format="];
         if self.ignore_whitespace {
             args.push("-w");
@@ -842,12 +896,6 @@ impl ReviewModel {
         args.push(&hash);
         let request = self.git_request(&args);
         let exec = self.exec.clone();
-        self.selected_commit = Some(SelectedCommit { commit, diff: Loaded::Loading });
-        self.focused_file = None;
-        if self.image_diff.is_some() {
-            self.close_image_diff(cx);
-        }
-        cx.notify();
         self._commit = Some(cx.spawn(async move |this, cx| {
             let files = git.get_commit_diff(&path, &hash).await;
             let diff = match files {
@@ -1155,10 +1203,13 @@ impl ReviewModel {
             return;
         }
         self.mode = mode;
-        // Another view, another diff (Electron's find bar goes with its list). The comment
-        // being written stays, as Electron's `commentInput`.
+        // Another view, another diff (Electron's find bar goes with its list, and the new
+        // list's band is watched afresh). The comment being written stays, as Electron's
+        // `commentInput`, and so does a file still to scroll to (`scrollToFile`).
         self.find = DiffFind::Closed { query: String::new() };
         self._find = None;
+        self.active_file = None;
+        self.scroll_band.clear();
         cx.emit(ReviewEvent::StateChanged(json!({ "viewMode": mode.as_str() })));
         // The views keep what they loaded; the commits load when first shown (and again
         // while none are listed: `commits.length === 0`).
@@ -1666,46 +1717,44 @@ impl ReviewModel {
         }
     }
 
-    /// The file a click in the list (or a jump) went to.
-    pub fn focus_file(&mut self, path: &str, cx: &mut Context<Self>) {
-        self.focused_file = Some(path.to_owned());
-        if is_image_path(path) {
-            self.load_image_diff(path, cx);
-        } else if self.image_diff.is_some() {
-            self.close_image_diff(cx);
+    /// A click in the file list, or a jump (`handleSelectDiffFile`): the pane goes back to
+    /// the diff, which scrolls to the file once a list shows it; the file is the active one.
+    pub fn select_file(&mut self, path: &str, cx: &mut Context<Self>) {
+        self.show_diff(cx);
+        self.active_file = Some(path.to_owned());
+        self.scroll_request = Some(path.to_owned());
+        cx.notify();
+    }
+
+    /// A click in the Committed tree is kept in the tab state (`selectedFilePath`): the
+    /// Review opened from it again (after a restart, or for a new parent) comes back there.
+    pub fn remember_selected_file(&mut self, path: &str, cx: &mut Context<Self>) {
+        cx.emit(ReviewEvent::StateChanged(json!({ "selectedFilePath": path })));
+    }
+
+    /// The file to scroll to, for the list being shown: it scrolls there when it lists the
+    /// file, and drops it otherwise (`onScrollToFileHandled`).
+    pub fn take_scroll_request(&mut self) -> Option<String> {
+        self.scroll_request.take()
+    }
+
+    /// The files with a row in the top tenth of the diff, in list order, after a layout
+    /// (`IntersectionObserver` with `rootMargin: '0px 0px -90% 0px'` over the file sections):
+    /// a file that enters the band becomes the active one.
+    pub fn follow_scroll(&mut self, band: &[String], cx: &mut Context<Self>) {
+        if let Some(entered) = newly_entered(&self.scroll_band, band)
+            && self.active_file.as_deref() != Some(entered)
+        {
+            self.active_file = Some(entered.to_owned());
+            cx.notify();
         }
-        cx.notify();
+        self.scroll_band = band.to_vec();
     }
 
-    pub fn image_diff(&self) -> Option<&ImageDiff> {
-        self.image_diff.as_ref()
-    }
-
-    pub fn close_image_diff(&mut self, cx: &mut Context<Self>) {
-        self.image_diff = None;
-        self._image = None;
-        cx.notify();
-    }
-
-    /// Load both sides of an image change: the parent branch against the branch in
-    /// Committed, the index / HEAD against the working tree in Uncommitted.
-    fn load_image_diff(&mut self, path: &str, cx: &mut Context<Self>) {
-        let sides = self.image_sides(path);
-        let file = path.to_owned();
-        self.image_diff = Some(ImageDiff { path: path.to_owned(), sides: ImageSides::Loading });
-        self._image = Some(cx.spawn(async move |this, cx| {
-            let sides = sides.await;
-            match this.update(cx, |model, cx| {
-                if let Some(diff) = &mut model.image_diff
-                    && diff.path == file
-                {
-                    diff.sides = sides;
-                    cx.notify();
-                }
-            }) {
-                Ok(()) | Err(_) => {}
-            }
-        }));
+    /// The diff lists other files: the observer watches them afresh, so the next band
+    /// reported makes its last file the active one.
+    pub fn reobserve_scroll(&mut self) {
+        self.scroll_band.clear();
     }
 
     /// The shown diff's image files, each shown inline under its header
@@ -1788,9 +1837,10 @@ impl ReviewModel {
         }
     }
 
-    /// The next (or previous) file not viewed yet, from the focused file; it becomes the
-    /// focused file. The view scrolls to it.
-    pub fn jump_unviewed(&mut self, direction: Direction, cx: &mut Context<Self>) -> Option<String> {
+    /// "Next / previous unviewed" (`navigateUnviewed`): the next (or previous) file not
+    /// viewed yet in `order`, the files as listed (tree order, filtered), from the active
+    /// file. It is selected.
+    pub fn jump_unviewed(&mut self, order: &[String], direction: Direction, cx: &mut Context<Self>) -> Option<String> {
         let viewed = match self.viewed_files(cx) {
             Ok(viewed) => viewed,
             Err(error) => {
@@ -1799,9 +1849,8 @@ impl ReviewModel {
                 return None;
             }
         };
-        let order = self.file_order();
-        let target = unviewed_from(&order, &viewed, self.focused_file.as_deref(), direction)?.to_owned();
-        self.focus_file(&target, cx);
+        let target = unviewed_from(order, &viewed, self.active_file.as_deref(), direction)?.to_owned();
+        self.select_file(&target, cx);
         Some(target)
     }
 
@@ -2252,6 +2301,34 @@ mod tests {
         assert_eq!(previous(None), Some("c"));
         assert_eq!(previous(Some("c")), Some("a"));
         assert_eq!(previous(Some("a")), None);
+    }
+
+    #[test]
+    fn a_file_entering_the_top_band_becomes_active() {
+        let band = |paths: &[&str]| paths.iter().map(|p| (*p).to_owned()).collect::<Vec<_>>();
+        // A list shown (or listing other files): the last file in the band.
+        assert_eq!(newly_entered(&[], &band(&["a"])), Some("a"));
+        assert_eq!(newly_entered(&[], &band(&["a", "b"])), Some("b"));
+        // Scrolling down, the next file enters from below; scrolling up, the one above.
+        assert_eq!(newly_entered(&band(&["a"]), &band(&["a", "b"])), Some("b"));
+        assert_eq!(newly_entered(&band(&["b", "c"]), &band(&["a", "b", "c"])), Some("a"));
+        // A file leaving changes nothing, and neither does the same band.
+        assert_eq!(newly_entered(&band(&["a", "b"]), &band(&["b"])), None);
+        assert_eq!(newly_entered(&band(&["b"]), &band(&["b"])), None);
+        assert_eq!(newly_entered(&band(&["b"]), &[]), None);
+    }
+
+    #[test]
+    fn collapse_all_lasts_for_files_listed_later() {
+        use CollapseAll::*;
+        assert_eq!([Untouched, Collapsed, Expanded].map(CollapseAll::label), ["Collapse all", "Expand all", "Collapse all"]);
+        assert_eq!([Untouched, Collapsed, Expanded].map(CollapseAll::toggled), [Collapsed, Expanded, Collapsed]);
+        // Untouched: viewed files start collapsed; after a collapse-all or expand-all, every
+        // file follows it.
+        let starts = |command: CollapseAll| [false, true].map(|viewed| command.initial_collapsed(viewed));
+        assert_eq!(starts(Untouched), [false, true]);
+        assert_eq!(starts(Collapsed), [true, true]);
+        assert_eq!(starts(Expanded), [false, false]);
     }
 
     fn conflicted(files: &[&str]) -> ConflictInfo {

@@ -2138,11 +2138,9 @@ fn review_shows_both_sides_of_a_changed_image(cx: &mut TestAppContext) {
     };
     wait_until(cx, &review, |r| matches!(r.content(), ReviewContent::Uncommitted(_)));
     // Every image file shown loads inline under its header.
-    wait_until(cx, &review, |r| matches!(r.image("logo.png"), Some(ImageSides::Loaded { .. })));
-    review.update(cx, |r, cx| r.focus_file("logo.png", cx));
-    wait_until(cx, &review, |r| r.image_diff().is_some_and(|d| !matches!(d.sides, ImageSides::Loading)));
-    let sides = review.read_with(cx, |r, _| r.image_diff().unwrap().sides.clone());
-    let ImageSides::Loaded { before, after } = sides else {
+    wait_until(cx, &review, |r| matches!(r.image("logo.png"), Some(ImageSides::Loaded { .. } | ImageSides::Failed(_))));
+    let sides = review.read_with(cx, |r, _| r.image("logo.png").cloned());
+    let Some(ImageSides::Loaded { before, after }) = sides else {
         panic!("not loaded: {sides:?}");
     };
     assert_eq!(before.as_deref().map(Vec::as_slice), Some(&b"\x89PNG-before"[..]));

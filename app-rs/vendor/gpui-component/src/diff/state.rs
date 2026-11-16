@@ -92,6 +92,17 @@ pub enum DiffEvent {
     /// The user resolved a merge conflict, or undid its resolution; read it
     /// with [`DiffState::conflict_resolution`].
     ConflictResolved(SharedString, usize),
+    /// TreeTerm patch: the files with a row in the top tenth of the viewport changed, after
+    /// a layout (see [`DiffState::top_band`]).
+    TopBandChanged(Vec<SharedString>),
+}
+
+/// TreeTerm patch: the row at the top of the viewport, found again after the files change.
+enum TopAnchor {
+    /// A source line's row (or the fold hiding it), and how far it was scrolled past.
+    Line(DiffLinePosition, Pixels),
+    /// A file's header row, and how far it was scrolled past.
+    Header(SharedString, Pixels),
 }
 
 /// Inputs that determine row heights and content width.
@@ -244,6 +255,11 @@ pub struct DiffState {
     /// started for earlier ones never installs its results.
     presentation_generation: usize,
     preparing: Option<usize>,
+    /// TreeTerm patch: the files last reported by [`DiffEvent::TopBandChanged`].
+    top_band: Vec<SharedString>,
+    /// TreeTerm patch: [`Self::expand_unchanged`] revealed every file's unchanged lines
+    /// (files [`Self::update_files`] brings in show them too).
+    unchanged_expanded: bool,
     _presentation: Task<()>,
     _selection_subscription: Subscription,
 }
@@ -375,6 +391,8 @@ impl DiffState {
             window: None,
             presentation_generation: 0,
             preparing: None,
+            top_band: Vec::new(),
+            unchanged_expanded: false,
             _presentation: Task::ready(()),
             _selection_subscription,
         };
@@ -623,6 +641,8 @@ impl DiffState {
             .retain(|path| self.file_ixs.contains_key(path));
         self.resolutions.clear();
         self.expanded = vec![Vec::new(); self.files.len()];
+        // TreeTerm patch.
+        self.unchanged_expanded = false;
         self.reset_presentation();
         self.layout = None;
         self.annotations.clear();
@@ -633,10 +653,129 @@ impl DiffState {
         self.selection_cursor = None;
         self.selecting = false;
         self.geometry.borrow_mut().clear();
+        // TreeTerm patch: other files report their top band afresh.
+        self.top_band.clear();
         self.rebuild(true);
         self.horizontal_scroll.set_offset(point(px(0.), px(0.)));
         self.ensure_presentation(cx);
         cx.notify();
+    }
+
+    /// TreeTerm patch: replaces the files keeping the reader's place, as a list of file
+    /// sections keyed by path would: the row at the top of the viewport (the same source
+    /// line or file header, as far scrolled past) and the horizontal scroll stay; files still
+    /// present stay collapsed; files whose content did not change keep their opened folds,
+    /// conflict resolutions, prepared emphasis and selected lines. When the top row's file is
+    /// gone, the next file still present comes to the top (else the last one before it).
+    /// After [`Self::expand_unchanged`], other files show all their lines too. `collapsed`
+    /// are more files to show collapsed (say, files listed for the first time that start
+    /// so). The top band is reported afresh after the next layout.
+    pub fn update_files(
+        &mut self,
+        files: impl IntoIterator<Item = DiffFile>,
+        collapsed: impl IntoIterator<Item = SharedString>,
+        cx: &mut Context<Self>,
+    ) {
+        let anchor = self.top_anchor();
+        let old_order: Vec<SharedString> =
+            self.files.iter().map(|file| file.path().clone()).collect();
+        let files: Vec<DiffFile> = files.into_iter().collect();
+        let mut expanded = Vec::with_capacity(files.len());
+        let mut presentations = Vec::with_capacity(files.len());
+        let mut unchanged = HashSet::new();
+        for file in &files {
+            match self
+                .file_ix(file.path())
+                .filter(|old| self.files[*old].same_content(file))
+            {
+                Some(old) => {
+                    expanded.push(self.expanded[old].clone());
+                    presentations.push(self.presentations[old].clone());
+                    unchanged.insert(file.path().clone());
+                }
+                None => {
+                    expanded.push(if self.unchanged_expanded {
+                        vec![0..file.pairs().len()]
+                    } else {
+                        Vec::new()
+                    });
+                    presentations.push(None);
+                }
+            }
+        }
+        if let Some(window) = self.window
+            && self.selection_is_local(cx)
+        {
+            TextSelection::clear_for_window(window, cx);
+        }
+        let keep_selected = self
+            .selected_lines
+            .as_ref()
+            .is_some_and(|range| unchanged.contains(range.path()));
+        if !keep_selected {
+            self.selection.set_local_selection(false, cx);
+            self.selection.set_fallback_copy_text("", cx);
+            self.selected_lines = None;
+            self.selection_anchor = None;
+            self.selection_cursor = None;
+        }
+        self.selecting = false;
+        self.files = files;
+        self.file_ixs = file_ixs(&self.files);
+        self.collapsed
+            .retain(|path| self.file_ixs.contains_key(path));
+        self.collapsed.extend(
+            collapsed
+                .into_iter()
+                .filter(|path| self.file_ixs.contains_key(path)),
+        );
+        self.resolutions
+            .retain(|(path, _), _| unchanged.contains(path));
+        self.expanded = expanded;
+        self.reset_presentation();
+        self.presentations = presentations;
+        self.layout = None;
+        self.annotations.clear();
+        self.geometry.borrow_mut().clear();
+        self.top_band.clear();
+        self.rebuild(true);
+        match anchor {
+            Some(anchor) => self.restore_anchor(anchor, &old_order),
+            None => self.list.scroll_to(ListOffset::default()),
+        }
+        self.ensure_presentation(cx);
+        cx.notify();
+    }
+
+    /// TreeTerm patch: the files with a row in the top tenth of the viewport, in list order,
+    /// as of the last layout: the band an `IntersectionObserver` with `rootMargin: '0px 0px
+    /// -90% 0px'` watches over a list of file sections. A collapsed file counts by its header.
+    pub fn top_band(&self) -> &[SharedString] {
+        &self.top_band
+    }
+
+    /// TreeTerm patch: after the list has laid out, reports [`DiffEvent::TopBandChanged`]
+    /// when the band differs from the one last reported.
+    pub(crate) fn report_top_band(&mut self, cx: &mut Context<Self>) {
+        let viewport = self.list.viewport_bounds();
+        let bottom = viewport.top() + viewport.size.height * 0.1;
+        let mut band: Vec<SharedString> = Vec::new();
+        let mut ix = self.list.logical_scroll_top().item_ix;
+        // The top row covers the top edge; the rows below it, while they start in the band.
+        while let (Some(row), Some(bounds)) = (self.rows.get(ix), self.list.bounds_for_item(ix)) {
+            if !band.is_empty() && bounds.top() >= bottom {
+                break;
+            }
+            let path = self.files[row.file()].path();
+            if band.last() != Some(path) {
+                band.push(path.clone());
+            }
+            ix += 1;
+        }
+        if band != self.top_band {
+            self.top_band = band.clone();
+            cx.emit(DiffEvent::TopBandChanged(band));
+        }
     }
 
     /// Changes the display mode while preserving source-line selection and a
@@ -658,6 +797,8 @@ impl DiffState {
         }
         self.context_lines = lines;
         self.expanded.iter_mut().for_each(Vec::clear);
+        // TreeTerm patch.
+        self.unchanged_expanded = false;
         self.rebuild_at_anchor();
         cx.notify();
     }
@@ -667,6 +808,8 @@ impl DiffState {
         for (expanded, file) in self.expanded.iter_mut().zip(&self.files) {
             *expanded = vec![0..file.pairs().len()];
         }
+        // TreeTerm patch.
+        self.unchanged_expanded = true;
         self.rebuild_at_anchor();
         cx.notify();
     }
@@ -674,6 +817,8 @@ impl DiffState {
     /// Restores the configured context disclosures.
     pub fn collapse_unchanged(&mut self, cx: &mut Context<Self>) {
         self.expanded.iter_mut().for_each(Vec::clear);
+        // TreeTerm patch.
+        self.unchanged_expanded = false;
         self.rebuild_at_anchor();
         cx.notify();
     }
@@ -1341,6 +1486,76 @@ impl DiffState {
                 offset_in_item: px(0.),
             });
         }
+    }
+
+    /// TreeTerm patch: what [`Self::update_files`] keeps at the top of the viewport. A code or
+    /// header row keeps how far it was scrolled past; another row (a fold, a hunk heading,
+    /// a notice) stands for its file's line or header.
+    fn top_anchor(&self) -> Option<TopAnchor> {
+        let top = self.list.logical_scroll_top();
+        let row = self.rows.get(top.item_ix)?;
+        let path = self.files[row.file()].path().clone();
+        Some(match row {
+            DisplayRow::File(_) => TopAnchor::Header(path, top.offset_in_item),
+            DisplayRow::Code { .. } => match self.row_position(top.item_ix) {
+                Some(position) => TopAnchor::Line(position, top.offset_in_item),
+                None => TopAnchor::Header(path, px(0.)),
+            },
+            DisplayRow::Notice(_)
+            | DisplayRow::Hunk { .. }
+            | DisplayRow::Fold { .. }
+            | DisplayRow::Conflict { .. } => match self.row_position(top.item_ix) {
+                Some(position) => TopAnchor::Line(position, px(0.)),
+                None => TopAnchor::Header(path, px(0.)),
+            },
+        })
+    }
+
+    /// TreeTerm patch: scrolls back to `anchor` once the rows are rebuilt for other files:
+    /// its line, else its file's header, else the header of the next file of `old_order`
+    /// still present, else of the last one before it.
+    fn restore_anchor(&self, anchor: TopAnchor, old_order: &[SharedString]) {
+        let (path, row) = match &anchor {
+            // A line folded away since: the fold's row, from its top.
+            TopAnchor::Line(position, offset) => (
+                position.path().clone(),
+                self.source_row(position).map(|row| {
+                    let code = matches!(self.rows[row], DisplayRow::Code { .. });
+                    (row, if code { *offset } else { px(0.) })
+                }),
+            ),
+            TopAnchor::Header(path, offset) => (
+                path.clone(),
+                self.file_ix(path)
+                    .and_then(|file| self.header_rows.get(file).copied())
+                    .map(|row| (row, *offset)),
+            ),
+        };
+        let header = |path: &SharedString| {
+            self.file_ix(path)
+                .and_then(|file| self.header_rows.get(file).copied())
+        };
+        let at = old_order.iter().position(|old| *old == path).unwrap_or(0);
+        let row = row
+            .or_else(|| header(&path).map(|row| (row, px(0.))))
+            .or_else(|| {
+                old_order[at..]
+                    .iter()
+                    .find_map(header)
+                    .map(|row| (row, px(0.)))
+            })
+            .or_else(|| {
+                old_order[..at]
+                    .iter()
+                    .rev()
+                    .find_map(header)
+                    .map(|row| (row, px(0.)))
+            });
+        let (item_ix, offset_in_item) = row.unwrap_or((0, px(0.)));
+        self.list.scroll_to(ListOffset {
+            item_ix,
+            offset_in_item,
+        });
     }
 
     /// Rebuilds rows and restores the source line at the top of the viewport.

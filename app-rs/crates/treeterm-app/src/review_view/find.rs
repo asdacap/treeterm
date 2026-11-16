@@ -50,14 +50,14 @@ impl ReviewView {
         }
     }
 
-    /// The file being read: under the pointer last, else the one last selected, else the
-    /// first of the diff (Electron took the top one on screen).
+    /// The file being read: under the pointer last, else the one at the top of the diff,
+    /// else the first of the diff (Electron took the top one on screen).
     fn reading(&self, cx: &App) -> String {
         let order = self.diff.as_ref().map(|diff| diff.paths()).unwrap_or_default();
         self.hovered_file
             .clone()
             .filter(|file| order.contains(file))
-            .or_else(|| self.model.read(cx).focused_file().map(str::to_owned).filter(|file| order.contains(file)))
+            .or_else(|| self.model.read(cx).active_file().map(str::to_owned).filter(|file| order.contains(file)))
             .or_else(|| order.first().cloned())
             .unwrap_or_default()
     }

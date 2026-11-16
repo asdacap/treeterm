@@ -18,6 +18,29 @@ use super::parts::{MONO, change_stats, outline_button, plain_icon, status_badge,
 use super::stacked::ListedFile;
 use crate::theme::colors;
 
+/// A file tree beside the diff.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Tree {
+    /// The Committed view's: a click is kept in the tab state (`selectedFilePath`).
+    Committed,
+    /// The selected commit's, in the Commits view.
+    Commit,
+    Staged,
+    Unstaged,
+}
+
+impl Tree {
+    /// Keeps the rows of several trees apart.
+    fn id(self) -> &'static str {
+        match self {
+            Tree::Committed => "committed",
+            Tree::Commit => "commit",
+            Tree::Staged => "Staged",
+            Tree::Unstaged => "Unstaged",
+        }
+    }
+}
+
 /// `.diff-file-section`: 11px semibold uppercase, on the secondary background.
 pub fn section_title(title: &'static str, cx: &App) -> AnyElement {
     let c = colors(cx);
@@ -130,10 +153,9 @@ pub fn favourites(view: &ReviewView, changed: &[ListedFile], cx: &mut Context<Re
 }
 
 /// `CommittedDiffFileTree` (`staging: None`) or `UncommittedDiffFileTree` (`Some(busy)`).
-/// `id` keeps the rows of several trees apart.
 pub fn tree(
     view: &ReviewView,
-    id: &'static str,
+    tree: Tree,
     files: &[ListedFile],
     viewed: &HashSet<String>,
     staging: Option<bool>,
@@ -142,13 +164,13 @@ pub fn tree(
 ) -> AnyElement {
     let entries: Vec<(&str, treeterm_core::git::FileChangeStats)> = files.iter().map(|f| (f.path.as_str(), f.stats)).collect();
     let nodes = build_tree(&entries);
-    // `selectedFile`: the file the diff shows at its top (`activeFile`), here the one last
-    // clicked or jumped to, else the first.
-    let focused = view.model.read(cx).focused_file().filter(|f| files.iter().any(|l| l.path == *f)).map(str::to_owned);
-    let active = focused.or_else(|| treeterm_model::review_tree::tree_order(&nodes).first().map(|i| files[*i].path.clone()));
+    // `selectedFile`: the file at the top of the diff (`activeFile`), else the first until
+    // the diff reports it.
+    let listed = view.model.read(cx).active_file().filter(|f| files.iter().any(|l| l.path == *f)).map(str::to_owned);
+    let active = listed.or_else(|| treeterm_model::review_tree::tree_order(&nodes).first().map(|i| files[*i].path.clone()));
     let mut list = Vec::new();
     for node in &nodes {
-        rows(view, id, node, 0, files, viewed, staging, active.as_deref(), cx, &mut list);
+        rows(view, tree, node, 0, files, viewed, staging, active.as_deref(), cx, &mut list);
     }
     // Chromium lays 12px text on 14px lines.
     v_flex().line_height(px(14.)).children(list).into_any_element()
@@ -157,7 +179,7 @@ pub fn tree(
 #[allow(clippy::too_many_arguments)]
 fn rows(
     view: &ReviewView,
-    id: &'static str,
+    tree: Tree,
     node: &TreeNode,
     depth: usize,
     files: &[ListedFile],
@@ -171,6 +193,7 @@ fn rows(
     let (secondary, primary, hover, active_bg, border, accent) =
         (c.text_secondary, c.text_primary, c.bg_hover, c.bg_active, c.border, c.accent);
     let indent = px(depth as f32 * 16. + 12.);
+    let id = tree.id();
     match node {
         TreeNode::Dir { name, path, children, additions, deletions } => {
             let open = !view.closed_dirs.contains(path);
@@ -212,7 +235,7 @@ fn rows(
             list.push(row.into_any_element());
             if open {
                 for child in children {
-                    rows(view, id, child, depth + 1, files, viewed, staging, active, cx, list);
+                    rows(view, tree, child, depth + 1, files, viewed, staging, active, cx, list);
                 }
             }
         }
@@ -264,7 +287,14 @@ fn rows(
                     d.child(div().flex_shrink_0().ml_auto().text_color(accent).child(plain_icon(IconName::Check, 12.)))
                 })
                 .children(action)
-                .on_click(cx.listener(move |view, _: &ClickEvent, _, cx| view.select_file(&path, cx)));
+                .on_click(cx.listener(move |view, _: &ClickEvent, _, cx| {
+                    view.select_file(&path, cx);
+                    // `persistViewState({ selectedFilePath })`: a Committed click only.
+                    match tree {
+                        Tree::Committed => view.model.update(cx, |m, cx| m.remember_selected_file(&path, cx)),
+                        Tree::Commit | Tree::Staged | Tree::Unstaged => {}
+                    }
+                }));
             list.push(row.into_any_element());
         }
     }

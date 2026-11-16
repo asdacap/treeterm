@@ -809,10 +809,15 @@ fn review_files_are_marked_viewed_in_workspace_metadata(cx: &mut TestAppContext)
     );
     assert_eq!(review.read_with(cx, |r, cx| r.viewed_count(cx).unwrap()), (1, 2));
 
-    // "Next unviewed" skips viewed files and stops at the end.
-    assert_eq!(review.update(cx, |r, cx| r.jump_unviewed(Direction::Next, cx)), Some("b.txt".into()));
-    assert_eq!(review.update(cx, |r, cx| r.jump_unviewed(Direction::Next, cx)), None);
-    assert_eq!(review.update(cx, |r, cx| r.jump_unviewed(Direction::Previous, cx)), None);
+    // "Next unviewed" walks the files as listed from the active file (none yet): it skips
+    // viewed files, selects the one it finds and stops at the end.
+    let order = ["a.txt".to_owned(), "b.txt".to_owned()];
+    assert_eq!(review.update(cx, |r, cx| r.jump_unviewed(&order, Direction::Next, cx)), Some("b.txt".into()));
+    assert_eq!(review.read_with(cx, |r, _| r.active_file().map(str::to_owned)), Some("b.txt".into()));
+    assert_eq!(review.update(cx, |r, _| r.take_scroll_request()), Some("b.txt".into()));
+    assert_eq!(review.update(cx, |r, cx| r.jump_unviewed(&order, Direction::Next, cx)), None);
+    assert_eq!(review.update(cx, |r, cx| r.jump_unviewed(&order, Direction::Previous, cx)), None);
+    assert_eq!(review.update(cx, |r, _| r.take_scroll_request()), None);
     review.update(cx, |r, cx| r.toggle_viewed("b.txt", cx));
     assert_eq!(review.read_with(cx, |r, cx| r.viewed_count(cx).unwrap()), (2, 2));
 
@@ -825,6 +830,78 @@ fn review_files_are_marked_viewed_in_workspace_metadata(cx: &mut TestAppContext)
     // Unmarking.
     review.update(cx, |r, cx| r.toggle_viewed("b.txt", cx));
     assert_eq!(metadata(cx, &workspace, "reviewViewedFiles"), Some(serde_json::json!({})));
+}
+
+#[gpui_kit::test]
+fn review_follows_the_diff_scroll_and_comes_back_to_the_file_last_clicked(cx: &mut TestAppContext) {
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let repo = TempRepo::new(&h);
+    for name in ["a.txt", "b.txt", "c.txt"] {
+        repo.write(name, "one\n");
+    }
+    repo.commit_all("base");
+    repo.git(&["checkout", "-q", "-b", "feature"]);
+    for name in ["a.txt", "b.txt", "c.txt"] {
+        repo.write(name, "two\n");
+    }
+    repo.commit_all("change");
+    let store = open_store(cx, &h);
+    let workspace = open_repo_workspace(cx, &h, &store, &repo);
+    let state = serde_json::json!({ "viewMode": "committed", "baseBranchOverride": "main", "selectedFilePath": "b.txt" });
+    let (tab, review) = open_review_with(cx, &workspace, state);
+    wait_review(cx, &review, "committed", |r, _| matches!(r.content(), ReviewContent::Committed(_)));
+    let active = |cx: &mut TestAppContext| review.read_with(cx, |r, _| r.active_file().map(str::to_owned));
+    let band = |paths: &[&str]| paths.iter().map(|p| (*p).to_owned()).collect::<Vec<_>>();
+
+    // The tab state's file is scrolled to by the first list shown, once.
+    assert_eq!(review.update(cx, |r, _| r.take_scroll_request()), Some("b.txt".into()));
+    assert_eq!(review.update(cx, |r, _| r.take_scroll_request()), None);
+
+    // A file entering the diff's top band is the active one: scrolling down the one below,
+    // scrolling up the one above. One leaving it changes nothing.
+    assert_eq!(active(cx), None);
+    review.update(cx, |r, cx| r.follow_scroll(&band(&["a.txt"]), cx));
+    assert_eq!(active(cx), Some("a.txt".into()));
+    review.update(cx, |r, cx| r.follow_scroll(&band(&["a.txt", "b.txt"]), cx));
+    assert_eq!(active(cx), Some("b.txt".into()));
+    review.update(cx, |r, cx| r.follow_scroll(&band(&["b.txt"]), cx));
+    assert_eq!(active(cx), Some("b.txt".into()));
+    review.update(cx, |r, cx| r.follow_scroll(&band(&["a.txt", "b.txt"]), cx));
+    assert_eq!(active(cx), Some("a.txt".into()));
+    // Next unviewed starts from it.
+    let order = band(&["a.txt", "b.txt", "c.txt"]);
+    assert_eq!(review.update(cx, |r, cx| r.jump_unviewed(&order, Direction::Next, cx)), Some("b.txt".into()));
+    review.update(cx, |r, cx| r.follow_scroll(&band(&["b.txt"]), cx));
+    assert_eq!(review.update(cx, |r, cx| r.jump_unviewed(&order, Direction::Next, cx)), Some("c.txt".into()));
+    assert_eq!(review.update(cx, |r, _| r.take_scroll_request()), Some("c.txt".into()));
+
+    // Other files listed: the band is watched afresh, and its last file is the active one.
+    review.update(cx, |r, cx| r.follow_scroll(&band(&["a.txt", "b.txt"]), cx));
+    assert_eq!(active(cx), Some("a.txt".into()));
+    review.update(cx, |r, _| r.reobserve_scroll());
+    review.update(cx, |r, cx| r.follow_scroll(&band(&["a.txt", "b.txt"]), cx));
+    assert_eq!(active(cx), Some("b.txt".into()));
+    // Another view's list has none until it reports its band.
+    review.update(cx, |r, cx| r.set_mode(ReviewMode::Uncommitted, cx));
+    assert_eq!(active(cx), None);
+    review.update(cx, |r, cx| r.set_mode(ReviewMode::Committed, cx));
+
+    // A click in the Committed tree is kept in the tab state: a Review opened from it comes
+    // back to that file.
+    review.update(cx, |r, cx| {
+        r.select_file("c.txt", cx);
+        r.remember_selected_file("c.txt", cx);
+    });
+    assert_eq!(active(cx), Some("c.txt".into()));
+    let saved = tab_state(cx, &workspace, &tab);
+    assert_eq!((saved["selectedFilePath"].as_str(), saved["viewMode"].as_str()), (Some("c.txt"), Some("committed")));
+    let (_, again) = open_review_with(cx, &workspace, saved);
+    assert_eq!(again.update(cx, |r, _| r.take_scroll_request()), Some("c.txt".into()));
+    // `if (!scrollToFile) return`: an empty path is none.
+    let (_, empty) = open_review_with(cx, &workspace, serde_json::json!({ "selectedFilePath": "" }));
+    assert_eq!(empty.update(cx, |r, _| r.take_scroll_request()), None);
 }
 
 #[gpui_kit::test]
@@ -1153,6 +1230,19 @@ fn review_counts_views_lists_commits_and_shows_a_commits_changes(cx: &mut TestAp
     assert_eq!(review.read_with(cx, |r, cx| r.viewed_count(cx).unwrap()), (2, 2));
     review.update(cx, |r, cx| r.set_files_viewed(&all[..1], false, cx));
     assert_eq!(review.read_with(cx, |r, cx| r.viewed_count(cx).unwrap()), (1, 2));
+
+    // `-w` reads the picked commit's changes again, which stay shown meanwhile (the diff
+    // keeps its place).
+    let shown = |r: &ReviewModel, whitespace: bool| {
+        matches!(r.selected_commit().map(|s| &s.diff), Some(Loaded::Ready(d)) if d.patch.contains("+one  ") == whitespace)
+    };
+    review.update(cx, |r, cx| r.select_commit(&commits[0].hash, cx));
+    wait_review(cx, &review, "the second commit", |r, _| shown(r, true));
+    review.update(cx, |r, cx| r.set_ignore_whitespace(true, cx));
+    assert!(review.read_with(cx, |r, _| shown(r, true)));
+    wait_review(cx, &review, "the second commit with -w", |r, _| shown(r, false));
+    review.update(cx, |r, cx| r.set_ignore_whitespace(false, cx));
+    wait_review(cx, &review, "the second commit without -w", |r, _| shown(r, true));
 
     // Resetting the base drops the override from the tab state (Electron's `undefined`); with
     // no parent there is then no base, and the Commits view lists the whole history.
