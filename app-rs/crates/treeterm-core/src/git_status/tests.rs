@@ -793,15 +793,18 @@ mod create_git_controller_store {
             assert!(matches!(result, Err(ControllerError::Git(_))));
         }
 
+        /// Electron's `refreshGitInfo` never fails, so a pull that worked is never alerted
+        /// as a failure because git could not re-read the branch afterwards.
         #[test]
-        fn reports_a_failed_branch_refresh_after_the_pull() {
+        fn a_failed_branch_refresh_after_the_pull_still_succeeds() {
             let deps = Deps {
                 refresh_info_fails: Some("gone"),
                 ..Deps::default()
             };
             let (result, updates) = pull(&deps);
-            assert_eq!(result.unwrap_err().to_string(), "gone");
+            result.unwrap();
             assert_eq!(updates, vec![GitStatusUpdate::BehindCount(0)]);
+            assert_eq!(*deps.refresh_calls.borrow(), vec!["refreshGitInfo"]);
         }
     }
 

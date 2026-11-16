@@ -250,8 +250,6 @@ pub enum ControllerError {
     Git(#[from] GitError),
     #[error(transparent)]
     GitHub(#[from] GitHubError),
-    #[error(transparent)]
-    Refresh(DepError),
 }
 
 // === steps ==================================================================================
@@ -373,7 +371,9 @@ pub async fn refresh_git<D: GitControllerDeps + ?Sized>(
     failures
 }
 
-/// `pullFromRemote`: pull, then re-read the branch. A successful pull leaves nothing behind.
+/// `pullFromRemote`: pull, then re-read the branch. A successful pull leaves nothing behind
+/// and succeeds: a branch re-read git cannot answer is only logged, as Electron's
+/// `refreshGitInfo` never fails (the status refresh that follows tries again).
 pub async fn pull_from_remote<D: GitControllerDeps + ?Sized>(
     deps: &D,
     apply: &mut dyn FnMut(GitStatusUpdate),
@@ -384,9 +384,10 @@ pub async fn pull_from_remote<D: GitControllerDeps + ?Sized>(
     }
     deps.git().pull(&workspace.path).await?;
     apply(GitStatusUpdate::BehindCount(0));
-    deps.refresh_git_info()
-        .await
-        .map_err(ControllerError::Refresh)
+    if let Err(error) = deps.refresh_git_info().await {
+        tracing::warn!(workspace = %workspace.id, %error, "re-reading the branch after a pull failed");
+    }
+    Ok(())
 }
 
 /// Where "open on GitHub" goes.
