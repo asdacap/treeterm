@@ -721,14 +721,7 @@ impl TreePane {
                             cx.notify();
                         }
                     }))
-                    // Wrapped, as the system draws a long `title`.
-                    .when_some(tooltip, |row, tooltip| {
-                        row.tooltip(move |window, cx| {
-                            let text = tooltip.clone();
-                            gpui_kit::component::tooltip::Tooltip::element(move |_, _| div().max_w(px(400.)).child(text.clone()))
-                                .build(window, cx)
-                        })
-                    })
+                    .when_some(tooltip, |row, tooltip| row.tooltip(ui::title_tooltip(tooltip)))
                     .on_drag(drag_value, |dragged, _, _, cx| cx.new(|_| dragged.clone()))
                     .on_drag_move(cx.listener(move |pane, event: &gpui_kit::DragMoveEvent<DraggedWorkspace>, _, cx| {
                         let position = event.event.position;
@@ -793,23 +786,9 @@ impl TreePane {
             .children(pr)
             .child(div().flex_1().min_w_0().truncate().text_size(px(ui::BODY)).text_color(primary).child(label.clone()))
             .when(unread, |row| {
-                row.child(
-                    div()
-                        .id(SharedString::from(format!("ws-unread-{id}")))
-                        .mx(px(4.))
-                        .flex_shrink_0()
-                        .text_size(px(10.))
-                        .text_color(c.accent)
-                        .child("●")
-                        .when(live, |marker| {
-                            marker.tooltip(|window, cx| {
-                                gpui_kit::component::tooltip::Tooltip::new("New activity — open workspace to mark as read")
-                                    .build(window, cx)
-                            })
-                        }),
-                )
-            })
-            // "Saving workspace attention" while an unread-marker edit is not yet saved.
+                let marker = ui::unread_marker(SharedString::from(format!("ws-unread-{id}")), c.accent);
+                row.child(marker.when(live, |marker| marker.tooltip(ui::unread_hint)))
+            })            // "Saving workspace attention" while an unread-marker edit is not yet saved.
             .when(attention_pending, |row| row.child(ui::attention_saving(primary)))
             // `.tree-item-favourite`: a filled star when marked.
             .child(

@@ -177,6 +177,27 @@ struct SessionTree {
     _events: [Subscription; 3],
 }
 
+/// A favourite's row, copied out of its session so rendering can borrow the context mutably.
+struct FavouriteRow {
+    id: String,
+    conn: ConnectionId,
+    name: String,
+    /// Shown on hover (`title={data.path}`).
+    path: SharedString,
+    is_worktree: bool,
+    /// Background work finished while the workspace was not shown.
+    unread: bool,
+    /// An unread-marker edit is not yet saved.
+    pending: bool,
+    /// The attention flash's state and opacity now.
+    flash: Option<(treeterm_model::workspace_store::ActivityState, f32)>,
+    activity: treeterm_model::workspace_store::ActivityState,
+    /// The workspace the window shows.
+    is_shown: bool,
+    /// `PrIndicators`: the PR's number and what it needs.
+    pr: Vec<AnyElement>,
+}
+
 /// Per-window state for a session shown (a connection generation's store).
 struct Connected {
     session: Entity<SessionStore>,
@@ -954,21 +975,22 @@ impl AppView {
                 if workspace.is_favourite() {
                     let flash = workspace.attention_flash(now);
                     flashing |= flash.is_some();
-                    rows.push((
-                        id.clone(),
-                        workspace.file().display_name().to_owned(),
-                        workspace.file().is_worktree,
-                        workspace.has_unread_attention(),
-                        workspace.attention_pending(),
+                    rows.push(FavouriteRow {
+                        id: id.clone(),
+                        conn: conn.clone(),
+                        name: workspace.file().display_name().to_owned(),
+                        path: workspace.workspace().path.clone().into(),
+                        is_worktree: workspace.file().is_worktree,
+                        unread: workspace.has_unread_attention(),
+                        pending: workspace.attention_pending(),
                         flash,
-                        workspace.overall_activity(),
-                        shown.as_deref() == Some(id.as_str()),
-                        conn.clone(),
+                        activity: workspace.overall_activity(),
+                        is_shown: shown.as_deref() == Some(id.as_str()),
                         // `PrIndicators`, as in the tree.
-                        session
+                        pr: session
                             .git_controller(id)
                             .map_or_else(Vec::new, |git| crate::tree_pane::pr_indicators(git.read(cx).status())),
-                    ));
+                    });
                 }
             }
         }
@@ -979,8 +1001,9 @@ impl AppView {
         if flashing {
             window.request_animation_frame();
         }
-        // `.favourites-header`: filled star and "FAVOURITES", 11px semibold secondary.
-        let mut panel = v_flex().pb(px(6.)).border_b(px(2.)).border_color(border).child(
+        // `.favourites-panel`: a 2px rule, then 4px before the sessions. `.favourites-header`:
+        // filled star and "FAVOURITES", 11px semibold secondary.
+        let mut panel = v_flex().pb(px(6.)).mb(px(4.)).border_b(px(2.)).border_color(border).child(
             h_flex()
                 .pt(px(6.))
                 .px(px(12.))
@@ -990,12 +1013,14 @@ impl AppView {
                 .child(div().text_size(px(12.)).line_height(px(12.)).text_color(secondary).child("★"))
                 .child(crate::ui::caps_title("Favourites", cx)),
         );
-        for (id, name, is_worktree, unread, pending, flash, activity, is_shown, conn, pr) in rows {
+        for row in rows {
+            let FavouriteRow { id, conn, name, path, is_worktree, unread, pending, flash, activity, is_shown, pr } = row;
             let icon = if activity == treeterm_model::workspace_store::ActivityState::Idle {
                 crate::ui::icon(if is_worktree { IconName::GitBranch } else { IconName::Folder }, 16., secondary).into_any_element()
             } else {
                 crate::ui::activity_glyph(activity, 14., secondary)
             };
+            let unread_id = SharedString::from(format!("fav-unread-{id}"));
             panel = panel.child(
                 h_flex()
                     .id(SharedString::from(format!("fav-{id}")))
@@ -1008,10 +1033,11 @@ impl AppView {
                     .when(is_shown, |d| d.bg(active))
                     .when(!is_shown, |d| d.hover(move |d| d.bg(hover)))
                     .when(unread, |d| d.border_l(px(2.)).border_color(accent))
+                    .tooltip(crate::ui::title_tooltip(path))
                     .child(div().mr(px(8.)).flex_shrink_0().child(icon))
                     .children(pr)
                     .child(div().flex_1().min_w_0().truncate().text_size(px(crate::ui::BODY)).text_color(primary).child(name))
-                    .when(unread, |d| d.child(div().mx(px(4.)).text_size(px(10.)).text_color(accent).child("●")))
+                    .when(unread, |d| d.child(crate::ui::unread_marker(unread_id, accent).tooltip(crate::ui::unread_hint)))
                     .when(pending, |d| d.child(crate::ui::attention_saving(primary)))
                     // `WorkspaceAttentionFlash`, over the row's content.
                     .children(flash.map(|flash| crate::ui::attention_flash(flash, 0.)))

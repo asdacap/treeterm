@@ -259,6 +259,26 @@ pub fn attention_flash(
     div().absolute().inset_0().rounded(px(radius)).bg(color.opacity(opacity))
 }
 
+/// `.workspace-unread-marker`: the accent "●" after a tree or favourite row's name while it
+/// has unread activity. Where it takes the pointer, its tooltip is [`unread_hint`].
+pub fn unread_marker(id: impl Into<ElementId>, accent: impl Into<Hsla>) -> Stateful<Div> {
+    div().id(id).mx(px(4.)).flex_shrink_0().text_size(px(10.)).text_color(accent.into()).child("●")
+}
+
+/// The unread marker's `title`: how to clear it.
+pub fn unread_hint(window: &mut Window, cx: &mut App) -> gpui_kit::AnyView {
+    gpui_kit::component::tooltip::Tooltip::new("New activity — open workspace to mark as read").build(window, cx)
+}
+
+/// An element's `title`: its text on hover, wrapped at 400px as the system draws a long one.
+pub fn title_tooltip(text: impl Into<SharedString>) -> impl Fn(&mut Window, &mut App) -> gpui_kit::AnyView + 'static {
+    let text = text.into();
+    move |window, cx| {
+        let text = text.clone();
+        gpui_kit::component::tooltip::Tooltip::element(move |_, _| div().max_w(px(400.)).child(text.clone())).build(window, cx)
+    }
+}
+
 /// The 12px spinner after the unread marker while an unread-marker edit is not yet saved
 /// (`Loader2` "Saving workspace attention"), in the row's text colour.
 pub fn attention_saving(color: impl Into<Hsla>) -> gpui_kit::AnyElement {
