@@ -10,7 +10,7 @@ pub use diff::{
     DiffSearchHit, DiffSearchOptions, DiffSearchSide, DiffStyle, LineMatcher, SearchableDiff,
     TextSearchHit, UnchangedRegions, find_in_text, find_lines_in_diff, word_at, word_range_at,
 };
-pub use line_diff::{Hunk, HunkBlock, LineDiff, Whitespace, line_diff};
+pub use line_diff::{Hunk, HunkBlock, LineDiff, Whitespace, ignore_whitespace_in_patch, line_diff};
 pub use repo::{
     Completion, MAX_REPO_HITS, REPO_SEARCH_TIMEOUT, RepoHit, RepoSearchError, RepoSearchEvent,
     RepoSearchTool, parse_vimgrep_line, repo_search, to_workspace_absolute, to_workspace_relative,

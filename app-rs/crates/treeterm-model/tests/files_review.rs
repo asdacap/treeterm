@@ -1433,9 +1433,9 @@ fn review_counts_views_lists_commits_and_shows_a_commits_changes(cx: &mut TestAp
     assert!(patch.contains("@@ -1,2 +1,2 @@\n-one\n-two\n+one  \n+TWO"), "{patch}");
     assert!(review.read_with(cx, |r, cx| r.is_base_overridden(cx)));
 
-    // Whitespace-only changes drop out with `-w`.
+    // Ignoring whitespace, a line respaced at its end is unchanged.
     review.update(cx, |r, cx| r.set_ignore_whitespace(true, cx));
-    wait_review(cx, &review, "-w", |r, _| {
+    wait_review(cx, &review, "ignoring whitespace", |r, _| {
         matches!(r.content(), ReviewContent::Committed(c) if c.diffs.is_complete() && !c.diffs.patch().contains("+one  "))
     });
     assert!(review.read_with(cx, |r, _| r.ignore_whitespace()));
@@ -1466,8 +1466,8 @@ fn review_counts_views_lists_commits_and_shows_a_commits_changes(cx: &mut TestAp
     review.update(cx, |r, cx| r.set_files_viewed(&all[..1], false, cx));
     assert_eq!(review.read_with(cx, |r, cx| r.viewed_count(cx).unwrap()), (1, 2));
 
-    // `-w` reads the picked commit's changes again, which stay shown meanwhile (the diff
-    // keeps its place).
+    // Ignoring whitespace reads the picked commit's changes again, which stay shown
+    // meanwhile (the diff keeps its place).
     let shown = |r: &ReviewModel, whitespace: bool| {
         matches!(r.selected_commit().map(|s| &s.diff), Some(Loaded::Ready(d)) if d.diffs.is_complete() && d.diffs.patch().contains("+one  ") == whitespace)
     };
@@ -1475,9 +1475,9 @@ fn review_counts_views_lists_commits_and_shows_a_commits_changes(cx: &mut TestAp
     wait_review(cx, &review, "the second commit", |r, _| shown(r, true));
     review.update(cx, |r, cx| r.set_ignore_whitespace(true, cx));
     assert!(review.read_with(cx, |r, _| shown(r, true)));
-    wait_review(cx, &review, "the second commit with -w", |r, _| shown(r, false));
+    wait_review(cx, &review, "the second commit ignoring whitespace", |r, _| shown(r, false));
     review.update(cx, |r, cx| r.set_ignore_whitespace(false, cx));
-    wait_review(cx, &review, "the second commit without -w", |r, _| shown(r, true));
+    wait_review(cx, &review, "the second commit with whitespace", |r, _| shown(r, true));
 
     // Resetting the base drops the override from the tab state (Electron's `undefined`); with
     // no parent there is then no base, and the Commits view lists the whole history.
@@ -1493,6 +1493,69 @@ fn review_counts_views_lists_commits_and_shows_a_commits_changes(cx: &mut TestAp
     cx.run_until_parked();
     assert!(events.borrow().contains(&ReviewEvent::CloseRequested));
     assert!(workspace.read_with(cx, |w, _| !w.file().app_states.contains_key(&tab)));
+}
+
+#[gpui_kit::test]
+fn ignoring_whitespace_hides_a_change_at_a_lines_ends_but_not_within_it(cx: &mut TestAppContext) {
+    use treeterm_model::review::{Loaded, ReviewMode};
+    use treeterm_model::review_patch::FileDiff;
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let repo = TempRepo::new(&h);
+    repo.write("a.txt", "fn main() {\nlet x = 1;\nrun(x);\n}\n");
+    repo.write("s.txt", "s\nx y\n");
+    repo.write("w.txt", "w\nx y\n");
+    repo.commit_all("base");
+    repo.git(&["checkout", "-q", "-b", "feature"]);
+    // Re-indented, and respaced within a line (which `git diff -w` would hide too).
+    repo.write("a.txt", "fn main() {\n    let x = 1;\nrun( x);\n}\n");
+    repo.commit_all("feature");
+    repo.write("s.txt", "  s\nx  y\n");
+    repo.git(&["add", "s.txt"]);
+    repo.write("w.txt", "w  \nx\ty\n");
+    repo.write("u.txt", "  u\n");
+    let store = open_store(cx, &h);
+    let workspace = open_repo_workspace(cx, &h, &store, &repo);
+    let (_, review) =
+        open_review_with(cx, &workspace, serde_json::json!({ "viewMode": "committed", "baseBranchOverride": "main" }));
+    let section = |cx: &mut TestAppContext, path: &str| match file_diff(cx, &review, path) {
+        Some(FileDiff::Loaded(section)) => section,
+        other => panic!("{path}: {other:?}"),
+    };
+    wait_review(cx, &review, "committed", |r, _| matches!(r.content(), ReviewContent::Committed(c) if c.diffs.is_complete()));
+    assert!(section(cx, "a.txt").contains("-let x = 1;\n-run(x);\n+    let x = 1;\n+run( x);\n"), "{}", section(cx, "a.txt"));
+
+    // The re-indented line is unchanged, shown as it is now; the respaced one still changed.
+    let ignored = "\n     let x = 1;\n-run(x);\n+run( x);\n";
+    review.update(cx, |r, cx| r.set_ignore_whitespace(true, cx));
+    wait_review(cx, &review, "committed, ignoring whitespace", |r, _| {
+        matches!(r.content(), ReviewContent::Committed(c) if c.diffs.is_complete() && c.diffs.patch().contains(ignored))
+    });
+    // A file read again on its own reads the same.
+    review.update(cx, |r, cx| r.refresh_file("a.txt", cx));
+    wait_review(cx, &review, "a.txt read again", |r, _| !r.is_file_loading("a.txt"));
+    assert!(section(cx, "a.txt").contains(ignored), "{}", section(cx, "a.txt"));
+
+    // So are the staged and unstaged changes; an untracked file is all added.
+    review.update(cx, |r, cx| r.set_mode(ReviewMode::Uncommitted, cx));
+    wait_review(cx, &review, "uncommitted", |r, _| matches!(r.content(), ReviewContent::Uncommitted(u) if u.diffs.is_complete()));
+    assert!(section(cx, "s.txt").contains("@@ -1,2 +1,2 @@\n   s\n-x y\n+x  y\n"), "{}", section(cx, "s.txt"));
+    assert!(section(cx, "w.txt").contains("@@ -1,2 +1,2 @@\n w  \n-x y\n+x\ty\n"), "{}", section(cx, "w.txt"));
+    assert!(section(cx, "u.txt").contains("@@ -0,0 +1 @@\n+  u\n"), "{}", section(cx, "u.txt"));
+
+    // And a commit's.
+    review.update(cx, |r, cx| r.set_mode(ReviewMode::Commits, cx));
+    wait_review(cx, &review, "commits", |r, _| matches!(r.content(), ReviewContent::Commits(c) if c.len() == 1));
+    let hash = review.read_with(cx, |r, _| match r.content() {
+        ReviewContent::Commits(commits) => commits[0].hash.clone(),
+        other => panic!("{other:?}"),
+    });
+    review.update(cx, |r, cx| r.select_commit(&hash, cx));
+    wait_review(cx, &review, "the commit", |r, _| {
+        matches!(r.selected_commit().map(|s| &s.diff), Some(Loaded::Ready(d)) if d.diffs.is_complete())
+    });
+    assert!(section(cx, "a.txt").contains(ignored), "{}", section(cx, "a.txt"));
 }
 
 #[gpui_kit::test]

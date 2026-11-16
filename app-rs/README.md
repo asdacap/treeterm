@@ -332,10 +332,13 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   them (choosing one opened the file on the size notice).
 - Review measures a diff's size from git's whole-file patch (`git diff -U1000000`); Electron
   read both files. With "Ignore whitespace changes" on, unchanged lines count as the new side
-  has them. A file whose patch has no hunks is never too large: a pure rename, a mode-only
-  change, or, with "Ignore whitespace changes" on, a renamed file or mode change whose only
-  edits are whitespace (`git diff -w` prints its header alone). Electron measured both files,
-  so a large file in any of these cases showed "This diff is large (...)" and "Load anyway".
+  has them. A file whose patch has no hunks is never too large: a pure rename or a mode-only
+  change. Electron measured both files, so a large file in either case showed "This diff is
+  large (...)" and "Load anyway".
+- Review's "Ignore whitespace changes" diffs git's patch again over trimmed lines, as jsdiff
+  does (a change of indentation, trailing spaces or line ending is unchanged; one of spacing
+  within a line still shows). A line that is unchanged only once trimmed shows its new text
+  on both sides of the split view; Pierre showed each side's own.
 - Review's "This diff is large (N lines, K KB)" groups digits the en-US way (`25,003`) whatever
   Electron's locale; Electron's `toLocaleString` grouped them as its locale does (`25.003` in
   German, Persian digits in Farsi).

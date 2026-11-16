@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use gpui_kit::{App, Context, Entity, EventEmitter, Subscription, Task, WeakEntity};
+use gpui_kit::{App, BackgroundExecutor, Context, Entity, EventEmitter, Subscription, Task, WeakEntity};
 use indexmap::{IndexMap, IndexSet};
 use serde_json::{Value, json};
 use treeterm_core::exec::{ExecClient, ExecRequest, ExecTimeout};
@@ -30,6 +30,7 @@ use treeterm_core::review::{
 };
 
 use treeterm_core::files::{FavouriteFile, is_image_path};
+use treeterm_core::search::{Whitespace, ignore_whitespace_in_patch};
 
 use crate::file_browser::FileBrowser;
 use crate::review_find::{DiffLayout, DiffMatch, find_in_patch, in_file_first};
@@ -493,8 +494,9 @@ pub struct ReviewModel {
     /// Local and remote branches for the base picker, loaded when it opens.
     branches: Loaded<Vec<String>>,
     selected_commit: Option<SelectedCommit>,
-    /// `git diff -w`.
-    ignore_whitespace: bool,
+    /// The whitespace toggle: with [`Whitespace::Ignore`], lines equal once trimmed show
+    /// unchanged ([`PatchReader`]).
+    whitespace: Whitespace,
     /// "Refresh changes" (or the tab shown again) runs until what it reloads has answered.
     refreshing: bool,
     visibility: Visibility,
@@ -689,7 +691,7 @@ impl ReviewModel {
             conflicts: Conflicts::default(),
             branches: Loaded::Loading,
             selected_commit: None,
-            ignore_whitespace: false,
+            whitespace: Whitespace::Compare,
             refreshing: false,
             visibility: Visibility::Unknown,
             conflicts_load: None,
@@ -796,7 +798,7 @@ impl ReviewModel {
     }
 
     pub fn ignore_whitespace(&self) -> bool {
-        self.ignore_whitespace
+        self.whitespace == Whitespace::Ignore
     }
 
     /// The workspace's name and branch, its parent and its branch, and whether a harness runs.
@@ -914,12 +916,14 @@ impl ReviewModel {
         }));
     }
 
-    /// The whitespace toggle: reload the patches with or without `-w`.
+    /// The whitespace toggle: the patches are read again, lines equal once trimmed
+    /// unchanged or not.
     pub fn set_ignore_whitespace(&mut self, ignore: bool, cx: &mut Context<Self>) {
-        if self.ignore_whitespace == ignore {
+        let whitespace = if ignore { Whitespace::Ignore } else { Whitespace::Compare };
+        if self.whitespace == whitespace {
             return;
         }
-        self.ignore_whitespace = ignore;
+        self.whitespace = whitespace;
         self.load_committed(cx);
         self.load_uncommitted(cx);
         // The commit's changes stay shown until they are read again (Electron's sections
@@ -952,7 +956,7 @@ impl ReviewModel {
         };
         let (git, path, hash) = (self.git.clone(), self.path.clone(), selected.commit.hash.clone());
         let request = self.show_request(&hash, &[]);
-        let exec = self.exec.clone();
+        let patches = self.patch_reader(cx);
         self._commit = Some(cx.spawn(async move |this, cx| {
             let files = match git.get_commit_diff(&path, &hash).await {
                 Ok(files) => files,
@@ -976,7 +980,7 @@ impl ReviewModel {
                 Ok(shown) => shown,
                 Err(_) => return, // tab closed
             };
-            let diffs = FileDiffs::read(paths(), &patch_of(exec.run(request).await));
+            let diffs = FileDiffs::read(paths(), &patches.read(request, patch_of).await);
             match this.update(cx, |model, cx| {
                 let diffs = model.with_file_loads(&DiffList::Commit(hash.clone()), diffs);
                 model.commit_diff_read(&hash, Loaded::Ready(CommitDiff { files, diffs }), !shown, cx);
@@ -1000,13 +1004,9 @@ impl ReviewModel {
         }
     }
 
-    /// `git show` of a commit's changes, with the view's options, limited to `paths`.
+    /// `git show` of a commit's changes (renames, whole files), limited to `paths`.
     fn show_request(&self, hash: &str, paths: &[&str]) -> ExecRequest {
-        let mut args = vec!["show", "--no-color", "-M", FULL_CONTEXT, "--format="];
-        if self.ignore_whitespace {
-            args.push("-w");
-        }
-        args.push(hash);
+        let mut args = vec!["show", "--no-color", "-M", FULL_CONTEXT, "--format=", hash];
         args.extend_from_slice(paths);
         self.git_request(&args)
     }
@@ -1383,10 +1383,10 @@ impl ReviewModel {
         if self.images.contains_key(path) {
             self.load_image(path.to_owned(), cx);
         }
-        let (exec, key) = (self.exec.clone(), (list.clone(), path.to_owned()));
+        let (patches, key) = (self.patch_reader(cx), (list.clone(), path.to_owned()));
         let path = path.to_owned();
         let load = cx.spawn(async move |this, cx| {
-            let diff = FileDiff::of(&path, &read(exec.run(request).await));
+            let diff = FileDiff::of(&path, &patches.read(request, read).await);
             match this.update(cx, |model, cx| {
                 model.file_loads.remove(&(list.clone(), path.clone()));
                 if let Some(diffs) = model.diffs_mut(&list) {
@@ -1540,7 +1540,7 @@ impl ReviewModel {
             return;
         };
         self.committed.start();
-        let (exec, git, path) = (self.exec.clone(), self.git.clone(), self.path.clone());
+        let (patches, git, path) = (self.patch_reader(cx), self.git.clone(), self.path.clone());
         let request = self.diff_request(&[&format!("{branch}...HEAD")]);
         self.committed_load = Some(cx.spawn(async move |this, cx| {
             let diff = match git.get_diff(&path, &branch).await {
@@ -1568,7 +1568,7 @@ impl ReviewModel {
                 Ok(shown) => shown,
                 Err(_) => return, // tab closed
             };
-            let diffs = FileDiffs::read(paths(), &patch_of(exec.run(request).await));
+            let diffs = FileDiffs::read(paths(), &patches.read(request, patch_of).await);
             match this.update(cx, |model, cx| {
                 model.committed_load = None;
                 let diffs = model.with_file_loads(&DiffList::Committed, diffs);
@@ -1586,7 +1586,7 @@ impl ReviewModel {
     fn load_uncommitted(&mut self, cx: &mut Context<Self>) {
         self.drop_file_loads(|list| *list == DiffList::Uncommitted);
         self.uncommitted.start();
-        let (exec, git, path) = (self.exec.clone(), self.git.clone(), self.path.clone());
+        let (patches, git, path) = (self.patch_reader(cx), self.git.clone(), self.path.clone());
         let staged = self.diff_request(&["--cached"]);
         let unstaged = self.diff_request(&[]);
         self.uncommitted_load = Some(cx.spawn(async move |this, cx| {
@@ -1615,7 +1615,7 @@ impl ReviewModel {
                 Ok(shown) => shown,
                 Err(_) => return, // tab closed
             };
-            let diffs = uncommitted_diffs(&exec, &path, &changes, staged, unstaged).await;
+            let diffs = uncommitted_diffs(&patches, &path, &changes, staged, unstaged).await;
             match this.update(cx, |model, cx| {
                 model.uncommitted_load = None;
                 let diffs = model.with_file_loads(&DiffList::Uncommitted, diffs);
@@ -1688,14 +1688,16 @@ impl ReviewModel {
         cx.notify();
     }
 
-    /// `git diff` with the view's options: renames, whole files, `-w`.
+    /// `git diff` with the view's options: renames, whole files.
     fn diff_request(&self, args: &[&str]) -> ExecRequest {
         let mut all = vec!["diff", "--no-color", "-M", FULL_CONTEXT];
-        if self.ignore_whitespace {
-            all.push("-w");
-        }
         all.extend_from_slice(args);
         self.git_request(&all)
+    }
+
+    /// How the views' patches are read now.
+    fn patch_reader(&self, cx: &App) -> PatchReader {
+        PatchReader { exec: self.exec.clone(), whitespace: self.whitespace, executor: cx.background_executor().clone() }
     }
 
     /// The workspace's favourite files, shown above the changed files.
@@ -2526,6 +2528,27 @@ type ExecResult = Result<treeterm_core::exec::CommandOutput, treeterm_core::exec
 /// How a command's output is read as a patch (git's message when it failed).
 type ReadPatch = fn(ExecResult) -> Result<String, String>;
 
+/// Reads the views' patches with the whitespace toggle as it was when they were asked for.
+/// Ignoring whitespace, each hunk is diffed again over trimmed lines, as jsdiff's
+/// `ignoreWhitespace` diffs the files for Pierre (`git diff -w` would also hide changes of
+/// spacing within a line, which Electron shows), off the main thread.
+struct PatchReader {
+    exec: ExecClient,
+    whitespace: Whitespace,
+    executor: BackgroundExecutor,
+}
+
+impl PatchReader {
+    /// `request`'s output read as a patch by `read`, then shown with the toggle.
+    async fn read(&self, request: ExecRequest, read: ReadPatch) -> Result<String, String> {
+        let patch = read(self.exec.run(request).await)?;
+        Ok(match self.whitespace {
+            Whitespace::Compare => patch,
+            Whitespace::Ignore => self.executor.spawn(async move { ignore_whitespace_in_patch(&patch) }).await,
+        })
+    }
+}
+
 fn patch_of(result: ExecResult) -> Result<String, String> {
     match result {
         Ok(output) if output.exit_code == 0 => Ok(String::from_utf8_lossy(&output.stdout).into_owned()),
@@ -2557,7 +2580,7 @@ fn untracked_request(cwd: &str, file: &str) -> ExecRequest {
 /// else (untracked) the file as added, read one file at a time. A command that fails fails
 /// the files it reads, each showing its message.
 async fn uncommitted_diffs(
-    exec: &ExecClient,
+    patches: &PatchReader,
     cwd: &str,
     changes: &UncommittedChanges,
     staged: ExecRequest,
@@ -2568,12 +2591,12 @@ async fn uncommitted_diffs(
         changes.files.iter().filter(move |file| file.entry.staged == staging && !untracked(file)).map(|file| file.entry.path.as_str())
     };
     let mut diffs = FileDiffs::default();
-    diffs.add_read(tracked(Staging::Staged), &patch_of(exec.run(staged).await));
-    diffs.add_read(tracked(Staging::Unstaged), &patch_of(exec.run(unstaged).await));
+    diffs.add_read(tracked(Staging::Staged), &patches.read(staged, patch_of).await);
+    diffs.add_read(tracked(Staging::Unstaged), &patches.read(unstaged, patch_of).await);
     for file in changes.files.iter().filter(untracked) {
         let path = file.entry.path.as_str();
         if diffs.get(path).is_none() {
-            let patch = untracked_patch(exec.run(untracked_request(cwd, path)).await);
+            let patch = patches.read(untracked_request(cwd, path), untracked_patch).await;
             diffs.add(path, FileDiff::of(path, &patch));
         }
     }
