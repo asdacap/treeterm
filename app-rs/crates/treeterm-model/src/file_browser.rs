@@ -270,6 +270,9 @@ pub struct FileBrowser {
     expanded: Vec<String>,
     selected: Option<String>,
     view: FileView,
+    /// Reads started so far: `view` comes from the latest, so a view of a file it keeps can
+    /// tell when the same file was read again.
+    reads: u64,
     search: SearchPanel,
     definition: DefinitionLookup,
     reveal: Option<Reveal>,
@@ -396,6 +399,7 @@ impl FileBrowser {
             expanded: expanded.clone(),
             selected: None,
             view: FileView::Nothing,
+            reads: 0,
             search: SearchPanel::Closed,
             definition: DefinitionLookup::Idle,
             reveal: None,
@@ -484,6 +488,11 @@ impl FileBrowser {
 
     pub fn selected(&self) -> Option<&str> {
         self.selected.as_deref()
+    }
+
+    /// How many reads have started; [`Self::view`] comes from the latest.
+    pub fn reads(&self) -> u64 {
+        self.reads
     }
 
     pub fn search(&self) -> &SearchPanel {
@@ -599,11 +608,21 @@ impl FileBrowser {
         cx.notify();
     }
 
-    /// Show a file. `allow_large` reads past [`MAX_VIEW_BYTES`] ("Open anyway").
+    /// The user picked a file (a tree row, a favourite, a search result): show it. The file
+    /// shown already stays as it is, unread, as Electron reads only when the path changes.
+    pub fn select_file(&mut self, path: &str, cx: &mut Context<Self>) {
+        if self.selected.as_deref() != Some(path) {
+            self.open(path, false, cx);
+        }
+    }
+
+    /// Read a file and show it, even the one shown (Review's Refresh). `allow_large` reads
+    /// past [`MAX_VIEW_BYTES`] ("Open anyway").
     pub fn open(&mut self, path: &str, allow_large: bool, cx: &mut Context<Self>) {
         self.drop_draft_unless(path);
         self.selected = Some(path.to_owned());
         self.view = FileView::Loading(path.to_owned());
+        self.reads += 1;
         self.reveal = None;
         if let SearchPanel::Open(search) = &mut self.search {
             search.active = None;
@@ -655,9 +674,7 @@ impl FileBrowser {
     /// Open a workspace-relative location (a search hit or a definition) and move to it.
     pub fn open_location(&mut self, relative_path: &str, line_number: usize, column: usize, len: usize, cx: &mut Context<Self>) {
         let path = search::to_workspace_absolute(&self.root, relative_path);
-        if self.selected.as_deref() != Some(path.as_str()) {
-            self.open(&path, false, cx);
-        }
+        self.select_file(&path, cx);
         self.reveal_at(&path, line_number, column, len);
         cx.notify();
     }
@@ -1023,13 +1040,13 @@ impl FileBrowser {
         cx.notify();
     }
 
-    /// A search result was clicked: a file opens; a directory expands (or collapses) and is
-    /// selected, as Electron does.
+    /// A search result was clicked: a file is selected; a directory expands (or collapses)
+    /// and is selected, as Electron does.
     pub fn open_name_result(&mut self, entry: &FileEntry, cx: &mut Context<Self>) {
         if entry.is_directory {
             self.toggle_dir(&entry.path, cx);
         }
-        self.open(&entry.path, false, cx);
+        self.select_file(&entry.path, cx);
     }
 
     // ---- go to definition --------------------------------------------------------------

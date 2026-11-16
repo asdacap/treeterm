@@ -228,8 +228,9 @@ pub struct FileBrowserView {
     preview_scroll: gpui_kit::ScrollHandle,
     tree_scroll: gpui_kit::ScrollHandle,
     workspace: Entity<treeterm_model::workspace_store::WorkspaceStore>,
-    /// The editor showing the current file, and which file it shows.
-    editor: Option<(String, Entity<EditorState>)>,
+    /// The editor showing the current file, and which file and read
+    /// ([`FileBrowser::reads`]) it shows.
+    editor: Option<(String, u64, Entity<EditorState>)>,
     /// The editor's glyph margin ([`monaco_gutter`]).
     gutter: Option<gpui_kit::component::input::GutterDecorationCollection>,
     /// The editor's bracket pair colours ([`bracket_colors`]).
@@ -402,10 +403,12 @@ impl FileBrowserView {
         }
     }
 
-    /// The editor for `path`, created when the shown file changes.
+    /// The editor for `path`, created when the shown file changes or is read again.
     fn editor_for(&mut self, path: &str, text: &str, window: &mut Window, cx: &mut Context<Self>) -> Entity<EditorState> {
-        if let Some((shown, editor)) = &self.editor
+        let read = self.model.read(cx).reads();
+        if let Some((shown, shown_read, editor)) = &self.editor
             && shown == path
+            && *shown_read == read
         {
             return editor.clone();
         }
@@ -418,17 +421,18 @@ impl FileBrowserView {
         self.brackets = Some(editor.update(cx, |editor, cx| editor.create_decorations_collection(brackets, cx)));
         self.comment_lines = Some(editor.update(cx, |editor, cx| editor.create_range_decorations_collection(Vec::new(), cx)));
         self.marked = (String::new(), Vec::new());
-        self.editor = Some((path.to_owned(), editor.clone()));
+        self.editor = Some((path.to_owned(), read, editor.clone()));
         editor
     }
 
     /// The editor of the file shown now, if it is text.
     fn shown_editor(&self, cx: &App) -> Option<Entity<EditorState>> {
-        let FileView::Text { path, .. } = self.model.read(cx).view() else {
+        let model = self.model.read(cx);
+        let FileView::Text { path, .. } = model.view() else {
             return None;
         };
         match &self.editor {
-            Some((shown, editor)) if shown == path => Some(editor.clone()),
+            Some((shown, read, editor)) if shown == path && *read == model.reads() => Some(editor.clone()),
             Some(_) | None => None,
         }
     }
@@ -816,7 +820,7 @@ impl FileBrowserView {
                             if is_dir {
                                 model.toggle_dir(&path, cx);
                             } else {
-                                model.open(&path, false, cx);
+                                model.select_file(&path, cx);
                             }
                         });
                     }))
@@ -939,7 +943,7 @@ impl FileBrowserView {
                         .child(Self::entry_icon(false))
                         .child(div().flex_1().min_w_0().truncate().text_size(px(12.)).child(name))
                         .tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(tooltip.clone()).build(window, cx))
-                        .on_click(cx.listener(move |view, _, _, cx| view.model.update(cx, |m, cx| m.open(&path, false, cx))))
+                        .on_click(cx.listener(move |view, _, _, cx| view.model.update(cx, |m, cx| m.select_file(&path, cx))))
                         .into_any_element()
                 })
                 .collect(),

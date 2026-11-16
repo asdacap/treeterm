@@ -218,6 +218,49 @@ fn the_tree_searches_file_names_after_a_pause(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn picking_the_file_shown_leaves_it_as_it_is(cx: &mut TestAppContext) {
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let repo = TempRepo::new(&h);
+    repo.write("a.rs", "let word = 1;\nlet word = 2;\n");
+    repo.write("big.txt", &"x".repeat(1024 * 1024 + 1));
+    repo.commit_all("files");
+    let (_store, _workspace, browser) = open_browser(cx, &h, &repo, "a.rs");
+    let (a, big) = (format!("{}/a.rs", repo.root()), format!("{}/big.txt", repo.root()));
+
+    // Not read again: no "Loading...", the selected match stays, and so does the text read
+    // before the file changed on disk.
+    browser.update(cx, |b, cx| b.open_search("word", None, cx));
+    browser.update(cx, |b, cx| b.select_match(1, cx));
+    repo.write("a.rs", "changed\n");
+    let reads = browser.read_with(cx, |b, _| b.reads());
+    browser.update(cx, |b, cx| b.select_file(&a, cx));
+    assert!(matches!(browser.read_with(cx, |b, _| b.view().clone()), FileView::Text { text, .. } if text.starts_with("let word")));
+    assert_eq!(browser.read_with(cx, |b, _| b.reads()), reads);
+    assert_eq!(browser.read_with(cx, |b, _| b.match_count_label()), "2/2");
+    assert!(browser.read_with(cx, |b, _| b.reveal_range()).is_some());
+
+    // Reading it again (Review's Refresh) shows what is on disk now.
+    browser.update(cx, |b, cx| b.open(&a, false, cx));
+    assert!(browser.read_with(cx, |b, _| b.reads()) > reads);
+    wait_until(cx, &browser, |b| matches!(b.view(), FileView::Text { text, .. } if text == "changed\n"));
+
+    // A file opened anyway stays open when picked again.
+    browser.update(cx, |b, cx| b.select_file(&big, cx));
+    wait_until(cx, &browser, |b| !matches!(b.view(), FileView::Loading(_)));
+    assert!(matches!(browser.read_with(cx, |b, _| b.view().clone()), FileView::TooLarge { .. }));
+    browser.update(cx, |b, cx| b.open(&big, true, cx));
+    wait_until(cx, &browser, |b| matches!(b.view(), FileView::Text { .. }));
+    browser.update(cx, |b, cx| b.select_file(&big, cx));
+    assert!(matches!(browser.read_with(cx, |b, _| b.view().clone()), FileView::Text { .. }));
+
+    // Another file is read.
+    browser.update(cx, |b, cx| b.select_file(&a, cx));
+    assert!(matches!(browser.read_with(cx, |b, _| b.view().clone()), FileView::Loading(path) if path == a));
+}
+
+#[gpui_kit::test]
 fn a_folder_that_failed_to_load_loads_again_when_reopened(cx: &mut TestAppContext) {
     let _serial = serial();
     cx.executor().allow_parking();
