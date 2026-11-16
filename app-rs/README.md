@@ -357,8 +357,9 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   slides it there in 0.3 s), the edge docks' arrows are text triangles, and a pane showing a
   web page (Browser, Web App, a PDF) draws its page over the outline and edge docks: native
   webviews draw above the window's content.
-- A session dragged in the sidebar or the rail dims as in Electron, but GPUI has no drag
-  image of its section: a chip with the session's name follows the pointer instead.
+- A session dragged in the sidebar or the rail, or a workspace dragged in the tree, dims as
+  in Electron, but GPUI has no drag image of its section or row: a chip with its name follows
+  the pointer instead.
 
 ## Known differences from Electron (deliberate)
 

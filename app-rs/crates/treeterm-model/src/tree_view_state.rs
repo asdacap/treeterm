@@ -86,8 +86,8 @@ pub enum TreeDrag {
     /// no hint here and lands nowhere (`!dragState`).
     #[default]
     Idle,
-    /// `over` is the row and the place there `dragged` would land (`drag-before`,
-    /// `drag-after`, `drag-onto`), none while over no row that takes it.
+    /// `dragged`'s row dims (`.dragging`); `over` is the row and the place there it would
+    /// land (`drag-before`, `drag-after`, `drag-onto`), none while over no row that takes it.
     Dragging {
         dragged: String,
         over: Option<(String, DropPosition)>,
@@ -101,6 +101,11 @@ impl TreeDrag {
             dragged: id.to_owned(),
             over: None,
         };
+    }
+
+    /// Whether `row` is the one dragged (`.dragging`).
+    pub fn dims(&self, row: &str) -> bool {
+        matches!(self, TreeDrag::Dragging { dragged, .. } if dragged == row)
     }
 
     /// Where on `row` the dragged workspace would land, if it shows there.
@@ -293,14 +298,17 @@ mod tests {
         let mut drag = TreeDrag::Idle;
         assert!(!drag.moved("b", Some(DropPosition::Onto), |_, _| true));
         assert_eq!(drag.hint("b"), None);
+        assert!(!drag.dims("b"));
         assert_eq!(drag.drop_on("b"), None);
         assert_eq!(drag, TreeDrag::Idle);
     }
 
     #[test]
-    fn the_row_under_the_pointer_shows_where_the_dragged_workspace_lands() {
+    fn the_dragged_row_dims_and_the_row_under_the_pointer_shows_where_it_lands() {
         let mut drag = TreeDrag::default();
         drag.start("a");
+        assert!(drag.dims("a"));
+        assert!(!drag.dims("b"));
         let mut asked = Vec::new();
         assert!(
             drag.moved("b", Some(DropPosition::Before), |dragged, zone| {
@@ -324,6 +332,7 @@ mod tests {
         // Off the row: no hint.
         assert!(drag.moved("c", None, |_, _| true));
         assert_eq!(drag.hint("c"), None);
+        assert!(drag.dims("a"));
     }
 
     #[test]

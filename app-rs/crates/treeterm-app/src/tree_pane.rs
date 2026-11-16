@@ -693,7 +693,7 @@ impl TreePane {
         let fork_id = id.clone();
         let (drag_value, drag_id, move_id, drop_id) =
             (DraggedWorkspace { label: label.clone() }, id.clone(), id.clone(), id.clone());
-        let hint = self.drag.hint(&id);
+        let (dimmed, hint) = (self.drag.dims(&id), self.drag.hint(&id));
         let menu_id = id.clone();
         let (session, move_session, drop_session, fork_session) =
             (session.clone(), session.clone(), session.clone(), session.clone());
@@ -768,10 +768,18 @@ impl TreePane {
                         pane.select(select_id.clone(), cx);
                     }))
             })
-            .when_some(hint, |row, position| match position {
-                DropPosition::Before => row.border_t_2().border_color(c.accent),
-                DropPosition::After => row.border_b_2().border_color(c.accent),
-                DropPosition::Onto => row.bg(c.bg_hover).border_1().border_color(c.accent),
+            // `.dragging`: the dragged row dims.
+            .when(dimmed, |row| row.opacity(0.4))
+            // `.drag-before` / `.drag-after` (`inset 0 ±2px 0 0 var(--accent)`): a line along
+            // the row's edge, under its content, that moves no row. `.drag-onto`: a 20% accent
+            // tint, and its outline (below).
+            .when_some(hint, |row, position| {
+                let line = div().absolute().left_0().right_0().h(px(2.)).bg(c.accent);
+                match position {
+                    DropPosition::Before => row.child(line.top_0()),
+                    DropPosition::After => row.child(line.bottom_0()),
+                    DropPosition::Onto => row.bg(c.accent.opacity(0.2)),
+                }
             })
             // The chevron toggles; a row without children keeps the 16px slot, and a click
             // there selects the row (`.tree-item-expand-placeholder`).
@@ -847,6 +855,20 @@ impl TreePane {
             })
             // `WorkspaceAttentionFlash`, over the row's content.
             .children(flash.map(|flash| ui::attention_flash(flash, 0.)))
+            // `.drag-onto`'s outline: 1px accent just inside the row's edge (`outline-offset:
+            // -1px`), over its content and the unread rule.
+            .when(hint == Some(DropPosition::Onto), |row| {
+                row.child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .right_0()
+                        .bottom_0()
+                        .left(px(if unread { -2. } else { 0. }))
+                        .border_1()
+                        .border_color(c.accent),
+                )
+            })
             // `.focused`: the focus cursor is a 2px accent outline just inside the row's edge
             // (`outline-offset: -2px`), drawn over the row without moving its content, and
             // over the unread rule too.
