@@ -347,7 +347,7 @@ pub(crate) async fn ensure_forward(
         // Most likely the local port is taken: try another.
         remove(cx)?;
     }
-    Err(format!("Could not forward port {remote_port} after {FORWARD_ATTEMPTS} attempts"))
+    Err(format!("Port forward failed after {FORWARD_ATTEMPTS} attempts"))
 }
 
 #[cfg(test)]

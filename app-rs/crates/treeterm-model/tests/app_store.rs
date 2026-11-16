@@ -57,6 +57,8 @@ struct App {
     _events: Subscription,
     /// Set: the host refuses ssh (the bootstrap fails).
     refuse: Arc<AtomicBool>,
+    /// Set: every TCP port forward's ssh exits at once, as when its local port is taken.
+    forwards_fail: Arc<AtomicBool>,
     /// The ssh host's daemon socket, as its next bootstrap reports it.
     host_daemon: Arc<Mutex<PathBuf>>,
     /// The ssh tunnels to the host's daemon: clearing them cuts the connection.
@@ -73,15 +75,23 @@ fn app(cx: &mut TestAppContext, h: &Harness, local: Option<&Path>) -> App {
         .unwrap();
     let tunnels = Arc::new(Mutex::new(Vec::new()));
     let refuse = Arc::new(AtomicBool::new(false));
+    let forwards_fail = Arc::new(AtomicBool::new(false));
     let host_daemon = Arc::new(Mutex::new(h.daemon.socket_path().to_owned()));
     let spawner = FakeSpawner::with_responder({
         let (socket, tunnels, refuse) = (host_daemon.clone(), tunnels.clone(), refuse.clone());
+        let forwards_fail = forwards_fail.clone();
         move |command| {
             if refuse.load(Ordering::SeqCst) {
                 FakeResponse::Exit {
                     stdout: String::new(),
                     stderr: "ssh: connect to host example.com port 22: Connection refused"
                         .to_owned(),
+                    code: 255,
+                }
+            } else if is_port_forward(command) && forwards_fail.load(Ordering::SeqCst) {
+                FakeResponse::Exit {
+                    stdout: String::new(),
+                    stderr: "Error: Could not request local forwarding.".to_owned(),
                     code: 255,
                 }
             } else if is_port_forward(command) || command.program == "scp" {
@@ -113,6 +123,7 @@ fn app(cx: &mut TestAppContext, h: &Harness, local: Option<&Path>) -> App {
         events,
         _events: subscription,
         refuse,
+        forwards_fail,
         host_daemon,
         tunnels,
         spawner,
@@ -1626,5 +1637,44 @@ fn a_remote_browser_page_opens_anew_on_its_forward_after_a_restart(cx: &mut Test
         ready
     );
     assert_eq!(mount(cx), 2);
+    page.update(cx, |p, cx| p.close(cx));
+}
+
+/// The local ports of the TCP forwards started so far, in order.
+fn forward_local_ports(app: &App) -> Vec<u16> {
+    app.spawner
+        .commands()
+        .iter()
+        .filter(|command| is_port_forward(command))
+        .map(|command| {
+            let spec = command.args.iter().skip_while(|arg| *arg != "-L").nth(1).unwrap();
+            spec.split(':').next().unwrap().parse().unwrap()
+        })
+        .collect()
+}
+
+#[gpui_kit::test]
+fn a_remote_page_whose_forwards_all_fail_says_so_after_5_attempts_as_in_electron(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    isolated_home();
+    let h = harness();
+    let app = app(cx, &h, None);
+    app.connect(cx);
+    app.restored(cx);
+    app.forwards_fail.store(true, Ordering::SeqCst);
+    let remote = remote_host(cx, &app);
+    let home = "http://localhost:3000/".to_owned();
+    let page = cx.new(|cx| BrowserPageModel::new(home, "tab-1".to_owned(), Some(23456), Some(remote), cx));
+
+    assert_eq!(
+        wait_for_page(cx, &page, |phase| matches!(phase, BrowserPhase::Error(_))),
+        BrowserPhase::Error("Port forward failed after 5 attempts".to_owned())
+    );
+    // The saved local port first, then four random ones; each failed forward is removed.
+    let tried = forward_local_ports(&app);
+    assert_eq!(tried.len(), 5, "{tried:?}");
+    assert_eq!(tried[0], 23456);
+    assert!(tried[1..].iter().all(|port| (20000..45000).contains(port)), "{tried:?}");
+    assert_eq!(forwards(cx, &app), []);
     page.update(cx, |p, cx| p.close(cx));
 }
