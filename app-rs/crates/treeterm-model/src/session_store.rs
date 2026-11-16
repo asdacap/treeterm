@@ -1910,22 +1910,32 @@ impl SessionStore {
         Some(published)
     }
 
-    /// The worktree registry of this session's host, when the app gave it one.
     /// The PR lookup client, if one could be built (`useGitHubApi`).
     pub fn github_api(&self) -> Option<Arc<dyn treeterm_core::github::GitHubApi>> {
         self.github.clone()
     }
 
+    /// Look PRs up with `github` (tests give a fake); workspaces loaded from now on use it.
+    pub fn set_github_api(&mut self, github: Arc<dyn treeterm_core::github::GitHubApi>) {
+        self.github = Some(github);
+    }
+
+    /// The worktree registry of this session's host, when the app gave it one.
     pub fn worktree_registry(&self) -> Option<treeterm_core::worktree_registry::WorktreeRegistry> {
         self.registry_api.clone()
     }
 
     /// Record worktrees in the daemon host's registry (`~/.treeterm/worktrees.json`).
     pub fn use_worktree_registry(&mut self) {
-        self.registry_api = Some(treeterm_core::worktree_registry::WorktreeRegistry::new(
+        self.set_worktree_registry(treeterm_core::worktree_registry::WorktreeRegistry::new(
             Arc::new(self.conn.fs_client()),
             Arc::new(self.conn.exec_client()),
         ));
+    }
+
+    /// Record worktrees in `registry` (tests give it a temporary home).
+    pub fn set_worktree_registry(&mut self, registry: treeterm_core::worktree_registry::WorktreeRegistry) {
+        self.registry_api = Some(registry);
     }
 
     /// Record a worktree workspace in the registry (`saveRegistryEntry`). Best effort: a
