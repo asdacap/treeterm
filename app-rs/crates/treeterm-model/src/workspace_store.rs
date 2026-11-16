@@ -771,13 +771,40 @@ impl WorkspaceStore {
             },
             cx,
         );
-        let limit = if enabled {
-            WidthLimit::Capped(self.settings.terminal.max_cols)
-        } else {
+        self.sync_terminal_options(cx);
+    }
+
+    /// The column cap of the tab's terminal: the settings' `maxCols` unless its
+    /// `widthLimitDisabled` is set.
+    fn width_limit(&self, tab_id: &str) -> WidthLimit {
+        if self.tab_flag(tab_id, "widthLimitDisabled") {
             WidthLimit::Off
-        };
-        if let Some(TabRef::Terminal(TerminalTab::Attached { model, .. })) = self.tabs.get(tab_id) {
-            model.update(cx, |model, cx| model.set_width_limit(limit, cx));
+        } else {
+            WidthLimit::Capped(self.settings.terminal.max_cols)
+        }
+    }
+
+    /// Live terminals take what their tab's state now says, whoever changed it:
+    /// BaseTerminal re-reads `widthLimitDisabled` on every store change, so a flip made in
+    /// another window refits it.
+    fn sync_terminal_options(&mut self, cx: &mut Context<Self>) {
+        let terminals: Vec<(Entity<TerminalModel>, WidthLimit)> = self
+            .tabs
+            .iter()
+            .filter_map(|(tab_id, tab)| match tab {
+                TabRef::Terminal(TerminalTab::Attached { model, .. }) => {
+                    Some((model.clone(), self.width_limit(tab_id)))
+                }
+                TabRef::Terminal(TerminalTab::Creating { .. } | TerminalTab::Failed(_))
+                | TabRef::Files { .. }
+                | TabRef::Editor { .. }
+                | TabRef::Review { .. }
+                | TabRef::Browser { .. }
+                | TabRef::Tool(_) => None,
+            })
+            .collect();
+        for (model, width_limit) in terminals {
+            model.update(cx, |model, cx| model.set_width_limit(width_limit, cx));
         }
     }
 
@@ -1040,11 +1067,7 @@ impl WorkspaceStore {
             },
             settings: settings.terminal.clone(),
             keep_on_exit: flag("keepOnExit"),
-            width_limit: if flag("widthLimitDisabled") {
-                WidthLimit::Off
-            } else {
-                WidthLimit::Capped(settings.terminal.max_cols)
-            },
+            width_limit: self.width_limit(tab_id),
             // Always detecting: the per-tab switch gates only the Working edge, read when it
             // fires, so turning it off still lets a pending Idle land.
             idle_timeout: Some(self.idle_timeout()),
@@ -1781,8 +1804,9 @@ impl WorkspaceStore {
     // ---- sync --------------------------------------------------------------------------
 
     /// A body written elsewhere, with hash `sha`, replaces ours (`applyWorkspaceFile`): tabs
-    /// it dropped are detached, new tabs initialised, and a terminal whose tab now names
-    /// another PTY re-attaches. Emits no change: the body is already on disk.
+    /// it dropped are detached, new tabs initialised, a terminal whose tab now names
+    /// another PTY re-attaches, and the others take their tab's width limit. Emits no
+    /// change: the body is already on disk.
     pub fn apply_external(&mut self, mut file: WorkspaceFile, sha: &str, cx: &mut Context<Self>) {
         let removed: Vec<String> = self
             .workspace
@@ -1826,6 +1850,7 @@ impl WorkspaceStore {
         for tab_id in tab_ids {
             self.init_tab(&tab_id, cx);
         }
+        self.sync_terminal_options(cx);
         let rewrite = self.attention.has_pending() && self.reapply_attention();
         self.observe_attention(false, cx);
         self.sync_idle_timeouts(cx);

@@ -438,6 +438,68 @@ fn settings_changes_reach_live_terminals(cx: &mut TestAppContext) {
     terminal.read_with(cx, |t, _| assert_eq!(t.options().settings.font_size, 17.0));
 }
 
+/// Wait until nobody writes `id`'s body any more (it stays the same for a while).
+fn wait_for_quiet_disk(cx: &mut TestAppContext, h: &Harness, id: &str) {
+    let (mut last, mut unchanged) = (file_on_disk(h, id), 0);
+    for _ in 0..1000 {
+        cx.run_until_parked();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        let now = file_on_disk(h, id);
+        if now == last {
+            unchanged += 1;
+            if unchanged == 30 {
+                return;
+            }
+        } else {
+            (last, unchanged) = (now, 0);
+        }
+    }
+    panic!("the body kept changing");
+}
+
+/// The terminal `tab` shows, once attached.
+fn terminal_of(w: &WorkspaceStore, tab: &str) -> Option<Entity<treeterm_model::terminal::TerminalModel>> {
+    match w.tab_content(tab) {
+        Some(TabContent::Terminal(terminal)) => Some(terminal),
+        _ => None,
+    }
+}
+
+#[gpui_kit::test]
+fn a_width_limit_flip_in_another_window_reaches_the_live_terminal(cx: &mut TestAppContext) {
+    use treeterm_term::fit::WidthLimit;
+    cx.executor().allow_parking();
+    let h = harness();
+    std::fs::write(h.daemon.workspaces_dir().join("a.json"), body("a", None)).unwrap();
+    publish(&h, &["a"]);
+    let first = open_store(cx, &h, "client-a");
+    let second = open_store(cx, &h, "client-b");
+    wait_until(cx, &first, |s| loaded(s, "a"));
+    wait_until(cx, &second, |s| loaded(s, "a"));
+    let wa = first.read_with(cx, |s, _| ws(s, "a"));
+    let wb = second.read_with(cx, |s, _| ws(s, "a"));
+    let tab = wa.update(cx, |w, cx| w.add_tab("terminal", cx)).unwrap();
+    wait_until(cx, &wa, |w| terminal_of(w, &tab).is_some());
+    wait_until(cx, &wb, |w| terminal_of(w, &tab).is_some());
+    // Both windows wrote the PTY id: let those writes land first, or the flip below could
+    // lose the CAS race to one of them and be replaced.
+    wait_for_quiet_disk(cx, &h, "a");
+    let terminal = wa.read_with(cx, |w, _| terminal_of(w, &tab)).unwrap();
+    let max_cols = terminal.read_with(cx, |t, _| t.options().settings.max_cols);
+    assert_eq!(terminal.read_with(cx, |t, _| t.width_limit()), WidthLimit::Capped(max_cols));
+
+    // The other window turns the cap off: its own terminal at once, and this window's,
+    // still attached, when the body arrives.
+    wb.update(cx, |w, cx| w.set_width_limit_enabled(&tab, false, cx));
+    let other = wb.read_with(cx, |w, _| terminal_of(w, &tab)).unwrap();
+    assert_eq!(other.read_with(cx, |t, _| t.width_limit()), WidthLimit::Off);
+    wait_until(cx, &terminal, |t| t.width_limit() == WidthLimit::Off);
+    // And back on.
+    wb.update(cx, |w, cx| w.set_width_limit_enabled(&tab, true, cx));
+    wait_until(cx, &terminal, |t| t.width_limit() == WidthLimit::Capped(max_cols));
+    wa.read_with(cx, |w, _| assert_eq!(terminal_of(w, &tab), Some(terminal.clone()), "no re-attach"));
+}
+
 #[gpui_kit::test]
 fn opening_a_directory_adds_a_root_workspace_with_git_info_and_a_terminal(cx: &mut TestAppContext) {
     cx.executor().allow_parking();
