@@ -28,6 +28,7 @@ pub mod session_names;
 mod review_metadata;
 pub mod run_actions;
 pub mod session_store;
+pub mod session_tty_list;
 pub mod settings_store;
 pub mod system_monitor;
 pub mod terminal;

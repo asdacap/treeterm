@@ -167,7 +167,7 @@ impl SessionInfo {
         value
     }
 
-    /// The session these logs belong to, while connected (the TTYs tab lists its PTYs).
+    /// The session these logs belong to, while connected (the JSON tab follows it).
     pub fn session(&self, cx: &App) -> Option<Entity<crate::session_store::SessionStore>> {
         let app = self.app.upgrade()?;
         app.read(cx).session_slot(&self.id)?.session().cloned()

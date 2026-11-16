@@ -1,11 +1,15 @@
 //! The TTYs tab (`SessionTtyList.tsx`): every PTY of the session grouped by workspace, with
-//! Open (a live viewer dialog) and Kill.
+//! Open (a live viewer dialog) and Kill. [`SessionTtyList`] follows the connection's session
+//! across reconnects and its workspaces as they change.
 
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{AnyElement, Context, Entity, FontWeight, SharedString, Subscription, Window, div, px, rgb};
-use treeterm_model::active_processes::{ActiveProcesses, ProcessList, group_by_workspace, relative_time};
-use treeterm_model::session_store::SessionStore;
+use treeterm_core::connection::ConnectionId;
+use treeterm_model::active_processes::relative_time;
+use treeterm_model::app_store::AppStore;
+use treeterm_model::session_tty_list::{SessionTtyList, TtyListBody};
+use treeterm_model::terminal::TerminalModel;
 
 use crate::terminal_view::TerminalView;
 use crate::theme::colors;
@@ -15,30 +19,17 @@ use crate::ui::{MONO, dialog_close, dialog_shadow, modal, normal_line, text_butt
 const DANGER: u32 = 0xe74c3c;
 
 pub struct SessionTtys {
-    model: Entity<ActiveProcesses>,
-    /// `(path, name)` of the session's workspaces, to group PTYs by their cwd.
-    workspaces: Vec<(String, String)>,
-    viewer: Option<(String, Entity<TerminalView>)>,
+    list: Entity<SessionTtyList>,
+    /// The viewer of the selected PTY's terminal.
+    viewer: Option<(Entity<TerminalModel>, Entity<TerminalView>)>,
     _observe: Subscription,
 }
 
 impl SessionTtys {
-    pub fn new(session: &Entity<SessionStore>, settings: treeterm_core::settings::TerminalSettings, cx: &mut Context<Self>) -> Self {
-        let (conn, workspaces) = {
-            let session = session.read(cx);
-            let workspaces = session
-                .workspace_ids()
-                .filter_map(|id| session.workspace_store(id))
-                .map(|w| {
-                    let w = w.read(cx).workspace();
-                    (w.path.clone(), w.file.name.clone())
-                })
-                .collect();
-            (session.connection().clone(), workspaces)
-        };
-        let model = cx.new(|cx| ActiveProcesses::new(conn, settings, cx));
-        let observe = cx.observe(&model, |_, _, cx| cx.notify());
-        Self { model, workspaces, viewer: None, _observe: observe }
+    pub fn new(app: &Entity<AppStore>, id: ConnectionId, cx: &mut Context<Self>) -> Self {
+        let list = cx.new(|cx| SessionTtyList::new(app, id, cx));
+        let observe = cx.observe(&list, |_, _, cx| cx.notify());
+        Self { list, viewer: None, _observe: observe }
     }
 
     /// `.tty-list-refresh-btn` / `.tty-list-open-btn`.
@@ -54,21 +45,21 @@ impl SessionTtys {
     /// The viewer of the selected PTY, made when the selection changes.
     fn viewer(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<(String, Entity<TerminalView>)> {
         let (id, terminal) = {
-            let model = self.model.read(cx);
-            let (id, terminal) = model.selected()?;
+            let (id, terminal) = self.list.read(cx).selected(cx)?;
             (id.to_owned(), terminal.clone())
         };
-        match &self.viewer {
-            Some((shown, view)) if *shown == id => Some((id, view.clone())),
+        let view = match &self.viewer {
+            Some((shown, view)) if *shown == terminal => view.clone(),
             Some(_) | None => {
-                let view = cx.new(|cx| TerminalView::new(terminal, window, cx));
-                self.viewer = Some((id.clone(), view.clone()));
-                Some((id, view))
+                let view = cx.new(|cx| TerminalView::new(terminal.clone(), window, cx));
+                self.viewer = Some((terminal, view.clone()));
+                view
             }
-        }
+        };
+        Some((id, view))
     }
 
-    fn body(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn body(&self, body: TtyListBody, cx: &mut Context<Self>) -> AnyElement {
         let c = colors(cx);
         let (secondary, primary, border) = (c.text_secondary, c.text_primary, c.border);
         let centered = |child: AnyElement| {
@@ -82,20 +73,26 @@ impl SessionTtys {
                 .child(child)
                 .into_any_element()
         };
-        let sessions = match self.model.read(cx).list() {
-            ProcessList::Loading => return centered(div().child("Loading TTY sessions…").into_any_element()),
-            ProcessList::Failed(message) => {
+        let groups = match body {
+            // Without the toolbar: there is nothing to refresh.
+            TtyListBody::NotConnected => {
+                return super::SessionInfoView::output("session-ttys")
+                    .size_full()
+                    .child(div().text_color(secondary).child("Not connected"))
+                    .into_any_element();
+            }
+            TtyListBody::Loading => return centered(div().child("Loading TTY sessions…").into_any_element()),
+            TtyListBody::Failed(message) => {
                 return centered(
                     v_flex()
                         .items_center()
                         .child(div().mb(px(6.)).font_weight(FontWeight::MEDIUM).text_color(rgb(DANGER)).child("Failed to load TTY sessions"))
-                        .child(div().text_size(px(12.)).line_height(normal_line(12.)).opacity(0.85).child(message.clone()))
+                        .child(div().text_size(px(12.)).line_height(normal_line(12.)).opacity(0.85).child(message))
                         .into_any_element(),
                 );
             }
-            ProcessList::Loaded(sessions) => sessions.clone(),
+            TtyListBody::Loaded(groups) => groups,
         };
-        let groups = group_by_workspace(&sessions, &self.workspaces);
         if groups.is_empty() {
             return centered(div().child("No TTY sessions").into_any_element());
         }
@@ -144,10 +141,10 @@ impl SessionTtys {
                             h_flex()
                                 .gap(px(6.))
                                 .child(Self::button(SharedString::from(format!("tty-open-{g}-{i}")), "Open", cx).on_click(
-                                    cx.listener(move |view, _, _, cx| view.model.update(cx, |m, cx| m.select(&open, cx))),
+                                    cx.listener(move |view, _, _, cx| view.list.update(cx, |l, cx| l.select(&open, cx))),
                                 ))
                                 .child(Self::kill_button(SharedString::from(format!("tty-kill-{g}-{i}"))).on_click(
-                                    cx.listener(move |view, _, _, cx| view.model.update(cx, |m, cx| m.kill(&kill, cx))),
+                                    cx.listener(move |view, _, _, cx| view.list.update(cx, |l, cx| l.kill(&kill, cx))),
                                 )),
                         ),
                 );
@@ -159,6 +156,11 @@ impl SessionTtys {
 
 impl Render for SessionTtys {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let body = self.list.read(cx).body(cx);
+        if body == TtyListBody::NotConnected {
+            self.viewer = None;
+            return self.body(body, cx);
+        }
         let viewer = self.viewer(window, cx);
         if viewer.is_none() {
             self.viewer = None;
@@ -169,7 +171,7 @@ impl Render for SessionTtys {
             let size = window.viewport_size();
             let width = (f32::from(size.width) * 0.8).min(1000.);
             let short: String = id.chars().take(8).collect();
-            let model = self.model.clone();
+            let list = self.list.clone();
             let content = v_flex()
                 .id("pty-viewer-dialog")
                 .occlude()
@@ -191,16 +193,16 @@ impl Render for SessionTtys {
                             h_flex()
                                 .gap(px(8.))
                                 .child(Self::kill_button("pty-viewer-kill").on_click(cx.listener(move |view, _, _, cx| {
-                                    view.model.update(cx, |m, cx| m.kill(&id, cx));
+                                    view.list.update(cx, |l, cx| l.kill(&id, cx));
                                 })))
                                 .child(dialog_close("pty-viewer-close", "×", cx).on_click(cx.listener(|view, _, _, cx| {
-                                    view.model.update(cx, |m, cx| m.deselect(cx));
+                                    view.list.update(cx, |l, cx| l.deselect(cx));
                                 }))),
                         ),
                 )
                 // `.active-processes-pty-viewer`: the terminal inset 4px.
                 .child(div().flex_1().min_h_0().p(px(4.)).child(terminal));
-            modal(window, content, move |_, cx| model.update(cx, |m, cx| m.deselect(cx)))
+            modal(window, content, move |_, cx| list.update(cx, |l, cx| l.deselect(cx)))
         });
         v_flex()
             .flex_1()
@@ -219,10 +221,11 @@ impl Render for SessionTtys {
                     .child(div().truncate().text_size(px(13.)).line_height(normal_line(13.)).font_weight(FontWeight::MEDIUM).text_color(secondary).child("TTY sessions"))
                     .child(
                         Self::button("tty-refresh", "Refresh", cx)
-                            .on_click(cx.listener(|view, _, _, cx| view.model.update(cx, |m, cx| m.reload(cx)))),
+                            .on_click(cx.listener(|view, _, _, cx| view.list.update(cx, |l, cx| l.reload(cx)))),
                     ),
             )
-            .child(self.body(cx))
+            .child(self.body(body, cx))
             .children(dialog)
+            .into_any_element()
     }
 }

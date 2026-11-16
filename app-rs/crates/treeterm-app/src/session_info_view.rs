@@ -377,18 +377,16 @@ impl SessionInfoView {
     }
 
     fn ttys_view(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        if self.ttys.is_none()
-            && let Some(session) = self.info.read(cx).session(cx)
-        {
-            let settings = self.app.read(cx).settings().read(cx).settings().terminal.clone();
-            self.ttys = Some(cx.new(|cx| ttys::SessionTtys::new(&session, settings, cx)));
-        }
-        match &self.ttys {
-            Some(view) => div().flex_1().min_h_0().child(view.clone()).into_any_element(),
-            None => Self::output("session-ttys")
-                .child(div().text_color(colors(cx).text_secondary).child("Not connected"))
-                .into_any_element(),
-        }
+        let view = match &self.ttys {
+            Some(view) => view.clone(),
+            None => {
+                let (app, id) = (self.app.clone(), self.connection(cx));
+                let view = cx.new(|cx| ttys::SessionTtys::new(&app, id, cx));
+                self.ttys = Some(view.clone());
+                view
+            }
+        };
+        div().flex_1().min_h_0().child(view).into_any_element()
     }
 
     fn monitor_view(&mut self, state: Option<&ConnState>, cx: &mut Context<Self>) -> AnyElement {
