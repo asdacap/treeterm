@@ -159,6 +159,26 @@ pub(crate) fn reveal_in_center(editor: &Entity<EditorState>, range: std::ops::Ra
     });
 }
 
+/// A code editor for `text` with the defaults of Monaco's models: the file's own
+/// indentation (`detectIndentation`, else 4-space soft tabs, and tabs drawn that wide).
+pub(crate) fn code_editor(
+    language: &'static str,
+    text: String,
+    window: &mut Window,
+    cx: &mut Context<EditorState>,
+) -> EditorState {
+    use treeterm_model::indentation::{IndentUnit, Indentation, guess_indentation};
+    let indentation = guess_indentation(&text, Indentation::MONACO_DEFAULT);
+    let hard_tabs = match indentation.unit {
+        IndentUnit::Tab => true,
+        IndentUnit::Spaces => false,
+    };
+    EditorState::new(window, cx)
+        .language(language)
+        .tab_size(gpui_kit::component::input::TabSize { tab_size: indentation.tab_size, hard_tabs })
+        .default_value(text)
+}
+
 /// A code editor laid out as Monaco's: its gutter width (keep the returned collection with
 /// the editor) and its always-visible 14px scrollbar (`scrollbarSlider.*` of vs-dark, beside
 /// the overview ruler's border).
@@ -526,7 +546,7 @@ impl FileBrowserView {
         let brackets = bracket_colors(text, detect_monaco_language(path));
         let text = text.to_owned();
         // Not searchable: Cmd/Ctrl+F reaches this view's search panel instead.
-        let editor = cx.new(|cx| EditorState::new(window, cx).language(language).searchable(false).default_value(text));
+        let editor = cx.new(|cx| code_editor(language, text, window, cx).searchable(false));
         self.gutter = Some(monaco_gutter(&editor, true, cx));
         self.brackets = Some(editor.update(cx, |editor, cx| editor.create_decorations_collection(brackets, cx)));
         self.comment_lines = Some(editor.update(cx, |editor, cx| editor.create_range_decorations_collection(Vec::new(), cx)));
@@ -1734,6 +1754,50 @@ mod tests {
         assert_eq!(language_for("/w/build.Dockerfile"), "bash");
         assert_eq!(language_for("/w/Dockerfile"), "bash");
         assert_eq!(language_for("/w/plot.r"), "text");
+    }
+
+    /// A 400 x 300 code editor, as the Editor tab lays it out.
+    struct Host {
+        editor: Entity<EditorState>,
+    }
+
+    impl Render for Host {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().w(px(400.)).h(px(300.)).child(Editor::new(&self.editor).bordered(false).h_full())
+        }
+    }
+
+    fn draw(cx: &mut gpui_kit::VisualTestContext) {
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+    }
+
+    /// [`code_editor`] for `text`, laid out and focused, after `gpui_kit::init`.
+    fn code_editor_host<'a>(
+        text: &str,
+        cx: &'a mut gpui_kit::TestAppContext,
+    ) -> (Entity<EditorState>, &'a mut gpui_kit::VisualTestContext) {
+        let text = text.to_owned();
+        let (host, cx) = cx.add_window_view(move |window, cx| Host { editor: cx.new(|cx| code_editor("rust", text, window, cx)) });
+        let editor = cx.update(|_, cx| host.read(cx).editor.clone());
+        cx.update(|window, cx| editor.update(cx, |editor, cx| editor.focus(window, cx)));
+        draw(cx);
+        draw(cx);
+        (editor, cx)
+    }
+
+    #[gpui_kit::test]
+    fn tab_indents_as_the_file_does(cx: &mut gpui_kit::TestAppContext) {
+        cx.update(gpui_kit::init);
+        for (text, indent) in [("all:\n\tcc a.c\n", "\t"), ("fn f() {\n  g();\n}\n", "  "), ("one\ntwo\n", "    ")] {
+            let (editor, cx) = code_editor_host(text, cx);
+            editor.update(cx, |editor, cx| {
+                let end = editor.value().len();
+                editor.set_selected_range(end..end, cx);
+            });
+            cx.simulate_keystrokes("tab");
+            assert_eq!(cx.update(|_, cx| editor.read(cx).value().to_string()), format!("{text}{indent}"), "{text:?}");
+        }
     }
 
     #[test]

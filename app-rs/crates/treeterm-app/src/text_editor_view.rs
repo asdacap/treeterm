@@ -60,7 +60,7 @@ impl TextEditorView {
         let language = language_for(self.model.read(cx).path());
         let monaco_language = self.model.read(cx).language();
         let brackets = crate::file_browser_view::bracket_colors(&current, monaco_language);
-        let editor = cx.new(|cx| EditorState::new(window, cx).language(language).default_value(current));
+        let editor = cx.new(|cx| crate::file_browser_view::code_editor(language, current, window, cx));
         self.gutter = Some(crate::file_browser_view::monaco_gutter(&editor, false, cx));
         let brackets = editor.update(cx, |editor, cx| editor.create_decorations_collection(brackets, cx));
         let model = self.model.clone();

@@ -16,6 +16,7 @@ pub mod file_browser;
 pub mod forward_monitor;
 pub mod git_controller;
 pub mod harness_prompts;
+pub mod indentation;
 pub mod keybinding_store;
 pub mod pty_writer;
 pub mod review;

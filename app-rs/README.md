@@ -210,7 +210,8 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   Monaco's view zones; selects open a Kit menu, not the native popup; textareas have no
   resize grip. Off macOS the menu bar is GPUI Kit's, drawn in the window (not GTK's), above
   dialogs so that it stays usable while one is open, as GTK's is.
-- The code editors (Files viewer, Editor tab): GPUI Kit has no R, XML, Less or Dockerfile
+- The code editors (Files viewer, Editor tab), through GPUI Kit: Tab inserts a whole indent
+  step, not spaces up to the next tab stop. The Kit has no R, XML, Less or Dockerfile
   grammar: `.r` files are plain, and `.xml`, `.less` and `.dockerfile` files are coloured
   with the HTML, CSS and shell grammars.
 - With the sidebar collapsed the header keeps clear of the macOS window buttons (Electron's
