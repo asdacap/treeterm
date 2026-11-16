@@ -473,8 +473,15 @@ impl TerminalModel {
         self.options.width_limit
     }
 
+    /// Electron fits again when the switch flips, comparing the fit with the grid even if the
+    /// limit leaves it unchanged (a container narrower than the cap): that takes the PTY back
+    /// from a size another attachment set. The badge stays until the daemon echoes.
     pub fn set_width_limit(&mut self, limit: WidthLimit, cx: &mut Context<Self>) {
+        if self.options.width_limit == limit {
+            return;
+        }
         self.options.width_limit = limit;
+        self.fit.forget_fit();
         cx.notify();
     }
 

@@ -91,6 +91,12 @@ impl FitState {
             .map(|requested| (requested, actual))
     }
 
+    /// Fit again without mounting again, as Electron's width-limit switch does: the next fit
+    /// is compared with the grid even if it is unchanged, and the last request still stands.
+    pub fn forget_fit(&mut self) {
+        self.last_fit = None;
+    }
+
     /// Start over, as a terminal mounting again in Electron: the next fit is proposed even if
     /// it is unchanged, and nothing counts as requested.
     pub fn reset(&mut self) {
@@ -174,6 +180,17 @@ mod tests {
         assert_eq!(fit.mismatch(LARGE), None);
         assert_eq!(fit.mismatch(OTHER), Some((LARGE, OTHER)));
         assert_eq!(fit.mismatch(LARGE), None, "kept after the echo");
+    }
+
+    #[test]
+    fn a_forgotten_fit_is_compared_with_the_grid_again_and_keeps_the_request() {
+        let mut fit = FitState::default();
+        assert_eq!(fit.propose(LARGE, SMALL), Some(LARGE));
+        fit.forget_fit();
+        assert_eq!(fit.propose(LARGE, OTHER), Some(LARGE), "taken back from another attachment");
+        fit.forget_fit();
+        assert_eq!(fit.propose(LARGE, LARGE), None, "the grid has it already");
+        assert_eq!(fit.mismatch(OTHER), Some((LARGE, OTHER)), "the last request still stands");
     }
 
     #[test]

@@ -223,6 +223,29 @@ fn a_view_shown_again_takes_the_pty_back(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn flipping_the_width_limit_takes_the_pty_back(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    // A's 100 columns are under the 160 cap, so flipping it leaves A's fit unchanged.
+    let (a, b) = resized_by_another(cx, &h);
+
+    // Setting the limit A already has is no flip.
+    a.update(cx, |m, cx| m.set_width_limit(WidthLimit::Capped(160), cx));
+    a.update(cx, |m, _| m.fit(A_SIZE));
+    round_trip(cx, &a);
+    assert_eq!(a.read_with(cx, |m, _| m.grid_size()), B_SIZE);
+    assert_eq!(mismatch(cx, &a), Some((A_SIZE, B_SIZE)));
+
+    // A flip compares the fit with the grid again, as Electron's applyFit does.
+    a.update(cx, |m, cx| m.set_width_limit(WidthLimit::Off, cx));
+    a.update(cx, |m, _| m.fit(A_SIZE));
+    wait_until(cx, &a, |m| m.grid_size() == A_SIZE);
+    wait_until(cx, &b, |m| m.grid_size() == A_SIZE);
+    assert_eq!(mismatch(cx, &a), None);
+    assert_eq!(mismatch(cx, &b), Some((B_SIZE, A_SIZE)));
+}
+
+#[gpui_kit::test]
 fn a_settings_change_or_a_refresh_fits_again(cx: &mut TestAppContext) {
     cx.executor().allow_parking();
     let h = harness();
