@@ -418,6 +418,7 @@ pub struct Overview {
 /// The workspace as the Review header shows it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReviewHeader {
+    /// The workspace's `name` (`wsData.name`), not the Settings tab's `displayName`.
     pub name: String,
     pub branch: String,
     /// The tab names a parent workspace (`parentWorkspaceId`): the child's actions show
@@ -813,7 +814,7 @@ impl ReviewModel {
         let workspace = workspace.read(cx);
         let file = workspace.file();
         ReviewHeader {
-            name: file.display_name().to_owned(),
+            name: file.name.clone(),
             branch: file.git_branch.clone().unwrap_or_default(),
             has_parent: self.has_parent,
             parent_branch: workspace.parent_branch().map(str::to_owned),

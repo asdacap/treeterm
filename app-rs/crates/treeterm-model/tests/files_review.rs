@@ -2131,6 +2131,24 @@ fn the_review_header_takes_the_child_actions_from_the_tabs_parent_id(cx: &mut Te
     assert!(!top.read_with(cx, |r, cx| r.header(cx)).has_parent);
 }
 
+#[gpui_kit::test]
+fn the_review_header_shows_the_workspace_name_not_its_display_name(cx: &mut TestAppContext) {
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let repo = TempRepo::new(&h);
+    let store = open_store(cx, &h);
+    let workspace = open_repo_workspace(cx, &h, &store, &repo);
+    let review = open_review(cx, &workspace);
+    wait_review(cx, &review, "loaded", |r, _| !r.is_loading());
+    let name = workspace.read_with(cx, |w, _| w.file().name.clone());
+    assert!(!name.is_empty());
+    // Electron's header shows `wsData.name`, also once the Settings tab renamed it.
+    workspace.update(cx, |w, cx| w.set_display_name("Renamed", cx));
+    assert_eq!(workspace.read_with(cx, |w, _| w.file().display_name().to_owned()), "Renamed");
+    assert_eq!(review.read_with(cx, |r, cx| r.header(cx)).name, name);
+}
+
 /// The diffs of the list the review shows.
 fn shown_diffs(review: &ReviewModel) -> treeterm_model::review_patch::FileDiffs {
     use treeterm_model::review::Loaded;
