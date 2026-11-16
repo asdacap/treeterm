@@ -20,6 +20,9 @@ tracing.workspace = true
 thiserror.workspace = true
 uuid = { version = "1", features = ["v4"] }
 url = "2.5"
+# An AI harness's background, any CSS colour as xterm.js reads it (`harness_background`).
+# Already built for GPUI's SVG rendering.
+svgtypes = "0.16"
 # Monaco's per-language word patterns (`words`).
 regex = "1"
 # Syntax errors of TypeScript and JavaScript files (`code_intel::syntax`): the grammars GPUI

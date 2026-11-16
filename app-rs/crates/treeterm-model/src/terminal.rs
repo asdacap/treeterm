@@ -654,6 +654,16 @@ impl TerminalModel {
         cx.notify();
     }
 
+    /// The application's background changed. The emulator answers a program's OSC 11 query
+    /// with the background it attached with until the stream is refreshed.
+    pub fn set_background(&mut self, background: Rgb, cx: &mut Context<Self>) {
+        if self.options.background == background {
+            return;
+        }
+        self.options.background = background;
+        cx.notify();
+    }
+
     // ---- viewport ----------------------------------------------------------------------
 
     /// The mouse wheel turned toward older output. That unpins, whatever the wheel then does

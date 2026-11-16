@@ -7,6 +7,7 @@
 use serde_json::{Value, json};
 use treeterm_core::pty::Sandbox;
 use treeterm_core::settings::Settings;
+use treeterm_term::alacritty_terminal::vte::ansi::Rgb;
 
 use crate::terminal::{ScrollbarVisibility, SelectionCopy};
 
@@ -23,7 +24,8 @@ pub enum AppKind {
     /// An AI coding agent running in a PTY, read by the LLM analyzer.
     AiHarness {
         command: String,
-        background: String,
+        /// Its terminals' background (`backgroundColor`), whether sandboxed or not.
+        background: Rgb,
         keep_on_exit: bool,
         enable_sandbox: bool,
         allow_network: bool,
@@ -237,10 +239,11 @@ impl AppDef {
         }
     }
 
-    /// The terminal background a tab of this application uses, as `#rrggbb`, if not the default.
-    pub fn background(&self) -> Option<&str> {
+    /// The terminal background of this application's tabs, if it has its own (an AI
+    /// harness, sandboxed or not); other tabs take Terminal's.
+    pub fn background(&self) -> Option<Rgb> {
         match &self.kind {
-            AppKind::AiHarness { background, .. } => Some(background),
+            AppKind::AiHarness { background, .. } => Some(*background),
             AppKind::Terminal { .. }
             | AppKind::CustomRunner { .. }
             | AppKind::Files
@@ -249,6 +252,23 @@ impl AppDef {
             | AppKind::Browser { .. }
             | AppKind::WebApp { .. }
             | AppKind::Tool(_) => None,
+        }
+    }
+}
+
+/// What xterm.js draws for a theme background it cannot read (its `DEFAULT_BACKGROUND`).
+const XTERM_DEFAULT_BACKGROUND: Rgb = Rgb { r: 0, g: 0, b: 0 };
+
+/// An AI harness's `backgroundColor` read as a CSS colour, as xterm.js reads its theme:
+/// `#rgb` or `#rrggbb` (with or without alpha), `rgb()`, `hsl()`, `hwb()` or a colour name,
+/// drawn opaque as xterm.js draws it. Anything else gives xterm.js's black, also the newer
+/// CSS colours Chromium reads (`lab()`, `oklch()`, `color()`).
+fn harness_background(text: &str) -> Rgb {
+    match text.parse::<svgtypes::Color>() {
+        Ok(color) => Rgb { r: color.red, g: color.green, b: color.blue },
+        Err(error) => {
+            tracing::warn!(%error, background = text, "AI harness backgroundColor is not a CSS colour; using #000000");
+            XTERM_DEFAULT_BACKGROUND
         }
     }
 }
@@ -504,7 +524,7 @@ impl AppRegistry {
                 icon: instance.icon.clone(),
                 kind: AppKind::AiHarness {
                     command: instance.command.clone(),
-                    background: instance.background_color.clone(),
+                    background: harness_background(&instance.background_color),
                     keep_on_exit: instance.keep_on_exit,
                     enable_sandbox: instance.enable_sandbox,
                     allow_network: instance.allow_network,
@@ -750,7 +770,7 @@ mod tests {
         assert_eq!(registry.default_app().unwrap().id, "terminal");
         let claude = registry.get("aiharness-claude").unwrap();
         assert_eq!(claude.startup_command("/w").as_deref(), Some("claude"));
-        assert_eq!(claude.background(), Some("#1a1a24"));
+        assert_eq!(claude.background(), Some(Rgb { r: 0x1a, g: 0x1a, b: 0x24 }));
         assert_eq!(claude.initial_state()["keepOnExit"], true);
         assert_eq!(claude.initial_state()["sandbox"]["allowNetwork"], true);
         let build = registry.get("customrunner-build").unwrap();
@@ -811,6 +831,31 @@ mod tests {
         assert_eq!(copy(GHOSTTY_TERMINAL), SelectionCopy::OnSelect);
         assert_eq!(copy("terminal"), SelectionCopy::OnCopy);
         assert_eq!(copy("aiharness-claude"), SelectionCopy::OnCopy);
+    }
+
+    #[test]
+    fn an_ai_harness_background_is_any_css_colour_and_black_when_it_is_none() {
+        let rgb = |r, g, b| Rgb { r, g, b };
+        let colours = [
+            ("#1a1a24", rgb(0x1a, 0x1a, 0x24)),
+            ("#1A1A24", rgb(0x1a, 0x1a, 0x24)),
+            ("#000", rgb(0, 0, 0)),
+            ("#fa0", rgb(0xff, 0xaa, 0x00)),
+            ("#1a1a2480", rgb(0x1a, 0x1a, 0x24)),
+            ("#fa08", rgb(0xff, 0xaa, 0x00)),
+            ("navy", rgb(0, 0, 0x80)),
+            ("DarkSlateGray", rgb(0x2f, 0x4f, 0x4f)),
+            ("rgb(26, 26, 36)", rgb(26, 26, 36)),
+            ("rgba(255,0,0,0.5)", rgb(255, 0, 0)),
+            ("hsl(240, 100%, 25%)", rgb(0, 0, 0x80)),
+            (" #1a1a24 ", rgb(0x1a, 0x1a, 0x24)),
+        ];
+        for (text, colour) in colours {
+            assert_eq!(harness_background(text), colour, "{text}");
+        }
+        for text in ["", "nonsense", "currentcolor", "#12345", "#1a1a24 red", "1a1a24"] {
+            assert_eq!(harness_background(text), XTERM_DEFAULT_BACKGROUND, "{text}");
+        }
     }
 
     #[test]

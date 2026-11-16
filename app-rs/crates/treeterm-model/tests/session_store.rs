@@ -718,6 +718,61 @@ fn an_ai_harness_set_to_disable_scrollbar_draws_none(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn an_ai_harness_draws_on_its_css_background_whether_sandboxed_or_not(cx: &mut TestAppContext) {
+    use treeterm_term::alacritty_terminal::vte::ansi::Rgb;
+    use treeterm_term::palette::SANDBOX_BACKGROUND;
+    cx.executor().allow_parking();
+    let h = harness();
+    // A Terminal tab opened sandboxed keeps Terminal's sandbox background.
+    let mut file: serde_json::Value = serde_json::from_str(&body("a", None)).unwrap();
+    file["appStates"]["boxed"] = serde_json::json!({
+        "applicationId": "terminal", "title": "Terminal",
+        "state": {
+            "ptyId": null, "ptyHandle": "boxed-handle", "keepOnExit": false,
+            "sandbox": { "enabled": true, "allowNetwork": false, "allowedPaths": [] }
+        }
+    });
+    std::fs::write(h.daemon.workspaces_dir().join("a.json"), file.to_string()).unwrap();
+    publish(&h, &["a"]);
+    let settings = treeterm_core::settings::from_value(serde_json::json!({
+        "aiHarness": { "instances": [{
+            "id": "bot", "name": "Bot", "icon": "B", "command": "sleep 60",
+            "isDefault": false, "enableSandbox": true, "allowNetwork": false,
+            "backgroundColor": "navy", "disableScrollbar": false, "keepOnExit": true
+        }]}
+    }))
+    .unwrap();
+    let settings = cx.new(|_| SettingsStore::in_memory(settings));
+    let conn = h.conn.clone();
+    let store = cx.new(|cx| SessionStore::new(conn, "client-a".into(), settings.clone(), None, cx.new(ConnectionTraffic::new), cx));
+    wait_until(cx, &store, |s| loaded(s, "a"));
+    let workspace = store.read_with(cx, |s, _| ws(s, "a"));
+    let bot = workspace.update(cx, |w, cx| w.add_tab("aiharness-bot", cx)).unwrap();
+    wait_until(cx, &workspace, |w| terminal_of(w, &bot).is_some() && terminal_of(w, "boxed").is_some());
+    let (bot_terminal, boxed_terminal) =
+        workspace.read_with(cx, |w, _| (terminal_of(w, &bot).unwrap(), terminal_of(w, "boxed").unwrap()));
+    let background = |terminal: &Entity<treeterm_model::terminal::TerminalModel>, cx: &mut TestAppContext| {
+        terminal.read_with(cx, |t, _| t.options().background)
+    };
+    assert_eq!(background(&bot_terminal, cx), Rgb { r: 0, g: 0, b: 0x80 });
+    assert_eq!(background(&boxed_terminal, cx), SANDBOX_BACKGROUND);
+
+    // Changed in the settings: the harness's live terminal takes it.
+    let set_colour = |colour: &str, cx: &mut TestAppContext| {
+        let colour = colour.to_owned();
+        settings.update(cx, |s, cx| {
+            s.update(|settings| settings.ai_harness.instances[0].background_color = colour, cx)
+        });
+    };
+    set_colour("rgb(10, 20, 30)", cx);
+    wait_until(cx, &bot_terminal, |t| t.options().background == Rgb { r: 10, g: 20, b: 30 });
+    // Not a colour: xterm.js's own black.
+    set_colour("not a colour", cx);
+    wait_until(cx, &bot_terminal, |t| t.options().background == Rgb { r: 0, g: 0, b: 0 });
+    assert_eq!(background(&boxed_terminal, cx), SANDBOX_BACKGROUND);
+}
+
+#[gpui_kit::test]
 fn a_ghostty_tab_copies_its_selection_as_it_is_made(cx: &mut TestAppContext) {
     use treeterm_model::terminal::SelectionCopy;
     cx.executor().allow_parking();

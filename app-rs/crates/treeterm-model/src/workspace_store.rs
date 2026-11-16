@@ -22,12 +22,13 @@ use treeterm_core::layout::{DropTarget, Layout, LayoutTab, Side};
 use treeterm_core::pty::{CreatePty, Sandbox};
 use treeterm_core::settings::Settings;
 use treeterm_core::wire::workspace_file::{AppState, WorkspaceFile};
+use treeterm_term::alacritty_terminal::vte::ansi::Rgb;
 use treeterm_term::fit::WidthLimit;
 use treeterm_term::palette::{DEFAULT_BACKGROUND, SANDBOX_BACKGROUND};
 
 use crate::analyzer::{AnalyzerEvent, AnalyzerModel, LlmService};
 use crate::code_intel::links::Opening;
-use crate::apps::{AI_HARNESS_PREFIX, AppKind, AppRegistry};
+use crate::apps::{AI_HARNESS_PREFIX, AppDef, AppKind, AppRegistry};
 use crate::pty_writer::PtyWriter;
 use crate::session_store::ConnectionStatus;
 use crate::terminal::{ScrollbarVisibility, SelectionCopy, TerminalEvent, TerminalModel, TerminalOptions};
@@ -303,17 +304,6 @@ pub const NO_AI_HARNESS_TAB: &str = "No AI Harness tab open — the labeller has
 /// A refresh whose analyzer went first: its tab closed, its PTY was replaced, or the
 /// workspace was unloaded.
 pub const REFRESH_ANALYZER_GONE: &str = "The AI Harness terminal went away before the labeller finished";
-
-/// `#rrggbb` → colour; anything else is ignored (the default background is used).
-fn parse_hex_color(text: &str) -> Option<treeterm_term::alacritty_terminal::vte::ansi::Rgb> {
-    let hex = text.strip_prefix('#').filter(|h| h.len() == 6)?;
-    let value = u32::from_str_radix(hex, 16).ok()?;
-    Some(treeterm_term::alacritty_terminal::vte::ansi::Rgb {
-        r: (value >> 16) as u8,
-        g: (value >> 8) as u8,
-        b: value as u8,
-    })
-}
 
 /// `isAiHarnessState`: a terminal's state (`ptyId` a string or null) with a `sandbox` that
 /// JavaScript's `typeof` calls an object (so also an array or null).
@@ -913,17 +903,32 @@ impl WorkspaceStore {
         }
     }
 
+    /// The tab's terminal background: its application's own (an AI harness's, sandboxed or
+    /// not), else Terminal's, set apart when the tab is sandboxed.
+    fn background(&self, tab_id: &str) -> Rgb {
+        let tab = &self.workspace.file.app_states[tab_id];
+        let sandboxed = Sandbox::from_tab_state(&tab.state).is_some_and(|sandbox| sandbox.enabled);
+        match (self.registry.get(&tab.application_id).and_then(AppDef::background), sandboxed) {
+            (Some(color), _) => color,
+            (None, true) => SANDBOX_BACKGROUND,
+            (None, false) => DEFAULT_BACKGROUND,
+        }
+    }
+
     /// Live terminals take what their tab's state and application now say, whoever changed
     /// them: BaseTerminal re-reads `widthLimitDisabled` on every store change, so a flip
     /// made in another window refits it, and mounts again on a settings change.
     fn sync_terminal_options(&mut self, cx: &mut Context<Self>) {
-        let terminals: Vec<(Entity<TerminalModel>, WidthLimit, ScrollbarVisibility)> = self
+        let terminals: Vec<(Entity<TerminalModel>, WidthLimit, ScrollbarVisibility, Rgb)> = self
             .tabs
             .iter()
             .filter_map(|(tab_id, tab)| match tab {
-                TabRef::Terminal(TerminalTab::Attached { model, .. }) => {
-                    Some((model.clone(), self.width_limit(tab_id), self.scrollbar(tab_id)))
-                }
+                TabRef::Terminal(TerminalTab::Attached { model, .. }) => Some((
+                    model.clone(),
+                    self.width_limit(tab_id),
+                    self.scrollbar(tab_id),
+                    self.background(tab_id),
+                )),
                 TabRef::Terminal(TerminalTab::Creating { .. } | TerminalTab::Failed(_))
                 | TabRef::Files { .. }
                 | TabRef::Editor { .. }
@@ -932,10 +937,11 @@ impl WorkspaceStore {
                 | TabRef::Tool(_) => None,
             })
             .collect();
-        for (model, width_limit, scrollbar) in terminals {
+        for (model, width_limit, scrollbar, background) in terminals {
             model.update(cx, |model, cx| {
                 model.set_width_limit(width_limit, cx);
                 model.set_scrollbar(scrollbar, cx);
+                model.set_background(background, cx);
             });
         }
     }
@@ -1214,16 +1220,10 @@ impl WorkspaceStore {
         let state = &self.workspace.file.app_states[tab_id].state;
         let settings = &self.settings;
         let flag = |key: &str| state.get(key).and_then(Value::as_bool).unwrap_or(false);
-        let sandboxed = Sandbox::from_tab_state(state).is_some_and(|sandbox| sandbox.enabled);
         let app = self.registry.get(&self.workspace.file.app_states[tab_id].application_id);
-        let app_background = app.and_then(|app| app.background()).and_then(parse_hex_color);
         TerminalOptions {
             pty_id,
-            background: match (app_background, sandboxed) {
-                (Some(color), _) => color,
-                (None, true) => SANDBOX_BACKGROUND,
-                (None, false) => DEFAULT_BACKGROUND,
-            },
+            background: self.background(tab_id),
             settings: settings.terminal.clone(),
             keep_on_exit: flag("keepOnExit"),
             width_limit: self.width_limit(tab_id),
@@ -2124,7 +2124,7 @@ impl WorkspaceStore {
 
     /// New settings: the registry decides which tabs are native and how new ones start;
     /// live terminals take the emulator and font settings and their application's Disable
-    /// Scrollbar.
+    /// Scrollbar and background.
     pub fn apply_settings(&mut self, registry: Rc<AppRegistry>, settings: Rc<Settings>, cx: &mut Context<Self>) {
         self.registry = registry;
         self.settings = settings;

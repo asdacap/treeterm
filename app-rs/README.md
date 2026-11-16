@@ -463,6 +463,11 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   `disable-scrollbar` rule targets `.xterm-viewport`, which no longer holds the scrollbar
   since xterm.js 6, so the bar still shows there. In both apps the wheel scrolls the
   scrollback (or goes to a program that asked for mouse events).
+- An AI harness's "Background color" is read as CSS Color 3 (`#rgb`/`#rrggbb` with or without
+  alpha, `rgb()`, `hsl()`, `hwb()`, colour names) and drawn opaque; anything else gives
+  xterm.js's black, as an unreadable colour does in Electron, also Chromium's newer `lab()`,
+  `oklch()` or `color()`. A change reaches open harness tabs at once; Electron kept the colour
+  a tab's view was mounted with until it was mounted again.
 - URLs in a terminal's text are links in every terminal tab, with the schemes ghostty-web
   links (`http(s)`, `mailto`, `ftp`, `ssh`, `git`, `tel`, `magnet`, `gemini`, `gopher`,
   `news`): Cmd/Ctrl+click opens one, and it is underlined only while Cmd/Ctrl is held, so a
