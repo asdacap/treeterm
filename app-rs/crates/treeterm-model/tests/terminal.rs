@@ -21,13 +21,17 @@ use common::{Harness, harness, wait_until};
 
 /// A login shell with an empty config dir, so the user's dotfiles stay out of the test.
 fn spawn_shell(h: &Harness) -> String {
+    spawn_shell_sized(h, (80, 24))
+}
+
+fn spawn_shell_sized(h: &Harness, size: (u16, u16)) -> String {
     let mut env = HashMap::new();
     env.insert("ZDOTDIR".to_owned(), h.daemon.root().to_string_lossy().into_owned());
     env.insert("PS1".to_owned(), "$ ".to_owned());
     futures::executor::block_on(h.conn.create_pty(CreatePty {
         cwd: h.daemon.root().to_string_lossy().into_owned(),
         env,
-        size: Some((80, 24)),
+        size: Some(size),
         ..CreatePty::default()
     }))
     .unwrap()
@@ -114,11 +118,128 @@ fn the_grid_resizes_only_when_the_daemon_echoes(cx: &mut TestAppContext) {
 
     let target = GridSize { cols: 100, rows: 30 };
     model.update(cx, |m, _| {
-        m.request_size(target);
+        m.fit(target);
         assert_eq!(m.grid_size(), GridSize { cols: 80, rows: 24 }, "no local resize");
     });
     wait_until(cx, &model, |m| m.grid_size() == target);
     assert_eq!(model.read_with(cx, |m, _| m.size_mismatch()), None);
+}
+
+/// Type a command into `model` and wait for its output: anything the daemon sent before
+/// it has arrived by then.
+fn round_trip(cx: &mut TestAppContext, model: &Entity<TerminalModel>) {
+    model.update(cx, |m, cx| m.set_focused(true, cx));
+    type_line(cx, model, "echo trip-$((20+3))");
+    wait_until(cx, model, |m| m.screen_text().contains("trip-23"));
+}
+
+fn mismatch(cx: &mut TestAppContext, model: &Entity<TerminalModel>) -> Option<(GridSize, GridSize)> {
+    model.read_with(cx, |m, _| m.size_mismatch().map(|s| (s.requested, s.actual)))
+}
+
+const A_SIZE: GridSize = GridSize { cols: 100, rows: 30 };
+const B_SIZE: GridSize = GridSize { cols: 90, rows: 20 };
+
+/// Two views A and B of one shell: A fitted it to [`A_SIZE`], then B to [`B_SIZE`].
+fn resized_by_another(cx: &mut TestAppContext, h: &Harness) -> (Entity<TerminalModel>, Entity<TerminalModel>) {
+    let pty = spawn_shell(h);
+    let a = open(cx, h, options(pty.clone()));
+    let b = open(cx, h, options(pty));
+    a.update(cx, |m, _| m.fit(A_SIZE));
+    wait_until(cx, &a, |m| m.grid_size() == A_SIZE);
+    wait_until(cx, &b, |m| m.grid_size() == A_SIZE);
+    assert_eq!(mismatch(cx, &a), None);
+    b.update(cx, |m, _| m.fit(B_SIZE));
+    wait_until(cx, &a, |m| m.grid_size() == B_SIZE);
+    wait_until(cx, &b, |m| m.grid_size() == B_SIZE);
+    (a, b)
+}
+
+#[gpui_kit::test]
+fn no_fit_is_asked_for_before_the_daemon_reports_the_size(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    let pty = spawn_shell_sized(&h, (100, 30));
+    let conn = h.conn.clone();
+    let model = cx.new(|cx| TerminalModel::new(conn, options(pty), cx));
+
+    // The grid is still the 80x24 placeholder: a fit compared with it would ask for nothing,
+    // and the view would keep the PTY's 100x30 for good.
+    let fits_the_placeholder = GridSize { cols: 80, rows: 24 };
+    model.update(cx, |m, _| m.fit(fits_the_placeholder));
+    wait_until(cx, &model, |m| m.grid_size() == GridSize { cols: 100, rows: 30 });
+    model.update(cx, |m, _| m.fit(fits_the_placeholder));
+    wait_until(cx, &model, |m| m.grid_size() == fits_the_placeholder);
+}
+
+#[gpui_kit::test]
+fn a_foreign_resize_is_kept_and_flagged(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    let (a, b) = resized_by_another(cx, &h);
+
+    // A flags the size another attachment set, with the one it had asked for.
+    assert_eq!(mismatch(cx, &a), Some((A_SIZE, B_SIZE)));
+    assert_eq!(mismatch(cx, &b), None);
+
+    // A's fit is unchanged, so A does not take the PTY back however often it lays out.
+    a.update(cx, |m, _| m.fit(A_SIZE));
+    round_trip(cx, &b);
+    assert_eq!(a.read_with(cx, |m, _| m.grid_size()), B_SIZE);
+    assert_eq!(b.read_with(cx, |m, _| m.grid_size()), B_SIZE);
+
+    // A fit of its own changing does, and then B is the one flagging.
+    let wider = GridSize { cols: 110, rows: 30 };
+    a.update(cx, |m, _| m.fit(wider));
+    wait_until(cx, &a, |m| m.grid_size() == wider);
+    wait_until(cx, &b, |m| m.grid_size() == wider);
+    assert_eq!(mismatch(cx, &a), None);
+    assert_eq!(mismatch(cx, &b), Some((B_SIZE, wider)));
+}
+
+#[gpui_kit::test]
+fn a_view_shown_again_takes_the_pty_back(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    let (a, b) = resized_by_another(cx, &h);
+
+    // The badge goes, and the unchanged fit is asked for again.
+    a.update(cx, |m, cx| m.refit(cx));
+    assert_eq!(mismatch(cx, &a), None);
+    a.update(cx, |m, _| m.fit(A_SIZE));
+    wait_until(cx, &a, |m| m.grid_size() == A_SIZE);
+    wait_until(cx, &b, |m| m.grid_size() == A_SIZE);
+    assert_eq!(mismatch(cx, &a), None);
+    assert_eq!(mismatch(cx, &b), Some((B_SIZE, A_SIZE)));
+
+    // Shown again with a fit the grid already has: nothing is asked for, so a size another
+    // attachment sets later is not flagged (Electron's requestedSize starts empty).
+    a.update(cx, |m, cx| m.refit(cx));
+    a.update(cx, |m, _| m.fit(A_SIZE));
+    b.update(cx, |m, cx| m.refit(cx));
+    b.update(cx, |m, _| m.fit(B_SIZE));
+    wait_until(cx, &a, |m| m.grid_size() == B_SIZE);
+    assert_eq!(mismatch(cx, &a), None);
+}
+
+#[gpui_kit::test]
+fn a_settings_change_or_a_refresh_fits_again(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    let (a, b) = resized_by_another(cx, &h);
+
+    // Electron mounts its terminals again on a settings change.
+    a.update(cx, |m, cx| m.apply_settings(TerminalSettings::default(), cx));
+    a.update(cx, |m, _| m.fit(A_SIZE));
+    wait_until(cx, &b, |m| m.grid_size() == A_SIZE);
+
+    // A refresh starts over from the replay's size, whatever the placeholder grid was.
+    b.update(cx, |m, cx| m.refresh(cx));
+    assert_eq!(mismatch(cx, &b), None);
+    b.update(cx, |m, _| m.fit(B_SIZE));
+    wait_until(cx, &b, |m| *m.overlay() == Overlay::Hidden && m.grid_size() == A_SIZE);
+    b.update(cx, |m, _| m.fit(B_SIZE));
+    wait_until(cx, &a, |m| m.grid_size() == B_SIZE);
 }
 
 #[gpui_kit::test]

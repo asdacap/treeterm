@@ -191,6 +191,12 @@ impl TerminalView {
         &self.focus
     }
 
+    /// This terminal came into view as the shown tab, as an Electron terminal mounts: it fits
+    /// its PTY to itself again, taking it back from a size another attachment set meanwhile.
+    pub fn on_shown(&mut self, cx: &mut Context<Self>) {
+        self.model.update(cx, |model, cx| model.refit(cx));
+    }
+
     /// Keyboard focus in the focused window, which is what lets this terminal write.
     fn sync_focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let focused = self.focus.is_focused(window) && crate::window_counts_as_active(window);

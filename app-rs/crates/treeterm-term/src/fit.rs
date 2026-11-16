@@ -52,6 +52,52 @@ impl WidthLimit {
     }
 }
 
+/// What one view of a PTY asked the daemon for. Port of `applyFit` and `requestedSize` in
+/// `BaseTerminal.tsx`.
+///
+/// Any attachment may resize the PTY, and the daemon applies the last request. A view asks
+/// again only when its own fit changes (its container, font or width limit), never because
+/// the size is not the one it asked for: two views of one PTY at different sizes would
+/// otherwise take it from each other on every frame. A size another attachment applied is
+/// kept, and [`FitState::mismatch`] flags it.
+#[derive(Debug, Default)]
+pub struct FitState {
+    /// The size the view called for last time.
+    last_fit: Option<GridSize>,
+    /// The size the view last asked for. Kept after the daemon's echo, so a later size from
+    /// another attachment is a mismatch.
+    last_requested: Option<GridSize>,
+}
+
+impl FitState {
+    /// The size to ask the daemon for, if any: none while the view's fit is unchanged, or
+    /// when the grid (`current`) already has it.
+    pub fn propose(&mut self, wanted: GridSize, current: GridSize) -> Option<GridSize> {
+        if self.last_fit == Some(wanted) {
+            return None;
+        }
+        self.last_fit = Some(wanted);
+        if wanted == current {
+            return None;
+        }
+        self.last_requested = Some(wanted);
+        Some(wanted)
+    }
+
+    /// `(requested, actual)` when the size the daemon reported is not the one last asked for.
+    pub fn mismatch(&self, actual: GridSize) -> Option<(GridSize, GridSize)> {
+        self.last_requested
+            .filter(|requested| *requested != actual)
+            .map(|requested| (requested, actual))
+    }
+
+    /// Start over, as a terminal mounting again in Electron: the next fit is proposed even if
+    /// it is unchanged, and nothing counts as requested.
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -92,5 +138,50 @@ mod tests {
         assert_eq!(WidthLimit::Capped(160).unused_strip(1600.0, 160, 8.0), Some(1280.0));
         assert_eq!(WidthLimit::Capped(160).unused_strip(1285.0, 160, 8.0), None);
         assert_eq!(WidthLimit::Off.unused_strip(1600.0, 160, 8.0), None);
+    }
+
+    const SMALL: GridSize = GridSize { cols: 80, rows: 24 };
+    const LARGE: GridSize = GridSize { cols: 100, rows: 30 };
+    const OTHER: GridSize = GridSize { cols: 90, rows: 20 };
+
+    #[test]
+    fn an_unchanged_fit_is_proposed_once() {
+        let mut fit = FitState::default();
+        assert_eq!(fit.propose(LARGE, SMALL), Some(LARGE));
+        assert_eq!(fit.propose(LARGE, SMALL), None, "not again while the echo is on its way");
+        assert_eq!(fit.propose(LARGE, OTHER), None, "nor to undo another attachment's size");
+        assert_eq!(fit.propose(SMALL, OTHER), Some(SMALL), "a new fit is");
+    }
+
+    #[test]
+    fn a_fit_the_grid_already_has_is_not_requested() {
+        let mut fit = FitState::default();
+        assert_eq!(fit.propose(SMALL, SMALL), None);
+        assert_eq!(fit.mismatch(OTHER), None, "nothing was requested");
+        assert_eq!(fit.propose(LARGE, SMALL), Some(LARGE));
+        assert_eq!(fit.propose(OTHER, OTHER), None);
+        assert_eq!(
+            fit.mismatch(OTHER),
+            Some((LARGE, OTHER)),
+            "the last request stands until another is sent"
+        );
+    }
+
+    #[test]
+    fn a_size_other_than_the_last_request_is_a_mismatch() {
+        let mut fit = FitState::default();
+        assert_eq!(fit.propose(LARGE, SMALL), Some(LARGE));
+        assert_eq!(fit.mismatch(LARGE), None);
+        assert_eq!(fit.mismatch(OTHER), Some((LARGE, OTHER)));
+        assert_eq!(fit.mismatch(LARGE), None, "kept after the echo");
+    }
+
+    #[test]
+    fn a_reset_proposes_the_same_fit_again_and_forgets_the_request() {
+        let mut fit = FitState::default();
+        assert_eq!(fit.propose(LARGE, SMALL), Some(LARGE));
+        fit.reset();
+        assert_eq!(fit.mismatch(OTHER), None);
+        assert_eq!(fit.propose(LARGE, OTHER), Some(LARGE));
     }
 }

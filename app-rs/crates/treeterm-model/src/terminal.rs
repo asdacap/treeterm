@@ -27,7 +27,7 @@ use treeterm_term::core::{
     CursorShapeSetting, EmulatorSettings, Gate, GridSize, Notice, Responder, SCROLLBACK_LINES,
     SharedTerm, TermCore, apply_settings, write_local,
 };
-use treeterm_term::fit::WidthLimit;
+use treeterm_term::fit::{FitState, WidthLimit};
 use treeterm_term::idle::{IdleDetector, IdleEdge, IdleOutput};
 use treeterm_term::keys::paste_bytes;
 use treeterm_term::palette::Palette;
@@ -91,6 +91,14 @@ impl Overlay {
 pub struct SizeMismatch {
     pub requested: GridSize,
     pub actual: GridSize,
+}
+
+/// Whether the grid has the PTY's size. The daemon reports it in every attachment's replay;
+/// until then the grid is a placeholder that no fit may be compared with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PtySize {
+    Unknown,
+    Reported,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -162,7 +170,8 @@ pub struct TerminalModel {
     attachment: Attachment,
     overlay: Overlay,
     title: Option<String>,
-    requested: Option<GridSize>,
+    pty_size: PtySize,
+    fit: FitState,
     size_mismatch: Option<SizeMismatch>,
     scroll_position: ScrollPosition,
     alternate_screen: bool,
@@ -208,7 +217,8 @@ impl TerminalModel {
             attachment,
             overlay: Overlay::Loading,
             title: None,
-            requested: None,
+            pty_size: PtySize::Unknown,
+            fit: FitState::default(),
             size_mismatch: None,
             scroll_position: ScrollPosition::Bottom,
             alternate_screen: false,
@@ -434,18 +444,29 @@ impl TerminalModel {
             .set_cell_size(width.round() as u16, height.round() as u16);
     }
 
-    /// Ask the daemon for a size that fits the view. Nothing resizes locally: the daemon
-    /// echoes the size it applied, and only then does the grid change. Does not notify, so
-    /// it is safe to call while laying out.
-    pub fn request_size(&mut self, size: GridSize) {
-        let current = self.grid_size();
-        if self.requested == Some(size) || (self.requested.is_none() && current == size) {
+    /// The view laid out and `wanted` fits it. The daemon is asked for it when the view's fit
+    /// changed and the grid does not have it already; a size another attachment applied is
+    /// otherwise kept (and flagged by [`Self::size_mismatch`]). Nothing resizes locally: the
+    /// daemon echoes the size it applied, and only then does the grid change. Does not
+    /// notify, so it is safe to call while laying out.
+    pub fn fit(&mut self, wanted: GridSize) {
+        if self.pty_size == PtySize::Unknown {
             return;
         }
-        self.requested = Some(size);
+        let Some(size) = self.fit.propose(wanted, self.grid_size()) else {
+            return;
+        };
         if self.attachment.input.resize(size.cols, size.rows).is_err() {
             tracing::debug!(pty = %self.options.pty_id, "resize dropped: stream closed");
         }
+    }
+
+    /// The view came into view again, as an Electron terminal mounts again: its next fit is
+    /// asked for even if unchanged, taking the PTY back from a size another attachment set.
+    pub fn refit(&mut self, cx: &mut Context<Self>) {
+        self.fit.reset();
+        self.size_mismatch = None;
+        cx.notify();
     }
 
     pub fn width_limit(&self) -> WidthLimit {
@@ -619,6 +640,8 @@ impl TerminalModel {
             self.options.width_limit = WidthLimit::Capped(settings.max_cols);
         }
         self.options.settings = settings;
+        // Electron mounts its terminals again on a settings change, which fits them again.
+        self.fit.reset();
         cx.notify();
     }
 
@@ -631,7 +654,8 @@ impl TerminalModel {
         self.attachment.gate.set_focused(focused);
         self.attachment.gate.set_pinned(pinned);
         self.overlay = Overlay::Loading;
-        self.requested = None;
+        self.pty_size = PtySize::Unknown;
+        self.fit.reset();
         self.size_mismatch = None;
         self.exited = None;
         self.title = None;
@@ -681,11 +705,12 @@ impl TerminalModel {
             self.overlay = Overlay::Hidden;
         }
         if let Some(actual) = batch.resized {
-            self.size_mismatch = match self.requested {
-                Some(requested) if requested != actual => Some(SizeMismatch { requested, actual }),
-                Some(_) | None => None,
-            };
-            self.requested = None;
+            self.pty_size = PtySize::Reported;
+            // The last request stands: a size another attachment applies later shows too.
+            self.size_mismatch = self
+                .fit
+                .mismatch(actual)
+                .map(|(requested, actual)| SizeMismatch { requested, actual });
         }
         for notice in batch.notices {
             match notice {

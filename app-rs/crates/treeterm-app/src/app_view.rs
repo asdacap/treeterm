@@ -131,6 +131,8 @@ struct Connected {
     branch_copied: Option<(String, gpui_kit::Task<()>)>,
     /// Focus the shown terminal on the next render (after a workspace or tab switch).
     focus_pending: bool,
+    /// The terminal model the last render showed: a terminal coming into view fits again.
+    shown_terminal: Option<EntityId>,
     _selection: Subscription,
 }
 
@@ -317,6 +319,7 @@ impl AppView {
             branch_copied: None,
             tool_views: crate::tool_views::ToolViews::new(self.settings.clone()),
             focus_pending: false,
+            shown_terminal: None,
             _selection: selection,
         }
     }
@@ -752,6 +755,10 @@ impl Render for AppView {
         }
         for (_, connected) in self.sessions.iter().filter(|(id, _)| on_screen.as_ref() != Some(*id)) {
             hide_reviews(connected, cx);
+        }
+        // A session off screen shows no terminal: its terminal is shown again when it returns.
+        for (_, connected) in self.sessions.iter_mut().filter(|(id, _)| on_screen.as_ref() != Some(*id)) {
+            connected.shown_terminal = None;
         }
         let pane = match (info, self.current_mut()) {
             (Some(info), _) => info.into_any_element(),
@@ -1873,6 +1880,8 @@ fn workspace_pane(
     let (secondary, error) = (c.text_secondary, c.error);
     prune_terminal_views(connected, cx);
     connected.tool_views.prune(connected.session.read(cx), cx);
+    // Set again below if this render shows a terminal.
+    let previous_terminal = connected.shown_terminal.take();
     let ActiveView::Workspace(id) = &connected.active else {
         hide_reviews(connected, cx);
         // `.workspace-empty`.
@@ -1959,6 +1968,7 @@ fn workspace_pane(
                     .entry(model.entity_id())
                     .or_insert_with(|| cx.new(|cx| TerminalView::new(model.clone(), window, cx)))
                     .clone();
+                show_terminal(connected, previous_terminal, model.entity_id(), &view, cx);
                 if std::mem::take(&mut connected.focus_pending) {
                     let focus = view.read(cx).focus_handle().clone();
                     window.focus(&focus, cx);
@@ -2007,7 +2017,7 @@ fn workspace_pane(
             }
             Some(TabContent::Browser { page, forward }) => browser_tab(connected, &workspace, &id, tab_id, &page, forward, cx),
             Some(TabContent::WebApp { app, terminal, forward }) => {
-                web_app_tab(connected, &workspace, &id, tab_id, &app, terminal, forward, window, cx)
+                web_app_tab(connected, previous_terminal, &workspace, &id, tab_id, &app, terminal, forward, window, cx)
             }
             Some(
                 tool @ (TabContent::GitHub
@@ -2355,6 +2365,7 @@ fn browser_tab(
 #[allow(clippy::too_many_arguments)]
 fn web_app_tab(
     connected: &mut Connected,
+    previous_terminal: Option<EntityId>,
     workspace: &Entity<treeterm_model::workspace_store::WorkspaceStore>,
     workspace_id: &str,
     tab_id: &str,
@@ -2387,6 +2398,7 @@ fn web_app_tab(
                     .entry(model.entity_id())
                     .or_insert_with(|| cx.new(|cx| TerminalView::new(model.clone(), window, cx)))
                     .clone();
+                show_terminal(connected, previous_terminal, model.entity_id(), &view, cx);
                 if std::mem::take(&mut connected.focus_pending) {
                     let focus = view.read(cx).focus_handle().clone();
                     window.focus(&focus, cx);
@@ -2552,6 +2564,22 @@ fn terminal_status_bar(
             width_ws.update(cx, |w, cx| w.set_width_limit_enabled(&width_tab, checked, cx));
         }))
         .into_any_element()
+}
+
+/// Show the terminal of `model` in the workspace pane. Electron mounts only the shown tab's
+/// terminal, so one not shown in the last render comes into view as a mount does: after a
+/// tab or workspace switch, or the shown tab closing.
+fn show_terminal(
+    connected: &mut Connected,
+    previous: Option<EntityId>,
+    model: EntityId,
+    view: &Entity<TerminalView>,
+    cx: &mut Context<AppView>,
+) {
+    connected.shown_terminal = Some(model);
+    if previous != Some(model) {
+        view.update(cx, |view, cx| view.on_shown(cx));
+    }
 }
 
 /// Drop views whose terminal is gone (tab closed, workspace removed): a view holds its

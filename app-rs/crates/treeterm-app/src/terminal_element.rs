@@ -288,26 +288,19 @@ impl Element for TerminalElement {
             ),
         );
 
-        // Propose a size that fits; the daemon decides and echoes it back.
-        let (width_limit, live) = {
-            let model = self.model.read(cx);
-            (
-                model.width_limit(),
-                !matches!(model.overlay(), treeterm_model::terminal::Overlay::Loading),
-            )
-        };
-        if live
-            && let Some(proposed) = propose_dimensions(
-                f32::from(inner.size.width),
-                f32::from(inner.size.height),
-                f32::from(cell.width),
-                f32::from(cell.height),
-            )
-        {
+        // The size that fits; the model asks the daemon for it when it changed, and the daemon
+        // echoes back the size it applied.
+        let width_limit = self.model.read(cx).width_limit();
+        if let Some(proposed) = propose_dimensions(
+            f32::from(inner.size.width),
+            f32::from(inner.size.height),
+            f32::from(cell.width),
+            f32::from(cell.height),
+        ) {
             let wanted: GridSize = width_limit.apply(proposed);
             self.model.update(cx, |model, _| {
                 model.set_cell_size(f32::from(cell.width), f32::from(cell.height));
-                model.request_size(wanted);
+                model.fit(wanted);
             });
         }
 
