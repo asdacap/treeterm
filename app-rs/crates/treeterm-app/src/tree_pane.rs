@@ -40,15 +40,8 @@ pub struct TreePane {
     drop_hint: Option<(String, DropPosition)>,
     /// Per-window view state: which workspaces have their children hidden.
     view: TreeViewState,
-    selected: Selection,
     /// Bytes per second received from this connection's daemon.
     traffic: Entity<crate::traffic_badge::TrafficBadge>,
-}
-
-#[derive(Clone, PartialEq, Eq)]
-pub enum Selection {
-    Nothing,
-    Workspace(String),
 }
 
 impl EventEmitter<WorkspaceSelected> for TreePane {}
@@ -126,7 +119,6 @@ impl TreePane {
             folded: false,
             drop_hint: None,
             view,
-            selected: Selection::Nothing,
         }
     }
 
@@ -197,18 +189,10 @@ impl TreePane {
         );
     }
 
-    /// Another session's workspace was picked: this tree shows no selection.
-    pub fn clear_selection(&mut self, cx: &mut Context<Self>) {
-        if self.selected != Selection::Nothing {
-            self.selected = Selection::Nothing;
-            cx.notify();
-        }
-    }
-
+    /// Pick workspace `id`: the window shows it. (The row of the session's active workspace
+    /// is highlighted while the window shows the session.)
     pub fn select(&mut self, id: String, cx: &mut Context<Self>) {
-        self.selected = Selection::Workspace(id.clone());
         cx.emit(WorkspaceSelected(id));
-        cx.notify();
     }
 }
 
@@ -482,7 +466,7 @@ impl TreePane {
             ),
             Label::Error(name) => (ui::icon(IconName::CircleAlert, 16., c.error).into_any_element(), name),
         };
-        let selected = self.selected == Selection::Workspace(id.clone());
+        let selected = self.session.read(cx).viewed_workspace() == Some(id.as_str());
         // Workspace focus mode (prefix + w) moves this cursor with the arrow keys.
         let focus_cursor = self.keybindings.read(cx).machine().focused_workspace() == Some(id.as_str());
         let expand = match (has_children, self.view.is_collapsed(&id)) {

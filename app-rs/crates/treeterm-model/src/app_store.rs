@@ -26,7 +26,7 @@ use treeterm_core::local_daemon::LocalDaemonSpec;
 use treeterm_core::rt::Rt;
 use treeterm_core::settings::SshConnectionConfig;
 
-use crate::session_store::{ConnectionStatus as SessionConnection, SessionEvent, SessionStore};
+use crate::session_store::{ConnectionStatus as SessionConnection, Restore, SessionEvent, SessionStore};
 use crate::settings_store::SettingsStore;
 
 /// What a connection is doing, with its session store once connected.
@@ -301,7 +301,7 @@ impl AppStore {
             ConnectionStatus::Connected { daemon } => {
                 tracing::info!(%id, "connected");
                 match std::mem::replace(&mut slot.previous, Previous::Nothing) {
-                    Previous::Nothing => self.connect_session(&id, daemon, cx),
+                    Previous::Nothing => self.connect_session(&id, daemon, Restore::FirstRef, cx),
                     Previous::Kept(session) | Previous::HandingOver { session, .. } => {
                         self.hand_over(&id, session, daemon, cx);
                     }
@@ -323,8 +323,9 @@ impl AppStore {
         cx.notify();
     }
 
-    /// Build the session store of a new connection generation.
-    fn connect_session(&mut self, id: &ConnectionId, daemon: DaemonConnection, cx: &mut Context<Self>) {
+    /// Build the session store of a new connection generation; `restore` is what it makes
+    /// active once restored.
+    fn connect_session(&mut self, id: &ConnectionId, daemon: DaemonConnection, restore: Restore, cx: &mut Context<Self>) {
         let Some(slot) = self.sessions.get(id) else {
             return;
         };
@@ -332,6 +333,7 @@ impl AppStore {
         let remote = (!slot.is_local()).then(|| crate::web_app::RemoteHost { app: cx.weak_entity(), connection: id.clone() });
         let session = cx.new(|cx| {
             let mut session = SessionStore::new(daemon, client_id, settings, llm, cx);
+            session.set_restore(restore);
             session.use_worktree_registry();
             if let Some(remote) = remote {
                 session.set_remote_host(remote);
@@ -342,7 +344,7 @@ impl AppStore {
         let owned = id.clone();
         let events = cx.subscribe(&session, move |store, session, event: &SessionEvent, cx| match event {
             SessionEvent::Failed(reason) => store.on_session_failed(&owned, session, reason, cx),
-            SessionEvent::WorkspaceRemoved(_) => {}
+            SessionEvent::WorkspaceRemoved(_) | SessionEvent::Restored => {}
             SessionEvent::AttentionRecorded(workspace) => {
                 cx.emit(AppEvent::Attention { workspace: workspace.clone() });
             }
@@ -387,8 +389,13 @@ impl AppStore {
         };
         // This very task is finishing: detach it rather than cancel it mid-poll.
         task.detach();
+        // The new store keeps the workspace this one had active.
+        let restore = match session.read(cx).active_workspace() {
+            Some(workspace) => Restore::Workspace(workspace.to_owned()),
+            None => Restore::FirstRef,
+        };
         session.update(cx, |session, cx| session.dispose(cx));
-        self.connect_session(id, daemon, cx);
+        self.connect_session(id, daemon, restore, cx);
         cx.notify();
     }
 

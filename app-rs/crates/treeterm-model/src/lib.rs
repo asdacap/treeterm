@@ -18,6 +18,7 @@ pub mod git_controller;
 pub mod harness_prompts;
 pub mod indentation;
 pub mod keybinding_store;
+pub mod navigation;
 pub mod pty_writer;
 pub mod review;
 pub mod review_find;

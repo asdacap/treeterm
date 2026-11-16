@@ -128,7 +128,10 @@ Done (tested against a real in-process daemon unless noted):
   Electron), upstream warning before forking,
   force-unlock of a held session lock; session renaming (double-click its name; kept in
   `ui-state.json` by connection target); session pane with info, logs, port forwards, a system
-  monitor, the session as JSON and its TTYs.
+  monitor, the session as JSON and its TTYs. Each session has an active workspace (its first
+  one once loaded, a new or forked one at once): the window opens on it at start-up and
+  after a remote connect, and disconnecting the shown session shows the next one's (or its
+  session pane when it has none).
 - **Tool tabs:** GitHub PR details (reviews, checks, unresolved threads), review comments
   (prompt the harness, push to GitHub), analyzer history and system-prompt debugger (from
   the activity badge's right-click menu), Chat, TTY list with orphan kill, workspace
@@ -250,9 +253,14 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   Review and can be pushed to GitHub. Comments with Electron's absolute paths still show in
   the Files viewer and the Comments tab; Electron's Files tab does not show the relative ones.
 
-- After a reconnect the window shows the workspace it showed before (the first one if it is
-  gone) and leaves other sessions' views alone; Electron always jumps to the reconnected
-  session's first workspace.
+- After a reconnect a session keeps the workspace it had active (its first one if that is
+  gone), and the window stays on the session it shows; Electron made the reconnected
+  session's first workspace active and switched the window to it, even from another
+  session's terminal in use.
+- A workspace counts as viewed (it gets no unread marker, and its marker is cleared) only
+  while it is the one on screen. Electron counted the one its navigation last named (the
+  one last clicked, or a session's first), also after a quick fork or a new workspace put
+  another one on screen.
 - A workspace write still in flight when the connection drops is written after the reconnect
   too (Electron's flush waited for it to fail and then dropped it).
 - The session's force-unlock button hides once the lock has expired (the daemon ignores an

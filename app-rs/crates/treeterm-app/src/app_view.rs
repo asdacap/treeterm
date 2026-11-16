@@ -10,6 +10,7 @@ use indexmap::IndexMap;
 use treeterm_core::connection::ConnectionId;
 use treeterm_model::app_store::{AppStore, ConnState};
 use treeterm_model::keybinding_store::KeybindingStore;
+use treeterm_model::navigation::AfterDisconnect;
 use treeterm_model::session_names::Side;
 use treeterm_model::session_store::{SessionEvent, SessionStore, WorkspaceEntry};
 use treeterm_model::workspace_store::{ActivityStyle as _, PageHost, TabContent, WorkspaceStore};
@@ -107,7 +108,6 @@ impl Render for DraggedSession {
 struct Connected {
     session: Entity<SessionStore>,
     tree: Entity<TreePane>,
-    active: ActiveView,
     /// Views of terminal models, by model, so focus and IME state survive re-renders.
     terminal_views: HashMap<EntityId, Entity<TerminalView>>,
     /// Views of Files tabs, by model.
@@ -137,17 +137,19 @@ struct Connected {
     /// The terminal model the last render showed: a terminal coming into view fits again and
     /// takes focus.
     shown_terminal: Option<EntityId>,
-    reselect: Reselect,
     _selection: Subscription,
     _session_events: Subscription,
 }
 
-/// What a session view selects once its session is live.
-enum Reselect {
-    Nothing,
-    /// The view replaces the last connection generation's, which showed this workspace: show
-    /// it again, or the first one if it is gone (`handleReconnected`'s `workspaceRefs[0]`).
-    Workspace(String),
+/// Why a session view is built.
+#[derive(Clone, Copy)]
+enum Arrival {
+    /// The session connected for the first time: once restored, the window shows its active
+    /// workspace (`local:connect`, `addRemoteSession`).
+    Connected,
+    /// A new connection generation replaces the last one's store: the window keeps to what
+    /// it shows (the new store keeps the workspace the last one had active).
+    Reconnected,
 }
 
 /// What the workspace header is editing in place (`workspace-edit-input` / `-textarea`).
@@ -160,11 +162,6 @@ enum HeaderEdit {
 enum HeaderField {
     Name,
     Description,
-}
-
-enum ActiveView {
-    Nothing,
-    Workspace(String),
 }
 
 impl AppView {
@@ -229,25 +226,17 @@ impl AppView {
             .sessions()
             .filter_map(|slot| Some((slot.id.clone(), slot.shown_session()?.clone(), slot.target.clone())))
             .collect();
-        // A replaced view showing a workspace on the right hands it to its successor.
-        let shown = if self.info.is_none() { self.active.clone() } else { None };
-        let mut carried: HashMap<ConnectionId, String> = HashMap::new();
-        self.sessions.retain(|id, connected| {
-            let keep = wanted.iter().any(|(w, session, ..)| w == id && *session == connected.session);
-            if !keep
-                && shown.as_ref() == Some(id)
-                && let ActiveView::Workspace(workspace) = &connected.active
-            {
-                carried.insert(id.clone(), workspace.clone());
-            }
-            keep
-        });
+        // The session the window shows: its pane, else its workspace view.
+        let shown_before = match &self.info {
+            Some(info) => Some(info.read(cx).connection(cx)),
+            None => self.info_pending.clone().or_else(|| self.active.clone()),
+        };
+        let had_view: Vec<ConnectionId> = self.sessions.keys().cloned().collect();
+        self.sessions.retain(|id, connected| wanted.iter().any(|(w, session, ..)| w == id && *session == connected.session));
         for (id, session, target) in wanted {
             if !self.sessions.contains_key(&id) {
-                let mut connected = self.connect(id.clone(), session, target, cx);
-                if let Some(workspace) = carried.remove(&id) {
-                    connected.reselect = Reselect::Workspace(workspace);
-                }
+                let arrival = if had_view.contains(&id) { Arrival::Reconnected } else { Arrival::Connected };
+                let connected = self.connect(id.clone(), session, target, arrival, cx);
                 self.sessions.insert(id, connected);
             }
         }
@@ -259,37 +248,55 @@ impl AppView {
             let rank = |id: &ConnectionId| order.iter().position(|o| o == id).unwrap_or(usize::MAX);
             rank(a).cmp(&rank(b))
         });
+        // The shown session was disconnected (`disconnectSession`): the next one in the
+        // sidebar is shown.
+        if let Some(gone) = shown_before
+            && store.read(cx).session_slot(&gone).is_none()
+        {
+            let remaining: Vec<(ConnectionId, bool)> = order
+                .iter()
+                .map(|id| {
+                    let has_workspaces =
+                        self.sessions.get(id).is_some_and(|c| c.session.read(cx).workspace_ids().next().is_some());
+                    (id.clone(), has_workspaces)
+                })
+                .collect();
+            self.info = None;
+            self.info_pending = None;
+            self.active = match treeterm_model::navigation::after_disconnect(&remaining) {
+                AfterDisconnect::Workspace(next) => Some(next),
+                AfterDisconnect::SessionPane(next) => {
+                    self.info_pending = Some(next.clone());
+                    Some(next)
+                }
+                AfterDisconnect::Nothing => None,
+            };
+        }
         if self.active.as_ref().is_none_or(|id| !self.sessions.contains_key(id)) {
             self.active = self.sessions.keys().next().cloned();
         }
-        self.reselect_workspaces(cx);
+        self.apply_shown(cx);
         self.open_pending_workspace(cx);
         cx.notify();
     }
 
-    /// Select each rebuilt view's carried-over workspace once its session is live.
-    fn reselect_workspaces(&mut self, cx: &mut Context<Self>) {
-        let mut picks = Vec::new();
-        for connected in self.sessions.values_mut() {
-            let Reselect::Workspace(previous) = &connected.reselect else {
-                continue;
-            };
-            let session = connected.session.read(cx);
-            if !matches!(session.state(), treeterm_model::session_store::SessionState::Live) {
-                continue;
-            }
-            let pick = match session.entry(previous) {
-                Some(_) => Some(previous.clone()),
-                None => session.workspace_ids().next().cloned(),
-            };
-            connected.reselect = Reselect::Nothing;
-            if let Some(workspace) = pick {
-                picks.push((connected.tree.clone(), workspace));
-            }
+    /// Tell each session whether the window shows its workspace view (`activeView`): the
+    /// session shown, unless its session pane (or another's) is up.
+    fn apply_shown(&mut self, cx: &mut Context<Self>) {
+        let pane = self.info.is_some() || self.info_pending.is_some();
+        for (id, connected) in &self.sessions {
+            let shown = !pane && self.active.as_ref() == Some(id);
+            connected.session.update(cx, |s, cx| s.set_shown(shown, cx));
         }
-        for (tree, workspace) in picks {
-            tree.update(cx, |tree, cx| tree.select(workspace, cx));
-        }
+    }
+
+    /// Show `id`'s workspace view on the right (closing a session pane).
+    fn show_session(&mut self, id: &ConnectionId, cx: &mut Context<Self>) {
+        self.info = None;
+        self.info_pending = None;
+        self.active = Some(id.clone());
+        self.apply_shown(cx);
+        cx.notify();
     }
 
     /// Open `path` in the local session as soon as it is live (the CLI's directory).
@@ -328,6 +335,7 @@ impl AppView {
         id: ConnectionId,
         session: Entity<SessionStore>,
         target: treeterm_core::connection::ConnectionTarget,
+        arrival: Arrival,
         cx: &mut Context<Self>,
     ) -> Connected {
         cx.observe(&session, |_, _, cx| cx.notify()).detach();
@@ -345,39 +353,39 @@ impl AppView {
             cx.notify();
         })
         .detach();
-        // The shown workspace was dismissed or removed (`activeWorkspaceId` cleared): the
-        // pane reads "No workspace selected" and no row is selected.
-        let removed_id = id.clone();
-        let session_events = cx.subscribe(&session, move |view, _, event: &SessionEvent, cx| match event {
-            SessionEvent::WorkspaceRemoved(workspace) => {
-                let Some(connected) = view.sessions.get_mut(&removed_id) else {
-                    return;
-                };
-                if !matches!(&connected.active, ActiveView::Workspace(shown) if shown == workspace) {
+        let events_id = id.clone();
+        let session_events = cx.subscribe(&session, move |view, session, event: &SessionEvent, cx| match event {
+            // The workspace shown was dismissed or removed (its session has none active): an
+            // edit of its header goes with it.
+            SessionEvent::WorkspaceRemoved(_) => {
+                if session.read(cx).active_workspace().is_some() {
                     return;
                 }
-                connected.active = ActiveView::Nothing;
-                connected.header_edit = None;
-                connected.tree.update(cx, |tree, cx| tree.clear_selection(cx));
+                if let Some(connected) = view.sessions.get_mut(&events_id) {
+                    connected.header_edit = None;
+                }
                 cx.notify();
             }
+            // A session connected for the first time shows its first workspace once restored
+            // (`setActiveView` after `handleRestore`); a reconnect keeps to what the window
+            // shows.
+            SessionEvent::Restored => match arrival {
+                Arrival::Connected if session.read(cx).active_workspace().is_some() => view.show_session(&events_id, cx),
+                Arrival::Connected | Arrival::Reconnected => {}
+            },
             SessionEvent::AttentionRecorded(_) | SessionEvent::Failed(_) => {}
         });
-        let viewed = session.clone();
+        let picked = session.clone();
         let selection = cx.subscribe(&tree, move |view, _, WorkspaceSelected(workspace), cx| {
-            view.info = None;
-            view.activate_session(&id, cx);
-            viewed.update(cx, |s, cx| s.set_viewed_workspace(Some(workspace.clone()), cx));
+            picked.update(cx, |s, cx| s.set_active_workspace(workspace.clone(), cx));
+            view.show_session(&id, cx);
             if let Some(connected) = view.sessions.get_mut(&id) {
-                connected.active = ActiveView::Workspace(workspace.clone());
                 connected.focus_pending = true;
             }
-            cx.notify();
         });
         Connected {
             session,
             tree,
-            active: ActiveView::Nothing,
             terminal_views: HashMap::new(),
             file_views: HashMap::new(),
             editor_views: HashMap::new(),
@@ -392,20 +400,8 @@ impl AppView {
             tool_views: crate::tool_views::ToolViews::new(self.settings.clone()),
             focus_pending: false,
             shown_terminal: None,
-            reselect: Reselect::Nothing,
             _selection: selection,
             _session_events: session_events,
-        }
-    }
-
-    /// Show `id`'s session on the right; the other trees drop their selection.
-    fn activate_session(&mut self, id: &ConnectionId, cx: &mut Context<Self>) {
-        self.active = Some(id.clone());
-        for (other, connected) in &self.sessions {
-            if other != id {
-                connected.tree.update(cx, |tree, cx| tree.clear_selection(cx));
-                connected.session.update(cx, |s, cx| s.set_viewed_workspace(None, cx));
-            }
         }
     }
 
@@ -426,12 +422,9 @@ impl AppView {
         let (bg, border, hover, active, secondary, primary) =
             (c.bg_secondary, c.border, c.bg_hover, c.bg_active, c.text_secondary, c.text_primary);
         let mut rail = v_flex().py(px(4.)).items_center();
-        for (conn_id, connected) in &self.sessions {
+        for connected in self.sessions.values() {
             let session = connected.session.read(cx);
-            let shown = match (&self.active, &connected.active) {
-                (Some(active_id), ActiveView::Workspace(id)) if active_id == conn_id => Some(id.clone()),
-                (Some(_), ActiveView::Workspace(_)) | (_, ActiveView::Nothing) | (None, ActiveView::Workspace(_)) => None,
-            };
+            let shown = session.viewed_workspace().map(str::to_owned);
             for row in session.tree_rows(&Default::default(), cx) {
                 let Some(entry) = session.entry(&row.id) else { continue };
                 let is_shown = shown.as_deref() == Some(row.id.as_str());
@@ -794,12 +787,9 @@ impl AppView {
         let (secondary, primary, hover, active, accent, border) =
             (c.text_secondary, c.text_primary, c.bg_hover, c.bg_active, c.accent, c.border);
         let mut rows = Vec::new();
-        for (conn_id, connected) in &self.sessions {
+        for connected in self.sessions.values() {
             let session = connected.session.read(cx);
-            let shown = match (&self.active, &connected.active) {
-                (Some(active_id), ActiveView::Workspace(id)) if active_id == conn_id => Some(id.clone()),
-                (Some(_), ActiveView::Workspace(_)) | (_, ActiveView::Nothing) | (None, ActiveView::Workspace(_)) => None,
-            };
+            let shown = session.viewed_workspace().map(str::to_owned);
             for id in session.workspace_ids() {
                 let Some(store) = session.workspace_store(id) else { continue };
                 let workspace = store.read(cx);
@@ -859,10 +849,6 @@ impl AppView {
     /// Open a pending session pane, or drop one whose session is gone.
     fn sync_info(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(id) = self.info_pending.take() {
-            // A session pane shows no workspace: none is being viewed.
-            for connected in self.sessions.values() {
-                connected.session.update(cx, |s, cx| s.set_viewed_workspace(None, cx));
-            }
             let (app, names) = (self.store.clone(), self.names.clone());
             self.info = Some(cx.new(|cx| crate::session_info_view::SessionInfoView::new(app, names, id, window, cx)));
         }
@@ -872,6 +858,8 @@ impl AppView {
                 self.info = None;
             }
         }
+        // A session pane shows no workspace: none is being viewed.
+        self.apply_shown(cx);
     }
 
 }
@@ -1157,11 +1145,8 @@ impl AppView {
 
     /// The active workspace's store, if it is loaded.
     fn active_store(&self, cx: &App) -> Option<Entity<treeterm_model::workspace_store::WorkspaceStore>> {
-        let connected = self.current()?;
-        let ActiveView::Workspace(id) = &connected.active else {
-            return None;
-        };
-        connected.session.read(cx).workspace_store(id).cloned()
+        let session = self.current()?.session.read(cx);
+        session.workspace_store(session.active_workspace()?).cloned()
     }
 
     fn focus_active_tab(&mut self, cx: &mut Context<Self>) {
@@ -1238,10 +1223,10 @@ impl AppView {
                     .into_iter()
                     .map(|row| row.id)
                     .collect();
-                let current = match &connected.active {
-                    ActiveView::Workspace(id) => ids.iter().position(|w| w == id).unwrap_or(0),
-                    ActiveView::Nothing => 0,
-                };
+                let current = session
+                    .active_workspace()
+                    .and_then(|active| ids.iter().position(|w| w == active))
+                    .unwrap_or(0);
                 if let Err(error) = self
                     .keybindings
                     .update(cx, |kb, cx| kb.enter_workspace_focus(ids, current, cx))
@@ -2064,7 +2049,7 @@ fn workspace_pane(
     connected.tool_views.prune(connected.session.read(cx), cx);
     // Set again below if this render shows a terminal.
     let previous_terminal = connected.shown_terminal.take();
-    let ActiveView::Workspace(id) = &connected.active else {
+    let Some(id) = connected.session.read(cx).active_workspace().map(str::to_owned) else {
         hide_reviews(connected, cx);
         // `.workspace-empty`.
         return centered(
@@ -2074,7 +2059,6 @@ fn workspace_pane(
                 .child(div().text_size(px(13.)).text_color(secondary).child("Select a workspace from the sidebar or add a new one to get started.")),
         );
     };
-    let id = id.clone();
     let tabs_shown =
         matches!(connected.session.read(cx).entry(&id), Some(WorkspaceEntry::Loaded(_) | WorkspaceEntry::OperationError { .. }));
     if !tabs_shown {
@@ -2835,10 +2819,7 @@ impl AppView {
                         json!({ "id": id, "entry": entry })
                     })
                     .collect();
-                let active = match &connected.active {
-                    ActiveView::Nothing => serde_json::Value::Null,
-                    ActiveView::Workspace(id) => json!(id),
-                };
+                let active = json!(session.active_workspace());
                 let terminals: Vec<_> = connected
                     .terminal_views
                     .values()

@@ -140,6 +140,103 @@ fn the_debug_json_shows_each_entry_with_its_status(cx: &mut TestAppContext) {
     assert!(json["workspaces"]["broken"]["error"].is_string());
 }
 
+/// How many `Restored` the store emits.
+fn record_restores(cx: &mut TestAppContext, store: &Entity<SessionStore>) -> std::rc::Rc<std::cell::Cell<usize>> {
+    use treeterm_model::session_store::SessionEvent;
+    let restored = std::rc::Rc::new(std::cell::Cell::new(0));
+    let sink = restored.clone();
+    cx.update(|cx| {
+        cx.subscribe(store, move |_, event: &SessionEvent, _| {
+            if *event == SessionEvent::Restored {
+                sink.set(sink.get() + 1);
+            }
+        })
+        .detach()
+    });
+    restored
+}
+
+fn active(cx: &mut TestAppContext, store: &Entity<SessionStore>) -> Option<String> {
+    store.read_with(cx, |s, _| s.active_workspace().map(str::to_owned))
+}
+
+#[gpui_kit::test]
+fn a_restored_session_makes_its_first_workspace_active_and_says_so_once(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    std::fs::write(h.daemon.workspaces_dir().join("a.json"), body("a", None)).unwrap();
+    std::fs::write(h.daemon.workspaces_dir().join("b.json"), body("b", None)).unwrap();
+    publish(&h, &["b", "a"]);
+    let store = open_store(cx, &h, "client-a");
+    let restored = record_restores(cx, &store);
+
+    // `handleRestore`: the first ref, by position, whether or not its body is in yet.
+    wait_until(cx, &store, |s| matches!(s.state(), SessionState::Live));
+    assert_eq!(active(cx, &store).as_deref(), Some("b"));
+    assert_eq!(restored.get(), 1);
+    wait_until(cx, &store, |s| loaded(s, "a") && loaded(s, "b"));
+    assert_eq!(active(cx, &store).as_deref(), Some("b"));
+    assert_eq!(cx.update(|cx| store.read(cx).debug_json(cx))["activeWorkspaceId"], "b");
+
+    // A later snapshot restores nothing.
+    std::fs::write(h.daemon.workspaces_dir().join("c.json"), body("c", None)).unwrap();
+    publish(&h, &["c", "b", "a"]);
+    wait_until(cx, &store, |s| loaded(s, "c"));
+    assert_eq!(active(cx, &store).as_deref(), Some("b"));
+    assert_eq!(restored.get(), 1);
+}
+
+#[gpui_kit::test]
+fn in_an_empty_session_the_first_workspace_to_load_becomes_active(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    publish(&h, &[]);
+    let store = open_store(cx, &h, "client-a");
+    let restored = record_restores(cx, &store);
+    wait_until(cx, &store, |s| matches!(s.state(), SessionState::Live));
+    assert_eq!(restored.get(), 1);
+    assert_eq!(active(cx, &store), None);
+
+    // Another window adds one (`reconstructWorkspace`: `activeWorkspaceId ?? id`).
+    std::fs::write(h.daemon.workspaces_dir().join("c.json"), body("c", None)).unwrap();
+    publish(&h, &["c"]);
+    wait_until(cx, &store, |s| loaded(s, "c"));
+    assert_eq!(active(cx, &store).as_deref(), Some("c"));
+
+    // The next one leaves it be.
+    std::fs::write(h.daemon.workspaces_dir().join("d.json"), body("d", None)).unwrap();
+    publish(&h, &["c", "d"]);
+    wait_until(cx, &store, |s| loaded(s, "d"));
+    assert_eq!(active(cx, &store).as_deref(), Some("c"));
+}
+
+#[gpui_kit::test]
+fn an_opened_or_forked_workspace_is_active_from_its_placeholder_on(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    publish(&h, &[]);
+    let repo = TempRepo::new(&h);
+    let store = open_store(cx, &h, "client-a");
+    wait_until(cx, &store, |s| matches!(s.state(), SessionState::Live));
+    let path = repo.path.to_string_lossy().into_owned();
+    let root = store.update(cx, |s, cx| s.open_workspace(path, cx));
+    assert_eq!(active(cx, &store), Some(root.clone()), "active while its git info loads");
+    wait_until(cx, &store, |s| loaded(s, &root));
+    assert_eq!(active(cx, &store), Some(root.clone()));
+
+    // A quick fork's child is active as soon as its row appears (`createChildWithLoading`).
+    store.update(cx, |s, cx| s.quick_fork(&root, cx)).unwrap();
+    wait_until(cx, &store, |s| s.active_workspace().is_some_and(|id| id != root));
+    let child = active(cx, &store).unwrap();
+    wait_child(cx, &store, &child);
+    assert_eq!(file_of(cx, &store, &child).parent_id, Some(root.clone()));
+    assert_eq!(active(cx, &store), Some(child.clone()));
+
+    // Picking a workspace makes it active.
+    store.update(cx, |s, cx| s.set_active_workspace(root.clone(), cx));
+    assert_eq!(active(cx, &store), Some(root));
+}
+
 #[gpui_kit::test]
 fn follows_ref_removal_and_body_changes(cx: &mut TestAppContext) {
     cx.executor().allow_parking();
@@ -301,11 +398,16 @@ fn removing_a_workspace_takes_its_children_and_files_with_it(cx: &mut TestAppCon
     let watcher = open_store(cx, &h, "client-b");
     wait_until(cx, &store, |s| loaded(s, "root") && loaded(s, "child") && loaded(s, "other"));
     wait_until(cx, &watcher, |s| loaded(s, "root"));
+    assert_eq!(store.read_with(cx, |s, _| s.active_workspace().map(str::to_owned)).as_deref(), Some("root"));
+    assert_eq!(watcher.read_with(cx, |s, _| s.active_workspace().map(str::to_owned)).as_deref(), Some("root"));
 
     store.update(cx, |s, cx| s.remove_workspace_keep_both("root", cx));
     wait_until(cx, &store, |s| s.entry("root").is_none() && s.entry("child").is_none());
     // Another window sees the membership change.
     wait_until(cx, &watcher, |s| s.entry("root").is_none() && s.entry("child").is_none() && loaded(s, "other"));
+    // The active workspace went: none is active (the pane reads "No workspace selected").
+    assert_eq!(store.read_with(cx, |s, _| s.active_workspace().map(str::to_owned)), None);
+    assert_eq!(watcher.read_with(cx, |s, _| s.active_workspace().map(str::to_owned)), None);
     wait_for_disk(cx, || {
         !h.daemon.workspaces_dir().join("root.json").exists() && !h.daemon.workspaces_dir().join("child.json").exists()
     });
@@ -1255,6 +1357,8 @@ fn an_existing_worktree_is_adopted_once_and_named_after_its_branch(cx: &mut Test
     assert_eq!(store.read_with(cx, |s, _| s.workspace_ids().count()), 1, "no row until it is added");
     let child = recv(cx, opened).unwrap();
     assert!(store.read_with(cx, |s, _| loaded(s, &child)));
+    // It is active at once (`addChildWorkspaceFromResult`).
+    assert_eq!(store.read_with(cx, |s, _| s.active_workspace().map(str::to_owned)), Some(child.clone()));
     let file = file_of(cx, &store, &child);
     // Named after the branch, not the directory; with no display name the tree shows it.
     assert_eq!(file.name, "team/side");
@@ -1595,7 +1699,12 @@ fn finished_work_in_an_unviewed_workspace_is_marked_unread_until_viewed(cx: &mut
         .detach()
     });
     wait_until(cx, &store, |s| loaded(s, "a") && loaded(s, "b"));
-    store.update(cx, |s, cx| s.set_viewed_workspace(Some("a".into()), cx));
+    // Not shown, the session's active workspace (its first) is not viewed.
+    assert_eq!(store.read_with(cx, |s, _| s.active_workspace().map(str::to_owned)).as_deref(), Some("a"));
+    assert_eq!(store.read_with(cx, |s, _| s.viewed_workspace().map(str::to_owned)), None);
+    // The window shows the session.
+    store.update(cx, |s, cx| s.set_shown(true, cx));
+    assert_eq!(store.read_with(cx, |s, _| s.viewed_workspace().map(str::to_owned)).as_deref(), Some("a"));
     let b = store.read_with(cx, |s, _| ws(s, "b"));
     let tab = b.update(cx, |w, cx| w.add_tab("terminal", cx)).unwrap();
     wait_until_app(cx, &b, |w, _| matches!(w.tab_content(&tab), Some(TabContent::Terminal(_))));
@@ -1630,8 +1739,17 @@ fn finished_work_in_an_unviewed_workspace_is_marked_unread_until_viewed(cx: &mut
     assert!(b.read_with(cx, |w, _| w.has_unread_attention()));
     wait_for_disk(cx, || file_on_disk(&h, "b")["metadata"]["workspaceAttention"].is_string());
 
-    // Viewing it marks it read.
-    store.update(cx, |s, cx| s.set_viewed_workspace(Some("b".into()), cx));
+    // Made active while another session is shown, it is not viewed yet: still unread.
+    store.update(cx, |s, cx| s.set_shown(false, cx));
+    store.update(cx, |s, cx| s.set_active_workspace("b".into(), cx));
+    assert_eq!(store.read_with(cx, |s, _| s.viewed_workspace().map(str::to_owned)), None);
+    for _ in 0..20 {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        cx.run_until_parked();
+    }
+    assert!(b.read_with(cx, |w, _| w.has_unread_attention()));
+    // Shown, it is viewed, and marked read.
+    store.update(cx, |s, cx| s.set_shown(true, cx));
     wait_until_app(cx, &b, |w, _| !w.has_unread_attention());
     wait_for_disk(cx, || {
         let raw = file_on_disk(&h, "b")["metadata"]["workspaceAttention"].as_str().map(str::to_owned);
@@ -2036,16 +2154,17 @@ fn a_loading_or_failed_child_is_dismissed_at_once_and_no_longer_shown(cx: &mut T
     let locked = futures::executor::block_on(other.lock_session(std::time::Duration::from_secs(600))).unwrap().unwrap();
     assert!(matches!(locked, treeterm_core::daemon::SessionLockResult::Acquired(_)));
 
-    // A row still waiting for the lock goes, and the shown workspace stays shown.
-    store.update(cx, |s, cx| s.set_viewed_workspace(Some(root.clone()), cx));
+    // A row still waiting for the lock goes. It was active from its placeholder on, so
+    // none is now (`activeWorkspaceId` cleared).
     let pending = store.update(cx, |s, cx| s.add_child_workspace(&root, "feature-x".into(), false, None, cx)).unwrap();
     assert!(store.read_with(cx, |s, _| {
         matches!(s.entry(&pending), Some(WorkspaceEntry::Loading { name, .. }) if name == "feature-x")
     }));
+    assert_eq!(store.read_with(cx, |s, _| s.active_workspace().map(str::to_owned)), Some(pending.clone()));
     store.update(cx, |s, cx| s.dismiss_workspace(&pending, cx));
     store.read_with(cx, |s, _| {
         assert!(s.entry(&pending).is_none());
-        assert_eq!(s.viewed_workspace(), Some(root.as_str()));
+        assert_eq!(s.active_workspace(), None);
     });
     assert_eq!(*removed.borrow(), vec![pending.clone()]);
 
@@ -2059,20 +2178,20 @@ fn a_loading_or_failed_child_is_dismissed_at_once_and_no_longer_shown(cx: &mut T
         }
         _ => unreachable!(),
     });
-    store.update(cx, |s, cx| s.set_viewed_workspace(Some(failed.clone()), cx));
+    store.update(cx, |s, cx| s.set_active_workspace(root.clone(), cx));
     store.update(cx, |s, cx| s.dismiss_workspace(&failed, cx));
     store.read_with(cx, |s, _| {
         assert!(s.entry(&failed).is_none());
-        assert_eq!(s.viewed_workspace(), None);
+        // Another workspace stays active.
+        assert_eq!(s.active_workspace(), Some(root.as_str()));
     });
     assert_eq!(*removed.borrow(), vec![pending, failed]);
 
     // A loaded workspace is not dismissed.
-    store.update(cx, |s, cx| s.set_viewed_workspace(Some(root.clone()), cx));
     store.update(cx, |s, cx| s.dismiss_workspace(&root, cx));
     store.read_with(cx, |s, _| {
         assert!(loaded(s, &root));
-        assert_eq!(s.viewed_workspace(), Some(root.as_str()));
+        assert_eq!(s.active_workspace(), Some(root.as_str()));
     });
     assert_eq!(removed.borrow().len(), 2);
 }

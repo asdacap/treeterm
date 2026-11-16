@@ -227,14 +227,14 @@ fn selecting_a_workspace_refreshes_it_even_when_it_is_shown_already(cx: &mut Tes
     let store = open_store(cx, &h, "client-a");
     let id = open(cx, &store, &repo);
     settle(cx, &store, &[&id]);
-    store.update(cx, |s, cx| s.set_viewed_workspace(Some(id.clone()), cx));
+    store.update(cx, |s, cx| s.set_active_workspace(id.clone(), cx));
     cool_down(cx);
     settle(cx, &store, &[&id]);
     assert_eq!(status(cx, &store, &id).working_tree, WorkingTree::Clean);
 
     std::fs::write(repo.join("untracked.txt"), "x\n").unwrap();
     // A click on the row shown already.
-    store.update(cx, |s, cx| s.set_viewed_workspace(Some(id.clone()), cx));
+    store.update(cx, |s, cx| s.set_active_workspace(id.clone(), cx));
     cool_down(cx);
     wait_status(cx, &store, &id, |s| s.working_tree == WorkingTree::Dirty);
 }

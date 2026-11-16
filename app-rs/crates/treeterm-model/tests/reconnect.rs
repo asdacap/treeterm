@@ -7,7 +7,7 @@ use gpui_kit::{AppContext as _, Entity, Task, TestAppContext};
 use treeterm_core::daemon::DaemonConnection;
 use treeterm_core::local_daemon::LocalDaemonSpec;
 use treeterm_model::app_store::{AppStore, ConnState, SessionSlot};
-use treeterm_model::session_store::{ConnectionStatus, SessionStore, WorkspaceEntry};
+use treeterm_model::session_store::{ConnectionStatus, SessionState, SessionStore, WorkspaceEntry};
 use treeterm_model::settings_store::SettingsStore;
 use treeterm_model::workspace_store::WorkspaceStore;
 use treeterm_proto::treeterm::WorkspaceRef;
@@ -312,4 +312,95 @@ fn a_reconnect_keeps_the_session_dimmed_and_writes_its_unsaved_bodies_before_the
     std::thread::sleep(std::time::Duration::from_millis(200));
     cx.run_until_parked();
     assert_eq!(display_name_on_disk(&h).as_deref(), Some("Renamed"));
+}
+
+/// Workspaces `a` and `b` on disk; the session lists `ids`.
+fn publish_refs(h: &Harness, ids: &[&str]) {
+    for id in ["a", "b"] {
+        std::fs::write(
+            h.daemon.workspaces_dir().join(format!("{id}.json")),
+            body(id),
+        )
+        .unwrap();
+    }
+    let path = h.daemon.root().to_string_lossy().into_owned();
+    let refs = ids
+        .iter()
+        .map(|id| WorkspaceRef {
+            id: (*id).into(),
+            path: path.clone(),
+        })
+        .collect();
+    futures::executor::block_on(h.conn.update_session(refs, None, "test-writer"))
+        .unwrap()
+        .unwrap();
+}
+
+fn active(cx: &mut TestAppContext, store: &Entity<SessionStore>) -> Option<String> {
+    store.read_with(cx, |s, _| s.active_workspace().map(str::to_owned))
+}
+
+/// Take the daemon away, run `while_down`, then bring it back: the next generation's store,
+/// once restored.
+fn reconnect(
+    cx: &mut TestAppContext,
+    app: &Entity<AppStore>,
+    proxy: Proxy,
+    socket: &std::path::Path,
+    h: &Harness,
+    while_down: impl FnOnce(),
+) -> (Proxy, Entity<SessionStore>) {
+    let before = app.read_with(cx, |a, _| local(a).session().unwrap().clone());
+    drop(proxy);
+    wait_until(cx, app, |a| {
+        matches!(local(a).state, ConnState::Reconnecting { .. })
+    });
+    while_down();
+    let proxy = Proxy::start(socket, h.daemon.socket_path());
+    wait_until_app(cx, app, |a, cx| {
+        local(a)
+            .session()
+            .is_some_and(|s| *s != before && matches!(s.read(cx).state(), SessionState::Live))
+    });
+    let after = app.read_with(cx, |a, _| local(a).session().unwrap().clone());
+    (proxy, after)
+}
+
+#[gpui_kit::test]
+fn a_reconnect_keeps_the_active_workspace_or_falls_back_to_the_first(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    publish_refs(&h, &["a", "b"]);
+    let dir = tempfile::Builder::new()
+        .prefix("tt")
+        .tempdir_in("/tmp")
+        .unwrap();
+    let socket = dir.path().join("p.sock");
+    let proxy = Proxy::start(&socket, h.daemon.socket_path());
+    let spec = LocalDaemonSpec {
+        socket_path: socket.clone(),
+        binary: dir.path().join("never-spawned"),
+        log_path: dir.path().join("daemon.log"),
+        pid_file: dir.path().join("daemon.pid"),
+    };
+    let settings = cx.new(|_| SettingsStore::in_memory(Default::default()));
+    let rt = h.rt.clone();
+    let app = cx.new(|cx| AppStore::new(rt, spec, settings, cx));
+    wait_until_app(cx, &app, |a, cx| {
+        local(a).session().is_some_and(|s| {
+            let s = s.read(cx);
+            s.workspace_store("a").is_some() && s.workspace_store("b").is_some()
+        })
+    });
+    let first = app.read_with(cx, |a, _| local(a).session().unwrap().clone());
+    assert_eq!(active(cx, &first).as_deref(), Some("a"));
+    first.update(cx, |s, cx| s.set_active_workspace("b".to_owned(), cx));
+
+    // The next generation's store keeps `b` active.
+    let (proxy, second) = reconnect(cx, &app, proxy, &socket, &h, || {});
+    assert_eq!(active(cx, &second).as_deref(), Some("b"));
+
+    // `b` was removed while the connection was down: the first workspace is active.
+    let (_proxy, third) = reconnect(cx, &app, proxy, &socket, &h, || publish_refs(&h, &["a"]));
+    assert_eq!(active(cx, &third).as_deref(), Some("a"));
 }

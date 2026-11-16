@@ -234,9 +234,23 @@ pub enum SessionEvent {
     AttentionRecorded(String),
     /// The session watch failed or ended: this store's connection is gone.
     Failed(String),
+    /// The first snapshot arrived (`handleRestore`): the session is live, with its first
+    /// workspace (or the one a reconnect kept) active. Emitted once per store.
+    Restored,
 }
 
 impl EventEmitter<SessionEvent> for SessionStore {}
+
+/// Which workspace a store makes active once its first snapshot arrives.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Restore {
+    /// The session's first ref (`handleRestore`).
+    FirstRef,
+    /// The workspace the last connection generation's store had active, while the session
+    /// still lists it; else the first ref. (Electron's `handleReconnected` always takes the
+    /// first ref.)
+    Workspace(String),
+}
 
 /// Per-workspace body-sync bookkeeping (`WorkspaceSyncState`).
 #[derive(Default)]
@@ -375,8 +389,13 @@ pub struct SessionStore {
     ref_sync_retry_on_next_event: bool,
     ops: VecDeque<QueuedOp>,
     op_runner: Option<Task<()>>,
-    /// The workspace this session's window shows, if any.
-    viewed: Option<String>,
+    /// The session's active workspace (`activeWorkspaceId`): the one its workspace view shows.
+    active: Option<String>,
+    /// The window shows this session's workspace view (not another session's, nor a session
+    /// pane): its active workspace is being viewed.
+    shown: bool,
+    /// What becomes active with the first snapshot.
+    restore: Restore,
     /// For a session on an ssh host: where its web apps' ports are forwarded from.
     remote: Option<crate::web_app::RemoteHost>,
     /// Recently used worktrees on the daemon's host (`~/.treeterm/worktrees.json`). Set by
@@ -457,7 +476,9 @@ impl SessionStore {
             ref_sync_retry_on_next_event: false,
             ops: VecDeque::new(),
             op_runner: None,
-            viewed: None,
+            active: None,
+            shown: false,
+            restore: Restore::FirstRef,
             remote: None,
             registry_api: None,
             git_controllers: HashMap::new(),
@@ -515,7 +536,7 @@ impl SessionStore {
             .collect();
         serde_json::json!({
             "sessionId": self.session_id,
-            "activeWorkspaceId": self.viewed,
+            "activeWorkspaceId": self.active,
             "sessionVersion": self.version,
             "workspaceDataDir": self.data_dir,
             "workspaces": workspaces,
@@ -544,9 +565,16 @@ impl SessionStore {
         self.entries.get(id)
     }
 
-    /// The workspace this session's window shows (`activeWorkspaceId`), if any.
+    /// The session's active workspace (`activeWorkspaceId`), if any: the one its workspace
+    /// view shows.
+    pub fn active_workspace(&self) -> Option<&str> {
+        self.active.as_deref()
+    }
+
+    /// The workspace the window shows from this session: the active one, while the session
+    /// is shown (`isActiveSession && activeWorkspaceId === id`).
     pub fn viewed_workspace(&self) -> Option<&str> {
-        self.viewed.as_deref()
+        self.active.as_deref().filter(|_| self.shown)
     }
 
     pub fn workspace_store(&self, id: &str) -> Option<&Entity<WorkspaceStore>> {
@@ -631,7 +659,8 @@ impl SessionStore {
         // A snapshot at the version this window already has (its own lock or unlock coming
         // back, a heartbeat) holds no newer refs, and may hold older ones than a ref sync in
         // flight: applying those would bring back what that sync removes.
-        let newer = session.version > self.version || !matches!(self.state, SessionState::Live);
+        let restoring = !matches!(self.state, SessionState::Live);
+        let newer = session.version > self.version || restoring;
         self.version = session.version;
         self.session_id = session.id;
         self.lock = session.lock;
@@ -653,7 +682,31 @@ impl SessionStore {
         if newer {
             self.apply_refs(&session.workspace_refs, cx);
         }
+        if restoring {
+            self.restore_active(&session.workspace_refs, cx);
+        }
         cx.notify();
+    }
+
+    /// `handleRestore`, once the refs are applied: the first ref becomes active (or, after a
+    /// reconnect, the workspace the last generation had active, if the session still lists
+    /// it). Its row may still be a placeholder.
+    fn restore_active(&mut self, refs: &[WorkspaceRef], cx: &mut Context<Self>) {
+        let listed = |id: &str| refs.iter().any(|r| r.id == id);
+        let pick = match &self.restore {
+            Restore::Workspace(id) if listed(id) => Some(id.clone()),
+            Restore::Workspace(_) | Restore::FirstRef => refs.first().map(|r| r.id.clone()),
+        };
+        if let Some(id) = pick {
+            self.make_active(id, cx);
+        }
+        cx.emit(SessionEvent::Restored);
+    }
+
+    /// What becomes active once the session is restored: a reconnect passes the workspace
+    /// the last generation had active. Set before the first snapshot.
+    pub fn set_restore(&mut self, restore: Restore) {
+        self.restore = restore;
     }
 
     /// The refs of the session in the reply to this window's lock or unlock, unless a newer
@@ -690,6 +743,7 @@ impl SessionStore {
             self.syncs.remove(&id);
             self.entries.shift_remove(&id);
             self.git_controllers.remove(&id);
+            self.forget_active(&id);
             cx.emit(SessionEvent::WorkspaceRemoved(id));
         }
         self.known_refs.retain(|id, _| incoming.contains(id.as_str()));
@@ -732,9 +786,18 @@ impl SessionStore {
             store.update(cx, |store, _| store.dispose());
         }
         self.git_controllers.remove(id);
+        self.forget_active(id);
         self.refresh_inherited(cx);
         cx.emit(SessionEvent::WorkspaceRemoved(id.to_owned()));
         cx.notify();
+    }
+
+    /// Workspace `id` is gone from this session: if it was active, none is
+    /// (`activeWorkspaceId` cleared), and the pane reads "No workspace selected".
+    fn forget_active(&mut self, id: &str) {
+        if self.active.as_deref() == Some(id) {
+            self.active = None;
+        }
     }
 
     // ---- body watch ---------------------------------------------------------------------
@@ -897,6 +960,11 @@ impl SessionStore {
             path,
             file,
         };
+        // `reconstructWorkspace`: the first workspace to load is active when none is (no
+        // other workspace is viewed then).
+        if self.active.is_none() {
+            self.active = Some(id.to_owned());
+        }
         let store = self.new_workspace_store(workspace, cx);
         self.entries.insert(id.to_owned(), WorkspaceEntry::Loaded(store));
         self.refresh_inherited(cx);
@@ -941,7 +1009,7 @@ impl SessionStore {
                 }
             }
         });
-        let viewed = self.viewed.as_deref() == Some(id.as_str());
+        let viewed = self.viewed_workspace() == Some(id.as_str());
         let (git, session, owned, github) = (self.conn.git(), cx.weak_entity(), id.clone(), self.github.clone());
         let controller = cx.new(|_| crate::git_controller::GitController::new(owned, session, git, github));
         cx.observe(&controller, |_, _, cx| cx.notify()).detach();
@@ -1019,24 +1087,46 @@ impl SessionStore {
         }
     }
 
-    /// The window now shows `workspace` of this session (or none of its workspaces):
-    /// a viewed unread workspace is acknowledged, and its git status refreshed
-    /// (`setActiveWorkspace`), also when it was shown already (a click on its row).
-    pub fn set_viewed_workspace(&mut self, workspace: Option<String>, cx: &mut Context<Self>) {
-        if let Some(id) = workspace.as_deref() {
-            self.refresh_git_status(id, cx);
-        }
-        if self.viewed == workspace {
+    /// The user picked workspace `id` of this session (`setActiveWorkspace`): it becomes
+    /// active, and its git status is refreshed, also when it was active already (a click on
+    /// its row).
+    pub fn set_active_workspace(&mut self, id: String, cx: &mut Context<Self>) {
+        self.refresh_git_status(&id, cx);
+        self.make_active(id, cx);
+    }
+
+    /// Workspace `id` becomes active; while the session is shown, it is the one viewed (a
+    /// viewed unread workspace is acknowledged).
+    fn make_active(&mut self, id: String, cx: &mut Context<Self>) {
+        if self.active.as_deref() == Some(id.as_str()) {
             return;
         }
-        self.viewed = workspace;
+        self.active = Some(id);
+        self.apply_viewed(cx);
+        cx.notify();
+    }
+
+    /// The window starts or stops showing this session's workspace view (another session's
+    /// is shown, or a session pane): its active workspace is viewed only while it is shown.
+    pub fn set_shown(&mut self, shown: bool, cx: &mut Context<Self>) {
+        if self.shown == shown {
+            return;
+        }
+        self.shown = shown;
+        self.apply_viewed(cx);
+        cx.notify();
+    }
+
+    /// Tell each workspace whether it is the one viewed.
+    fn apply_viewed(&mut self, cx: &mut Context<Self>) {
+        let viewed = self.viewed_workspace().map(str::to_owned);
         let stores: Vec<(String, Entity<WorkspaceStore>)> = self
             .entries
             .iter()
             .filter_map(|(id, entry)| entry.store().map(|s| (id.clone(), s.clone())))
             .collect();
         for (id, store) in stores {
-            let viewed = self.viewed.as_deref() == Some(id.as_str());
+            let viewed = viewed.as_deref() == Some(id.as_str());
             store.update(cx, |w, cx| w.set_viewed(viewed, cx));
         }
     }
@@ -1519,8 +1609,8 @@ impl SessionStore {
 
     // ---- workspace lifecycle ----------------------------------------------------------------
 
-    /// Open a directory as a new root workspace (`addWorkspace`): a placeholder at once,
-    /// then git info, the default tab, its body and its ref. Returns the new id.
+    /// Open a directory as a new root workspace (`addWorkspace`): a placeholder at once, made
+    /// active, then git info, the default tab, its body and its ref. Returns the new id.
     pub fn open_workspace(&mut self, path: String, cx: &mut Context<Self>) -> String {
         let id = new_workspace_id();
         let name = name_from_path(&path);
@@ -1532,6 +1622,7 @@ impl SessionStore {
                 output: Vec::new(),
             },
         );
+        self.make_active(id.clone(), cx);
         cx.notify();
         let git = self.conn.git();
         let owned = id.clone();
@@ -1650,9 +1741,7 @@ impl SessionStore {
         }
         self.entries.shift_remove(id);
         self.git_controllers.remove(id);
-        if self.viewed.as_deref() == Some(id) {
-            self.viewed = None;
-        }
+        self.forget_active(id);
         cx.emit(SessionEvent::WorkspaceRemoved(id.to_owned()));
         cx.notify();
     }
@@ -1744,6 +1833,8 @@ impl SessionStore {
                 output: Vec::new(),
             },
         );
+        // `createChildWithLoading`: the child is active from its placeholder on.
+        self.make_active(id.clone(), cx);
         cx.notify();
         let lock = self.acquire_lock(cx);
         let git = self.conn.git();
@@ -1936,7 +2027,8 @@ impl SessionStore {
 
     /// Add an existing worktree as a Loaded child of `parent_id` (`addChildWorkspaceFromResult`),
     /// with the session lock held: the checks run again, as another window may have changed
-    /// the session while the lock was awaited. Returns the child's id and when it is published.
+    /// the session while the lock was awaited. The child becomes active. Returns its id and
+    /// when it is published.
     fn add_adopted(
         &mut self,
         parent_id: &str,
@@ -1949,6 +2041,7 @@ impl SessionStore {
         let parent = self.adoptable(parent_id, &worktree.path, cx)?;
         let id = new_workspace_id();
         let published = self.add_child(&id, &parent, name, worktree, false, metadata, own_default, cx);
+        self.make_active(id.clone(), cx);
         Ok((id, published))
     }
 
