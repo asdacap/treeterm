@@ -19,6 +19,8 @@
 //! - `scroll <x> <y> <dy> [modifiers]` — a wheel scroll of `dy` points over (x, y), in window
 //!   points
 //! - `screenshot <path.png>` — render the last frame offscreen (no screen-capture permission)
+//! - `panic [message]` — panic on the UI thread: the app hands off to the crash screen, whose
+//!   process takes the same socket (`state`, the pointer and keys, `screenshot`)
 
 use std::path::PathBuf;
 
@@ -31,16 +33,34 @@ use tokio::net::UnixListener;
 use treeterm_core::rt::Rt;
 
 use crate::app_view::AppView;
+use crate::crash_view::CrashView;
 
 type Request = (String, oneshot::Sender<Value>);
 
-pub fn start(path: PathBuf, window: AnyWindowHandle, view: Entity<AppView>, rt: &Rt, cx: &mut App) {
+/// What the driven window shows.
+pub enum Screen {
+    App(Entity<AppView>),
+    /// The crash screen's process (`crash_view`).
+    Crash(Entity<CrashView>),
+}
+
+impl Screen {
+    /// The app's view, for the commands that act on workspaces and tabs.
+    fn app(&self) -> Result<&Entity<AppView>, String> {
+        match self {
+            Screen::App(view) => Ok(view),
+            Screen::Crash(_) => Err("the crash screen is showing".to_owned()),
+        }
+    }
+}
+
+pub fn start(path: PathBuf, window: AnyWindowHandle, screen: Screen, rt: &Rt, cx: &mut App) {
     let (tx, mut rx) = mpsc::channel::<Request>(16);
     let server = rt.run(serve(path, tx));
     cx.spawn(async move |cx: &mut AsyncApp| {
         let _server = server;
         while let Some((line, reply)) = rx.next().await {
-            let result = handle(&line, window, &view, cx);
+            let result = handle(&line, window, &screen, cx);
             reply.send(result).ok();
         }
     })
@@ -116,7 +136,7 @@ fn pointer(args: &str) -> Result<(gpui_kit::Point<gpui_kit::Pixels>, gpui_kit::M
     Ok((gpui_kit::point(gpui_kit::px(x), gpui_kit::px(y)), modifiers(args.next())?))
 }
 
-fn handle(line: &str, window: AnyWindowHandle, view: &Entity<AppView>, cx: &mut AsyncApp) -> Value {
+fn handle(line: &str, window: AnyWindowHandle, screen: &Screen, cx: &mut AsyncApp) -> Value {
     let (command, rest) = line.split_once(' ').unwrap_or((line, ""));
     let result = window.update(cx, |_, window, cx| -> Result<Value, String> {
         // An occluded window gets no frames from the display link; render one so the reply
@@ -125,14 +145,18 @@ fn handle(line: &str, window: AnyWindowHandle, view: &Entity<AppView>, cx: &mut 
         window.simulate_next_frame(cx);
         window.draw(cx).clear(cx);
         match command {
-            "state" => Ok(view.read(cx).automation_state(window, cx)),
+            "state" => Ok(match screen {
+                Screen::App(view) => view.read(cx).automation_state(window, cx),
+                Screen::Crash(view) => view.read(cx).automation_state(),
+            }),
+            "panic" => panic!("automation panic: {rest}"),
             "select" => {
-                view.update(cx, |view, cx| view.automation_select_workspace(rest, cx));
+                screen.app()?.update(cx, |view, cx| view.automation_select_workspace(rest, cx));
                 Ok(json!({ "ok": true }))
             }
             "tab" => {
                 let (workspace, tab) = rest.split_once(' ').ok_or("usage: tab <workspace> <tab>")?;
-                view.update(cx, |view, cx| view.automation_select_tab(workspace, tab, cx));
+                screen.app()?.update(cx, |view, cx| view.automation_select_tab(workspace, tab, cx));
                 Ok(json!({ "ok": true }))
             }
             "type" => {
@@ -149,24 +173,24 @@ fn handle(line: &str, window: AnyWindowHandle, view: &Entity<AppView>, cx: &mut 
             }
             "newtab" => {
                 let (workspace, app) = rest.split_once(' ').unwrap_or((rest, ""));
-                let tab = view.update(cx, |view, cx| view.automation_new_tab(workspace, app, cx));
+                let tab = screen.app()?.update(cx, |view, cx| view.automation_new_tab(workspace, app, cx));
                 Ok(json!({ "ok": tab.is_some(), "tab": tab }))
             }
             "closetab" => {
                 let (workspace, tab) = rest.split_once(' ').ok_or("usage: closetab <workspace> <tab>")?;
-                view.update(cx, |view, cx| view.automation_close_tab(workspace, tab, cx));
+                screen.app()?.update(cx, |view, cx| view.automation_close_tab(workspace, tab, cx));
                 Ok(json!({ "ok": true }))
             }
             "open" => {
-                let id = view.update(cx, |view, cx| view.automation_open_workspace(rest.to_owned(), cx));
+                let id = screen.app()?.update(cx, |view, cx| view.automation_open_workspace(rest.to_owned(), cx));
                 Ok(json!({ "ok": id.is_some(), "id": id }))
             }
             "workspacedialog" => {
-                let ok = view.update(cx, |view, cx| view.automation_open_workspace_dialog(window, cx));
+                let ok = screen.app()?.update(cx, |view, cx| view.automation_open_workspace_dialog(window, cx));
                 Ok(json!({ "ok": ok }))
             }
             "childdialog" => {
-                let session = view.read(cx).automation_session().ok_or("not connected")?;
+                let session = screen.app()?.read(cx).automation_session().ok_or("not connected")?;
                 let on_created: crate::child_dialog::OnCreated = std::rc::Rc::new(|_, _, _| {});
                 crate::child_dialog::open(session, rest.to_owned(), "parent".into(), on_created, window, cx);
                 Ok(json!({ "ok": true }))
@@ -174,11 +198,11 @@ fn handle(line: &str, window: AnyWindowHandle, view: &Entity<AppView>, cx: &mut 
             "fork" => {
                 // `fork <workspace-id>`: the tree row's Fork button (past the upstream
                 // warning), a child workspace on a new branch, shown once added.
-                let ok = view.update(cx, |view, cx| view.automation_fork(rest, cx));
+                let ok = screen.app()?.update(cx, |view, cx| view.automation_fork(rest, cx));
                 Ok(json!({ "ok": ok }))
             }
             "fileopen" => {
-                let ok = view.update(cx, |view, cx| view.automation_open_file(rest, cx));
+                let ok = screen.app()?.update(cx, |view, cx| view.automation_open_file(rest, cx));
                 Ok(json!({ "ok": ok }))
             }
             "focus" => {

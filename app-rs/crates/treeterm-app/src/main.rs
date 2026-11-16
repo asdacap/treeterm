@@ -13,6 +13,7 @@ mod cli;
 mod comment_ui;
 #[cfg(feature = "automation")]
 mod automation;
+mod crash_view;
 mod browser_view;
 mod daemon_binary;
 mod editor_hooks;
@@ -46,6 +47,7 @@ use treeterm_core::keybinding::{
 };
 use treeterm_model::keybinding_store::KeybindingStore;
 use treeterm_model::settings_store::{SettingsEvent, SettingsStore};
+use treeterm_core::crash_report::{self, CrashReport};
 use treeterm_core::local_daemon::LocalDaemonSpec;
 use treeterm_core::paths::{self, process_env};
 use treeterm_core::rt::Rt;
@@ -115,6 +117,46 @@ fn local_daemon_spec() -> Result<LocalDaemonSpec, paths::PathError> {
     })
 }
 
+/// The app's window: 1200×800, centred, at least 800×600, its title bar drawn by the app
+/// (Electron's `hiddenInset`).
+fn window_options(cx: &App) -> WindowOptions {
+    WindowOptions {
+        window_bounds: Some(WindowBounds::Windowed(Bounds::centered(None, size(px(1200.), px(800.)), cx))),
+        window_min_size: Some(size(px(800.), px(600.))),
+        // Matches the .desktop file, so Linux launchers show the right icon.
+        app_id: Some("treeterm".to_owned()),
+        titlebar: Some(TitlebarOptions {
+            title: Some("TreeTerm".into()),
+            appears_transparent: true,
+            traffic_light_position: Some(point(px(15.), px(15.))),
+        }),
+        ..WindowOptions::default()
+    }
+}
+
+/// A panic on the UI thread ends the app: GPUI cannot carry on, and the panic would unwind
+/// into AppKit, which aborts with the system's crash dialog. After Rust's own message, hand
+/// off to a new process that shows Electron's "Application Error" screen, and exit. Panics
+/// elsewhere go on as before (a tokio task's panic is that task's `TaskLost`).
+fn install_crash_hook() {
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        default_hook(info);
+        if !crash_report::is_ui_thread(std::thread::current().name()) {
+            return;
+        }
+        let report = CrashReport::from_panic(info, &std::backtrace::Backtrace::force_capture());
+        let handed_off = match paths::user_data_dir() {
+            Ok(dir) => crash_report::hand_off(&report, &dir).map_err(|error| error.to_string()),
+            Err(error) => Err(error.to_string()),
+        };
+        match handed_off {
+            Ok(()) => std::process::exit(101),
+            Err(error) => tracing::error!(%error, "cannot show the crash screen"),
+        }
+    }));
+}
+
 fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -175,6 +217,30 @@ fn main() {
             }
             return;
         }
+        cli::Command::CrashScreen { report } => {
+            let report = match CrashReport::read(&report) {
+                Ok(report) => report,
+                Err(error) => {
+                    eprintln!("treeterm: {error}");
+                    std::process::exit(1);
+                }
+            };
+            gpui_kit::application().with_assets(assets::AppAssets).run(move |cx| {
+                gpui_kit::init(cx);
+                theme::install(cx);
+                ui::bind_keys(cx);
+                let options = window_options(cx);
+                let (window, view) = crash_view::open(report, options, cx);
+                #[cfg(feature = "automation")]
+                if let Ok(path) = std::env::var("TREETERM_AUTOMATION_SOCKET") {
+                    automation::start(path.into(), window, automation::Screen::Crash(view), &rt, cx);
+                }
+                #[cfg(not(feature = "automation"))]
+                drop((window, view, rt));
+                cx.activate(true);
+            });
+            return;
+        }
         cli::Command::Gui { workspace, ssh } => (workspace, ssh),
     };
 
@@ -183,6 +249,7 @@ fn main() {
     // Before AppKit finishes launching, as Electron does it.
     #[cfg(target_os = "macos")]
     macos::disable_auto_full_screen_item();
+    install_crash_hook();
     gpui_kit::application().with_assets(assets::AppAssets).run(move |cx| {
         gpui_kit::init(cx);
         theme::install(cx);
@@ -205,22 +272,7 @@ fn main() {
             }
         };
         menus::install(store.clone(), zoom, cx);
-        let options = WindowOptions {
-            window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
-                None,
-                size(px(1200.), px(800.)),
-                cx,
-            ))),
-            window_min_size: Some(size(px(800.), px(600.))),
-            // Matches the .desktop file, so Linux launchers show the right icon.
-            app_id: Some("treeterm".to_owned()),
-            titlebar: Some(TitlebarOptions {
-                title: Some("TreeTerm".into()),
-                appears_transparent: true,
-                traffic_light_position: Some(point(px(15.), px(15.))),
-            }),
-            ..WindowOptions::default()
-        };
+        let options = window_options(cx);
         let initial_keys = keybinding_settings(settings.read(cx).settings());
         let keybindings = cx.new(|_| KeybindingStore::new(initial_keys));
         cx.subscribe(&settings, {
@@ -261,7 +313,7 @@ fn main() {
         .detach();
         #[cfg(feature = "automation")]
         if let Ok(path) = std::env::var("TREETERM_AUTOMATION_SOCKET") {
-            automation::start(path.into(), window, view, &rt_for_automation, cx);
+            automation::start(path.into(), window, automation::Screen::App(view), &rt_for_automation, cx);
         }
         #[cfg(not(feature = "automation"))]
         drop((window, view));

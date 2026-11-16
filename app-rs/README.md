@@ -489,3 +489,10 @@ The chrome was matched to Electron's computed styles, measured side by side on o
 - The SSH picker's Add trims the forward's remote host, so a blank one is ignored like an
   empty one (Electron added a forward to " "). Enter on a focused button there presses only
   that button; Electron's dialog then also ran Connect with the form as it was.
+- A panic on the UI thread ends the app process: GPUI cannot recover inside the process, so
+  there are no per-workspace or per-tab error fallbacks. A new process shows Electron's
+  "Application Error" screen, with the panic's message and a Show Stack Trace toggle (Electron's
+  app-level screen showed no error details; the panicked process and its console are gone),
+  and its "Reload Application" starts the app again: terminals survive in the daemon, SSH
+  sessions must be reconnected, and a directory given on the command line is not reopened (as
+  after Electron's reload). The report stays in `crash.json` beside `settings.json`.

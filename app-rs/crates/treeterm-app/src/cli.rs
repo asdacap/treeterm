@@ -4,6 +4,7 @@
 
 use std::path::{Path, PathBuf};
 
+use treeterm_core::crash_report;
 use treeterm_core::settings::{ConnectionLabel, IdentityFile, SshConnectionConfig};
 
 pub const USAGE: &str = "Usage: treeterm [command] [options]
@@ -25,6 +26,9 @@ pub enum Command {
         workspace: Option<PathBuf>,
         ssh: Option<Box<SshConnectionConfig>>,
     },
+    /// Electron's "Application Error" screen for the report a panic on the UI thread left
+    /// (`--crash-report=<path>`, not for people to type: the panic hook passes it).
+    CrashScreen { report: PathBuf },
 }
 
 /// `user@host[:port]` (`parseSSHTarget`); labelled with the target as typed.
@@ -54,6 +58,9 @@ pub fn parse_ssh_target(target: &str, now_ms: u128) -> Option<SshConnectionConfi
 
 /// `args` without the program name; `cwd` resolves a relative directory.
 pub fn parse(args: &[String], cwd: &Path, now_ms: u128) -> Result<Command, String> {
+    if let Some(report) = args.first().and_then(|arg| arg.strip_prefix(crash_report::ARG)) {
+        return Ok(Command::CrashScreen { report: PathBuf::from(report) });
+    }
     match args.first().map(String::as_str) {
         Some("-h" | "--help") => Ok(Command::Help),
         Some("shutdown-daemon") => Ok(Command::ShutdownDaemon),
@@ -112,5 +119,16 @@ mod tests {
         };
         assert_eq!(path, dir.path().canonicalize().unwrap());
         assert!(parse(&args(&["/definitely/not/here"]), &cwd, 1).unwrap_err().contains("does not exist"));
+    }
+
+    /// The panic hook's argument starts the crash screen, never a workspace (the directory
+    /// scan skips options).
+    #[test]
+    fn the_crash_report_argument_starts_the_crash_screen() {
+        let cwd = std::env::temp_dir();
+        assert_eq!(
+            parse(&args(&["--crash-report=/x/crash.json"]), &cwd, 1),
+            Ok(Command::CrashScreen { report: PathBuf::from("/x/crash.json") })
+        );
     }
 }
