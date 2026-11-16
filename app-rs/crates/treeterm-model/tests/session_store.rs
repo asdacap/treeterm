@@ -507,6 +507,7 @@ fn merging_a_child_brings_its_commits_into_the_parent_and_removes_it(cx: &mut Te
     std::process::Command::new("git").args(["config", "user.name", "t"]).current_dir(&repo).status().unwrap();
     // From the child's Review tab, which names its parent for Electron (`parentWorkspaceId`).
     let child_ws = store.read_with(cx, |s, _| ws(s, &child));
+    let child_path = child_ws.read_with(cx, |w, _| w.workspace().path.clone());
     let tab = child_ws.update(cx, |w, cx| w.add_tab("review", cx)).unwrap();
     assert_eq!(child_ws.read_with(cx, |w, _| w.file().app_states[&tab].state["parentWorkspaceId"].clone()), serde_json::json!(root));
     let Some(TabContent::Review(review)) = child_ws.read_with(cx, |w, _| w.tab_content(&tab)) else {
@@ -536,7 +537,16 @@ fn merging_a_child_brings_its_commits_into_the_parent_and_removes_it(cx: &mut Te
     wait_until(cx, &child_ws, |w| w.merge_output().is_some_and(|o| o.state == MergeState::Succeeded));
     let output = child_ws.read_with(cx, |w, _| w.merge_output().cloned()).unwrap();
     assert_eq!(output.title(), "Merge feat-merge and remove worktree");
-    assert!(output.output.contains("$ git merge feat-merge"), "{}", output.output);
+    // The merge, then the cleanup's commands and git's replies, as they ran.
+    let at = |line: &str| output.output.find(line).unwrap_or_else(|| panic!("no {line:?} in {}", output.output));
+    let steps = [
+        "$ git merge feat-merge\n".to_owned(),
+        "$ git rev-parse --abbrev-ref HEAD\nfeat-merge\n".to_owned(),
+        format!("$ git worktree remove {child_path} --force\n"),
+        "$ git branch -D feat-merge\nDeleted branch feat-merge".to_owned(),
+    ];
+    let positions: Vec<usize> = steps.iter().map(|step| at(step)).collect();
+    assert!(positions.is_sorted(), "{}", output.output);
     let root_ws = store.read_with(cx, |s, _| ws(s, &root));
     assert!(root_ws.read_with(cx, |w, _| w.merge_output().is_none()), "the parent shows no merge output");
 }
@@ -785,6 +795,41 @@ fn a_merge_skips_the_conflict_check_while_the_parent_is_unknown(cx: &mut TestApp
     wait_until(cx, &workspace, |w| w.merge_output().is_some_and(|o| o.state == MergeState::Failed));
     let output = workspace.read_with(cx, |w, _| w.merge_output().cloned()).unwrap();
     assert!(output.output.ends_with("\nMerge failed: Parent workspace not found or not a git repo\n"), "{}", output.output);
+}
+
+#[gpui_kit::test]
+fn a_cleanup_that_fails_after_the_merge_shows_its_git_output_and_the_error(cx: &mut TestAppContext) {
+    use treeterm_model::session_store::AfterMerge;
+    cx.executor().allow_parking();
+    let h = harness();
+    publish(&h, &[]);
+    let repo = TempRepo::new(&h);
+    let store = open_store(cx, &h, "client-a");
+    let root = open_repo_workspace(cx, &store, &repo);
+    let child = store.update(cx, |s, cx| s.add_child_workspace(&root, "feat-locked".into(), false, None, cx)).unwrap();
+    wait_child(cx, &store, &child);
+    wait_until(cx, &store, |s| !s.is_locked());
+    let child_ws = store.read_with(cx, |s, _| ws(s, &child));
+    let child_path = child_ws.read_with(cx, |w, _| w.workspace().path.clone());
+    commit_file(std::path::Path::new(&child_path), "locked.txt", "merged\n");
+    // A locked worktree is not removed by `git worktree remove --force`.
+    repo.git(&["worktree", "lock", &child_path]);
+
+    store.update(cx, |s, cx| s.merge_workspace(&child, false, AfterMerge::Remove, cx));
+    wait_until(cx, &store, |s| matches!(s.entry(&child), Some(WorkspaceEntry::OperationError { .. })));
+    let error = store.read_with(cx, |s, _| match s.entry(&child) {
+        Some(WorkspaceEntry::OperationError { error, .. }) => error.clone(),
+        _ => unreachable!(),
+    });
+    assert!(error.starts_with("Merge succeeded but cleanup failed: "), "{error}");
+    assert_eq!(std::fs::read_to_string(repo.path.join("locked.txt")).unwrap(), "merged\n");
+    wait_until(cx, &child_ws, |w| w.merge_output().is_some_and(|o| o.state == MergeState::Failed));
+    let output = child_ws.read_with(cx, |w, _| w.merge_output().cloned()).unwrap();
+    let removal = format!("$ git worktree remove {child_path} --force\n");
+    assert!(output.output.contains(&removal), "{}", output.output);
+    assert!(output.output.contains("locked working tree"), "git's reply: {}", output.output);
+    assert!(output.output.ends_with(&format!("\n{error}\n")), "{}", output.output);
+    repo.git(&["worktree", "unlock", &child_path]);
 }
 
 type Events = std::rc::Rc<std::cell::RefCell<Vec<ReviewEvent>>>;

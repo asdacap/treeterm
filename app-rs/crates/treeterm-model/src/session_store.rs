@@ -2081,7 +2081,8 @@ impl SessionStore {
             let locked = lock.await.unwrap_or_else(|_| Err("session store dropped".to_owned()));
             match locked {
                 Ok(()) => {
-                    if let Err(error) = remove_locked(&this, &id, mode, &git, cx).await {
+                    let removed = remove_locked(&this, &id, mode, &git, treeterm_core::git::Progress::Silent, cx).await;
+                    if let Err(error) = removed {
                         match this.update(cx, |session, cx| session.removal_failed(&id, &store, error, cx)) {
                             Ok(()) | Err(_) => {}
                         }
@@ -2121,8 +2122,8 @@ impl SessionStore {
     /// `mergeAndKeepWorkspace`), under the session lock. Refused while the parent has
     /// uncommitted changes. Before a merge that removes the child, its uncommitted work is
     /// committed as WIP; after it the child is marked merged and removed with its worktree
-    /// and branch. git's output goes to the child (its Review tab shows it, and it goes
-    /// with the child); failures also show on the child.
+    /// and branch. git's output, the removal's included, goes to the child (its Review tab
+    /// shows it, and it goes with the child); failures also show on the child.
     pub fn merge_workspace(&mut self, id: &str, squash: bool, after: AfterMerge, cx: &mut Context<Self>) {
         let Some(store) = self.workspace_store(id).cloned() else {
             return;
@@ -2142,15 +2143,21 @@ impl SessionStore {
         let git = self.conn.git();
         cx.spawn(async move |this, cx| {
             let locked = lock.await.unwrap_or_else(|_| Err("session store dropped".to_owned()));
+            let report = |text: &str| {
+                if lines_tx.unbounded_send(text.to_owned()).is_err() {
+                    tracing::debug!("merge output dropped: session gone");
+                }
+            };
+            let progress = treeterm_core::git::Progress::Report(&report);
             let result = match locked {
                 Ok(()) => {
-                    let merged = merge_locked(&this, &id, squash, after, &git, &lines_tx, cx).await;
+                    let merged = merge_locked(&this, &id, squash, after, &git, progress, cx).await;
                     let result = match (merged, after) {
                         (Ok(()), AfterMerge::Remove) => {
                             match this.update(cx, |_, cx| store.update(cx, |w, cx| w.set_status(WorkspaceStatus::Merged, cx))) {
                                 Ok(()) | Err(_) => {}
                             }
-                            remove_locked(&this, &id, RemoveMode::DeleteWorktreeAndBranch, &git, cx)
+                            remove_locked(&this, &id, RemoveMode::DeleteWorktreeAndBranch, &git, progress, cx)
                                 .await
                                 .map_err(|error| format!("Merge succeeded but cleanup failed: {error}"))
                         }
@@ -2390,13 +2397,15 @@ fn order_auto_open(items: Vec<AutoOpenItem>, root_path: &str, open: &[(String, S
 }
 
 /// `removeWorkspaceInternal`, with the session lock already held: children first, kill
-/// each workspace's tabs, clean up git, drop it; then publish the smaller membership and
-/// delete the body files. Stops at the first git failure.
+/// each workspace's tabs, clean up git (its commands and output to `progress`), drop it;
+/// then publish the smaller membership and delete the body files. Stops at the first git
+/// failure.
 async fn remove_locked(
     this: &WeakSession,
     id: &str,
     mode: RemoveMode,
     git: &treeterm_core::git::GitApi,
+    progress: treeterm_core::git::Progress<'_>,
     cx: &mut gpui_kit::AsyncApp,
 ) -> Result<(), String> {
     let gone = || "session store dropped".to_owned();
@@ -2414,7 +2423,7 @@ async fn remove_locked(
         let cleaned = match target {
             Some(GitCleanup::Nothing) | None => Ok(()),
             Some(GitCleanup::RemoveWorktree { root, path, branch }) => {
-                let removed = git.remove_worktree(&root, &path, branch, treeterm_core::git::Progress::Silent).await;
+                let removed = git.remove_worktree(&root, &path, branch, progress).await;
                 if removed.is_ok() {
                     let registry = this.read_with(cx, |s, _| s.worktree_registry()).ok().flatten();
                     if let Some(registry) = registry
@@ -2464,22 +2473,18 @@ async fn remove_locked(
     }
 }
 
-/// `mergeWorkspaceCore`, with the session lock already held.
+/// `mergeWorkspaceCore`, with the session lock already held. git's commands and output go
+/// to `progress`.
 async fn merge_locked(
     this: &WeakSession,
     id: &str,
     squash: bool,
     after: AfterMerge,
     git: &treeterm_core::git::GitApi,
-    lines: &futures::channel::mpsc::UnboundedSender<String>,
+    progress: treeterm_core::git::Progress<'_>,
     cx: &mut gpui_kit::AsyncApp,
 ) -> Result<(), String> {
-    use treeterm_core::git::{MergeMode, Progress};
-    let report = |text: &str| {
-        if lines.unbounded_send(text.to_owned()).is_err() {
-            tracing::debug!("merge output dropped: session gone");
-        }
-    };
+    use treeterm_core::git::MergeMode;
     let (child_path, child_name, child_branch, parent_path) = this
         .update(cx, |session, cx| -> Result<_, String> {
             let child = session.workspace_store(id).ok_or("Workspace not found")?.read(cx).workspace();
@@ -2505,12 +2510,12 @@ async fn merge_locked(
         git.stage_all(&child_path)
             .await
             .map_err(|e| format!("Failed to stage changes: {e}"))?;
-        git.commit_all(&child_path, &format!("WIP: Auto-commit before merge from {child_name}"), Progress::Report(&report))
+        git.commit_all(&child_path, &format!("WIP: Auto-commit before merge from {child_name}"), progress)
             .await
             .map_err(|e| format!("Failed to commit changes: {e}"))?;
     }
     let mode = if squash { MergeMode::Squash } else { MergeMode::Merge };
-    git.merge(&parent_path, &child_branch, mode, Progress::Report(&report))
+    git.merge(&parent_path, &child_branch, mode, progress)
         .await
         .map_err(|e| format!("Merge failed: {e}"))
 }
