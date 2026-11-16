@@ -297,7 +297,8 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   its file's review comments (and the comment box) in a panel under the editor instead of
   Monaco's view zones; selects open a Kit menu, not the native popup; textareas have no
   resize grip; GPUI has no backdrop filter, so the prefix-mode overlay does not blur what
-  is behind it. Off macOS the menu bar is GPUI Kit's, drawn in the window (not GTK's), above
+  is behind it; GPUI has no animated scrolling, so the Chat tab jumps to its last message
+  where Electron's smooth-scrolls there. Off macOS the menu bar is GPUI Kit's, drawn in the window (not GTK's), above
   dialogs so that it stays usable while one is open, as GTK's is.
 - The Comments tab's text (paths, code, comments, the generated prompt) is selected as GPUI
   Kit selects text: a selection over several lines copies a blank line as nothing, and a

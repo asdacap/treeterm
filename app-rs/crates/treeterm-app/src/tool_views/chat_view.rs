@@ -20,8 +20,12 @@ pub struct ChatView {
     scroll: ScrollHandle,
     /// Clear the input on the next render (the model took it).
     clear_input: bool,
-    /// How much text the list showed last time: more scrolls to the bottom.
-    shown_len: usize,
+    /// Scroll the list to the bottom on the next render. Electron's `ScrollAnchor` scrolls
+    /// after every render of the chat: a change of the conversation (a message, a streamed
+    /// chunk, an error, streaming starting or stopping, the reasoning), a keystroke in the
+    /// input, and the tab shown again (see `render`). GPUI also renders on a hover, which
+    /// must not pin the list to the bottom while it is being scrolled up.
+    scroll_pending: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -35,19 +39,25 @@ impl ChatView {
         });
         let enter = cx.subscribe(&input, |view, _, event: &InputEvent, cx| match event {
             InputEvent::PressEnter { shift: false, .. } => view.send(cx),
-            // The Send button follows what is typed.
-            InputEvent::Change => cx.notify(),
+            // The Send button follows what is typed, and typing scrolls to the bottom.
+            InputEvent::Change => view.scroll_to_bottom(cx),
             InputEvent::PressEnter { shift: true, .. } | InputEvent::Focus | InputEvent::Blur => {}
         });
-        let observe = cx.observe(&model, |_, _, cx| cx.notify());
+        let observe = cx.observe(&model, |view, _, cx| view.scroll_to_bottom(cx));
         Self {
             model,
             input,
             scroll: ScrollHandle::new(),
             clear_input: false,
-            shown_len: 0,
+            scroll_pending: false,
             _subscriptions: vec![enter, observe],
         }
+    }
+
+    /// Scroll the list to its bottom on the next render.
+    fn scroll_to_bottom(&mut self, cx: &mut Context<Self>) {
+        self.scroll_pending = true;
+        cx.notify();
     }
 
     fn send(&mut self, cx: &mut Context<Self>) {
@@ -98,17 +108,20 @@ impl Render for ChatView {
         if std::mem::take(&mut self.clear_input) {
             self.input.update(cx, |input, cx| input.set_value("", window, cx));
         }
+        // Electron renders nothing for a hidden tab, so its `ScrollAnchor` mounts and scrolls
+        // again when the tab is shown. This state lives only while the chat is drawn frame
+        // after frame: a new one means the chat was not on screen (or is new).
+        let mut shown = false;
+        window.use_keyed_state(SharedString::from(format!("chat-shown-{}", cx.entity_id())), cx, |_, _| shown = true);
+        if std::mem::take(&mut self.scroll_pending) || shown {
+            self.scroll.scroll_to_bottom();
+        }
         let c = colors(cx);
         let (secondary, primary, border) = (c.text_secondary, c.text_primary, c.border);
         let model = self.model.read(cx);
         let (messages, streaming, failure, reasoning) =
             (model.messages().to_vec(), model.is_streaming(), model.error().map(str::to_owned), model.reasoning());
         let endpoint = model.llm_settings(cx).map(|llm| format!("Using {} at {}", llm.model, llm.base_url));
-        let shown_len: usize = messages.iter().map(|m| m.content.len() + 1).sum();
-        if shown_len != self.shown_len {
-            self.shown_len = shown_len;
-            self.scroll.scroll_to_bottom();
-        }
         let mut list = v_flex()
             .id("chat-messages")
             .track_scroll(&self.scroll)
@@ -281,7 +294,8 @@ mod tests {
     use gpui_kit::base::TextSelection;
     use gpui_kit::test::TestQueryExt as _;
     use gpui_kit::{
-        Bounds, Modifiers, MouseButton, Pixels, Point, TestAppContext, VisualTestContext, WeakEntity, WindowOptions, point,
+        Bounds, Modifiers, MouseButton, MouseMoveEvent, Pixels, Point, ScrollDelta, ScrollEvent, ScrollSource, TestAppContext,
+        TouchPhase, VisualTestContext, WeakEntity, WindowOptions, point,
     };
     use serde_json::{Value, json};
 
@@ -425,5 +439,83 @@ mod tests {
     fn your_text_is_escaped_and_loses_only_its_trailing_line_breaks() {
         assert_eq!(literal_markdown("a\nb\n\n"), "a\\\nb");
         assert_eq!(literal_markdown("x y\t*"), "x&#32;y&#9;\\*");
+    }
+
+    /// How far the list is scrolled down, and how far it can be.
+    fn scrolled(pane: &Entity<Pane>, cx: &mut VisualTestContext) -> (Pixels, Pixels) {
+        cx.update(|_, cx| {
+            let scroll = &pane.read(cx).chat.read(cx).scroll;
+            (-scroll.offset().y, scroll.max_offset().y)
+        })
+    }
+
+    fn at_bottom(pane: &Entity<Pane>, cx: &mut VisualTestContext) -> bool {
+        let (offset, max) = scrolled(pane, cx);
+        max > px(0.) && offset == max
+    }
+
+    /// Scroll the list to its top with the wheel.
+    fn wheel_to_top(pane: &Entity<Pane>, cx: &mut VisualTestContext) {
+        let position = point(px(400.), px(100.));
+        cx.simulate_event(MouseMoveEvent { position, pressed_button: None, modifiers: Modifiers::default() });
+        cx.simulate_event(ScrollEvent {
+            position,
+            delta: ScrollDelta::Pixels(point(px(0.), px(100_000.))),
+            modifiers: Modifiers::default(),
+            touch_phase: TouchPhase::Moved,
+            source: ScrollSource::Pointer,
+        });
+        draw(cx);
+        assert_eq!(scrolled(pane, cx).0, px(0.), "the wheel scrolled the list to its top");
+    }
+
+    /// Electron's `ScrollAnchor` scrolls to the bottom after every render of the chat: when the
+    /// conversation changes (an error added below a long conversation included), on every
+    /// keystroke in the input, and when the tab is shown again. A hover does not move it.
+    #[gpui_kit::test]
+    fn the_list_scrolls_to_the_bottom_when_the_chat_changes_is_typed_in_or_is_shown_again(cx: &mut TestAppContext) {
+        let texts: Vec<String> = (0..40).map(|ix| format!("message {ix}")).collect();
+        let texts: Vec<&str> = texts.iter().map(String::as_str).collect();
+        let (chat, pane, cx) = open(conversation(&texts), cx);
+        assert!(at_bottom(&pane, cx), "a chat opens at its last message: {:?}", scrolled(&pane, cx));
+
+        // Scrolled up, the list stays where it is while the pointer moves over it.
+        wheel_to_top(&pane, cx);
+        cx.simulate_mouse_move(point(px(300.), px(200.)), None, Modifiers::none());
+        draw(cx);
+        assert_eq!(scrolled(&pane, cx).0, px(0.));
+
+        // A keystroke in the input.
+        let field = input(cx).center();
+        cx.simulate_click(field, Modifiers::none());
+        cx.simulate_input("x");
+        draw(cx);
+        assert!(at_bottom(&pane, cx), "typing scrolled to the bottom");
+
+        // A change of the conversation (a streamed chunk, an error, the reasoning, ...).
+        wheel_to_top(&pane, cx);
+        chat.update(cx, |chat, cx| chat.set_reasoning(treeterm_core::settings::ReasoningEffort::High, cx));
+        draw(cx);
+        assert!(at_bottom(&pane, cx), "a change of the chat scrolled to the bottom");
+
+        // The tab hidden, then shown again.
+        wheel_to_top(&pane, cx);
+        pane.update(cx, |pane, cx| {
+            pane.shown = false;
+            cx.notify();
+        });
+        draw(cx);
+        pane.update(cx, |pane, cx| {
+            pane.shown = true;
+            cx.notify();
+        });
+        draw(cx);
+        assert!(at_bottom(&pane, cx), "showing the tab again scrolled to the bottom");
+
+        // Drawn again while shown, it keeps its place.
+        wheel_to_top(&pane, cx);
+        pane.update(cx, |_, cx| cx.notify());
+        draw(cx);
+        assert_eq!(scrolled(&pane, cx).0, px(0.));
     }
 }
