@@ -285,8 +285,13 @@ fn is_word_char(c: char) -> bool {
 /// The word around byte `offset` in `text`; empty when `offset` sits outside a word (or
 /// inside a character, or past the end).
 pub fn word_at(text: &str, offset: usize) -> &str {
+    &text[word_range_at(text, offset)]
+}
+
+/// The bytes of [`word_at`]; empty when there is no word there.
+pub fn word_range_at(text: &str, offset: usize) -> std::ops::Range<usize> {
     if offset > text.len() || !text.is_char_boundary(offset) {
-        return "";
+        return 0..0;
     }
     let start = text[..offset]
         .char_indices()
@@ -298,7 +303,7 @@ pub fn word_at(text: &str, offset: usize) -> &str {
         .char_indices()
         .find(|(_, c)| !is_word_char(*c))
         .map_or(text.len(), |(index, _)| offset + index);
-    &text[start..end]
+    start..end
 }
 
 #[cfg(test)]
@@ -535,6 +540,13 @@ mod tests {
         fn is_empty_inside_a_character_or_past_the_end() {
             assert_eq!(word_at("é", 1), "");
             assert_eq!(word_at("ab", 3), "");
+        }
+
+        #[test]
+        fn its_range_is_the_words_bytes() {
+            assert_eq!(word_range_at("let café = 1", 6), 4..9);
+            assert_eq!(word_range_at("a   b", 2), 2..2);
+            assert_eq!(word_range_at("ab", 3), 0..0);
         }
     }
 }

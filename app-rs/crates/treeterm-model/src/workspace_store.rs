@@ -973,9 +973,12 @@ impl WorkspaceStore {
             }
             AppKind::Editor => {
                 let fs = self.conn.fs_client();
+                let exec: std::sync::Arc<dyn treeterm_core::exec::ExecApi> = std::sync::Arc::new(self.conn.exec_client());
                 let root = self.workspace.path.clone();
                 let state = tab.state.clone();
-                let model = cx.new(|cx| crate::text_editor::TextEditor::new(fs, root, &state, cx));
+                let workspace = cx.weak_entity();
+                let model =
+                    cx.new(|cx| crate::text_editor::TextEditor::new(fs, exec, workspace, root, &state, cx));
                 let owned_tab = tab_id.to_owned();
                 let events = cx.subscribe(&model, move |store, _, event: &crate::text_editor::TextEditorEvent, cx| {
                     let crate::text_editor::TextEditorEvent::StateChanged(next) = event;

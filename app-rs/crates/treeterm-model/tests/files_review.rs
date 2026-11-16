@@ -13,6 +13,7 @@ use treeterm_model::review::{
 use treeterm_model::review_find::DiffLayout;
 use treeterm_model::session_store::{SessionState, SessionStore, WorkspaceEntry};
 use treeterm_model::settings_store::SettingsStore;
+use treeterm_model::text_editor::{EditorDoc, TextEditor};
 use treeterm_model::workspace_store::{TabContent, WorkspaceStore};
 use treeterm_proto::treeterm::WorkspaceRef;
 
@@ -451,6 +452,172 @@ fn go_to_definition_opens_one_result_and_offers_several(cx: &mut TestAppContext)
         browser.read_with(cx, |b, _| b.definition().clone()),
         DefinitionLookup::Unavailable { language: "plaintext" }
     );
+}
+
+/// An Editor tab on `path`, once its file is loaded.
+fn open_editor(cx: &mut TestAppContext, workspace: &Entity<WorkspaceStore>, path: &str) -> Entity<TextEditor> {
+    let tab = workspace.update(cx, |w, cx| w.open_in_editor(path, cx)).unwrap();
+    let Some(TabContent::Editor(editor)) = workspace.read_with(cx, |w, _| w.tab_content(&tab)) else {
+        panic!("not an editor tab");
+    };
+    wait_until(cx, &editor, |e| matches!(e.doc(), EditorDoc::Ready { .. }));
+    editor
+}
+
+/// The Editor tabs' states, in no particular order.
+fn editor_states(cx: &mut TestAppContext, workspace: &Entity<WorkspaceStore>) -> Vec<serde_json::Value> {
+    workspace.read_with(cx, |w, _| {
+        w.file().app_states.values().filter(|tab| tab.application_id == "editor").map(|tab| tab.state.clone()).collect()
+    })
+}
+
+/// The Editor tab's text as it is now.
+fn editor_text(cx: &mut TestAppContext, editor: &Entity<TextEditor>) -> String {
+    editor.read_with(cx, |e, _| match e.doc() {
+        EditorDoc::Ready { current, .. } => current.clone(),
+        EditorDoc::Loading | EditorDoc::Error(_) => panic!("not loaded"),
+    })
+}
+
+#[gpui_kit::test]
+fn go_to_definition_in_an_editor_tab_opens_other_files_and_moves_within_its_own(cx: &mut TestAppContext) {
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let repo = TempRepo::new(&h);
+    repo.write("src/a.rs", "pub fn helper() {}\n\nfn twice() {}\n");
+    repo.write("src/b.rs", "fn local() {}\n\nfn twice() {}\n\nfn main() {\n    helper();\n    local();\n    twice();\n}\n");
+    repo.write("notes.txt", "helper\n");
+    repo.commit_all("files");
+    let store = open_store(cx, &h);
+    let workspace = open_repo_workspace(cx, &h, &store, &repo);
+    let editor = open_editor(cx, &workspace, &format!("{}/src/b.rs", repo.root()));
+    let text = editor_text(cx, &editor);
+    let opens_at = |cx: &mut TestAppContext, file: &str| -> Vec<serde_json::Value> {
+        editor_states(cx, &workspace)
+            .into_iter()
+            .filter(|state| state["filePath"].as_str().unwrap().ends_with(file))
+            .map(|state| state["scrollToLine"].clone())
+            .collect()
+    };
+
+    // A definition in another file opens it in a new Editor tab at its line.
+    let call = text.find("helper()").unwrap() + 2;
+    editor.update(cx, |e, cx| e.go_to_definition(call, cx));
+    assert_eq!(editor.read_with(cx, |e, _| e.definition().clone()), DefinitionLookup::Searching { symbol: "helper".into() });
+    wait_until(cx, &editor, |e| *e.definition() == DefinitionLookup::Idle);
+    assert_eq!(opens_at(cx, "src/a.rs"), [serde_json::json!(1)]);
+
+    // One in its own file moves the editor there; no tab opens.
+    let call = text.find("local();").unwrap();
+    editor.update(cx, |e, cx| e.go_to_definition(call, cx));
+    wait_until(cx, &editor, |e| *e.definition() == DefinitionLookup::Idle);
+    assert_eq!(editor.update(cx, |e, _| e.take_scroll_to_line()), Some(1));
+    assert_eq!(editor_states(cx, &workspace).len(), 2);
+
+    // Several: the chosen one opens.
+    let call = text.find("twice();").unwrap();
+    editor.update(cx, |e, cx| e.go_to_definition(call, cx));
+    wait_until(cx, &editor, |e| matches!(e.definition(), DefinitionLookup::Choose { .. }));
+    let DefinitionLookup::Choose { symbol, locations } = editor.read_with(cx, |e, _| e.definition().clone()) else {
+        unreachable!()
+    };
+    assert_eq!(symbol, "twice");
+    let mut found: Vec<(String, u64)> = locations.iter().map(|l| (l.file_path.clone(), l.line_number)).collect();
+    found.sort();
+    assert_eq!(found, vec![("src/a.rs".to_owned(), 3), ("src/b.rs".to_owned(), 3)]);
+    let other = locations.iter().position(|l| l.file_path == "src/a.rs").unwrap();
+    editor.update(cx, |e, cx| e.choose_definition(other, cx));
+    assert_eq!(editor.read_with(cx, |e, _| e.definition().clone()), DefinitionLookup::Idle);
+    let mut lines = opens_at(cx, "src/a.rs");
+    lines.sort_by_key(|line| line.as_u64());
+    assert_eq!(lines, [serde_json::json!(1), serde_json::json!(3)]);
+
+    // The text is searched as it is, unsaved edits included.
+    editor.update(cx, |e, cx| e.set_content(format!("helper\n{text}"), cx));
+    editor.update(cx, |e, cx| e.go_to_definition(2, cx));
+    assert_eq!(editor.read_with(cx, |e, _| e.definition().clone()), DefinitionLookup::Searching { symbol: "helper".into() });
+    wait_until(cx, &editor, |e| *e.definition() == DefinitionLookup::Idle);
+    assert_eq!(opens_at(cx, "src/a.rs").len(), 3);
+
+    // Off a word nothing is looked up; a failed lookup is dismissed.
+    let edited = "helper\n".len();
+    let space = edited + text.find(") {").unwrap() + 1;
+    editor.update(cx, |e, cx| e.go_to_definition(space, cx));
+    assert_eq!(editor.read_with(cx, |e, _| e.definition().clone()), DefinitionLookup::Idle);
+    let fn_word = edited + text.find("fn").unwrap();
+    editor.update(cx, |e, cx| e.go_to_definition(fn_word, cx));
+    wait_until(cx, &editor, |e| !matches!(e.definition(), DefinitionLookup::Searching { .. }));
+    assert_eq!(editor.read_with(cx, |e, _| e.definition().clone()), DefinitionLookup::NotFound { symbol: "fn".into() });
+    editor.update(cx, |e, cx| e.dismiss_definition(cx));
+    assert_eq!(editor.read_with(cx, |e, _| e.definition().clone()), DefinitionLookup::Idle);
+
+    // Plain text has no definitions, nor the context menu's item.
+    let notes = open_editor(cx, &workspace, &format!("{}/notes.txt", repo.root()));
+    assert!(editor.read_with(cx, |e, _| e.has_definitions()));
+    assert!(!notes.read_with(cx, |e, _| e.has_definitions()));
+    notes.update(cx, |e, cx| e.go_to_definition(1, cx));
+    assert_eq!(notes.read_with(cx, |e, _| e.definition().clone()), DefinitionLookup::Unavailable { language: "plaintext" });
+}
+
+/// Whether the probed word has a definition, once its search ends.
+fn has_definition(cx: &mut TestAppContext, found: treeterm_model::definition::HasDefinition) -> bool {
+    let (tx, rx) = futures::channel::oneshot::channel();
+    cx.update(|cx| {
+        cx.foreground_executor()
+            .spawn(async move {
+                match tx.send(found.await) {
+                    Ok(()) | Err(_) => {} // Err: the test gave up
+                }
+            })
+            .detach();
+    });
+    common::recv(cx, rx)
+}
+
+#[gpui_kit::test]
+fn the_cmd_hover_underline_marks_words_with_a_definition(cx: &mut TestAppContext) {
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let repo = TempRepo::new(&h);
+    repo.write("src/a.rs", "pub fn helper() {}\n");
+    repo.write("src/b.rs", "fn main() {\n    helper();\n    missing();\n}\n");
+    repo.write("notes.txt", "helper\n");
+    repo.commit_all("files");
+    let store = open_store(cx, &h);
+    let workspace = open_repo_workspace(cx, &h, &store, &repo);
+    let editor = open_editor(cx, &workspace, &format!("{}/src/b.rs", repo.root()));
+    let text = editor_text(cx, &editor);
+    let probe = editor.read_with(cx, |e, _| e.definition_probe());
+
+    let helper = text.find("helper").unwrap();
+    let (word, found) = cx.update(|cx| probe.probe(&text, helper + 3, cx)).unwrap();
+    assert_eq!(word, helper..helper + "helper".len());
+    // Moving over the same word joins its search.
+    let (_, again) = cx.update(|cx| probe.probe(&text, helper, cx)).unwrap();
+    assert!(found.ptr_eq(&again));
+    assert!(has_definition(cx, found));
+    let missing = text.find("missing").unwrap();
+    let (_, found) = cx.update(|cx| probe.probe(&text, missing, cx)).unwrap();
+    assert!(!has_definition(cx, found));
+    // Nothing to look up off a word, or in plain text.
+    assert!(cx.update(|cx| probe.probe(&text, text.find('{').unwrap() - 1, cx)).is_none());
+    let notes = open_editor(cx, &workspace, &format!("{}/notes.txt", repo.root()));
+    let probe = notes.read_with(cx, |e, _| e.definition_probe());
+    assert!(cx.update(|cx| probe.probe("helper\n", 1, cx)).is_none());
+
+    // The Files viewer probes the file it shows.
+    let state = serde_json::json!({ "selectedPath": format!("{}/src/b.rs", repo.root()), "expandedDirs": [] });
+    let tab = workspace.update(cx, |w, cx| w.add_tab_with("filesystem", state, cx)).unwrap();
+    let Some(TabContent::Files(browser)) = workspace.read_with(cx, |w, _| w.tab_content(&tab)) else {
+        panic!("not a files tab");
+    };
+    assert!(browser.read_with(cx, |b, _| b.definition_probe().is_none()), "nothing shown yet");
+    wait_until(cx, &browser, |b| matches!(b.view(), FileView::Text { .. }));
+    let probe = browser.read_with(cx, |b, _| b.definition_probe()).unwrap();
+    let (_, found) = cx.update(|cx| probe.probe(&text, helper, cx)).unwrap();
+    assert!(has_definition(cx, found));
 }
 
 #[gpui_kit::test]

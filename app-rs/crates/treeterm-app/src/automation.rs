@@ -10,6 +10,9 @@
 //! - `workspacedialog` — the current session's "+" (the Open Workspace dialog)
 //! - `fork <workspace-id>` — a quick fork of the workspace (its tree row's Fork button)
 //! - `type <text>` — type text as keystrokes; `key <keystroke>` — e.g. `enter`, `ctrl-c`
+//! - `click`/`rclick`/`dblclick <x> <y> [modifiers]` and `move <x> <y> [modifiers]` — the
+//!   pointer in window points, with keys held (e.g. `cmd`, `ctrl-shift`); `modifiers
+//!   [modifiers]` — the keys held change (none: released)
 //! - `scroll <x> <y> <dy>` — a wheel scroll of `dy` points over (x, y), in window points
 //! - `screenshot <path.png>` — render the last frame offscreen (no screen-capture permission)
 
@@ -75,6 +78,30 @@ async fn serve(path: PathBuf, tx: mpsc::Sender<Request>) {
             }
         });
     }
+}
+
+/// Keys held, `-`-separated (`cmd`, `ctrl`, `alt`, `shift`); none when `None`.
+fn modifiers(keys: Option<&str>) -> Result<gpui_kit::Modifiers, String> {
+    let mut modifiers = gpui_kit::Modifiers::default();
+    for key in keys.into_iter().flat_map(|keys| keys.split('-')) {
+        match key {
+            "cmd" => modifiers.platform = true,
+            "ctrl" => modifiers.control = true,
+            "alt" => modifiers.alt = true,
+            "shift" => modifiers.shift = true,
+            _ => return Err(format!("unknown modifier {key}: cmd, ctrl, alt or shift, joined by -")),
+        }
+    }
+    Ok(modifiers)
+}
+
+/// `<x> <y> [modifiers]`: a point in window points and the keys held ([`modifiers`]).
+fn pointer(args: &str) -> Result<(gpui_kit::Point<gpui_kit::Pixels>, gpui_kit::Modifiers), String> {
+    let usage = || "usage: <x> <y> [modifiers]".to_owned();
+    let mut args = args.split_whitespace();
+    let mut coord = || args.next().ok_or_else(usage)?.parse::<f32>().map_err(|_| usage());
+    let (x, y) = (coord()?, coord()?);
+    Ok((gpui_kit::point(gpui_kit::px(x), gpui_kit::px(y)), modifiers(args.next())?))
 }
 
 fn handle(line: &str, window: AnyWindowHandle, view: &Entity<AppView>, cx: &mut AsyncApp) -> Value {
@@ -191,15 +218,32 @@ fn handle(line: &str, window: AnyWindowHandle, view: &Entity<AppView>, cx: &mut 
                 );
                 Ok(json!({ "ok": true }))
             }
+            "modifiers" => {
+                // `modifiers [modifiers]`: the keys held now (none: all released).
+                let modifiers = modifiers(Some(rest).filter(|keys| !keys.is_empty()))?;
+                window.dispatch_event(
+                    gpui_kit::PlatformInput::ModifiersChanged(gpui_kit::ModifiersChangedEvent {
+                        modifiers,
+                        capslock: gpui_kit::Capslock::default(),
+                    }),
+                    cx,
+                );
+                Ok(json!({ "ok": true }))
+            }
+            "move" => {
+                // `move <x> <y> [modifiers]`: the pointer moves there, e.g. with `cmd` held.
+                let (position, modifiers) = pointer(rest)?;
+                window.dispatch_event(
+                    gpui_kit::PlatformInput::MouseMove(gpui_kit::MouseMoveEvent { position, pressed_button: None, modifiers }),
+                    cx,
+                );
+                Ok(json!({ "ok": true }))
+            }
             "click" | "rclick" | "dblclick" => {
-                // `click <x> <y>` in window points (screenshot pixels / scale factor);
-                // `rclick` uses the right button (context menus).
-                let mut coords = rest.split_whitespace().map(str::parse::<f32>);
-                let (Some(Ok(x)), Some(Ok(y))) = (coords.next(), coords.next()) else {
-                    return Err("usage: click <x> <y>".to_owned());
-                };
-                let position = gpui_kit::point(gpui_kit::px(x), gpui_kit::px(y));
-                let modifiers = gpui_kit::Modifiers::default();
+                // `click <x> <y> [modifiers]` in window points (screenshot pixels / scale
+                // factor), e.g. `click 10 20 cmd`; `rclick` uses the right button (context
+                // menus).
+                let (position, modifiers) = pointer(rest)?;
                 window.dispatch_event(
                     gpui_kit::PlatformInput::MouseMove(gpui_kit::MouseMoveEvent { position, pressed_button: None, modifiers }),
                     cx,

@@ -15,6 +15,7 @@ mod comment_ui;
 mod automation;
 mod browser_view;
 mod daemon_binary;
+mod editor_hooks;
 mod file_browser_view;
 mod json_view;
 mod keybinding_overlay;

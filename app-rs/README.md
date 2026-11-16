@@ -105,8 +105,9 @@ Done (tested against a real in-process daemon unless noted):
 - **Files / editor (M6):** file tree with favourites (a child worktree inherits its ancestors'),
   highlighted viewer, Markdown preview, images, PDF and 3D models (webview; three.js bundled
   by `assets/model-viewer/build.sh`), download, search panel (in file / in repo), find, go to
-  definition, review comments (click a line number; commented lines marked in the glyph
-  margin); editor tab.
+  definition (F12, Cmd/Ctrl+click, the context menu; a word with a definition is underlined
+  while Cmd/Ctrl is held over it), review comments (click a line number; commented lines
+  marked in the glyph margin); editor tab with go to definition.
 - **Review (M7):** committed / uncommitted / commits views, stage/unstage/commit, inline
   comments (Electron's metadata format), viewed files, image diffs (before / after), each
   file's diff loading, failing and refreshed (its header's refresh button) on its own,
@@ -243,7 +244,8 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   current line's outline is drawn over the text, so it stops at the scrollbar; a scrollbar
   fades 2 s after scrolling stops (Monaco: 0.5 s). The Kit has no R, XML, Less or Dockerfile
   grammar: `.r` files are plain, and `.xml`, `.less` and `.dockerfile` files are coloured
-  with the HTML, CSS and shell grammars.
+  with the HTML, CSS and shell grammars. The word underlined under Cmd/Ctrl keeps the
+  text's colour (Monaco's link is `#4E94CE`).
 - With the sidebar collapsed the header keeps clear of the macOS window buttons (Electron's
   title runs under them).
 - GPUI cannot decode AVIF, so the Files viewer shows `.avif` images in a webview (WebKit
@@ -317,6 +319,8 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   scrollback (or goes to a program that asked for mouse events).
 - The attention ding is the system bell (Electron synthesised an 880 Hz tone).
 - The analyzer reads the tab's own terminal; Electron attached a second, headless one.
+- Go to definition moves within the Files viewer or the Editor tab when the definition is in
+  the file it shows; Electron opened that file again in a new Editor tab.
 - The code editors colour files Electron shows as plain text: Makefile, Dockerfile,
   CMakeLists.txt, `.toml`, `.markdown`, `.mjs`/`.cjs`/`.mts`/`.cts`, `.jsonc`,
   `.cc`/`.cxx`/`.hh`, `.zig`, `.ex`/`.exs`, `.proto` and `.diff`/`.patch`.

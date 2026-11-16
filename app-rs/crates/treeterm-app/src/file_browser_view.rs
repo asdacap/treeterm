@@ -7,7 +7,7 @@
 //!
 //! In the viewer, Cmd/Ctrl+F opens the search panel with the selection, Cmd/Ctrl+click or
 //! F12 goes to the definition of the word under the cursor, and the context menu offers
-//! both.
+//! both. Holding Cmd/Ctrl over a word with a definition underlines it.
 //!
 //! A click on a line number starts a review comment on that line. Commented lines are
 //! tinted with a bar in the glyph margin (Monaco's `.comment-line` / `.comment-glyph`);
@@ -57,6 +57,88 @@ const VIEWER_CONTEXT: &str = "FileViewer";
 pub fn bind_keys(cx: &mut App) {
     cx.bind_keys([KeyBinding::new("f12", GoToDefinition, Some(VIEWER_CONTEXT))]);
     gpui_kit::component::Theme::global_mut(cx).highlight_theme = vs_dark::theme();
+}
+
+/// Go-to-definition progress, failures and the pick list, over a code editor (the Files
+/// viewer's or the Editor tab's): `choose` opens a candidate, `dismiss` closes it.
+pub(crate) fn definition_overlay<V: 'static>(
+    lookup: DefinitionLookup,
+    choose: impl Fn(&mut V, usize, &mut Context<V>) + Clone + 'static,
+    dismiss: impl Fn(&mut V, &mut Context<V>) + Clone + 'static,
+    cx: &mut Context<V>,
+) -> Option<AnyElement> {
+    let c = colors(cx);
+    let (secondary, primary, border, bg, hover) = (c.text_secondary, c.text_primary, c.border, c.bg_secondary, c.bg_hover);
+    let close = |cx: &mut Context<V>| {
+        let dismiss = dismiss.clone();
+        ui::find_button("close-definition", IconName::X, false, cx).on_click(cx.listener(move |view, _, _, cx| dismiss(view, cx)))
+    };
+    let status = |text: String, color: Hsla, cx: &mut Context<V>| {
+        h_flex()
+            .flex_shrink_0()
+            .gap(px(4.))
+            .px(px(8.))
+            .py(px(4.))
+            .text_size(px(ui::SMALL))
+            .bg(bg)
+            .border_b_1()
+            .border_color(border)
+            .child(div().flex_1().text_color(color).child(text))
+            .child(close(cx))
+            .into_any_element()
+    };
+    let error: Hsla = rgb(ui::FILE_ERROR).into();
+    match lookup {
+        DefinitionLookup::Idle => None,
+        DefinitionLookup::Searching { symbol } => Some(status(format!("Finding the definition of {symbol}…"), secondary, cx)),
+        DefinitionLookup::NotFound { symbol } => Some(status(format!("No definition found for '{symbol}'"), secondary, cx)),
+        DefinitionLookup::Unavailable { language } => {
+            Some(status(format!("Go to definition is not available for {language} files"), secondary, cx))
+        }
+        DefinitionLookup::Failed { symbol, error: message } => Some(status(format!("Could not look up {symbol}: {message}"), error, cx)),
+        DefinitionLookup::Choose { symbol, locations } => {
+            let mut list = v_flex().id("definitions").max_h(px(240.)).overflow_y_scroll().pb(px(4.));
+            for (index, location) in locations.iter().enumerate() {
+                let choose = choose.clone();
+                list = list.child(
+                    h_flex()
+                        .id(("definition", index))
+                        .gap(px(8.))
+                        .pl(px(16.))
+                        .pr(px(8.))
+                        .py(px(2.))
+                        .font_family(MONO)
+                        .text_size(px(ui::SMALL))
+                        .text_color(secondary)
+                        .cursor_pointer()
+                        .hover(move |d| d.bg(hover).text_color(primary))
+                        .child(format!("{}:{}", location.file_path, location.line_number))
+                        .on_click(cx.listener(move |view, _, _, cx| choose(view, index, cx))),
+                );
+            }
+            Some(
+                v_flex()
+                    .flex_shrink_0()
+                    .bg(bg)
+                    .border_b_1()
+                    .border_color(border)
+                    .child(
+                        h_flex()
+                            .gap(px(4.))
+                            .px(px(8.))
+                            .py(px(4.))
+                            .text_size(px(ui::SMALL))
+                            .child(div().flex_1().text_color(secondary).child(format!(
+                                "{} definitions of '{symbol}'",
+                                locations.len()
+                            )))
+                            .child(close(cx)),
+                    )
+                    .child(list)
+                    .into_any_element(),
+            )
+        }
+    }
 }
 
 /// The strip that lines GPUI Kit's gutter up with Monaco's, for a file of `lines` lines.
@@ -366,6 +448,8 @@ pub struct FileBrowserView {
     editor_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
     /// The pointer is over the editor ([`pointer_over`]).
     pointer_over: PointerOver,
+    /// The last press went to an underlined definition ([`crate::editor_hooks`]).
+    definition_clicked: Rc<Cell<bool>>,
     draft_input: Option<DraftInput>,
     comments_scroll: gpui_kit::ScrollHandle,
     _observe: Subscription,
@@ -568,6 +652,7 @@ impl FileBrowserView {
             marked: (String::new(), Vec::new()),
             editor_bounds: Rc::new(Cell::new(None)),
             pointer_over: PointerOver::default(),
+            definition_clicked: Rc::new(Cell::new(false)),
             draft_input: None,
             comments_scroll: gpui_kit::ScrollHandle::new(),
             _observe: observe,
@@ -638,6 +723,15 @@ impl FileBrowserView {
         self.gutter = Some(monaco_gutter(&editor, true, &self.pointer_over, cx));
         self.brackets = Some(editor.update(cx, |editor, cx| editor.create_decorations_collection(brackets, cx)));
         self.comment_lines = Some(editor.update(cx, |editor, cx| editor.create_range_decorations_collection(Vec::new(), cx)));
+        if let Some(probe) = self.model.read(cx).definition_probe() {
+            let model = self.model.downgrade();
+            let go = move |offset: usize, cx: &mut App| {
+                if let Some(model) = model.upgrade() {
+                    model.update(cx, |m, cx| m.go_to_definition(offset, cx));
+                }
+            };
+            crate::editor_hooks::install_definitions(&editor, probe, self.definition_clicked.clone(), go, cx);
+        }
         self.marked = (String::new(), Vec::new());
         self.editor = Some((path.to_owned(), read, editor.clone()));
         editor
@@ -741,8 +835,10 @@ impl FileBrowserView {
 
     /// Cmd/Ctrl+click goes to the definition, a click on a line number starts a comment
     /// there (`GUTTER_LINE_NUMBERS`): the press already put the cursor on the clicked word, or
-    /// at the start of the clicked line.
+    /// at the start of the clicked line. A press on an underlined definition already went
+    /// there.
     fn on_editor_mouse_up(&mut self, event: &MouseUpEvent, _: &mut Window, cx: &mut Context<Self>) {
+        let definition_clicked = self.definition_clicked.replace(false);
         let Some(editor) = self.shown_editor(cx) else {
             return;
         };
@@ -754,7 +850,9 @@ impl FileBrowserView {
             return;
         }
         if event.modifiers.secondary(cx) {
-            self.model.update(cx, |m, cx| m.go_to_definition(offset, cx));
+            if !definition_clicked {
+                self.model.update(cx, |m, cx| m.go_to_definition(offset, cx));
+            }
             return;
         }
         if event.click_count != 1 || !self.on_line_numbers(event.position, lines) {
@@ -1194,83 +1292,6 @@ impl FileBrowserView {
 
     // ---- viewer ------------------------------------------------------------------------
 
-    /// Go-to-definition progress, failures and the pick list, over the viewer.
-    fn definition_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let c = colors(cx);
-        let (secondary, primary, border, bg, hover) = (c.text_secondary, c.text_primary, c.border, c.bg_secondary, c.bg_hover);
-        let close = |cx: &mut Context<Self>| {
-            ui::find_button("close-definition", IconName::X, false, cx)
-                .on_click(cx.listener(|view, _, _, cx| view.model.update(cx, |m, cx| m.dismiss_definition(cx))))
-        };
-        let status = |text: String, color: Hsla, cx: &mut Context<Self>| {
-            h_flex()
-                .flex_shrink_0()
-                .gap(px(4.))
-                .px(px(8.))
-                .py(px(4.))
-                .text_size(px(ui::SMALL))
-                .bg(bg)
-                .border_b_1()
-                .border_color(border)
-                .child(div().flex_1().text_color(color).child(text))
-                .child(close(cx))
-                .into_any_element()
-        };
-        let error: Hsla = rgb(ui::FILE_ERROR).into();
-        match self.model.read(cx).definition().clone() {
-            DefinitionLookup::Idle => None,
-            DefinitionLookup::Searching { symbol } => Some(status(format!("Finding the definition of {symbol}…"), secondary, cx)),
-            DefinitionLookup::NotFound { symbol } => Some(status(format!("No definition found for '{symbol}'"), secondary, cx)),
-            DefinitionLookup::Unavailable { language } => {
-                Some(status(format!("Go to definition is not available for {language} files"), secondary, cx))
-            }
-            DefinitionLookup::Failed { symbol, error: message } => Some(status(format!("Could not look up {symbol}: {message}"), error, cx)),
-            DefinitionLookup::Choose { symbol, locations } => {
-                let mut list = v_flex().id("definitions").max_h(px(240.)).overflow_y_scroll().pb(px(4.));
-                for (index, location) in locations.iter().enumerate() {
-                    list = list.child(
-                        h_flex()
-                            .id(("definition", index))
-                            .gap(px(8.))
-                            .pl(px(16.))
-                            .pr(px(8.))
-                            .py(px(2.))
-                            .font_family(MONO)
-                            .text_size(px(ui::SMALL))
-                            .text_color(secondary)
-                            .cursor_pointer()
-                            .hover(move |d| d.bg(hover).text_color(primary))
-                            .child(format!("{}:{}", location.file_path, location.line_number))
-                            .on_click(cx.listener(move |view, _, _, cx| {
-                                view.model.update(cx, |m, cx| m.choose_definition(index, cx));
-                            })),
-                    );
-                }
-                Some(
-                    v_flex()
-                        .flex_shrink_0()
-                        .bg(bg)
-                        .border_b_1()
-                        .border_color(border)
-                        .child(
-                            h_flex()
-                                .gap(px(4.))
-                                .px(px(8.))
-                                .py(px(4.))
-                                .text_size(px(ui::SMALL))
-                                .child(div().flex_1().text_color(secondary).child(format!(
-                                    "{} definitions of '{symbol}'",
-                                    locations.len()
-                                )))
-                                .child(close(cx)),
-                        )
-                        .child(list)
-                        .into_any_element(),
-                )
-            }
-        }
-    }
-
     /// `FileDownloadButton`: pick where to save a copy of `path` on this computer; a failure
     /// shows beside a retry.
     fn download_button(&self, path: &str, cx: &mut Context<Self>) -> Vec<AnyElement> {
@@ -1491,7 +1512,12 @@ impl FileBrowserView {
         let editor = self.editor_for(path, text, window, cx);
         // Monaco shows the search panel's matches only by selecting the chosen one.
         self.apply_reveal(&editor, window, cx);
-        let overlay = self.definition_overlay(cx);
+        let overlay = definition_overlay(
+            self.model.read(cx).definition().clone(),
+            |view: &mut Self, index, cx| view.model.update(cx, |m, cx| m.choose_definition(index, cx)),
+            |view: &mut Self, cx| view.model.update(cx, |m, cx| m.dismiss_definition(cx)),
+            cx,
+        );
         let comments = self.model.read(cx).file_comments(cx);
         self.mark_comment_lines(path, text, comments.as_deref().unwrap_or_default(), cx);
         let panel = self.comments_panel(path, comments, window, cx);
@@ -1508,29 +1534,32 @@ impl FileBrowserView {
                     .on_action(cx.listener(Self::on_search_word))
                     .children(overlay)
                     .child(
-                        pointer_over(div().id("file-viewer-editor"), &self.pointer_over)
-                            .relative()
-                            .flex_1()
-                            .min_h_0()
-                            .on_mouse_up(MouseButton::Left, cx.listener(Self::on_editor_mouse_up))
-                            .child(measure)
-                            .child(
-                                Editor::new(&editor)
-                                    .readonly(true)
-                                    .bordered(false)
-                                    .h_full()
-                                    .font_family(MONO)
-                                    .text_size(px(14.))
-                                    .context_menu(|menu, _, _| {
-                                        menu.menu("Go to Definition", Box::new(GoToDefinition))
-                                            .separator()
-                                            .menu("Copy", Box::new(CopyText))
-                                            .menu("Search", Box::new(SearchWord))
-                                            .separator()
-                                            .menu("Select All", Box::new(SelectAll))
-                                    }),
-                            )
-                            .child(current_line_outline(&editor, true)),
+                        crate::editor_hooks::drop_underline_on_release(
+                            pointer_over(div().id("file-viewer-editor"), &self.pointer_over),
+                            &editor,
+                        )
+                        .relative()
+                        .flex_1()
+                        .min_h_0()
+                        .on_mouse_up(MouseButton::Left, cx.listener(Self::on_editor_mouse_up))
+                        .child(measure)
+                        .child(
+                            Editor::new(&editor)
+                                .readonly(true)
+                                .bordered(false)
+                                .h_full()
+                                .font_family(MONO)
+                                .text_size(px(14.))
+                                .context_menu(|menu, _, _| {
+                                    menu.menu("Go to Definition", Box::new(GoToDefinition))
+                                        .separator()
+                                        .menu("Copy", Box::new(CopyText))
+                                        .menu("Search", Box::new(SearchWord))
+                                        .separator()
+                                        .menu("Select All", Box::new(SelectAll))
+                                }),
+                        )
+                        .child(current_line_outline(&editor, true)),
                     ),
             )
             .children(panel)

@@ -2,15 +2,24 @@
 //! code editor with tree-sitter highlighting), styled as `.file-editor*` in `index.css`: a
 //! header with the file name and its unsaved mark, the markdown Edit/Preview toggle, Save
 //! and the language, over the editor or the markdown preview.
+//!
+//! As in Monaco: F12, Cmd/Ctrl+click and the context menu go to the definition of the word
+//! under the cursor (holding Cmd/Ctrl over a word with one underlines it).
 
-use gpui_kit::component::input::{Editor, EditorState, InputEvent, Replace};
+use std::cell::Cell;
+use std::rc::Rc;
+
+use gpui_kit::component::input::{Copy as CopyText, Cut, Editor, EditorState, InputEvent, Paste, Replace};
 use gpui_kit::component::v_flex;
 use gpui_kit::component::h_flex;
 use gpui_kit::prelude::*;
-use gpui_kit::{Context, Entity, FontWeight, KeyBinding, PromptLevel, SharedString, Subscription, Window, actions, div, px, rgb};
+use gpui_kit::{
+    App, Context, Entity, FontWeight, KeyBinding, MouseButton, MouseUpEvent, PromptLevel, SharedString, Subscription,
+    Window, actions, div, px, rgb,
+};
 use treeterm_model::text_editor::{EditorDoc, SaveState, TextEditor};
 
-use crate::file_browser_view::{PointerOver, language_for};
+use crate::file_browser_view::{GoToDefinition, PointerOver, language_for};
 use crate::theme::colors;
 use crate::ui;
 
@@ -19,12 +28,16 @@ actions!(text_editor, [Save]);
 const CONTEXT: &str = "TextEditor";
 
 /// Cmd/Ctrl+S saves. Monaco's replace is Cmd+Alt+F on macOS (GPUI Kit's Cmd+Shift+F
-/// stays); elsewhere it is Ctrl+H, as in the Kit.
+/// stays); elsewhere it is Ctrl+H, as in the Kit. F12 goes to the definition, as in Monaco.
 pub fn bind_keys(cx: &mut gpui_kit::App) {
-    let key = if cfg!(target_os = "macos") { "cmd-s" } else { "ctrl-s" };
-    cx.bind_keys([KeyBinding::new(key, Save, Some(CONTEXT))]);
+    cx.bind_keys([KeyBinding::new("f12", GoToDefinition, Some(CONTEXT))]);
     if cfg!(target_os = "macos") {
-        cx.bind_keys([KeyBinding::new("cmd-alt-f", Replace, Some(CONTEXT))]);
+        cx.bind_keys([
+            KeyBinding::new("cmd-s", Save, Some(CONTEXT)),
+            KeyBinding::new("cmd-alt-f", Replace, Some(CONTEXT)),
+        ]);
+    } else {
+        cx.bind_keys([KeyBinding::new("ctrl-s", Save, Some(CONTEXT))]);
     }
 }
 
@@ -35,6 +48,8 @@ pub struct TextEditorView {
     gutter: Option<gpui_kit::component::input::GutterDecorationCollection>,
     /// The pointer is over the editor ([`crate::file_browser_view::pointer_over`]).
     pointer_over: PointerOver,
+    /// The last press went to an underlined definition ([`crate::editor_hooks`]).
+    definition_clicked: Rc<Cell<bool>>,
     preview_scroll: gpui_kit::ScrollHandle,
     _subscriptions: Vec<Subscription>,
 }
@@ -47,6 +62,7 @@ impl TextEditorView {
             editor: None,
             gutter: None,
             pointer_over: PointerOver::default(),
+            definition_clicked: Rc::new(Cell::new(false)),
             preview_scroll: gpui_kit::ScrollHandle::new(),
             _subscriptions: vec![observe],
         }
@@ -76,11 +92,20 @@ impl TextEditorView {
             }
         });
         self._subscriptions.push(changes);
+        let probe = self.model.read(cx).definition_probe();
+        let model = self.model.downgrade();
+        let go = move |offset: usize, cx: &mut App| {
+            if let Some(model) = model.upgrade() {
+                model.update(cx, |m, cx| m.go_to_definition(offset, cx));
+            }
+        };
+        crate::editor_hooks::install_definitions(&editor, probe, self.definition_clicked.clone(), go, cx);
         self.editor = Some(editor.clone());
         Some(editor)
     }
 
-    /// Go to definition opened this tab at a line: move there once the editor has a layout.
+    /// Go to definition opened this tab at a line, or found the definition in this file:
+    /// move there once the editor has a layout.
     fn reveal_line(&mut self, editor: &Entity<EditorState>, window: &mut Window, cx: &mut Context<Self>) {
         if editor.read(cx).line_height().is_none() {
             window.request_animation_frame();
@@ -98,6 +123,31 @@ impl TextEditorView {
 
     fn save(&mut self, _: &Save, _window: &mut Window, cx: &mut Context<Self>) {
         self.model.update(cx, |model, cx| model.save(cx));
+    }
+
+    fn on_go_to_definition(&mut self, _: &GoToDefinition, _: &mut Window, cx: &mut Context<Self>) {
+        let Some(editor) = &self.editor else {
+            return;
+        };
+        let offset = editor.read(cx).cursor();
+        self.model.update(cx, |m, cx| m.go_to_definition(offset, cx));
+    }
+
+    /// Cmd/Ctrl+click goes to the definition of the clicked word (the press put the cursor
+    /// on it), unless the press went to an underlined definition, which already went there.
+    fn on_editor_mouse_up(&mut self, event: &MouseUpEvent, _: &mut Window, cx: &mut Context<Self>) {
+        let definition_clicked = self.definition_clicked.replace(false);
+        let Some(editor) = &self.editor else {
+            return;
+        };
+        let (selected, offset) = {
+            let editor = editor.read(cx);
+            (editor.selected_range(), editor.cursor())
+        };
+        if !selected.is_empty() || !event.modifiers.secondary(cx) || definition_clicked {
+            return;
+        }
+        self.model.update(cx, |m, cx| m.go_to_definition(offset, cx));
     }
 
     /// A failed save is an alert, as in Electron.
@@ -127,6 +177,7 @@ impl Render for TextEditorView {
         let dirty = model.is_dirty();
         let saving = matches!(model.save_state(), SaveState::Saving);
         let (markdown, preview, language) = (model.is_markdown(), model.is_preview(), model.language());
+        let (has_definitions, definition) = (model.has_definitions(), model.definition().clone());
         let doc = model.doc().clone();
         let current = match doc {
             EditorDoc::Loading => return frame.child(ui::viewer_placeholder("Loading...", cx)).into_any_element(),
@@ -143,11 +194,44 @@ impl Render for TextEditorView {
             match self.editor(window, cx) {
                 Some(editor) => {
                     self.reveal_line(&editor, window, cx);
-                    crate::file_browser_view::pointer_over(div().id("text-editor"), &self.pointer_over)
-                        .relative()
+                    let overlay = crate::file_browser_view::definition_overlay(
+                        definition,
+                        |view: &mut Self, index, cx| view.model.update(cx, |m, cx| m.choose_definition(index, cx)),
+                        |view: &mut Self, cx| view.model.update(cx, |m, cx| m.dismiss_definition(cx)),
+                        cx,
+                    );
+                    // Monaco's menu for an editable file: Go to Definition where the language
+                    // has it, then the clipboard.
+                    let editor_element = Editor::new(&editor)
+                        .bordered(false)
+                        .h_full()
+                        .font_family("Menlo")
+                        .text_size(px(14.))
+                        .context_menu(move |menu, _, _| {
+                            let menu = if has_definitions {
+                                menu.menu("Go to Definition", Box::new(GoToDefinition)).separator()
+                            } else {
+                                menu
+                            };
+                            menu.menu("Cut", Box::new(Cut))
+                                .menu("Copy", Box::new(CopyText))
+                                .menu("Paste", Box::new(Paste))
+                        });
+                    v_flex()
                         .size_full()
-                        .child(Editor::new(&editor).bordered(false).h_full().font_family("Menlo").text_size(px(14.)))
-                        .child(crate::file_browser_view::current_line_outline(&editor, false))
+                        .children(overlay)
+                        .child(
+                            crate::editor_hooks::drop_underline_on_release(
+                                crate::file_browser_view::pointer_over(div().id("text-editor"), &self.pointer_over),
+                                &editor,
+                            )
+                            .relative()
+                            .flex_1()
+                            .min_h_0()
+                            .on_mouse_up(MouseButton::Left, cx.listener(Self::on_editor_mouse_up))
+                            .child(editor_element)
+                            .child(crate::file_browser_view::current_line_outline(&editor, false)),
+                        )
                         .into_any_element()
                 }
                 None => div().into_any_element(),
@@ -170,6 +254,7 @@ impl Render for TextEditorView {
         frame
             .key_context(CONTEXT)
             .on_action(cx.listener(Self::save))
+            .on_action(cx.listener(Self::on_go_to_definition))
             .child(
                 h_flex()
                     .flex_shrink_0()

@@ -4,14 +4,23 @@
 //! The tab state keeps Electron's `EditorState` shape (`status`, `filePath`,
 //! `originalContent`, `currentContent`, `language`, `isDirty`, `viewMode`), so an editor tab
 //! opened in either app shows the same unsaved edits in the other.
+//!
+//! Go to definition searches the text as it is, unsaved edits included
+//! ([`crate::definition`]); a definition in another file opens in a new Editor tab at its
+//! line (`openFileAtLine`).
 
+use std::sync::Arc;
 use std::time::Duration;
 
-use gpui_kit::{Context, EventEmitter, Task};
+use gpui_kit::{Context, EventEmitter, Task, WeakEntity};
 use serde_json::{Value, json};
+use treeterm_core::exec::{ExecApi, ExecError};
 use treeterm_core::fs::{FsClient, FsError, ReadOutcome, WriteGuard, WriteOutcome};
+use treeterm_core::search::{self, DefinitionLocation};
 
+use crate::definition::{Begin, DefinitionLookup, DefinitionProbe, Settled};
 use crate::file_browser::{fs_error_text, fs_outcome};
+use crate::workspace_store::WorkspaceStore;
 
 /// Edits are persisted to the tab state this long after the last keystroke.
 const PERSIST_DEBOUNCE: Duration = Duration::from_millis(800);
@@ -61,6 +70,9 @@ pub fn tab_title_of_state(state: &Value) -> Option<String> {
 
 pub struct TextEditor {
     fs: FsClient,
+    exec: Arc<dyn ExecApi>,
+    /// The workspace the tab is in, where go to definition opens other files.
+    workspace: WeakEntity<WorkspaceStore>,
     root: String,
     path: String,
     doc: EditorDoc,
@@ -68,28 +80,41 @@ pub struct TextEditor {
     view_mode: String,
     /// Where to move once the text is shown (go to definition), until the view has.
     scroll_to_line: Option<usize>,
+    definition: DefinitionLookup,
     _load: Option<Task<()>>,
     _save: Option<Task<()>>,
     _persist: Option<Task<()>>,
+    _definition: Option<Task<()>>,
 }
 
 impl TextEditor {
     /// `state` is the tab's persisted `EditorState`; a Ready state with content is used as
     /// is (unsaved edits survive), anything else loads the file.
-    pub fn new(fs: FsClient, root: String, state: &Value, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        fs: FsClient,
+        exec: Arc<dyn ExecApi>,
+        workspace: WeakEntity<WorkspaceStore>,
+        root: String,
+        state: &Value,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let text = |key: &str| state.get(key).and_then(Value::as_str).map(str::to_owned);
         let path = text("filePath").unwrap_or_default();
         let mut editor = Self {
             fs,
+            exec,
+            workspace,
             root,
             path,
             doc: EditorDoc::Loading,
             save: SaveState::Idle,
             view_mode: text("viewMode").unwrap_or_else(|| VIEW_MODE_EDITOR.to_owned()),
             scroll_to_line: state.get("scrollToLine").and_then(Value::as_u64).map(|line| line as usize),
+            definition: DefinitionLookup::Idle,
             _load: None,
             _save: None,
             _persist: None,
+            _definition: None,
         };
         match (text("status").as_deref(), text("originalContent"), text("currentContent")) {
             (Some("ready"), Some(original), Some(current)) => {
@@ -264,6 +289,93 @@ impl TextEditor {
             }
         }));
         cx.notify();
+    }
+
+    // ---- go to definition --------------------------------------------------------------
+
+    pub fn definition(&self) -> &DefinitionLookup {
+        &self.definition
+    }
+
+    /// Whether this file's language has go to definition.
+    pub fn has_definitions(&self) -> bool {
+        crate::definition::has_definitions(&self.path)
+    }
+
+    /// Look up the definition of the word at byte `offset` of the text as it is now: one
+    /// result is gone to, several are offered to choose from.
+    pub fn go_to_definition(&mut self, offset: usize, cx: &mut Context<Self>) {
+        let EditorDoc::Ready { current, .. } = &self.doc else {
+            return;
+        };
+        self._definition = None;
+        self.definition = match crate::definition::begin(&self.path, current, offset) {
+            Begin::Idle => DefinitionLookup::Idle,
+            Begin::Unavailable { language } => DefinitionLookup::Unavailable { language },
+            Begin::Search(query) => {
+                let symbol = query.symbol.clone();
+                let search = crate::definition::run(self.exec.clone(), self.root.clone(), query);
+                let searched = symbol.clone();
+                self._definition = Some(cx.spawn(async move |this, cx| {
+                    let result = search.await;
+                    match this.update(cx, |editor, cx| editor.on_definitions(searched, result, cx)) {
+                        Ok(()) | Err(_) => {} // Err: tab closed
+                    }
+                }));
+                DefinitionLookup::Searching { symbol }
+            }
+        };
+        cx.notify();
+    }
+
+    fn on_definitions(&mut self, symbol: String, result: Result<Vec<DefinitionLocation>, ExecError>, cx: &mut Context<Self>) {
+        self.definition = match crate::definition::settle(symbol, result) {
+            Settled::Go(location) => {
+                self.go_to_location(&location, cx);
+                DefinitionLookup::Idle
+            }
+            Settled::Show(lookup) => lookup,
+        };
+        cx.notify();
+    }
+
+    /// Open one of several candidates.
+    pub fn choose_definition(&mut self, index: usize, cx: &mut Context<Self>) {
+        let DefinitionLookup::Choose { locations, .. } = &self.definition else {
+            return;
+        };
+        let Some(location) = locations.get(index).cloned() else {
+            return;
+        };
+        self.definition = DefinitionLookup::Idle;
+        self.go_to_location(&location, cx);
+        cx.notify();
+    }
+
+    pub fn dismiss_definition(&mut self, cx: &mut Context<Self>) {
+        self.definition = DefinitionLookup::Idle;
+        self._definition = None;
+        cx.notify();
+    }
+
+    /// A definition in this file moves the editor there, as the Files viewer does; one in
+    /// another file opens in a new Editor tab at its line (`openFileAtLine`).
+    fn go_to_location(&mut self, location: &DefinitionLocation, cx: &mut Context<Self>) {
+        let line = location.line_number as usize;
+        if search::to_workspace_relative(&self.root, &self.path) == location.file_path {
+            self.scroll_to_line = Some(line);
+            return;
+        }
+        let Some(workspace) = self.workspace.upgrade() else {
+            return;
+        };
+        let path = search::to_workspace_absolute(&self.root, &location.file_path);
+        workspace.update(cx, |w, cx| w.open_in_editor_at(&path, line, cx));
+    }
+
+    /// The Cmd/Ctrl+hover underline for this file.
+    pub fn definition_probe(&self) -> DefinitionProbe {
+        DefinitionProbe::new(self.exec.clone(), self.root.clone(), self.path.clone())
     }
 
     fn persist_now(&mut self, cx: &mut Context<Self>) {

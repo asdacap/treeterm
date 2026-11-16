@@ -27,7 +27,7 @@ use gpui_kit::{App, Context, Entity, EventEmitter, Subscription, Task, WeakEntit
 use serde_json::{Value, json};
 use treeterm_core::daemon::ApiError;
 use treeterm_core::exec::{ExecApi, ExecError};
-use treeterm_core::files::{FavouriteFile, detect_monaco_language, normalize_favourite_path, resolve_favourite_files};
+use treeterm_core::files::{FavouriteFile, normalize_favourite_path, resolve_favourite_files};
 use treeterm_core::fs::{FsClient, FsError, ReadOutcome};
 use treeterm_core::rt::TaskLost;
 use treeterm_core::git::GitApi;
@@ -47,14 +47,10 @@ pub const MAX_VIEW_BYTES: u64 = treeterm_core::files::MAX_READ_FILE_BYTES;
 /// The tree's file name search waits for a pause in typing (`FileTree`'s 300ms debounce).
 pub const NAME_SEARCH_DEBOUNCE: Duration = Duration::from_millis(300);
 
+pub use crate::definition::DefinitionLookup;
+use crate::definition::{Begin, DefinitionProbe, Settled};
 pub use crate::search_panel::{REPO_SEARCH_DEBOUNCE, RepoResults, SearchRow};
 use crate::search_panel::{count_label, push_repo_section, spawn_repo_search};
-
-/// Monaco languages Electron registers its grep definition provider for.
-const DEFINITION_LANGUAGES: [&str; 16] = [
-    "typescript", "javascript", "python", "rust", "go", "java", "kotlin", "ruby", "php", "c", "cpp",
-    "css", "scss", "less", "html", "shell",
-];
 
 /// A directory's entries, read on demand.
 #[derive(Debug, Clone)]
@@ -158,19 +154,6 @@ pub struct Reveal {
     pub len: usize,
     /// Bumped on every request, so asking for the same place again moves there again.
     pub seq: u64,
-}
-
-/// Go to definition (`definitionProvider` in `monaco-config.ts`).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum DefinitionLookup {
-    Idle,
-    Searching { symbol: String },
-    /// Several candidates: the user picks one.
-    Choose { symbol: String, locations: Vec<DefinitionLocation> },
-    NotFound { symbol: String },
-    /// No definition search for this file's language (Electron registers none).
-    Unavailable { language: &'static str },
-    Failed { symbol: String, error: String },
 }
 
 /// The favourites section (`FavouriteFilesSection`): the files the favourite paths name.
@@ -1109,43 +1092,43 @@ impl FileBrowser {
         let FileView::Text { path, text } = &self.view else {
             return;
         };
-        let symbol = search::word_at(text, offset).to_owned();
-        let language = detect_monaco_language(path);
         self._definition = None;
-        if symbol.is_empty() {
-            self.definition = DefinitionLookup::Idle;
-            cx.notify();
-            return;
-        }
-        if !DEFINITION_LANGUAGES.contains(&language) {
-            self.definition = DefinitionLookup::Unavailable { language };
-            cx.notify();
-            return;
-        }
-        self.definition = DefinitionLookup::Searching { symbol: symbol.clone() };
-        let (exec, root) = (self.exec.clone(), self.root.clone());
-        self._definition = Some(cx.spawn(async move |this, cx| {
-            let result = search::search_definition(exec.as_ref(), &root, &symbol, language).await;
-            match this.update(cx, |browser, cx| browser.on_definitions(symbol, result, cx)) {
-                Ok(()) | Err(_) => {} // Err: tab closed
+        self.definition = match crate::definition::begin(path, text, offset) {
+            Begin::Idle => DefinitionLookup::Idle,
+            Begin::Unavailable { language } => DefinitionLookup::Unavailable { language },
+            Begin::Search(query) => {
+                let symbol = query.symbol.clone();
+                let search = crate::definition::run(self.exec.clone(), self.root.clone(), query);
+                let searched = symbol.clone();
+                self._definition = Some(cx.spawn(async move |this, cx| {
+                    let result = search.await;
+                    match this.update(cx, |browser, cx| browser.on_definitions(searched, result, cx)) {
+                        Ok(()) | Err(_) => {} // Err: tab closed
+                    }
+                }));
+                DefinitionLookup::Searching { symbol }
             }
-        }));
+        };
         cx.notify();
     }
 
     fn on_definitions(&mut self, symbol: String, result: Result<Vec<DefinitionLocation>, ExecError>, cx: &mut Context<Self>) {
-        self.definition = match result {
-            Err(error) => DefinitionLookup::Failed { symbol, error: error.to_string() },
-            Ok(locations) => match <[DefinitionLocation; 1]>::try_from(locations) {
-                Ok([location]) => {
-                    self.go_to_location(&location, cx);
-                    DefinitionLookup::Idle
-                }
-                Err(locations) if locations.is_empty() => DefinitionLookup::NotFound { symbol },
-                Err(locations) => DefinitionLookup::Choose { symbol, locations },
-            },
+        self.definition = match crate::definition::settle(symbol, result) {
+            Settled::Go(location) => {
+                self.go_to_location(&location, cx);
+                DefinitionLookup::Idle
+            }
+            Settled::Show(lookup) => lookup,
         };
         cx.notify();
+    }
+
+    /// The Cmd/Ctrl+hover underline for the shown file, while it is text.
+    pub fn definition_probe(&self) -> Option<DefinitionProbe> {
+        let FileView::Text { path, .. } = &self.view else {
+            return None;
+        };
+        Some(DefinitionProbe::new(self.exec.clone(), self.root.clone(), path.clone()))
     }
 
     /// Open one of several candidates.

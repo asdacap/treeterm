@@ -8,7 +8,7 @@ pub mod repo;
 pub use definition::{DefinitionLocation, definition_pattern, file_globs, search_definition};
 pub use diff::{
     DiffSearchHit, DiffSearchOptions, DiffSearchSide, DiffStyle, LineMatcher, SearchableDiff,
-    TextSearchHit, UnchangedRegions, find_in_text, find_lines_in_diff, word_at,
+    TextSearchHit, UnchangedRegions, find_in_text, find_lines_in_diff, word_at, word_range_at,
 };
 pub use line_diff::{Hunk, HunkBlock, LineDiff, Whitespace, line_diff};
 pub use repo::{

@@ -11,6 +11,7 @@ pub mod bracket_pairs;
 pub mod browser_page;
 pub mod apps;
 pub mod child_dialog;
+pub mod definition;
 pub mod dir_browser;
 pub mod file_browser;
 pub mod forward_monitor;
