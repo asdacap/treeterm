@@ -170,7 +170,7 @@ impl PromptDebugger {
         let (mode, prompt) = (self.mode, self.prompt(self.mode).to_owned());
         settings.update(cx, |store, cx| {
             store.update(
-                |s| match mode {
+                move |s| match mode {
                     DebugMode::Analyzer => s.terminal_analyzer.system_prompt = prompt,
                     DebugMode::Title => s.terminal_analyzer.title_system_prompt = prompt,
                 },

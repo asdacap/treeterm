@@ -15,7 +15,7 @@ mod widgets;
 use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::input::{InputEvent, InputState, TextareaState};
 use gpui_kit::prelude::*;
-use gpui_kit::{App, Context, Entity, FocusHandle, SharedString, Subscription, Window, canvas, div, px};
+use gpui_kit::{App, Context, Entity, FocusHandle, SharedString, Subscription, Task, Window, canvas, div, px};
 use treeterm_core::keybinding::Os;
 use treeterm_core::settings::{
     AiHarnessInstance, BrowserInstance, CustomRunnerInstance, Settings, TerminalInstance, WebAppInstance,
@@ -26,6 +26,13 @@ use self::form::{Lists, SandboxSupport, Section, Texts};
 use self::instance_list::InstanceList;
 use crate::theme::colors;
 use crate::ui;
+
+/// Save's write to `settings.json`.
+enum Saving {
+    Idle,
+    /// Waits for the write, which runs on in the settings store if the dialog goes away.
+    Waiting { _wait: Task<()> },
+}
 
 /// A keybinding button waiting for its key (Electron's `RecordingState`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -55,6 +62,7 @@ pub struct SettingsView {
     web_apps: InstanceList<WebAppInstance>,
     browsers: InstanceList<BrowserInstance>,
     error: Option<SharedString>,
+    saving: Saving,
     recording: Option<Recording>,
     /// Takes the keystrokes while recording.
     intercept: Option<Subscription>,
@@ -203,6 +211,7 @@ impl SettingsView {
             web_apps,
             browsers,
             error: None,
+            saving: Saving::Idle,
             recording: None,
             intercept: None,
             focus: cx.focus_handle(),
@@ -222,9 +231,13 @@ impl SettingsView {
         }
     }
 
-    /// Validate and save. Returns whether the dialog may close; if not, the error is shown
-    /// and its section opened.
-    pub fn save(&mut self, cx: &mut Context<Self>) -> bool {
+    /// `handleSave`: validate, save, and close once written. An invalid form shows its error
+    /// and opens its section; a failed write shows why and keeps the dialog open, with the
+    /// settings unchanged, so the next Save writes again. Ignored while a save is running.
+    pub fn save(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Saving::Waiting { .. } = self.saving {
+            return;
+        }
         let texts = self.inputs.read(cx);
         let lists = self.lists(cx);
         let edited = match form::build(&self.draft, &texts, lists, Os::host()) {
@@ -233,19 +246,24 @@ impl SettingsView {
                 self.section = error.section;
                 self.error = Some(error.message.into());
                 cx.notify();
-                return false;
+                return;
             }
         };
-        self.store.update(cx, |store, cx| store.update(|current| form::apply_owned(edited, current), cx));
-        let saved_error = self.store.read(cx).error().map(str::to_owned);
-        match saved_error {
-            Some(error) => {
-                self.error = Some(format!("Could not save settings: {error}").into());
+        let saved = self.store.update(cx, |store, cx| store.save(move |current| form::apply_owned(edited, current), cx));
+        let wait = cx.spawn_in(window, async move |view, cx| {
+            let outcome = saved.await.unwrap_or_else(|_| Err("settings store closed".to_owned()));
+            match view.update_in(cx, |view, window, cx| {
+                view.saving = Saving::Idle;
+                match outcome {
+                    Ok(()) => window.close_dialog(cx),
+                    Err(error) => view.error = Some(format!("Could not save settings: {error}").into()),
+                }
                 cx.notify();
-                false
+            }) {
+                Ok(()) | Err(_) => {} // Err: the dialog closed
             }
-            None => true,
-        }
+        });
+        self.saving = Saving::Waiting { _wait: wait };
     }
 
     /// Start (or, clicked again, stop) recording a keybinding button's key. While recording,
@@ -420,11 +438,7 @@ impl Render for SettingsView {
                             .on_click(|_, window, cx| window.close_dialog(cx)),
                     )
                     .child(ui::dialog_button("save-settings", "Save", ui::ButtonKind::Primary, false, cx).on_click(
-                        cx.listener(|view, _, window, cx| {
-                            if view.save(cx) {
-                                window.close_dialog(cx);
-                            }
-                        }),
+                        cx.listener(|view, _, window, cx| view.save(window, cx)),
                     )),
             )
     }

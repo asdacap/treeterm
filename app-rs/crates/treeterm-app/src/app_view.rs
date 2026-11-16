@@ -489,7 +489,7 @@ impl AppView {
                 );
             }
         }
-        let on = self.settings.read(cx).settings().notifications.sound_enabled;
+        let sound_toggle = self.sound_toggle(crate::ui::icon_button("sound-toggle", cx), primary, cx);
         v_flex()
             .h_full()
             .w(px(36.))
@@ -502,15 +502,7 @@ impl AppView {
                     .items_center()
                     .border_b_1()
                     .border_color(border)
-                    .child(
-                        crate::ui::icon_button("sound-toggle", cx)
-                            .child(crate::ui::icon(if on { IconName::Volume2 } else { IconName::VolumeX }, 14., primary))
-                            .on_click(cx.listener(move |view, _, _, cx| {
-                                view.settings.update(cx, |store, cx| {
-                                    store.update(|s| s.notifications.sound_enabled = !on, cx)
-                                });
-                            })),
-                    )
+                    .child(sound_toggle)
                     .child(
                         crate::ui::icon_button("expand-sidebar", cx)
                             .tooltip(|window, cx| gpui_kit::component::tooltip::Tooltip::new("Expand sidebar").build(window, cx))
@@ -522,6 +514,65 @@ impl AppView {
                     ),
             )
             .child(div().id("rail").flex_1().overflow_y_scroll().child(rail))
+            .into_any_element()
+    }
+
+    /// `SoundToggle` (`.sound-toggle`): `button` (with the caller's tooltip) shows whether the
+    /// attention sound is on and toggles it. While the toggle saves, it spins (the store
+    /// ignores clicks) with "Saving sound preference…" below; a failed save keeps the icon and
+    /// says why below until the next click.
+    fn sound_toggle(
+        &self,
+        button: gpui_kit::Stateful<gpui_kit::Div>,
+        color: gpui_kit::Hsla,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        use treeterm_model::settings_store::SoundSave;
+        let c = colors(cx);
+        let store = self.settings.read(cx);
+        let on = store.settings().notifications.sound_enabled;
+        let volume = || crate::ui::icon(if on { IconName::Volume2 } else { IconName::VolumeX }, 14., color).into_any_element();
+        let (icon, feedback): (AnyElement, Option<SharedString>) = match store.sound_save() {
+            SoundSave::Idle => (volume(), None),
+            SoundSave::Saving => (
+                Spinner::new()
+                    .icon(gpui_kit::component::Icon::new(IconName::LoaderCircle))
+                    .with_size(px(14.))
+                    .color(color)
+                    .into_any_element(),
+                Some("Saving sound preference…".into()),
+            ),
+            SoundSave::Failed(error) => (volume(), Some(format!("Could not save sound preference: {error}").into())),
+        };
+        // `[role="status"]` / `[role="alert"]`: under the button, over what follows, 220px
+        // wide, 8px padding, an accent border, the page's 16px text.
+        let popover = feedback.map(|text| {
+            gpui_kit::deferred(
+                div()
+                    .absolute()
+                    .top_full()
+                    .left_0()
+                    .w(px(220.))
+                    .p(px(8.))
+                    .bg(c.bg_secondary)
+                    .border_1()
+                    .border_color(c.accent)
+                    .text_size(px(16.))
+                    .line_height(px(19.))
+                    .text_color(c.text_primary)
+                    .child(text),
+            )
+            .with_priority(1)
+        });
+        div()
+            .relative()
+            .flex()
+            .child(
+                button
+                    .child(icon)
+                    .on_click(cx.listener(|view, _, _, cx| view.settings.update(cx, |store, cx| store.toggle_sound(cx)))),
+            )
+            .children(popover)
             .into_any_element()
     }
 
@@ -602,16 +653,12 @@ impl AppView {
                     .items_center()
                     .border_b_1()
                     .border_color(border)
-                    .child(
+                    .child(self.sound_toggle(
                         crate::ui::icon_button("sound-toggle", cx)
-                            .tooltip(tip(if on { "Mute workspace attention sound" } else { "Unmute workspace attention sound" }))
-                            .child(crate::ui::icon(if on { IconName::Volume2 } else { IconName::VolumeX }, 14., fg))
-                            .on_click(cx.listener(move |view, _, _, cx| {
-                                view.settings.update(cx, |store, cx| {
-                                    store.update(|s| s.notifications.sound_enabled = !on, cx)
-                                });
-                            })),
-                    )
+                            .tooltip(tip(if on { "Mute workspace attention sound" } else { "Unmute workspace attention sound" })),
+                        fg,
+                        cx,
+                    ))
                     .child(crate::ui::caps_title("Sessions", cx))
                     .child(
                         h_flex()
