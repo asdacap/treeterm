@@ -55,6 +55,9 @@ pub struct AppView {
     /// stack a second one.
     close_confirm: std::rc::Weak<crate::active_processes_view::Unmerged>,
     menu_bar: MenuBar,
+    /// Where the sound toggle was laid out last (window coordinates): its save status shows
+    /// under it. `None` until it is first drawn.
+    sound_toggle_bounds: Option<gpui_kit::Bounds<gpui_kit::Pixels>>,
 }
 
 /// Window > Active Processes.
@@ -212,6 +215,7 @@ impl AppView {
             } else {
                 MenuBar::InWindow(gpui_kit::component::menu::AppMenuBar::new(cx))
             },
+            sound_toggle_bounds: None,
         };
         view.sync(&store, cx);
         view
@@ -519,8 +523,8 @@ impl AppView {
 
     /// `SoundToggle` (`.sound-toggle`): `button` (with the caller's tooltip) shows whether the
     /// attention sound is on and toggles it. While the toggle saves, it spins (the store
-    /// ignores clicks) with "Saving sound preference…" below; a failed save keeps the icon and
-    /// says why below until the next click.
+    /// ignores clicks). Its status box is drawn by [`Self::sound_status`], under where this was
+    /// laid out.
     fn sound_toggle(
         &self,
         button: gpui_kit::Stateful<gpui_kit::Div>,
@@ -528,42 +532,42 @@ impl AppView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         use treeterm_model::settings_store::SoundSave;
-        let c = colors(cx);
         let store = self.settings.read(cx);
         let on = store.settings().notifications.sound_enabled;
         let volume = || crate::ui::icon(if on { IconName::Volume2 } else { IconName::VolumeX }, 14., color).into_any_element();
-        let (icon, feedback): (AnyElement, Option<SharedString>) = match store.sound_save() {
-            SoundSave::Idle => (volume(), None),
+        let (icon, status_shown) = match store.sound_save() {
+            SoundSave::Idle => (volume(), false),
             SoundSave::Saving => (
                 Spinner::new()
                     .icon(gpui_kit::component::Icon::new(IconName::LoaderCircle))
                     .with_size(px(14.))
                     .color(color)
                     .into_any_element(),
-                Some("Saving sound preference…".into()),
+                true,
             ),
-            SoundSave::Failed(error) => (volume(), Some(format!("Could not save sound preference: {error}").into())),
+            SoundSave::Failed(_) => (volume(), true),
         };
-        // `[role="status"]` / `[role="alert"]`: under the button, over what follows, 220px
-        // wide, 8px padding, an accent border, the page's 16px text.
-        let popover = feedback.map(|text| {
-            gpui_kit::deferred(
-                div()
-                    .absolute()
-                    .top_full()
-                    .left_0()
-                    .w(px(220.))
-                    .p(px(8.))
-                    .bg(c.bg_secondary)
-                    .border_1()
-                    .border_color(c.accent)
-                    .text_size(px(16.))
-                    .line_height(px(19.))
-                    .text_color(c.text_primary)
-                    .child(text),
-            )
-            .with_priority(1)
-        });
+        // Where the toggle was laid out; a shown status box moves with it on the next frame.
+        let view = cx.entity().downgrade();
+        let measure = gpui_kit::canvas(
+            move |bounds, _, cx| {
+                if let Err(error) = view.update(cx, |view, cx| {
+                    if view.sound_toggle_bounds != Some(bounds) {
+                        view.sound_toggle_bounds = Some(bounds);
+                        if status_shown {
+                            cx.notify();
+                        }
+                    }
+                }) {
+                    tracing::debug!(%error, "window closed");
+                }
+            },
+            |_, _, _, _| {},
+        )
+        .absolute()
+        .top_0()
+        .left_0()
+        .size_full();
         div()
             .relative()
             .flex()
@@ -572,8 +576,43 @@ impl AppView {
                     .child(icon)
                     .on_click(cx.listener(|view, _, _, cx| view.settings.update(cx, |store, cx| store.toggle_sound(cx)))),
             )
-            .children(popover)
+            .child(measure)
             .into_any_element()
+    }
+
+    /// The sound toggle's `[role="status"]` ("Saving sound preference…") or `[role="alert"]`
+    /// ("Could not save sound preference: …", until the next click) box: under the toggle,
+    /// 220px wide, 8px padding, an accent border, the page's 16px text. Its z-index (100) puts
+    /// it over the sidebar and the pane but under dialogs (1000): drawn last in the window
+    /// content, not deferred, which would draw it over the dialogs too.
+    fn sound_status(&self, cx: &App) -> Option<AnyElement> {
+        use treeterm_model::settings_store::SoundSave;
+        let text: SharedString = match self.settings.read(cx).sound_save() {
+            SoundSave::Idle => return None,
+            SoundSave::Saving => "Saving sound preference…".into(),
+            SoundSave::Failed(error) => format!("Could not save sound preference: {error}").into(),
+        };
+        let toggle = self.sound_toggle_bounds?;
+        let c = colors(cx);
+        Some(
+            gpui_kit::anchored()
+                .position(toggle.bottom_left())
+                .position_mode(gpui_kit::AnchoredPositionMode::Window)
+                .child(
+                    div()
+                        .occlude()
+                        .w(px(220.))
+                        .p(px(8.))
+                        .bg(c.bg_secondary)
+                        .border_1()
+                        .border_color(c.accent)
+                        .text_size(px(16.))
+                        .line_height(px(19.))
+                        .text_color(c.text_primary)
+                        .child(text),
+                )
+                .into_any_element(),
+        )
     }
 
     /// The left column: every connection with its tree, status and actions.
@@ -963,6 +1002,7 @@ impl Render for AppView {
             .line_height(gpui_kit::relative(1.2))
             .children(menu_bar)
             .child(div().flex().flex_1().min_h_0().child(content))
+            .children(self.sound_status(cx))
             .children(crate::keybinding_overlay::render(&self.keybindings, window, cx))
     }
 }
