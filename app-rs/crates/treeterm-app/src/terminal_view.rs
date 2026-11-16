@@ -42,7 +42,7 @@ actions!(
     ]
 );
 
-const CONTEXT: &str = "Terminal";
+pub(crate) const CONTEXT: &str = "Terminal";
 /// xterm.js's blink interval.
 const BLINK_INTERVAL: Duration = Duration::from_millis(600);
 
@@ -65,16 +65,23 @@ pub fn bind_keys(cx: &mut App) {
             KeyBinding::new("ctrl-shift-v", Paste, Some(CONTEXT)),
             KeyBinding::new("ctrl-shift-a", SelectAll, Some(CONTEXT)),
         ]);
-        // The menu shortcuts and GPUI Kit Root's Ctrl+C (copy) would take Ctrl+Q (XON),
-        // Ctrl+W, Ctrl+M (CR), F11 and Ctrl+C (SIGINT) from the PTY: xterm.js consumed them
-        // before Electron's menu saw them.
-        let accelerators = crate::menus::ACCELERATORS.iter().copied().chain(["ctrl-c"]);
-        cx.bind_keys(
-            terminal_shadowed(accelerators, KeyOptions::for_host())
-                .into_iter()
-                .map(|keys| KeyBinding::new(keys, NoAction, Some(CONTEXT))),
-        );
     }
+}
+
+/// Give a focused terminal back the app shortcuts it encodes, from `accelerators` and GPUI
+/// Kit Root's Ctrl+C (copy): Ctrl+Q (XON), Ctrl+W, Ctrl+M (CR), F11 and Ctrl+C (SIGINT)
+/// reach the PTY, as xterm.js consumed them before Electron's menu saw them.
+///
+/// Bind this after the shortcuts themselves. GPUI ranks a binding with no context as deep
+/// as the focused terminal's own context, and of two bindings at one depth the one bound
+/// later wins.
+pub fn keep_terminal_keys(accelerators: &[&'static str], options: KeyOptions, cx: &mut App) {
+    let accelerators = accelerators.iter().copied().chain(["ctrl-c"]);
+    cx.bind_keys(
+        terminal_shadowed(accelerators, options)
+            .into_iter()
+            .map(|keys| KeyBinding::new(keys, NoAction, Some(CONTEXT))),
+    );
 }
 
 /// The app shortcuts a focused terminal keeps for its PTY: those it encodes. Ctrl+Shift+

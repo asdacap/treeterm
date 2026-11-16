@@ -14,6 +14,7 @@ use gpui_kit::{
     SystemMenuType, WeakEntity, Window, actions,
 };
 use treeterm_model::app_store::AppStore;
+use treeterm_term::keys::KeyOptions;
 
 use crate::app_view::AppView;
 use crate::terminal_view;
@@ -41,7 +42,8 @@ actions!(
 
 /// The menu shortcuts off macOS (Electron's Linux accelerators), in `key_bindings` order.
 /// GPUI runs bindings before a focused terminal sees the key, so the terminal takes back
-/// those it encodes (`terminal_view::bind_keys`), as xterm.js consumed them in Electron.
+/// those it encodes (`terminal_view::keep_terminal_keys`), as xterm.js consumed them in
+/// Electron.
 pub const ACCELERATORS: &[&str] = &["ctrl-,", "ctrl-q", "ctrl-shift-q", "ctrl-m", "ctrl-w", "f11"];
 
 /// The menu shortcuts (Electron's role accelerators).
@@ -66,6 +68,15 @@ fn key_bindings(mac: bool) -> Vec<KeyBinding> {
             KeyBinding::new("ctrl-w", CloseWindow, None),
             KeyBinding::new("f11", ToggleFullScreen, None),
         ]
+    }
+}
+
+/// The menu shortcuts, then (off macOS) the ones a focused terminal keeps for its PTY,
+/// encoded with `terminal`. The order matters: see `terminal_view::keep_terminal_keys`.
+fn bind_keys(mac: bool, terminal: KeyOptions, cx: &mut App) {
+    cx.bind_keys(key_bindings(mac));
+    if !mac {
+        terminal_view::keep_terminal_keys(ACCELERATORS, terminal, cx);
     }
 }
 
@@ -144,7 +155,7 @@ fn menus(mac: bool) -> Vec<Menu> {
 /// window opens: off macOS the window draws the menu bar from what this sets.
 pub fn install(store: Entity<AppStore>, cx: &mut App) {
     let mac = cfg!(target_os = "macos");
-    cx.bind_keys(key_bindings(mac));
+    bind_keys(mac, KeyOptions::for_host(), cx);
 
     cx.on_action(move |_: &QuitAndKillDaemon, cx| {
         let shutdown = store.read(cx).shutdown_daemon(cx);
@@ -216,8 +227,9 @@ fn route<A: Action, V: 'static>(
 #[cfg(test)]
 mod tests {
     use gpui_kit::component::WindowExt as _;
+    use gpui_kit::prelude::*;
     use gpui_kit::{
-        AppContext as _, IntoElement, OperatingSystem, OwnedMenu, OwnedMenuItem, Render,
+        IntoElement, OperatingSystem, OwnedMenu, OwnedMenuItem, Render,
         TestAppContext, VisualTestContext, WindowOptions, div,
     };
 
@@ -419,5 +431,73 @@ mod tests {
         cx.update(|cx| cx.dispatch_action(&Quit));
         cx.run_until_parked();
         assert_eq!(fallbacks.get(), 1);
+    }
+
+    /// A focused terminal: the keys that reach it and the menu commands that ran instead.
+    struct Terminal {
+        focus: gpui_kit::FocusHandle,
+        keys: Vec<String>,
+        commands: Vec<&'static str>,
+    }
+
+    impl Render for Terminal {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .size_full()
+                .key_context(terminal_view::CONTEXT)
+                .track_focus(&self.focus)
+                .on_key_down(cx.listener(|terminal, event: &gpui_kit::KeyDownEvent, _, _| {
+                    terminal.keys.push(event.keystroke.unparse(OperatingSystem::Linux));
+                }))
+        }
+    }
+
+    #[gpui_kit::test]
+    fn a_focused_terminal_keeps_the_menu_keys_it_encodes_off_macos(cx: &mut TestAppContext) {
+        let linux = KeyOptions {
+            alt_sends_escape: true,
+            mac_word_motion: false,
+        };
+        let (window, terminal) = cx.update(|cx| {
+            gpui_kit::init(cx);
+            bind_keys(false, linux, cx);
+            gpui_kit::open_window(WindowOptions::default(), cx, |_, cx| {
+                cx.new(|cx| Terminal { focus: cx.focus_handle(), keys: Vec::new(), commands: Vec::new() })
+            })
+            .expect("open a window")
+        });
+        cx.update(|cx| {
+            fn record<A: Action>(name: &'static str, window: AnyWindowHandle, terminal: &Entity<Terminal>, cx: &mut App) {
+                route::<A, _>(window, terminal.downgrade(), move |t, _, _| t.commands.push(name), |_| panic!("the window is open"), cx);
+            }
+            record::<Quit>("Quit", window, &terminal, cx);
+            record::<CloseWindow>("CloseWindow", window, &terminal, cx);
+            record::<Minimize>("Minimize", window, &terminal, cx);
+            record::<ToggleFullScreen>("ToggleFullScreen", window, &terminal, cx);
+            record::<QuitAndKillDaemon>("QuitAndKillDaemon", window, &terminal, cx);
+            record::<OpenSettings>("OpenSettings", window, &terminal, cx);
+        });
+        let cx = VisualTestContext::from_window(window, cx).into_mut();
+        cx.update(|window, cx| {
+            let focus = terminal.read(cx).focus.clone();
+            window.focus(&focus, cx);
+        });
+        cx.run_until_parked();
+
+        // Ctrl+W deletes a word, Ctrl+Q is XON, Ctrl+M is CR, F11 and Ctrl+C go to the PTY.
+        for keys in ["ctrl-w", "ctrl-q", "ctrl-m", "f11", "ctrl-c"] {
+            cx.simulate_keystrokes(keys);
+        }
+        cx.run_until_parked();
+        let (keys, commands) = terminal.read_with(cx, |t, _| (t.keys.clone(), t.commands.clone()));
+        assert_eq!(keys, ["ctrl-w", "ctrl-q", "ctrl-m", "f11", "ctrl-c"]);
+        assert!(commands.is_empty(), "the menu took {commands:?} from the terminal");
+
+        // The terminal encodes neither: the menu keeps them.
+        cx.simulate_keystrokes("ctrl-shift-q");
+        cx.simulate_keystrokes("ctrl-,");
+        cx.run_until_parked();
+        let commands = terminal.read_with(cx, |t, _| t.commands.clone());
+        assert_eq!(commands, ["QuitAndKillDaemon", "OpenSettings"]);
     }
 }
