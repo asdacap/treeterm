@@ -444,16 +444,7 @@ impl Render for SessionInfoView {
         let (bg, primary, secondary) = (c.bg_primary, c.text_primary, c.text_secondary);
         let id = self.connection(cx);
         let (label, state, remote) = match self.app.read(cx).session_slot(&id) {
-            Some(slot) => {
-                let name = self.names.read(cx).name(&slot.target);
-                // `deriveDefaultSessionName` calls the local session "LOCAL".
-                let name = if slot.is_local() && name == treeterm_model::session_names::default_name(&slot.target) {
-                    "LOCAL".to_owned()
-                } else {
-                    name
-                };
-                (name, Some(slot.state.clone()), !slot.is_local())
-            }
+            Some(slot) => (self.names.read(cx).name(&slot.target), Some(slot.state.clone()), !slot.is_local()),
             None => ("Disconnected".to_owned(), None, false),
         };
         let status = Status::of(state.as_ref());

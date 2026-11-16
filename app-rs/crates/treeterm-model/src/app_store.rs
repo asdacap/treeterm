@@ -89,12 +89,9 @@ enum Previous {
 }
 
 impl SessionSlot {
-    /// "Local", or the ssh label / `user@host`.
+    /// "LOCAL", or the ssh label / `user@host`.
     pub fn name(&self) -> String {
-        match &self.target {
-            ConnectionTarget::Local => "Local".to_owned(),
-            ConnectionTarget::Remote(config) => config.display_name(),
-        }
+        crate::session_names::default_name(&self.target)
     }
 
     pub fn is_local(&self) -> bool {

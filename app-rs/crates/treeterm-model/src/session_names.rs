@@ -23,10 +23,10 @@ pub enum Side {
     After,
 }
 
-/// "Local", or the ssh label / `user@host` (`deriveDefaultSessionName`).
+/// "LOCAL", or the ssh label / `user@host` (`deriveDefaultSessionName`).
 pub fn default_name(target: &ConnectionTarget) -> String {
     match target {
-        ConnectionTarget::Local => "Local".to_owned(),
+        ConnectionTarget::Local => "LOCAL".to_owned(),
         ConnectionTarget::Remote(config) => config.display_name(),
     }
 }
@@ -54,7 +54,7 @@ impl SessionNames {
             .unwrap_or_else(|| default_name(target))
     }
 
-    /// A blank name, or the default one, clears the custom name.
+    /// A blank name, or exactly the default one, clears the custom name (`handleSaveName`).
     pub fn rename(&mut self, target: &ConnectionTarget, name: &str, cx: &mut Context<Self>) {
         let key = ui_state::session_key(target);
         let name = name.trim();

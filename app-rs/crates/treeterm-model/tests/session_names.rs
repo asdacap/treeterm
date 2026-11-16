@@ -10,7 +10,8 @@ fn a_rename_persists_and_a_blank_name_restores_the_default(cx: &mut TestAppConte
     let path = dir.path().join("ui-state.json");
     let names = cx.new(|_| SessionNames::new(Some(path.clone())));
     let local = ConnectionTarget::Local;
-    assert_eq!(names.read_with(cx, |n, _| n.name(&local)), "Local");
+    // `deriveDefaultSessionName`: the rename field starts with it.
+    assert_eq!(names.read_with(cx, |n, _| n.name(&local)), "LOCAL");
 
     names.update(cx, |n, cx| n.rename(&local, "  Laptop ", cx));
     assert_eq!(names.read_with(cx, |n, _| n.name(&local)), "Laptop");
@@ -18,11 +19,32 @@ fn a_rename_persists_and_a_blank_name_restores_the_default(cx: &mut TestAppConte
     assert_eq!(reloaded.name(&local), "Laptop", "saved to disk");
 
     names.update(cx, |n, cx| n.rename(&local, "   ", cx));
-    assert_eq!(SessionNames::new(Some(path.clone())).name(&local), "Local");
+    assert_eq!(SessionNames::new(Some(path.clone())).name(&local), "LOCAL");
 
-    names.update(cx, |n, cx| n.rename(&local, "Local", cx));
+    names.update(cx, |n, cx| n.rename(&local, "Laptop", cx));
+    names.update(cx, |n, cx| n.rename(&local, " LOCAL ", cx));
+    assert_eq!(names.read_with(cx, |n, _| n.name(&local)), "LOCAL");
     let text = std::fs::read_to_string(&path).unwrap();
     assert!(!text.contains("sessionNames"), "the default name is not stored: {text}");
+}
+
+#[gpui_kit::test]
+fn only_the_exact_default_name_clears_a_custom_name(cx: &mut TestAppContext) {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("ui-state.json");
+    let names = cx.new(|_| SessionNames::new(Some(path.clone())));
+    let (local, host) = (ConnectionTarget::Local, remote("a"));
+
+    // `handleSaveName` compares with the default exactly: "Local" is a name of its own.
+    names.update(cx, |n, cx| n.rename(&local, "Local", cx));
+    assert_eq!(SessionNames::new(Some(path.clone())).name(&local), "Local", "saved to disk");
+
+    // A remote's default is its label (`user@host` here).
+    names.update(cx, |n, cx| n.rename(&host, "Build box", cx));
+    assert_eq!(names.read_with(cx, |n, _| n.name(&host)), "Build box");
+    names.update(cx, |n, cx| n.rename(&host, "me@a", cx));
+    assert_eq!(SessionNames::new(Some(path.clone())).name(&host), "me@a");
+    assert_eq!(names.read_with(cx, |n, _| n.name(&local)), "Local", "the other session keeps its name");
 }
 
 #[gpui_kit::test]
@@ -63,29 +85,29 @@ fn dragged_sessions_keep_their_place_and_the_rest_follow(cx: &mut TestAppContext
     let (local, a, b, c) = (ConnectionTarget::Local, remote("a"), remote("b"), remote("c"));
     let shown = vec![local.clone(), a.clone(), b.clone()];
     // Never dragged: the order given.
-    assert_eq!(names.read_with(cx, |n, _| names_of(n, shown.clone())), ["Local", "me@a", "me@b"]);
+    assert_eq!(names.read_with(cx, |n, _| names_of(n, shown.clone())), ["LOCAL", "me@a", "me@b"]);
 
     // An unnamed session never dragged before can be dragged, after or before another.
     names.update(cx, |n, cx| n.reorder(&shown, &local, &b, Side::After, cx));
-    assert_eq!(names.read_with(cx, |n, _| names_of(n, shown.clone())), ["me@a", "me@b", "Local"]);
+    assert_eq!(names.read_with(cx, |n, _| names_of(n, shown.clone())), ["me@a", "me@b", "LOCAL"]);
     names.update(cx, |n, cx| n.reorder(&shown, &b, &a, Side::Before, cx));
-    assert_eq!(names.read_with(cx, |n, _| names_of(n, shown.clone())), ["me@b", "me@a", "Local"]);
+    assert_eq!(names.read_with(cx, |n, _| names_of(n, shown.clone())), ["me@b", "me@a", "LOCAL"]);
 
     // Dropping on itself changes nothing.
     names.update(cx, |n, cx| n.reorder(&shown, &a, &a, Side::Before, cx));
-    assert_eq!(names.read_with(cx, |n, _| names_of(n, shown.clone())), ["me@b", "me@a", "Local"]);
+    assert_eq!(names.read_with(cx, |n, _| names_of(n, shown.clone())), ["me@b", "me@a", "LOCAL"]);
 
     // Saved, keyed by target: it survives a restart; a session connected later goes last
     // until it is dragged.
     let reloaded = SessionNames::new(Some(path.clone()));
     let with_c = vec![local.clone(), c.clone(), a.clone(), b.clone()];
-    assert_eq!(names_of(&reloaded, with_c.clone()), ["me@b", "me@a", "Local", "me@c"]);
+    assert_eq!(names_of(&reloaded, with_c.clone()), ["me@b", "me@a", "LOCAL", "me@c"]);
     names.update(cx, |n, cx| n.reorder(&with_c, &c, &b, Side::Before, cx));
-    assert_eq!(names.read_with(cx, |n, _| names_of(n, with_c.clone())), ["me@c", "me@b", "me@a", "Local"]);
+    assert_eq!(names.read_with(cx, |n, _| names_of(n, with_c.clone())), ["me@c", "me@b", "me@a", "LOCAL"]);
 
     // A disconnected session keeps its place among the others.
     names.update(cx, |n, cx| n.reorder(&shown, &local, &b, Side::Before, cx));
-    assert_eq!(names.read_with(cx, |n, _| names_of(n, with_c.clone())), ["me@c", "Local", "me@b", "me@a"]);
+    assert_eq!(names.read_with(cx, |n, _| names_of(n, with_c.clone())), ["me@c", "LOCAL", "me@b", "me@a"]);
 }
 
 #[gpui_kit::test]
