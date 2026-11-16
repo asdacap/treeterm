@@ -18,6 +18,7 @@ use treeterm_model::analyzer::LlmService;
 use treeterm_model::session_store::{SessionState, SessionStore, WorkspaceEntry};
 use treeterm_model::settings_store::SettingsStore;
 use treeterm_model::terminal::TerminalModel;
+use treeterm_model::traffic::ConnectionTraffic;
 use treeterm_model::workspace_store::{
     NO_AI_HARNESS_TAB, REFRESH_ANALYZER_GONE, TabContent, WorkspaceStore,
 };
@@ -80,7 +81,16 @@ fn open_store(
 ) -> Entity<SessionStore> {
     let conn = h.conn.clone();
     let settings = cx.new(|_| SettingsStore::in_memory(settings));
-    cx.new(|cx| SessionStore::new(conn, "client-a".into(), settings, Some(llm), cx))
+    cx.new(|cx| {
+        SessionStore::new(
+            conn,
+            "client-a".into(),
+            settings,
+            Some(llm),
+            cx.new(ConnectionTraffic::new),
+            cx,
+        )
+    })
 }
 
 /// A directory under the daemon's root as a loaded workspace with these tabs.
