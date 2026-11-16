@@ -1543,7 +1543,7 @@ impl WorkspaceStore {
         match result {
             Ok(()) => output.state = MergeState::Succeeded,
             Err(error) => {
-                output.output.push_str(&format!("\n{error}\n"));
+                output.output.push_str(&format!("\n{}\n", merge_failure_line(error)));
                 output.state = MergeState::Failed;
             }
         }
@@ -1741,5 +1741,34 @@ mod tests {
         assert!(!is_ai_harness_state(&json!({ "ptyId": 7, "sandbox": sandbox })));
         assert!(!is_ai_harness_state(&json!(null)));
         assert!(!is_ai_harness_state(&json!(["p1"])));
+    }
+}
+
+/// The merge output's last line for a failure: `Merge failed: <error>`, as Electron's Review
+/// writes every failure. An error that already says how the merge went is kept as it is
+/// (Electron doubled git's own "Merge failed: ").
+fn merge_failure_line(error: &str) -> String {
+    if error.starts_with("Merge failed: ") || error.starts_with("Merge succeeded but cleanup failed: ") {
+        error.to_owned()
+    } else {
+        format!("Merge failed: {error}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::merge_failure_line;
+
+    #[test]
+    fn a_merge_failure_says_merge_failed_once() {
+        assert_eq!(
+            merge_failure_line("Parent workspace has uncommitted changes. Commit or stash them before merging."),
+            "Merge failed: Parent workspace has uncommitted changes. Commit or stash them before merging."
+        );
+        assert_eq!(merge_failure_line("Merge failed: CONFLICT (content)"), "Merge failed: CONFLICT (content)");
+        assert_eq!(
+            merge_failure_line("Merge succeeded but cleanup failed: worktree locked"),
+            "Merge succeeded but cleanup failed: worktree locked"
+        );
     }
 }

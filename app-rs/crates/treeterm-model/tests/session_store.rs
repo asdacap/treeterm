@@ -563,7 +563,7 @@ fn a_failed_merge_shows_on_the_merged_workspace_only(cx: &mut TestAppContext) {
     let output = review.read_with(cx, |r, cx| r.merge_output(cx)).unwrap();
     assert_eq!(output.title(), "Squash merge feat-fail");
     assert!(
-        output.output.ends_with("\nParent workspace has uncommitted changes. Commit or stash them before merging.\n"),
+        output.output.ends_with("\nMerge failed: Parent workspace has uncommitted changes. Commit or stash them before merging.\n"),
         "{}",
         output.output
     );

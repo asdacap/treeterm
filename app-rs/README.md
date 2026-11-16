@@ -218,6 +218,9 @@ The chrome was matched to Electron's computed styles, measured side by side on o
 - Corrupt `settings.json` is an error (logged; defaults used) instead of being overwritten.
 - Merge-and-remove stages untracked files before its WIP commit (Electron's `commit -am`
   skips them, failing the merge or losing new files with the deleted worktree).
+- A failed merge's output ends with `Merge failed: <error>` once (Electron doubled the prefix
+  when `git merge` itself failed), or `Merge succeeded but cleanup failed: <error>` when only
+  the worktree removal after it failed.
 - Daemon fix: each gRPC connection now gets its own id, so the session lock actually excludes
   other connections (it was shared by all connections before).
 - Daemon fix: a PTY's child process is fork-safe (environment, cwd and argv built before
