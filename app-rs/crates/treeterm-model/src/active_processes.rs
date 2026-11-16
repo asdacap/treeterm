@@ -1,13 +1,14 @@
 //! "Window → Active Processes": every PTY the daemon is running, a live view of the selected
 //! one, and a way to stop it. Port of `ActiveProcessesDialog.tsx` + `utils/ttyDisplay.ts`.
 
-use gpui_kit::{AppContext as _, Context, Entity, Task};
+use gpui_kit::{App, AppContext as _, Context, Entity, Task};
 use treeterm_core::daemon::DaemonConnection;
 use treeterm_core::settings::TerminalSettings;
 use treeterm_proto::treeterm::PtySessionInfo;
 use treeterm_term::fit::WidthLimit;
 use treeterm_term::palette::DEFAULT_BACKGROUND;
 
+use crate::session_store::SessionStore;
 use crate::terminal::{TerminalModel, TerminalOptions};
 
 #[derive(Debug, Clone)]
@@ -151,6 +152,21 @@ impl ActiveProcesses {
         }));
         cx.notify();
     }
+}
+
+/// `(path, name)` of the session's workspaces that have a body (loaded, or loaded with an
+/// operation error), in session order: what PTYs are named after. Read it on every render
+/// so names follow workspaces added, removed or renamed meanwhile (App.tsx's
+/// `ActiveProcessesDialogContainer`).
+pub fn workspace_labels(session: &SessionStore, cx: &App) -> Vec<(String, String)> {
+    session
+        .workspace_ids()
+        .filter_map(|id| session.workspace_store(id))
+        .map(|store| {
+            let workspace = store.read(cx).workspace();
+            (workspace.path.clone(), workspace.file.name.clone())
+        })
+        .collect()
 }
 
 /// A PTY's label: the name of the workspace whose path is its cwd, else the cwd's last

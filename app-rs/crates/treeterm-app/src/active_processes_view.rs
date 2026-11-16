@@ -4,7 +4,7 @@
 use gpui_kit::component::WindowExt as _;
 use gpui_kit::prelude::*;
 use gpui_kit::{AnyElement, App, Context, Entity, SharedString, Subscription, Window, div, px};
-use treeterm_model::active_processes::{ActiveProcesses, ProcessList, display_name, relative_time};
+use treeterm_model::active_processes::{ActiveProcesses, ProcessList, display_name, relative_time, workspace_labels};
 use treeterm_model::session_store::SessionStore;
 
 use crate::terminal_view::TerminalView;
@@ -13,33 +13,26 @@ use crate::ui;
 
 pub struct ActiveProcessesView {
     model: Entity<ActiveProcesses>,
-    /// `(path, name)` of the session's workspaces, to name processes by their cwd.
-    workspaces: Vec<(String, String)>,
+    /// Its workspaces name processes by their cwd, read on every render.
+    session: Entity<SessionStore>,
     terminal: Option<(String, Entity<TerminalView>)>,
     _observe: Subscription,
+    _observe_session: Subscription,
 }
 
 impl ActiveProcessesView {
     pub(crate) fn new(session: &Entity<SessionStore>, settings: treeterm_core::settings::TerminalSettings, cx: &mut Context<Self>) -> Self {
-        let (conn, workspaces) = {
-            let session = session.read(cx);
-            let workspaces = session
-                .workspace_ids()
-                .filter_map(|id| session.workspace_store(id))
-                .map(|w| {
-                    let w = w.read(cx).workspace();
-                    (w.path.clone(), w.file.name.clone())
-                })
-                .collect();
-            (session.connection().clone(), workspaces)
-        };
+        let conn = session.read(cx).connection().clone();
         let model = cx.new(|cx| ActiveProcesses::new(conn, settings, cx));
         let observe = cx.observe(&model, |_, _, cx| cx.notify());
+        // The session notifies when a workspace is added, removed or changes.
+        let observe_session = cx.observe(session, |_, _, cx| cx.notify());
         Self {
             model,
-            workspaces,
+            session: session.clone(),
             terminal: None,
             _observe: observe,
+            _observe_session: observe_session,
         }
     }
 
@@ -73,6 +66,7 @@ impl ActiveProcessesView {
             ProcessList::Loaded(sessions) => sessions.clone(),
         };
         let selected = model.selected().map(|(id, _)| id.to_owned());
+        let workspaces = workspace_labels(self.session.read(cx), cx);
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis() as i64)
@@ -100,7 +94,7 @@ impl ActiveProcessesView {
                             .font_weight(gpui_kit::FontWeight::MEDIUM)
                             .text_color(c.text_primary)
                             .truncate()
-                            .child(display_name(&session.cwd, &self.workspaces)),
+                            .child(display_name(&session.cwd, &workspaces)),
                     )
                     .child(
                         div()
