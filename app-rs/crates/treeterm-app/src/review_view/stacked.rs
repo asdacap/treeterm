@@ -83,6 +83,42 @@ pub struct DraftInput {
     _events: Subscription,
 }
 
+/// A press on a line number, from GPUI Kit's `SelectionStarted` (only a press sends it) to
+/// the `SelectionEnded` of its release. The Kit's keyboard selections (Shift+Up/Down,
+/// Cmd/Ctrl+A) end with no press.
+enum LinePress {
+    Idle,
+    /// The lines the press selected: one, or more when Shift extended a selection.
+    Pressed(DiffLineRange),
+}
+
+impl LinePress {
+    /// Follows the diff's events. When a selection ends, the line it comments on: a press
+    /// released on the one line it selected (`onLineNumberClick`). A drag to other lines, a
+    /// Shift-extended press and a keyboard selection stay selected and comment nowhere.
+    fn follow(&mut self, event: &DiffEvent) -> Option<(String, Side, u32)> {
+        match event {
+            DiffEvent::SelectionStarted(range) => {
+                *self = LinePress::Pressed(range.clone());
+                None
+            }
+            DiffEvent::SelectionEnded(ended) => match std::mem::replace(self, LinePress::Idle) {
+                LinePress::Pressed(pressed)
+                    if pressed == *ended && ended.side() == ended.end_side() && ended.start() == ended.end() =>
+                {
+                    let side = match ended.side() {
+                        DiffSide::Original => Side::Original,
+                        DiffSide::Modified => Side::Modified,
+                    };
+                    Some((ended.path().to_string(), side, u32::try_from(ended.end()).unwrap_or(u32::MAX)))
+                }
+                LinePress::Pressed(_) | LinePress::Idle => None,
+            },
+            _ => None,
+        }
+    }
+}
+
 /// What an annotation of the diff shows.
 enum Annotated {
     /// A file's header (and, for an image, both sides under it).
@@ -245,17 +281,12 @@ impl ReviewView {
             if !self.hide_unchanged {
                 state.update(cx, |s, cx| s.expand_unchanged(cx));
             }
-            let comments = cx.subscribe(&state, |view, state, event: &DiffEvent, cx| {
+            let mut press = LinePress::Idle;
+            let comments = cx.subscribe(&state, move |view, state, event: &DiffEvent, cx| {
                 // A click on a line number (`onLineNumberClick`) starts a comment there; the
                 // line does not stay selected.
-                if let DiffEvent::SelectionEnded(range) = event {
+                if let Some((path, side, line)) = press.follow(event) {
                     state.update(cx, |s, cx| s.set_selected_lines(None, cx));
-                    let side = match range.end_side() {
-                        DiffSide::Original => Side::Original,
-                        DiffSide::Modified => Side::Modified,
-                    };
-                    let line = u32::try_from(range.end()).unwrap_or(u32::MAX);
-                    let path = range.path().to_string();
                     view.model.update(cx, |m, cx| m.start_comment(&path, side, line, cx));
                 }
             });
@@ -931,6 +962,115 @@ mod tests {
         });
         draw(cx);
         assert_eq!(header_top(&state, "c.txt", cx), Some(px(100.)));
+    }
+
+    fn lines(side: DiffSide, start: usize, end: usize) -> DiffLineRange {
+        DiffLineRange::new("file.txt", side, start, end)
+    }
+
+    #[test]
+    fn only_a_press_released_on_its_one_line_comments() {
+        let comment = |side, line| Some(("file.txt".to_owned(), side, line));
+        let one = lines(DiffSide::Modified, 2, 2);
+        let mut press = LinePress::Idle;
+        assert_eq!(press.follow(&DiffEvent::SelectionStarted(one.clone())), None);
+        assert_eq!(press.follow(&DiffEvent::SelectionChanged(Some(one.clone()))), None);
+        assert_eq!(press.follow(&DiffEvent::SelectionEnded(one.clone())), comment(Side::Modified, 2));
+        // Shift+Up/Down and Cmd/Ctrl+A end a selection with no press, also after a click.
+        assert_eq!(press.follow(&DiffEvent::SelectionEnded(one.clone())), None);
+        assert_eq!(press.follow(&DiffEvent::SelectionEnded(lines(DiffSide::Modified, 1, 4))), None);
+
+        // A drag to other lines.
+        assert_eq!(press.follow(&DiffEvent::SelectionStarted(one.clone())), None);
+        assert_eq!(press.follow(&DiffEvent::SelectionEnded(lines(DiffSide::Modified, 2, 4))), None);
+        // A Shift-click extending a selection, released there or dragged back to one line.
+        let extended = lines(DiffSide::Modified, 1, 3);
+        assert_eq!(press.follow(&DiffEvent::SelectionStarted(extended.clone())), None);
+        assert_eq!(press.follow(&DiffEvent::SelectionEnded(extended.clone())), None);
+        assert_eq!(press.follow(&DiffEvent::SelectionStarted(extended)), None);
+        assert_eq!(press.follow(&DiffEvent::SelectionEnded(lines(DiffSide::Modified, 1, 1))), None);
+        // A Shift-click across sides (Unified) covers two rows.
+        let across = lines(DiffSide::Original, 3, 3).with_end_side(DiffSide::Modified);
+        assert_eq!(press.follow(&DiffEvent::SelectionStarted(across.clone())), None);
+        assert_eq!(press.follow(&DiffEvent::SelectionEnded(across)), None);
+
+        // A click on a removed line, after a drag that came back to the line it pressed.
+        let old = lines(DiffSide::Original, 5, 5);
+        assert_eq!(press.follow(&DiffEvent::SelectionStarted(old.clone())), None);
+        assert_eq!(press.follow(&DiffEvent::SelectionChanged(Some(lines(DiffSide::Original, 5, 6)))), None);
+        assert_eq!(press.follow(&DiffEvent::SelectionEnded(old)), comment(Side::Original, 5));
+    }
+
+    /// A one-file diff that comments where `LinePress` says.
+    struct Commenting {
+        state: Entity<DiffState>,
+        comments: Vec<(String, Side, u32)>,
+        _events: Subscription,
+    }
+
+    impl gpui_kit::Render for Commenting {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().w(px(400.)).h(px(300.)).child(Diff::new(&self.state).size_full())
+        }
+    }
+
+    #[gpui_kit::test]
+    fn a_click_on_a_line_number_comments_and_keyboard_and_drag_selections_do_not(cx: &mut gpui_kit::TestAppContext) {
+        use gpui_kit::test::{TestQueryExt as _, TestWindowExt as _};
+
+        cx.update(gpui_kit::init);
+        let patch = "diff --git a/file.txt b/file.txt\n--- a/file.txt\n+++ b/file.txt\n@@ -1,4 +1,4 @@\n one\n-two\n+TWO\n three\n four\n";
+        let files = DiffFile::parse(patch).expect("a valid patch");
+        let state = cx.new(|cx| DiffState::new(files, cx));
+        let (host, cx) = cx.add_window_view({
+            let state = state.clone();
+            move |_, cx| {
+                let mut press = LinePress::Idle;
+                let events = cx.subscribe(&state, move |host: &mut Commenting, state, event: &DiffEvent, cx| {
+                    if let Some(comment) = press.follow(event) {
+                        state.update(cx, |s, cx| s.set_selected_lines(None, cx));
+                        host.comments.push(comment);
+                    }
+                });
+                Commenting { state, comments: Vec::new(), _events: events }
+            }
+        });
+        for _ in 0..3 {
+            draw(cx);
+        }
+        let number = |line: usize, cx: &mut gpui_kit::VisualTestContext| {
+            cx.update(|window, _| window.find_by_label(&format!("Select Modified line {line}")).bounds().center())
+        };
+        let comments = |cx: &mut gpui_kit::VisualTestContext| cx.update(|_, cx| host.read(cx).comments.clone());
+        let selected = |cx: &mut gpui_kit::VisualTestContext| cx.update(|_, cx| state.read(cx).selected_lines());
+
+        let at = number(2, cx);
+        cx.simulate_click(at, gpui_kit::Modifiers::none());
+        draw(cx);
+        assert_eq!(comments(cx), [("file.txt".to_owned(), Side::Modified, 2)]);
+        assert_eq!(selected(cx), None, "the clicked line does not stay selected");
+
+        // The click focused the diff: Shift+Down and select-all select lines, nothing more.
+        cx.simulate_keystrokes("shift-down");
+        draw(cx);
+        assert_eq!(selected(cx), Some(lines(DiffSide::Modified, 1, 1)));
+        cx.dispatch_action(gpui_kit::component::input::SelectAll);
+        draw(cx);
+        assert_eq!(selected(cx), Some(lines(DiffSide::Modified, 1, 4)));
+        assert_eq!(comments(cx).len(), 1);
+
+        // A drag over line numbers selects them.
+        let (from, to) = (number(1, cx), number(3, cx));
+        cx.update(|window, cx| window.drag(from, to, cx));
+        draw(cx);
+        assert_eq!(selected(cx), Some(lines(DiffSide::Modified, 1, 3)));
+        assert_eq!(comments(cx).len(), 1);
+
+        let at = number(3, cx);
+        cx.simulate_click(at, gpui_kit::Modifiers::none());
+        draw(cx);
+        assert_eq!(comments(cx)[1..], [("file.txt".to_owned(), Side::Modified, 3)]);
+        assert_eq!(selected(cx), None);
     }
 
     #[gpui_kit::test]
