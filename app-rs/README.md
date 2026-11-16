@@ -265,6 +265,9 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   `forkpty`; the child only calls `chdir` + `execve`). Before, `std::env::set_var` in the
   child of the multi-threaded daemon could deadlock it, and the stuck child kept other
   commands' pipes open (a git command started at the same time never finished).
+- A terminal takes keyboard focus when it comes into view as the shown tab, but not from an
+  open dialog, and not again on every workspace change while it stays shown (Electron
+  focused it on each, taking focus from the sidebar's inputs and from dialogs).
 - The attention ding is the system bell (Electron synthesised an 880 Hz tone).
 - The analyzer reads the tab's own terminal; Electron attached a second, headless one.
 - The code editors colour files Electron shows as plain text: Makefile, Dockerfile,

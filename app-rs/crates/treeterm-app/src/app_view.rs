@@ -131,7 +131,8 @@ struct Connected {
     branch_copied: Option<(String, gpui_kit::Task<()>)>,
     /// Focus the shown terminal on the next render (after a workspace or tab switch).
     focus_pending: bool,
-    /// The terminal model the last render showed: a terminal coming into view fits again.
+    /// The terminal model the last render showed: a terminal coming into view fits again and
+    /// takes focus.
     shown_terminal: Option<EntityId>,
     reselect: Reselect,
     _selection: Subscription,
@@ -787,7 +788,8 @@ impl Render for AppView {
         for (_, connected) in self.sessions.iter().filter(|(id, _)| on_screen.as_ref() != Some(*id)) {
             hide_reviews(connected, cx);
         }
-        // A session off screen shows no terminal: its terminal is shown again when it returns.
+        // A session off screen shows no terminal: its terminal is shown again (fits again and
+        // takes focus) when it returns.
         for (_, connected) in self.sessions.iter_mut().filter(|(id, _)| on_screen.as_ref() != Some(*id)) {
             connected.shown_terminal = None;
         }
@@ -2018,11 +2020,7 @@ fn workspace_pane(
                     .entry(model.entity_id())
                     .or_insert_with(|| cx.new(|cx| TerminalView::new(model.clone(), window, cx)))
                     .clone();
-                show_terminal(connected, previous_terminal, model.entity_id(), &view, cx);
-                if std::mem::take(&mut connected.focus_pending) {
-                    let focus = view.read(cx).focus_handle().clone();
-                    window.focus(&focus, cx);
-                }
+                show_terminal(connected, previous_terminal, model.entity_id(), &view, window, cx);
                 let prompts = workspace
                     .read(cx)
                     .analyzer(tab_id)
@@ -2448,11 +2446,7 @@ fn web_app_tab(
                     .entry(model.entity_id())
                     .or_insert_with(|| cx.new(|cx| TerminalView::new(model.clone(), window, cx)))
                     .clone();
-                show_terminal(connected, previous_terminal, model.entity_id(), &view, cx);
-                if std::mem::take(&mut connected.focus_pending) {
-                    let focus = view.read(cx).focus_handle().clone();
-                    window.focus(&focus, cx);
-                }
+                show_terminal(connected, previous_terminal, model.entity_id(), &view, window, cx);
                 v_flex()
                     .size_full()
                     .child(div().flex_1().min_h_0().child(view))
@@ -2617,18 +2611,25 @@ fn terminal_status_bar(
 }
 
 /// Show the terminal of `model` in the workspace pane. Electron mounts only the shown tab's
-/// terminal, so one not shown in the last render comes into view as a mount does: after a
-/// tab or workspace switch, or the shown tab closing.
+/// terminal, so one not shown in the last render comes into view as a mount does (it fits
+/// again and takes keyboard focus): after its tab is added or picked here or in another
+/// window, a workspace switch, or the shown tab closing or its program exiting. A tab or
+/// workspace switch that asked for focus also focuses it when it stays shown.
 fn show_terminal(
     connected: &mut Connected,
     previous: Option<EntityId>,
     model: EntityId,
     view: &Entity<TerminalView>,
+    window: &mut Window,
     cx: &mut Context<AppView>,
 ) {
     connected.shown_terminal = Some(model);
     if previous != Some(model) {
-        view.update(cx, |view, cx| view.on_shown(cx));
+        view.update(cx, |view, cx| view.on_shown(window, cx));
+    }
+    if std::mem::take(&mut connected.focus_pending) {
+        let focus = view.read(cx).focus_handle().clone();
+        window.focus(&focus, cx);
     }
 }
 

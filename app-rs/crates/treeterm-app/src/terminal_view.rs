@@ -192,9 +192,15 @@ impl TerminalView {
     }
 
     /// This terminal came into view as the shown tab, as an Electron terminal mounts: it fits
-    /// its PTY to itself again, taking it back from a size another attachment set meanwhile.
-    pub fn on_shown(&mut self, cx: &mut Context<Self>) {
+    /// its PTY to itself again, taking it back from a size another attachment set meanwhile,
+    /// and takes keyboard focus. Not from an open dialog, which gives focus back when it
+    /// closes.
+    pub fn on_shown(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        use gpui_kit::component::WindowExt as _;
         self.model.update(cx, |model, cx| model.refit(cx));
+        if !window.has_active_dialog(cx) {
+            window.focus(&self.focus, cx);
+        }
     }
 
     /// Keyboard focus in the focused window, which is what lets this terminal write.
