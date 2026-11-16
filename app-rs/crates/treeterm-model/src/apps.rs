@@ -436,10 +436,15 @@ impl ProxiedPages {
     }
 }
 
-/// `url` as the URL parser writes it, so a URL reads the same whichever way it was spelled.
+/// `url` as the URL parser writes it, so a URL reads the same whichever way it was spelled,
+/// and without its fragment, which a request to the scheme does not carry (a markdown link to
+/// `README.md#install` is requested as `README.md`).
 fn normalized_url(url: &str) -> String {
     match url::Url::parse(url) {
-        Ok(parsed) => parsed.into(),
+        Ok(mut parsed) => {
+            parsed.set_fragment(None);
+            parsed.into()
+        }
         Err(_) => url.to_owned(),
     }
 }
@@ -759,6 +764,11 @@ mod tests {
         // As the URL parser writes it either way.
         assert_eq!(pages.page("tt-page1", "tt-page1://http.LOCALHOST:8765/a.md").as_deref(), Some("http://LOCALHOST:8765/a.md"));
         assert_eq!(pages.page("tt-page1", "tt-page1://http.localhost:8765/b.md"), None, "another page");
+        // A page sent with a fragment is requested without it.
+        assert_eq!(pages.proxy("tt-page1", "http://localhost:8765/b.md#sec").as_deref(), Some("tt-page1://http.localhost:8765/b.md#sec"));
+        assert_eq!(pages.page("tt-page1", "tt-page1://http.localhost:8765/b.md").as_deref(), Some("http://localhost:8765/b.md"));
+        assert_eq!(pages.page("tt-page1", "tt-page1://http.localhost:8765/b.md#other").as_deref(), Some("http://localhost:8765/b.md#other"));
+        assert_eq!(pages.page("tt-page1", "tt-page1://http.localhost:8765/b.md?q"), None, "another query");
         assert_eq!(pages.page("tt-page1", "tt-page2://http.localhost:8765/a.md"), None, "another scheme");
         assert_eq!(pages.proxy("tt-page1", "file:///etc/passwd"), None);
         assert_eq!(pages.page("tt-page1", "tt-page1://file./etc/passwd"), None);
