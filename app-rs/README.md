@@ -168,7 +168,8 @@ Done (tested against a real in-process daemon unless noted):
 - **Workspace pane:** header with git status, PR link, Pull, ▶ Run (npm/make/just/Taskfile/
   VS Code tasks, custom runners), Review & Merge / Abandon; AI-harness Prompt Commit /
   Prompt Rebase; Prompt Description / Skip beside a description not yet sent to the
-  harness (shown while an AI-harness tab is active); activity glyphs on tabs. A workspace
+  harness (shown while an AI-harness tab is active); activity glyphs on tabs (as on tree,
+  favourite and rail rows, hovering one names its state: "Working..."). A workspace
   being created shows git's output once there is some; one that failed shows why, with
   Dismiss. A failed operation (merge, removal) shows "Operation failed" with Force Unlock
   and Cancel in place of the tabs.

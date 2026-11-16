@@ -296,7 +296,12 @@ impl TabStrip {
                     .cursor_pointer()
                     .child(div().flex_shrink_0().mr(px(6.)).child(tab.icon.clone()))
                     .child(div().whitespace_nowrap().child(tab.title.clone()))
-                    .child(div().ml(px(4.)).flex_shrink_0().child(crate::ui::activity_glyph(tab.activity, 10., text)))
+                    // `TabActivityIndicator`, titled with its state.
+                    .child(
+                        crate::ui::activity_glyph(SharedString::from(format!("tab-activity-{}", tab.id)), tab.activity, 10., text)
+                            .ml(px(4.))
+                            .tooltip(crate::ui::activity_hint(tab.activity)),
+                    )
                     .when(tab.closable, |d| {
                         d.child(
                             div()

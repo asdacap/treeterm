@@ -649,7 +649,9 @@ impl AppView {
                             let glyph = if workspace.file().is_worktree { IconName::GitBranch } else { IconName::Folder };
                             crate::ui::icon(glyph, 16., color).into_any_element()
                         } else {
-                            crate::ui::activity_glyph(activity, 14., color)
+                            crate::ui::activity_glyph(SharedString::from(format!("rail-activity-{}", row.id)), activity, 14., color)
+                                .tooltip(crate::ui::activity_hint(activity))
+                                .into_any_element()
                         };
                         let flash = workspace.attention_flash(now);
                         (workspace.file().display_name().to_owned(), icon, workspace.is_favourite(), flash)
@@ -1025,7 +1027,9 @@ impl AppView {
             let icon = if activity == treeterm_model::workspace_store::ActivityState::Idle {
                 crate::ui::icon(if is_worktree { IconName::GitBranch } else { IconName::Folder }, 16., secondary).into_any_element()
             } else {
-                crate::ui::activity_glyph(activity, 14., secondary)
+                crate::ui::activity_glyph(SharedString::from(format!("fav-activity-{id}")), activity, 14., secondary)
+                    .tooltip(crate::ui::activity_hint(activity))
+                    .into_any_element()
             };
             let (unread_id, menu_id) = (SharedString::from(format!("fav-unread-{id}")), id.clone());
             panel = panel.child(

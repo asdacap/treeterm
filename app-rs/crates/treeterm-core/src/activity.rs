@@ -52,6 +52,20 @@ impl ActivityState {
             ActivityState::Error => "error",
         }
     }
+
+    /// What hovering the state's glyph says (`ActivityIndicator`'s `title`).
+    pub fn title(self) -> &'static str {
+        match self {
+            ActivityState::Idle => "Idle",
+            ActivityState::Working => "Working...",
+            ActivityState::UserInputRequired => "Input required",
+            ActivityState::PermissionRequest => "Permission request",
+            ActivityState::SafePermissionRequested => "Safe permission",
+            ActivityState::Completed => "Completed",
+            ActivityState::ApplicationError => "Application error",
+            ActivityState::Error => "Error",
+        }
+    }
 }
 
 impl From<ClassifiedState> for ActivityState {
@@ -198,6 +212,24 @@ mod tests {
 
     fn set(store: &mut ActivityStates, tab: &str, state: ActivityState) {
         store.set_tab_state(tab, state, viewport(), SystemTime::UNIX_EPOCH);
+    }
+
+    #[test]
+    fn every_state_has_the_indicators_title() {
+        let titles = ActivityState::ALL.map(ActivityState::title);
+        assert_eq!(
+            titles,
+            [
+                "Idle",
+                "Working...",
+                "Input required",
+                "Permission request",
+                "Safe permission",
+                "Completed",
+                "Application error",
+                "Error",
+            ]
+        );
     }
 
     // --- setTabState ---

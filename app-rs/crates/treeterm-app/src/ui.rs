@@ -220,30 +220,41 @@ pub fn activity_color(state: treeterm_model::workspace_store::ActivityState, cur
 }
 
 /// `ActivityIndicator`: the state's glyph in its `.activity-*` colour (idle keeps `idle`'s
-/// colour, the text around it); working spins.
+/// colour, the text around it); working spins. Where it takes the pointer, its tooltip is
+/// [`activity_hint`].
 pub fn activity_glyph(
+    id: impl Into<ElementId>,
     state: treeterm_model::workspace_store::ActivityState,
     size: f32,
     idle: impl Into<Hsla>,
-) -> gpui_kit::AnyElement {
+) -> Stateful<Div> {
     use treeterm_model::workspace_store::ActivityState;
     let color = activity_color(state, idle);
+    let indicator = div().id(id).flex_shrink_0();
     let glyph = match state {
         ActivityState::Idle => "○",
         ActivityState::Working => {
             use gpui_kit::component::Sizable as _;
-            return gpui_kit::component::spinner::Spinner::new()
-                .icon(Icon::new(IconName::LoaderCircle))
-                .with_size(px(size))
-                .color(color)
-                .into_any_element();
+            return indicator.child(
+                gpui_kit::component::spinner::Spinner::new()
+                    .icon(Icon::new(IconName::LoaderCircle))
+                    .with_size(px(size))
+                    .color(color),
+            );
         }
         ActivityState::UserInputRequired => "▶",
         ActivityState::PermissionRequest | ActivityState::SafePermissionRequested | ActivityState::Error => "●",
         ActivityState::Completed => "✓",
         ActivityState::ApplicationError => "✗",
     };
-    div().text_size(px(size)).text_color(color).child(glyph).into_any_element()
+    indicator.text_size(px(size)).text_color(color).child(glyph)
+}
+
+/// `ActivityIndicator`'s `title`: the state's name ("Idle", "Working...", ...).
+pub fn activity_hint(
+    state: treeterm_model::workspace_store::ActivityState,
+) -> impl Fn(&mut Window, &mut App) -> gpui_kit::AnyView + 'static {
+    move |window, cx| gpui_kit::component::tooltip::Tooltip::new(state.title()).build(window, cx)
 }
 
 /// `.tree-item-flash`: a wash of the flashing state's colour over a row or rail icon (absolute,

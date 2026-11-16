@@ -643,13 +643,20 @@ impl TreePane {
         // Only a loaded row drags (`draggable={ws !== undefined}`); pressing on another drags
         // its session's section.
         let draggable = matches!(label, Label::Name { .. });
+        let live = pointer == Pointer::Live;
         let c = colors(cx);
         let (secondary, primary) = (c.text_secondary, c.text_primary);
-        // `WorkspaceIcon`: spinner while loading, alert on error, the activity glyph while
-        // busy, else a branch (worktree) or folder. Only a loaded row has a tooltip
-        // (`title={… ws?.path}`).
+        // `WorkspaceIcon`: spinner while loading, alert on error, the activity glyph (titled
+        // with its state) while busy, else a branch (worktree) or folder. Only a loaded row
+        // has a tooltip (`title={… ws?.path}`).
         let (icon, label, tooltip): (AnyElement, SharedString, Option<SharedString>) = match label {
-            Label::Name { name, tooltip } if busy => (ui::activity_glyph(activity, 14., secondary), name, Some(tooltip)),
+            Label::Name { name, tooltip } if busy => (
+                ui::activity_glyph(SharedString::from(format!("ws-activity-{id}")), activity, 14., secondary)
+                    .when(live, |glyph| glyph.tooltip(ui::activity_hint(activity)))
+                    .into_any_element(),
+                name,
+                Some(tooltip),
+            ),
             Label::Name { name, tooltip } => (
                 ui::icon(if is_worktree { IconName::GitBranch } else { IconName::Folder }, 16., secondary).into_any_element(),
                 name,
@@ -669,7 +676,6 @@ impl TreePane {
         let selected = session.read(cx).viewed_workspace() == Some(id.as_str());
         // Workspace focus mode (prefix + w) moves this cursor with the arrow keys.
         let focus_cursor = self.keybindings.read(cx).machine().focused_workspace() == Some(id.as_str());
-        let live = pointer == Pointer::Live;
         // An inert row is never under the pointer, whatever row it last left.
         let hover = if live { hover } else { RowHover::Outside };
         // `.tree-item:hover`, and `.tree-subtree:has(> .tree-item:hover) .tree-item:not(.active):not(.focused)`
