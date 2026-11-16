@@ -6,7 +6,9 @@
 //!
 //! Saves are written in the background, one at a time in the order they were asked for, and
 //! reach [`SettingsStore::settings`] only once written: a failed save changes nothing but the
-//! error (Electron's `saveSettings` and `toggleSound` set the settings only on success).
+//! error (Electron's `saveSettings` and `toggleSound` set the settings only on success). A
+//! `settings.json` that could not be read is left as it is until an explicit save
+//! ([`SettingsStore::save`]): changes made in passing ([`SettingsStore::update`]) are dropped.
 
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
@@ -40,11 +42,44 @@ pub enum SoundSave {
 /// Told a save's outcome.
 type SaveReply = oneshot::Sender<Result<(), String>>;
 
+/// Who asked for a save, which decides whether it may replace a `settings.json` that could
+/// not be read.
+enum SaveKind {
+    /// `saveSettings` (Save in Settings, the sound toggle): written whatever the file holds,
+    /// and told the write's outcome.
+    Explicit(SaveReply),
+    /// A change made in passing, not awaited (a folder picked with Browse..., a saved or
+    /// removed SSH connection, port forwards, the prompt debugger's Update): never written
+    /// over a file that could not be read.
+    InPassing,
+}
+
+impl SaveKind {
+    fn reply(self, outcome: Result<(), String>) {
+        match self {
+            SaveKind::Explicit(done) => match done.send(outcome) {
+                Ok(()) | Err(_) => {} // Err: the caller stopped waiting
+            },
+            SaveKind::InPassing => {}
+        }
+    }
+}
+
 /// A change waiting to be written, applied to the settings as they are when its turn comes.
 struct QueuedSave {
     change: Box<dyn FnOnce(&mut Settings)>,
-    /// Told the write's outcome; `None` when nobody waits for it.
-    done: Option<SaveReply>,
+    kind: SaveKind,
+}
+
+/// What `settings.json` holds, as far as the store knows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OnDisk {
+    /// The settings last read or written, or no file at all.
+    Known,
+    /// Something that could not be read (a hand edit gone wrong, settings Electron's schema
+    /// rejects). The settings held in its place (the defaults, or the last read) are not
+    /// what it holds, so only an explicit save replaces it.
+    Unreadable,
 }
 
 pub struct SettingsStore {
@@ -55,6 +90,7 @@ pub struct SettingsStore {
     seen: Option<SystemTime>,
     /// The last load or save failure.
     error: Option<String>,
+    on_disk: OnDisk,
     sound: SoundSave,
     queue: VecDeque<QueuedSave>,
     /// Writes `queue` front to back; `Some` while there is anything to write.
@@ -71,13 +107,14 @@ fn modified(dir: &Path) -> Option<SystemTime> {
 impl SettingsStore {
     /// Load from `user_data_dir` and start watching. A missing file is the defaults, written
     /// to disk as Electron's `loadSettings` does; an unreadable or corrupt one keeps the
-    /// defaults (and the file) and records the error.
+    /// defaults (and the file, until an explicit save) and records the error.
     pub fn new(user_data_dir: Option<PathBuf>, cx: &mut Context<Self>) -> Self {
         let mut store = Self {
             user_data_dir,
             settings: Rc::new(Settings::default()),
             seen: None,
             error: None,
+            on_disk: OnDisk::Known,
             sound: SoundSave::Idle,
             queue: VecDeque::new(),
             writer: None,
@@ -107,6 +144,7 @@ impl SettingsStore {
             settings: Rc::new(settings),
             seen: None,
             error: None,
+            on_disk: OnDisk::Known,
             sound: SoundSave::Idle,
             queue: VecDeque::new(),
             writer: None,
@@ -135,6 +173,7 @@ impl SettingsStore {
         match settings::load(dir) {
             Ok(loaded) => {
                 self.error = None;
+                self.on_disk = OnDisk::Known;
                 if *self.settings == loaded {
                     return false;
                 }
@@ -144,6 +183,7 @@ impl SettingsStore {
             Err(error) => {
                 tracing::error!(%error, "settings unreadable; keeping the current settings");
                 self.error = Some(error.to_string());
+                self.on_disk = OnDisk::Unreadable;
                 false
             }
         }
@@ -182,34 +222,31 @@ impl SettingsStore {
     }
 
     /// Change settings and persist them, without waiting: see [`Self::save`]. A failed save
-    /// is logged and recorded in [`Self::error`].
+    /// is logged and recorded in [`Self::error`]. While `settings.json` holds something that
+    /// could not be read, the change is dropped (and logged) when its turn comes, so the
+    /// settings held in its place never overwrite it in passing: only [`Self::save`] does.
     pub fn update(&mut self, change: impl FnOnce(&mut Settings) + 'static, cx: &mut Context<Self>) {
-        self.enqueue(Box::new(change), None, cx);
+        self.enqueue(Box::new(change), SaveKind::InPassing, cx);
     }
 
     /// Change settings and persist them (`saveSettings`). The change is applied to the
     /// settings as they are once every earlier save is written, and the file is written even
-    /// when nothing changed. The settings take the change only when the write succeeds.
-    /// Resolves with the write's outcome.
+    /// when nothing changed or it could not be read. The settings take the change only when
+    /// the write succeeds. Resolves with the write's outcome.
     pub fn save(
         &mut self,
         change: impl FnOnce(&mut Settings) + 'static,
         cx: &mut Context<Self>,
     ) -> oneshot::Receiver<Result<(), String>> {
         let (done, result) = oneshot::channel();
-        self.enqueue(Box::new(change), Some(done), cx);
+        self.enqueue(Box::new(change), SaveKind::Explicit(done), cx);
         result
     }
 
     /// A folder picked in the native folder picker (`dialog:selectFolder`) goes to the front
-    /// of `recentDirectories`, without waiting: see [`Self::update`]. Skipped (and logged)
-    /// while [`Self::error`] says `settings.json` failed to load or save, so a pick never
-    /// writes the settings held in its place over a file that could not be read.
+    /// of `recentDirectories`, without waiting: see [`Self::update`], which never writes it
+    /// over a `settings.json` that could not be read.
     pub fn add_recent_directory(&mut self, dir: &str, cx: &mut Context<Self>) {
-        if let Some(error) = &self.error {
-            tracing::warn!(%error, dir, "settings.json is in error; the picked folder is not recorded");
-            return;
-        }
         let dir = dir.to_owned();
         self.update(move |settings| settings.add_recent_directory(&dir), cx);
     }
@@ -245,29 +282,22 @@ impl SettingsStore {
         }));
     }
 
-    fn enqueue(
-        &mut self,
-        change: Box<dyn FnOnce(&mut Settings)>,
-        done: Option<SaveReply>,
-        cx: &mut Context<Self>,
-    ) {
+    fn enqueue(&mut self, change: Box<dyn FnOnce(&mut Settings)>, kind: SaveKind, cx: &mut Context<Self>) {
         let Some(dir) = self.user_data_dir.clone() else {
             // Nothing to write: in memory, a save always succeeds.
             let mut next = (*self.settings).clone();
             change(&mut next);
             self.apply(next, cx);
-            if let Some(done) = done {
-                done.send(Ok(())).ok(); // the caller may not wait
-            }
+            kind.reply(Ok(()));
             return;
         };
-        self.queue.push_back(QueuedSave { change, done });
+        self.queue.push_back(QueuedSave { change, kind });
         if self.writer.is_some() {
             return;
         }
         self.writer = Some(cx.spawn(async move |this, cx| {
             loop {
-                let Ok(Some((next, done))) = this.update(cx, |store, _| store.next_save()) else {
+                let Ok(Some((next, kind))) = this.update(cx, |store, _| store.next_save()) else {
                     return;
                 };
                 let written = cx.background_executor().spawn({
@@ -278,23 +308,35 @@ impl SettingsStore {
                 let outcome = this
                     .update(cx, |store, cx| store.finish_save(&dir, next, result, cx))
                     .unwrap_or_else(|_| Err("settings store closed".to_owned()));
-                if let Some(done) = done {
-                    done.send(outcome).ok(); // the caller may not wait
-                }
+                kind.reply(outcome);
             }
         }));
     }
 
-    /// The front of the queue with its change applied; `None` (and the writer done) when the
-    /// queue is empty.
-    fn next_save(&mut self) -> Option<(Settings, Option<SaveReply>)> {
-        let Some(QueuedSave { change, done }) = self.queue.pop_front() else {
-            self.writer = None;
-            return None;
-        };
-        let mut next = (*self.settings).clone();
-        change(&mut next);
-        Some((next, done))
+    /// The next save to write, with its change applied; `None` (and the writer done) when
+    /// the queue is empty. A change made in passing is dropped (and logged) while
+    /// `settings.json` could not be read.
+    fn next_save(&mut self) -> Option<(Settings, SaveKind)> {
+        loop {
+            let Some(QueuedSave { change, kind }) = self.queue.pop_front() else {
+                self.writer = None;
+                return None;
+            };
+            match (&kind, self.on_disk) {
+                (SaveKind::InPassing, OnDisk::Unreadable) => {
+                    tracing::warn!(
+                        error = ?self.error,
+                        "settings.json could not be read; a change is not written over it"
+                    );
+                }
+                (SaveKind::Explicit(_), OnDisk::Known | OnDisk::Unreadable)
+                | (SaveKind::InPassing, OnDisk::Known) => {
+                    let mut next = (*self.settings).clone();
+                    change(&mut next);
+                    return Some((next, kind));
+                }
+            }
+        }
     }
 
     fn finish_save(
@@ -308,6 +350,7 @@ impl SettingsStore {
             Ok(()) => {
                 self.seen = modified(dir);
                 self.error = None;
+                self.on_disk = OnDisk::Known;
                 self.apply(next, cx);
                 Ok(())
             }

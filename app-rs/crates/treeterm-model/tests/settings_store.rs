@@ -126,6 +126,80 @@ fn a_picked_folder_leaves_a_corrupt_settings_file_alone(cx: &mut TestAppContext)
     });
 }
 
+/// A change made in passing (an unchanged one included, such as port forwards for a
+/// connection the held settings do not have) never writes the settings held in place of a
+/// `settings.json` that failed to load: the file stays until Save replaces it, after which
+/// such changes are written again.
+#[gpui_kit::test]
+fn an_update_leaves_a_corrupt_settings_file_alone_until_a_save_replaces_it(cx: &mut TestAppContext) {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(settings::settings_path(dir.path()), b"{nope").unwrap();
+    let path = dir.path().to_owned();
+    let store = cx.new(|cx| SettingsStore::new(Some(path), cx));
+    let load_error = store.read_with(cx, |s, _| s.error().map(str::to_owned)).expect("the load failed");
+
+    store.update(cx, |s, cx| {
+        let forwards = |s: &mut Settings| {
+            if let Some(saved) = s.ssh.saved_connections.iter_mut().find(|c| c.id == "ssh-gone") {
+                saved.port_forwards.clear();
+            }
+        };
+        s.update(forwards, cx);
+        s.update(|s| s.terminal.max_cols = 120, cx);
+    });
+    cx.run_until_parked();
+    assert_eq!(std::fs::read(settings::settings_path(dir.path())).unwrap(), b"{nope");
+    store.read_with(cx, |s, _| {
+        assert_eq!(s.settings().terminal.max_cols, 160);
+        assert_eq!(s.error(), Some(load_error.as_str()));
+    });
+
+    // Save (in Settings) replaces it; changes in passing are written from then on.
+    let saved = save(cx, &store, |_| {});
+    assert_eq!(outcome(cx, saved), Ok(()));
+    store.update(cx, |s, cx| s.update(|s| s.terminal.max_cols = 120, cx));
+    cx.run_until_parked();
+    assert_eq!(saved_json(dir.path())["terminal"]["maxCols"], 120);
+    store.read_with(cx, |s, _| {
+        assert_eq!(s.settings().terminal.max_cols, 120);
+        assert_eq!(s.error(), None);
+    });
+}
+
+/// A file another writer breaks while the app runs is left alone too, the settings read
+/// before kept; once it reads again, changes in passing are written again.
+#[gpui_kit::test]
+fn an_update_leaves_a_file_broken_by_another_writer_alone_until_it_reads_again(cx: &mut TestAppContext) {
+    let dir = tempfile::tempdir().unwrap();
+    let mut mine = Settings::default();
+    mine.terminal.max_cols = 90;
+    let (store, _) = store_with(cx, dir.path(), &mine);
+    let edit = |bytes: &[u8], cx: &mut TestAppContext| {
+        // Make sure the modification time moves even on coarse-grained filesystems.
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        std::fs::write(settings::settings_path(dir.path()), bytes).unwrap();
+        cx.executor().advance_clock(std::time::Duration::from_secs(3));
+        cx.run_until_parked();
+    };
+
+    edit(b"{nope", cx);
+    store.read_with(cx, |s, _| assert!(s.error().is_some()));
+    store.update(cx, |s, cx| s.add_recent_directory("/picked", cx));
+    cx.run_until_parked();
+    assert_eq!(std::fs::read(settings::settings_path(dir.path())).unwrap(), b"{nope");
+    store.read_with(cx, |s, _| {
+        assert_eq!(s.settings().terminal.max_cols, 90);
+        assert!(s.settings().recent_directories.is_empty());
+    });
+
+    edit(&serde_json::to_vec_pretty(&mine).unwrap(), cx);
+    store.read_with(cx, |s, _| assert_eq!(s.error(), None));
+    store.update(cx, |s, cx| s.add_recent_directory("/picked", cx));
+    cx.run_until_parked();
+    assert_eq!(saved_json(dir.path())["recentDirectories"], serde_json::json!(["/picked"]));
+    assert_eq!(saved_json(dir.path())["terminal"]["maxCols"], 90);
+}
+
 /// Electron's `loadSettings` writes the defaults when there is no file.
 #[gpui_kit::test]
 fn a_missing_settings_file_is_created_with_the_defaults(cx: &mut TestAppContext) {
@@ -221,7 +295,8 @@ fn saves_run_in_call_order_each_seeing_the_previous(cx: &mut TestAppContext) {
     assert_eq!(changes.get(), 3);
 }
 
-/// A fire-and-forget update that fails is recorded and changes nothing.
+/// A fire-and-forget update that fails is recorded and changes nothing. The file still
+/// holds what was read, so the next update is written.
 #[gpui_kit::test]
 fn a_failed_update_is_recorded(cx: &mut TestAppContext) {
     let dir = tempfile::tempdir().unwrap();
@@ -235,6 +310,13 @@ fn a_failed_update_is_recorded(cx: &mut TestAppContext) {
         assert!(s.error().unwrap().starts_with("cannot write"), "{:?}", s.error());
     });
     assert_eq!(changes.get(), 0);
+
+    unblock_writes(dir.path());
+    store.update(cx, |s, cx| s.update(|s| s.terminal.max_cols = 120, cx));
+    cx.run_until_parked();
+    assert_eq!(saved_json(dir.path())["terminal"]["maxCols"], 120);
+    store.read_with(cx, |s, _| assert_eq!(s.error(), None));
+    assert_eq!(changes.get(), 1);
 }
 
 /// `toggleSound`: Saving while the write runs (further toggles ignored), then Idle with the

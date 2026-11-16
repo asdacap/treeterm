@@ -504,6 +504,9 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   tab each time, without showing the workspace).
 - A replayed OSC 52 copy or bell is ignored (it already happened when it first ran).
 - Corrupt `settings.json` is an error (logged; defaults used) instead of being overwritten.
+  Only Save in Settings and the sound toggle write over it; changes made in passing (a folder
+  picked with Browse..., a saved or removed SSH connection, its port forwards, the prompt
+  debugger's Update) are logged and not saved until it reads again.
 - A corrupt `ui-state.json` (session names and order, Recent Directories) is logged and kept as
   `ui-state.json.corrupt-<ms since the epoch>`; the state starts empty and is saved again as
   usual. Electron dropped a corrupt stored value silently and overwrote it.
