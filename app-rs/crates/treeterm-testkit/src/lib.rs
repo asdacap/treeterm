@@ -1,5 +1,7 @@
 //! A real daemon (`treeterm_daemon::serve`) running in-process, for contract tests.
 
+pub mod fake_ssh;
+
 use std::path::{Path, PathBuf};
 
 use tempfile::TempDir;

@@ -135,9 +135,10 @@ impl ConnectionPicker {
         self.store.read(cx).settings().read(cx).settings().ssh.saved_connections.clone()
     }
 
+    /// `connectAndCreateSession`: the window shows the session pane while it connects.
     fn connect_saved(&mut self, config: SshConnectionConfig, cx: &mut Context<Self>) {
         let outdated = self.outdated();
-        self.store.update(cx, |s, cx| s.connect_remote(config, outdated, cx));
+        self.store.update(cx, |s, cx| s.start_remote_connect(config, outdated, cx));
     }
 
     /// Validate the form, save the connection (`saveConnection`) and connect. Returns

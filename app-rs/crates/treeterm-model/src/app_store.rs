@@ -8,6 +8,9 @@
 //! writes. When the next generation connects, the kept store writes those bodies on it
 //! (`handleReconnected`'s flush) and is then disposed explicitly — a ghost store left alive
 //! keeps writing the same files as its replacement — before a fresh one is built.
+//!
+//! Where the window lands once a connection's session is restored is decided here too
+//! (`local:connect`, `addRemoteSession`): see [`AppEvent::ShowSession`].
 
 use std::sync::Arc;
 
@@ -15,18 +18,19 @@ use futures::StreamExt as _;
 use gpui_kit::{AppContext as _, Context, Entity, Subscription, Task};
 use indexmap::IndexMap;
 use treeterm_core::connection::dialer::GrpcDialer;
-use treeterm_core::connection::process::TokioSpawner;
+use treeterm_core::connection::process::{ProcessSpawner, TokioSpawner};
 use treeterm_core::connection::ssh::DaemonBinaries;
 use treeterm_core::connection::{
     ConnectPhase, ConnectionErrorKind, ConnectionId, ConnectionInfo, ConnectionManager, ConnectionStatus,
     ConnectionTarget, OutdatedDaemon, SshEnvironment,
 };
 use treeterm_core::daemon::DaemonConnection;
+use treeterm_core::exec::ExecApi;
 use treeterm_core::local_daemon::LocalDaemonSpec;
 use treeterm_core::rt::Rt;
 use treeterm_core::settings::SshConnectionConfig;
 
-use crate::session_store::{ConnectionStatus as SessionConnection, Restore, SessionEvent, SessionStore};
+use crate::session_store::{ConnectionStatus as SessionConnection, Restore, SessionEvent, SessionState, SessionStore};
 use crate::settings_store::SettingsStore;
 
 /// What a connection is doing, with its session store once connected.
@@ -52,7 +56,24 @@ pub struct SessionSlot {
     /// The saved port forwards were started (once per connection; the manager restarts
     /// them after reconnects).
     forwards_started: bool,
+    /// Where the window goes once the session is restored.
+    landing: Landing,
     _events: Option<Subscription>,
+}
+
+/// Where the window goes once a connection's session is restored (`setActiveView` after
+/// `handleRestore`).
+enum Landing {
+    /// It keeps to what it shows: a reconnect, or the landing is done.
+    Stay,
+    /// The session's first workspace, if it has one: its first connection (`local:connect`,
+    /// or a first connect that failed, retried).
+    FirstWorkspace,
+    /// A connect call (`addRemoteSession`): the session's first workspace, or, on a remote
+    /// session with none, a new one at the remote `$HOME`.
+    FirstOrHome,
+    /// Resolving the remote `$HOME` for that new workspace.
+    ResolvingHome(Task<()>),
 }
 
 /// The last connection generation's session store, kept while the connection is down, as
@@ -102,6 +123,25 @@ impl SessionSlot {
 pub enum AppEvent {
     /// A workspace was marked unread: ding if sound is on.
     Attention { workspace: String },
+    /// A connect from the connection picker started (`startRemoteConnect`): the window shows
+    /// the connection's session pane while it connects.
+    ShowSessionPane(ConnectionId),
+    /// A connection's session was restored with a workspace active (`local:connect`,
+    /// `addRemoteSession`): the window shows it.
+    ShowSession(ConnectionId),
+}
+
+/// Where a workspace for a remote session without any opens (`addRemoteSession`): the
+/// remote `$HOME`, else (with a warning) `/home/<user>`.
+pub async fn default_remote_workspace_path(exec: &dyn ExecApi, user: &str) -> String {
+    match treeterm_core::worktree_registry::resolve_homedir(exec).await {
+        Ok(home) => home,
+        Err(error) => {
+            let fallback = format!("/home/{user}");
+            tracing::warn!(%error, %fallback, "Failed to resolve remote home, falling back");
+            fallback
+        }
+    }
 }
 
 impl gpui_kit::EventEmitter<AppEvent> for AppStore {}
@@ -120,13 +160,6 @@ pub struct AppStore {
 
 impl AppStore {
     pub fn new(rt: Rt, spec: LocalDaemonSpec, settings: Entity<SettingsStore>, cx: &mut Context<Self>) -> Self {
-        let llm = match crate::analyzer::LlmService::http(rt.clone()) {
-            Ok(llm) => Some(llm),
-            Err(error) => {
-                tracing::error!(%error, "no LLM client: AI-harness analysis is off");
-                None
-            }
-        };
         // Remote hosts get the musl daemons shipped next to the local one.
         let daemon_dir = spec
             .binary
@@ -139,8 +172,26 @@ impl AppStore {
                 treeterm_core::paths::current_uid(),
             ),
         };
-        let mut manager =
-            ConnectionManager::new(rt.clone(), GrpcDialer::new(rt, spec), Arc::new(TokioSpawner), ssh);
+        Self::with_ssh(rt, spec, Arc::new(TokioSpawner), ssh, settings, cx)
+    }
+
+    /// [`AppStore::new`] with ssh run by `spawner` in `ssh` (tests use a fake ssh host).
+    pub fn with_ssh(
+        rt: Rt,
+        spec: LocalDaemonSpec,
+        spawner: Arc<dyn ProcessSpawner>,
+        ssh: SshEnvironment,
+        settings: Entity<SettingsStore>,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let llm = match crate::analyzer::LlmService::http(rt.clone()) {
+            Ok(llm) => Some(llm),
+            Err(error) => {
+                tracing::error!(%error, "no LLM client: AI-harness analysis is off");
+                None
+            }
+        };
+        let mut manager = ConnectionManager::new(rt.clone(), GrpcDialer::new(rt, spec), spawner, ssh);
         // Subscribe before connecting so no status is missed.
         let mut updates = manager.status_changes();
         let status = cx.spawn(async move |this, cx| {
@@ -170,6 +221,7 @@ impl AppStore {
             state: ConnState::Connecting(ConnectPhase::Daemon),
             previous: Previous::Nothing,
             forwards_started: false,
+            landing: Landing::Stay,
             _events: None,
         });
     }
@@ -196,7 +248,18 @@ impl AppStore {
         &self.settings
     }
 
-    /// Connect to an ssh host (`connectRemote`). An existing healthy connection is kept.
+    /// The connection picker's Connect (`startRemoteConnect`, then `ssh.connect`): the window
+    /// shows the session pane while it connects, then lands as with
+    /// [`AppStore::connect_remote`].
+    pub fn start_remote_connect(&mut self, config: SshConnectionConfig, outdated: OutdatedDaemon, cx: &mut Context<Self>) {
+        // A remote connection's id is its saved connection's.
+        cx.emit(AppEvent::ShowSessionPane(ConnectionId::new(config.id.clone())));
+        self.connect_remote(config, outdated, cx);
+    }
+
+    /// Connect to an ssh host (`ssh.connect`, then `addRemoteSession`). An existing healthy
+    /// connection is kept. Once its session is restored the window shows its first
+    /// workspace; a session with none gets one at the remote `$HOME`.
     pub fn connect_remote(&mut self, config: SshConnectionConfig, outdated: OutdatedDaemon, cx: &mut Context<Self>) {
         let target = ConnectionTarget::Remote(Arc::new(config.clone()));
         let settled = self.manager.connect_remote(config, outdated);
@@ -207,7 +270,20 @@ impl AppStore {
         {
             slot.state = ConnState::Connecting(ConnectPhase::Bootstrap);
         }
-        self.insert_slot(id, target);
+        self.insert_slot(id.clone(), target);
+        if let Some(slot) = self.sessions.get_mut(&id) {
+            slot.landing = Landing::FirstOrHome;
+        }
+        // The kept connection's session is restored already: land now.
+        let restored = self
+            .sessions
+            .get(&id)
+            .and_then(SessionSlot::session)
+            .filter(|session| matches!(session.read(cx).state(), SessionState::Live))
+            .cloned();
+        if let Some(session) = restored {
+            self.land(&id, &session, cx);
+        }
         cx.notify();
     }
 
@@ -296,12 +372,24 @@ impl AppStore {
         };
         // Every status change after Connected means that generation is gone.
         Self::keep_previous(slot, cx);
+        // A home lookup on it is dropped; the next session lands instead.
+        if let Landing::ResolvingHome(_) = slot.landing {
+            slot.landing = Landing::FirstOrHome;
+        }
         match status {
             ConnectionStatus::Connecting { phase } => slot.state = ConnState::Connecting(phase),
             ConnectionStatus::Connected { daemon } => {
                 tracing::info!(%id, "connected");
                 match std::mem::replace(&mut slot.previous, Previous::Nothing) {
-                    Previous::Nothing => self.connect_session(&id, daemon, Restore::FirstRef, cx),
+                    Previous::Nothing => {
+                        // The connection's first session (also a failed first connect,
+                        // retried) shows its first workspace, unless a connect call asked
+                        // for more.
+                        if matches!(slot.landing, Landing::Stay) {
+                            slot.landing = Landing::FirstWorkspace;
+                        }
+                        self.connect_session(&id, daemon, Restore::FirstRef, cx);
+                    }
                     Previous::Kept(session) | Previous::HandingOver { session, .. } => {
                         self.hand_over(&id, session, daemon, cx);
                     }
@@ -317,6 +405,8 @@ impl AppStore {
                     hash_mismatch: error.kind() == ConnectionErrorKind::DaemonHashMismatch,
                     error: error.to_string(),
                 };
+                // The connect ended: the window keeps showing the failure.
+                slot.landing = Landing::Stay;
             }
             ConnectionStatus::Disconnected => {} // handled above
         }
@@ -344,7 +434,8 @@ impl AppStore {
         let owned = id.clone();
         let events = cx.subscribe(&session, move |store, session, event: &SessionEvent, cx| match event {
             SessionEvent::Failed(reason) => store.on_session_failed(&owned, session, reason, cx),
-            SessionEvent::WorkspaceRemoved(_) | SessionEvent::Restored => {}
+            SessionEvent::Restored => store.on_restored(&owned, &session, cx),
+            SessionEvent::WorkspaceRemoved(_) => {}
             SessionEvent::AttentionRecorded(workspace) => {
                 cx.emit(AppEvent::Attention { workspace: workspace.clone() });
             }
@@ -399,6 +490,69 @@ impl AppStore {
         cx.notify();
     }
 
+    /// The connection's session store was restored: the window lands where the connection
+    /// asked.
+    fn on_restored(&mut self, id: &ConnectionId, session: &Entity<SessionStore>, cx: &mut Context<Self>) {
+        if self.sessions.get(id).and_then(SessionSlot::session) == Some(session) {
+            self.land(id, session, cx);
+        }
+    }
+
+    /// Where the window goes, now that `session` (the connection's, restored) can show it
+    /// (`setActiveView` in `local:connect` and `addRemoteSession`).
+    fn land(&mut self, id: &ConnectionId, session: &Entity<SessionStore>, cx: &mut Context<Self>) {
+        let Some(slot) = self.sessions.get_mut(id) else {
+            return;
+        };
+        let first = session.read(cx).workspace_ids().next().cloned();
+        match (std::mem::replace(&mut slot.landing, Landing::Stay), first) {
+            (Landing::Stay, _) => {}
+            // Restoring made the first one active.
+            (Landing::FirstWorkspace, Some(_)) => cx.emit(AppEvent::ShowSession(id.clone())),
+            // Electron: "No workspaces to restore".
+            (Landing::FirstWorkspace, None) => {}
+            // The first one, also when the session was live already or a reconnect kept
+            // another one active.
+            (Landing::FirstOrHome | Landing::ResolvingHome(_), Some(first)) => {
+                session.update(cx, |s, cx| s.set_active_workspace(first, cx));
+                cx.emit(AppEvent::ShowSession(id.clone()));
+            }
+            (Landing::FirstOrHome | Landing::ResolvingHome(_), None) => match &slot.target {
+                ConnectionTarget::Remote(config) => {
+                    let exec = session.read(cx).connection().exec_client();
+                    let (owned, user) = (id.clone(), config.user.clone());
+                    let task = cx.spawn(async move |this, cx| {
+                        let path = default_remote_workspace_path(&exec, &user).await;
+                        match this.update(cx, |store, cx| store.open_home(&owned, path, cx)) {
+                            Ok(()) | Err(_) => {} // Err: the app is shutting down
+                        }
+                    });
+                    slot.landing = Landing::ResolvingHome(task);
+                }
+                ConnectionTarget::Local => {}
+            },
+        }
+    }
+
+    /// The remote `$HOME` (`path`) is resolved: open it as a workspace of the connection's
+    /// session and show it (`addWorkspace`).
+    fn open_home(&mut self, id: &ConnectionId, path: String, cx: &mut Context<Self>) {
+        let Some(slot) = self.sessions.get_mut(id) else {
+            return;
+        };
+        let Landing::ResolvingHome(task) = std::mem::replace(&mut slot.landing, Landing::Stay) else {
+            unreachable!("a landing that is replaced cancels its task");
+        };
+        // This very task is finishing: detach it rather than cancel it mid-poll.
+        task.detach();
+        let ConnState::Connected(session) = &slot.state else {
+            unreachable!("a status change ends the lookup (on_status)");
+        };
+        tracing::info!(%id, %path, "no workspaces: opening the remote home");
+        session.update(cx, |s, cx| s.open_workspace(path, cx));
+        cx.emit(AppEvent::ShowSession(id.clone()));
+    }
+
     /// The session store's own watch died before the manager noticed: force a new
     /// generation (the store is kept when the status changes, and hands over to it).
     fn on_session_failed(&mut self, id: &ConnectionId, session: Entity<SessionStore>, reason: &str, cx: &mut Context<Self>) {
@@ -436,5 +590,65 @@ impl AppStore {
         cx: &gpui_kit::App,
     ) -> Option<treeterm_core::rt::Fut<Result<(), treeterm_core::daemon::ApiError>>> {
         self.local_session().map(|session| session.read(cx).connection().shutdown())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Mutex;
+
+    use futures::StreamExt as _;
+    use futures::stream::BoxStream;
+    use treeterm_core::exec::{ExecApi, ExecError, ExecEvent, ExecRequest};
+
+    use super::default_remote_workspace_path;
+
+    /// Every call plays `events`; the requests are kept.
+    struct ScriptedExec {
+        events: Vec<Result<ExecEvent, ExecError>>,
+        calls: Mutex<Vec<ExecRequest>>,
+    }
+
+    impl ScriptedExec {
+        fn new(events: Vec<Result<ExecEvent, ExecError>>) -> Self {
+            Self { events, calls: Mutex::new(Vec::new()) }
+        }
+    }
+
+    impl ExecApi for ScriptedExec {
+        fn start(&self, request: ExecRequest) -> BoxStream<'static, Result<ExecEvent, ExecError>> {
+            self.calls.lock().unwrap().push(request);
+            futures::stream::iter(self.events.clone()).boxed()
+        }
+    }
+
+    fn resolve(exec: &ScriptedExec) -> String {
+        futures::executor::block_on(default_remote_workspace_path(exec, "alice"))
+    }
+
+    fn prints(stdout: &str, code: i32) -> ScriptedExec {
+        ScriptedExec::new(vec![Ok(ExecEvent::Stdout(stdout.as_bytes().to_vec())), Ok(ExecEvent::Exit { code })])
+    }
+
+    #[test]
+    fn the_remote_home_is_what_the_host_echoes() {
+        let exec = prints("/root\n", 0);
+        assert_eq!(resolve(&exec), "/root");
+        let calls = exec.calls.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!((calls[0].cwd.as_str(), calls[0].command.as_str()), ("/", "sh"));
+        assert_eq!(calls[0].args, ["-c", "echo $HOME"]);
+    }
+
+    #[test]
+    fn a_failed_or_empty_echo_falls_back_to_home_slash_user() {
+        assert_eq!(resolve(&prints("/root\n", 1)), "/home/alice");
+        assert_eq!(resolve(&prints("\n", 0)), "/home/alice");
+    }
+
+    #[test]
+    fn an_exec_that_cannot_run_falls_back_to_home_slash_user() {
+        let refused = ScriptedExec::new(vec![Err(ExecError::System("spawn failed".to_owned()))]);
+        assert_eq!(resolve(&refused), "/home/alice");
     }
 }

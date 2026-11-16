@@ -6,78 +6,26 @@
 //! proxy from the forwarded local socket to the daemon.
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use futures::StreamExt;
-use tokio::net::{UnixListener, UnixStream};
-use tokio::task::JoinSet;
 use treeterm_core::connection::dialer::GrpcDialer;
-use treeterm_core::connection::fake::{FakeResponse, FakeSpawner};
 use treeterm_core::connection::output::Updates;
-use treeterm_core::connection::process::{ProcessCommand, TokioSpawner};
-use treeterm_core::connection::ssh::DaemonBinaries;
+use treeterm_core::connection::process::TokioSpawner;
 use treeterm_core::connection::{
-    ConnectionInfo, ConnectionManager, ConnectionStatus, OutdatedDaemon, OutputKind,
-    SshEnvironment, StatusKind,
+    ConnectionInfo, ConnectionManager, ConnectionStatus, OutdatedDaemon, OutputKind, StatusKind,
 };
 use treeterm_core::daemon::DaemonConnection;
 use treeterm_core::exec::{ExecError, ExecRequest, ExecTimeout};
 use treeterm_core::local_daemon::LocalDaemonSpec;
 use treeterm_core::pty::CreatePty;
 use treeterm_core::rt::Rt;
-use treeterm_core::settings::{ConnectionLabel, Extra, IdentityFile, SshConnectionConfig};
 use treeterm_testkit::TestDaemon;
+use treeterm_testkit::fake_ssh::{Proxy, fake_ssh_host, remote_config, ssh_env};
 
 fn rt() -> Rt {
     Rt::new(tokio::runtime::Handle::current())
-}
-
-/// Forwards connections on `listen` to `target` until dropped; dropping it cuts them all.
-struct Proxy {
-    task: tokio::task::JoinHandle<()>,
-}
-
-impl Proxy {
-    fn start(listen: &Path, target: &Path) -> Self {
-        match std::fs::remove_file(listen) {
-            Ok(()) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => panic!("cannot clear {listen:?}: {error}"),
-        }
-        let listener = UnixListener::bind(listen).expect("bind proxy");
-        let target = target.to_owned();
-        let task = tokio::spawn(async move {
-            let mut connections = JoinSet::new();
-            loop {
-                let (mut inbound, _) = listener.accept().await.expect("proxy accept");
-                let target = target.clone();
-                connections.spawn(async move {
-                    let mut outbound = UnixStream::connect(&target).await.expect("proxy dial");
-                    // Ends when either side closes; nothing to report then.
-                    if tokio::io::copy_bidirectional(&mut inbound, &mut outbound)
-                        .await
-                        .is_err()
-                    {}
-                });
-            }
-        });
-        Self { task }
-    }
-}
-
-impl Drop for Proxy {
-    fn drop(&mut self) {
-        self.task.abort();
-    }
-}
-
-fn ssh_env(dir: &Path) -> SshEnvironment {
-    SshEnvironment {
-        daemon_binaries: DaemonBinaries::new(dir.to_owned()),
-        forward_socket_dir: dir.join("s"),
-    }
 }
 
 /// The next status of `id` that satisfies `done`, failing after 10 s.
@@ -327,44 +275,6 @@ async fn a_reconnect_fails_the_commands_running_on_the_lost_generation() {
     };
     let output = second.exec_client().run(echo).await.unwrap();
     assert_eq!(output.stdout, b"again\n");
-}
-
-/// A fake ssh host whose daemon is `daemon` and whose tunnels are proxies to it.
-fn fake_ssh_host(daemon_socket: PathBuf, tunnels: Arc<Mutex<Vec<Proxy>>>) -> FakeSpawner {
-    FakeSpawner::with_responder(move |command: &ProcessCommand| {
-        let script = command.args.last().cloned().unwrap_or_default();
-        if script.contains("TREETERM_OS") {
-            return FakeResponse::stdout(format!(
-                "TREETERM_OS:Linux\nTREETERM_ARCH:x86_64\nTREETERM_HOME:/home/test\nTREETERM_REMOTE_HASH:NONE\nTREETERM_SOCKET:{}\n",
-                daemon_socket.display()
-            ));
-        }
-        let forward = command
-            .args
-            .iter()
-            .skip_while(|arg| *arg != "-L")
-            .nth(1)
-            .expect("only bootstraps and tunnels are expected");
-        let (local, remote) = forward.split_once(':').unwrap();
-        tunnels
-            .lock()
-            .unwrap()
-            .push(Proxy::start(Path::new(local), Path::new(remote)));
-        FakeResponse::Run
-    })
-}
-
-fn remote_config() -> SshConnectionConfig {
-    SshConnectionConfig {
-        id: "remote-1".to_owned(),
-        host: "example.com".to_owned(),
-        user: "test".to_owned(),
-        port: 22,
-        identity_file: IdentityFile::SshDefault,
-        label: ConnectionLabel::UserAtHost,
-        port_forwards: Vec::new(),
-        extra: Extra::new(),
-    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

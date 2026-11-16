@@ -131,7 +131,9 @@ Done (tested against a real in-process daemon unless noted):
   monitor, the session as JSON and its TTYs. Each session has an active workspace (its first
   one once loaded, a new or forked one at once): the window opens on it at start-up and
   after a remote connect, and disconnecting the shown session shows the next one's (or its
-  session pane when it has none).
+  session pane when it has none). A connect from the SSH picker shows the session pane while
+  it connects; a remote session without workspaces gets one at the remote `$HOME`
+  (`/home/<user>` if that cannot be read).
 - **Tool tabs:** GitHub PR details (reviews, checks, unresolved threads), review comments
   (prompt the harness, push to GitHub), analyzer history and system-prompt debugger (from
   the activity badge's right-click menu), Chat, TTY list with orphan kill, workspace

@@ -4,15 +4,16 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
-description = "Test support: a real TreeTerm daemon running in-process on a temporary socket."
+description = "Test support: a real TreeTerm daemon running in-process on a temporary socket, and a fake ssh host in front of it."
 
 [dependencies]
 treeterm-daemon.workspace = true
+# The fake ssh host drives the core connection manager's process spawner.
+treeterm-core.workspace = true
 tokio.workspace = true
 tempfile.workspace = true
 
 [dev-dependencies]
-treeterm-core.workspace = true
 treeterm-proto.workspace = true
 futures.workspace = true
 tempfile.workspace = true

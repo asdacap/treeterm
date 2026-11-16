@@ -184,17 +184,6 @@ fn loading_output(lines: Vec<String>, scroll: &gpui_kit::ScrollHandle, cx: &App)
         .into_any_element()
 }
 
-/// Why a session view is built.
-#[derive(Clone, Copy)]
-enum Arrival {
-    /// The session connected for the first time: once restored, the window shows its active
-    /// workspace (`local:connect`, `addRemoteSession`).
-    Connected,
-    /// A new connection generation replaces the last one's store: the window keeps to what
-    /// it shows (the new store keeps the workspace the last one had active).
-    Reconnected,
-}
-
 /// What the workspace header is editing in place (`workspace-edit-input` / `-textarea`).
 enum HeaderEdit {
     Name { input: Entity<gpui_kit::component::input::InputState>, _save: Subscription },
@@ -222,11 +211,25 @@ impl AppView {
             view.sync(&store, cx);
         })
         .detach();
-        // The attention ding (`playDing`): the system bell, when sound is on.
         cx.subscribe_in(&store, window, |view, _, event: &treeterm_model::app_store::AppEvent, window, cx| match event {
+            // The attention ding (`playDing`): the system bell, when sound is on.
             treeterm_model::app_store::AppEvent::Attention { .. } => {
                 if view.settings.read(cx).settings().notifications.sound_enabled {
                     window.play_system_bell();
+                }
+            }
+            // A connect started from the picker: its session pane, while it connects.
+            treeterm_model::app_store::AppEvent::ShowSessionPane(id) => {
+                view.info_pending = Some(id.clone());
+                cx.notify();
+            }
+            // A session restored (`setActiveView`): its active workspace, focused.
+            treeterm_model::app_store::AppEvent::ShowSession(id) => {
+                if view.sessions.contains_key(id) {
+                    view.show_session(id, cx);
+                    if let Some(connected) = view.sessions.get_mut(id) {
+                        connected.focus_pending = true;
+                    }
                 }
             }
         })
@@ -274,12 +277,10 @@ impl AppView {
             Some(info) => Some(info.read(cx).connection(cx)),
             None => self.info_pending.clone().or_else(|| self.active.clone()),
         };
-        let had_view: Vec<ConnectionId> = self.sessions.keys().cloned().collect();
         self.sessions.retain(|id, connected| wanted.iter().any(|(w, session, ..)| w == id && *session == connected.session));
         for (id, session, target) in wanted {
             if !self.sessions.contains_key(&id) {
-                let arrival = if had_view.contains(&id) { Arrival::Reconnected } else { Arrival::Connected };
-                let connected = self.connect(id.clone(), session, target, arrival, cx);
+                let connected = self.connect(id.clone(), session, target, cx);
                 self.sessions.insert(id, connected);
             }
         }
@@ -378,7 +379,6 @@ impl AppView {
         id: ConnectionId,
         session: Entity<SessionStore>,
         target: treeterm_core::connection::ConnectionTarget,
-        arrival: Arrival,
         cx: &mut Context<Self>,
     ) -> Connected {
         cx.observe(&session, |_, _, cx| cx.notify()).detach();
@@ -409,14 +409,8 @@ impl AppView {
                 }
                 cx.notify();
             }
-            // A session connected for the first time shows its first workspace once restored
-            // (`setActiveView` after `handleRestore`); a reconnect keeps to what the window
-            // shows.
-            SessionEvent::Restored => match arrival {
-                Arrival::Connected if session.read(cx).active_workspace().is_some() => view.show_session(&events_id, cx),
-                Arrival::Connected | Arrival::Reconnected => {}
-            },
-            SessionEvent::AttentionRecorded(_) | SessionEvent::Failed(_) => {}
+            // Where the window lands once restored is the app store's (`AppEvent::ShowSession`).
+            SessionEvent::Restored | SessionEvent::AttentionRecorded(_) | SessionEvent::Failed(_) => {}
         });
         let picked = session.clone();
         let selection = cx.subscribe(&tree, move |view, _, WorkspaceSelected(workspace), cx| {
