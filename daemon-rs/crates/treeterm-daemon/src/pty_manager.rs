@@ -1,6 +1,6 @@
 use std::collections::{HashMap, VecDeque};
 use std::ffi::{CStr, CString};
-use std::os::unix::io::{AsRawFd, RawFd};
+use std::os::unix::io::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use tokio::io::unix::AsyncFd;
@@ -21,12 +21,18 @@ pub enum BufferEvent {
 
 pub struct PtySession {
     pub id: String,
-    pub master_fd: RawFd,
     /// Shared AsyncFd for the master fd. The read loop and write() both call
     /// `.readable()` / `.writable()` on the same registration — tokio permits
     /// concurrent readable/writable awaits on a single AsyncFd, but registering
     /// the fd twice via `AsyncFd::new` would fail with EEXIST.
     async_fd: Option<Arc<AsyncFd<FdWrapper>>>,
+    /// The PTY master. `kill` and `shutdown` close it, which hangs the shell up (an
+    /// interactive shell ignores SIGTERM). A session dropped without them closes it then, as
+    /// the daemon's exit would: an in-process daemon (the app's testkit) is dropped that way
+    /// when its runtime ends before its shutdown ran, and a master left open there kept the
+    /// shell alive, and with it the waitpid thread that the runtime's drop waits for.
+    /// Declared after `async_fd`: a dropped session releases its registration first.
+    master: Option<OwnedFd>,
     pub child_pid: libc::pid_t,
     pub cwd: String,
     pub cols: u16,
@@ -41,7 +47,7 @@ pub struct PtySession {
     pub exit_tx: broadcast::Sender<(i32, Option<i32>)>,
     pub resize_tx: broadcast::Sender<(i32, i32)>,
     /// Handle to the background read_pty_loop task. Must be aborted before
-    /// closing master_fd to prevent stale AsyncFd from corrupting tokio's I/O driver
+    /// closing `master` to prevent stale AsyncFd from corrupting tokio's I/O driver
     /// when the fd number is reused by a new PTY session.
     pub reader_handle: Option<tokio::task::JoinHandle<()>>,
     /// Client-supplied idempotency key (see `create_pty`). Kept on the session so
@@ -175,7 +181,7 @@ impl PtyManager {
         let c_shell = CString::new(resolve_on_path(&get_login_shell())).map_err(|_| "invalid login shell path".to_owned())?;
         let c_arg = CString::new("-l").map_err(|_| "invalid shell argument".to_owned())?;
 
-        let (master_fd, child_pid) = unsafe {
+        let (master, child_pid) = unsafe {
             // Raw pointers stay inside this block (the future must stay `Send`).
             let mut envp: Vec<*const libc::c_char> = envp_owned.iter().map(|e| e.as_ptr()).collect();
             envp.push(std::ptr::null());
@@ -213,8 +219,9 @@ impl PtyManager {
                 libc::execve(c_shell.as_ptr(), argv.as_ptr(), envp.as_ptr());
                 libc::_exit(1);
             }
-            (master, pid)
+            (OwnedFd::from_raw_fd(master), pid)
         };
+        let master_fd = master.as_raw_fd();
 
         // Non-blocking, and close-on-exec so processes the daemon runs later (exec
         // requests) don't hold this PTY open either.
@@ -239,8 +246,8 @@ impl PtyManager {
         let now = chrono_now_millis();
         let session = PtySession {
             id: id.clone(),
-            master_fd,
             async_fd: Some(Arc::clone(&async_fd)),
+            master: Some(master),
             child_pid,
             cwd,
             cols,
@@ -457,7 +464,10 @@ impl PtyManager {
             ws_xpixel: 0,
             ws_ypixel: 0,
         };
-        let ret = unsafe { libc::ioctl(session.master_fd, libc::TIOCSWINSZ, &ws) };
+        let Some(master) = &session.master else {
+            return Err("pty master fd already released".to_string());
+        };
+        let ret = unsafe { libc::ioctl(master.as_raw_fd(), libc::TIOCSWINSZ, &ws) };
         if ret < 0 {
             return Err(format!(
                 "ioctl TIOCSWINSZ failed: {}",
@@ -499,8 +509,8 @@ impl PtyManager {
             let mut exit_rx = session.exit_tx.subscribe();
             unsafe {
                 libc::kill(pid, libc::SIGTERM);
-                libc::close(session.master_fd);
             }
+            drop(session.master.take());
             // Release lock so the waitpid task can access the session to broadcast exit
             drop(session);
             // SIGKILL fallback: if process doesn't exit within 5s after SIGTERM,
@@ -639,8 +649,8 @@ impl PtyManager {
             let mut exit_rx = session.exit_tx.subscribe();
             unsafe {
                 libc::kill(pid, libc::SIGTERM);
-                libc::close(session.master_fd);
             }
+            drop(session.master.take());
             drop(session);
             sigkill_tasks.push(tokio::spawn(async move {
                 if tokio::time::timeout(

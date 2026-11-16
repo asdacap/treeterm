@@ -154,3 +154,49 @@ async fn writes_after_a_detach_fail_with_pty_stream_detached() {
     assert_eq!(input.write(b"x").await, Err(closed));
     conn.kill_pty(&pty).await.unwrap().unwrap();
 }
+
+/// A test's runtime ends right after the test drops its daemon, so the daemon may be
+/// cancelled before its shutdown ran. Its shells are hung up all the same: the runtime's drop
+/// waits for each shell's waitpid thread, which never returned while a cancelled daemon left
+/// the shell's terminal open (the connection tests hung at exit).
+#[test]
+fn a_daemon_cancelled_with_its_runtime_hangs_up_its_shells() {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .unwrap();
+    let daemon = runtime.block_on(async {
+        let daemon = TestDaemon::start();
+        let conn = DaemonConnection::open(&rt(), daemon.socket_path()).await.unwrap().unwrap();
+        let pty = spawn_shell(&conn, &daemon).await;
+        // Idle at its prompt, as the connection test's shell is when it ends (zsh can
+        // deadlock in its own hangup handler when the hangup lands in a prompt hook).
+        let mut attachment = conn.attach_pty(&pty, AttachKind::Background);
+        let idle = tokio::time::timeout(Duration::from_secs(10), async {
+            let mut printed = false;
+            loop {
+                match tokio::time::timeout(Duration::from_millis(300), attachment.events.next()).await {
+                    Ok(Some(event)) => {
+                        printed |= matches!(event.expect("pty stream error"), PtyEvent::Data(_));
+                    }
+                    Ok(None) => panic!("pty stream ended"),
+                    Err(_quiet) if printed => return,
+                    Err(_quiet) => {}
+                }
+            }
+        })
+        .await;
+        assert!(idle.is_ok(), "the shell never went quiet at its prompt");
+        daemon
+    });
+
+    // The daemon is still serving: the runtime cancels it, it is never told to stop.
+    let started = std::time::Instant::now();
+    runtime.shutdown_timeout(Duration::from_secs(30));
+    assert!(
+        started.elapsed() < Duration::from_secs(20),
+        "the runtime waited for a shell that was never hung up"
+    );
+    drop(daemon);
+}
