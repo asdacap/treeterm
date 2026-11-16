@@ -219,7 +219,7 @@ fn an_opened_or_forked_workspace_is_active_from_its_placeholder_on(cx: &mut Test
     let store = open_store(cx, &h, "client-a");
     wait_until(cx, &store, |s| matches!(s.state(), SessionState::Live));
     let path = repo.path.to_string_lossy().into_owned();
-    let root = store.update(cx, |s, cx| s.open_workspace(path, cx));
+    let root = store.update(cx, |s, cx| s.open_workspace(path, WorktreeSettings::default(), cx));
     assert_eq!(active(cx, &store), Some(root.clone()), "active while its git info loads");
     wait_until(cx, &store, |s| loaded(s, &root));
     assert_eq!(active(cx, &store), Some(root.clone()));
