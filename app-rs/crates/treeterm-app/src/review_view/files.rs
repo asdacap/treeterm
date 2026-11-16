@@ -76,6 +76,7 @@ pub fn favourites(view: &ReviewView, changed: &[ListedFile], cx: &mut Context<Re
                 let name = treeterm_core::files::favourite_file_name(&file).to_owned();
                 let is_selected = selected.as_deref() == Some(file.relative_path.as_str());
                 let relative = file.relative_path.clone();
+                let tooltip = SharedString::from(file.relative_path.clone());
                 div()
                     .id(SharedString::from(format!("favourite-{}", file.relative_path)))
                     .flex()
@@ -96,6 +97,8 @@ pub fn favourites(view: &ReviewView, changed: &[ListedFile], cx: &mut Context<Re
                     .when(in_diff, |d| {
                         d.child(div().ml_auto().flex_shrink_0().text_size(px(10.)).text_color(secondary).child("CHANGED"))
                     })
+                    // `title={file.relativePath}`: two favourites with one name told apart.
+                    .tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(tooltip.clone()).build(window, cx))
                     .on_click(cx.listener(move |view, _: &ClickEvent, _, cx| {
                         if in_diff {
                             view.select_file(&relative, cx);
