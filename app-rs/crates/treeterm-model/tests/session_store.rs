@@ -2933,6 +2933,17 @@ fn web_app_workspace(
     conn: DaemonConnection,
     command: &str,
 ) -> (Entity<SessionStore>, Entity<WorkspaceStore>) {
+    let (store, workspace, _) = web_app_session(cx, h, conn, command);
+    (store, workspace)
+}
+
+/// [`web_app_workspace`], with the settings the session follows.
+fn web_app_session(
+    cx: &mut TestAppContext,
+    h: &Harness,
+    conn: DaemonConnection,
+    command: &str,
+) -> (Entity<SessionStore>, Entity<WorkspaceStore>, Entity<SettingsStore>) {
     std::fs::write(h.daemon.workspaces_dir().join("a.json"), body("a", None)).unwrap();
     publish(h, &["a"]);
     let settings = treeterm_core::settings::from_value(serde_json::json!({
@@ -2942,10 +2953,12 @@ fn web_app_workspace(
     }))
     .unwrap();
     let settings_store = cx.new(|_| SettingsStore::in_memory(settings));
-    let store = cx.new(|cx| SessionStore::new(conn, "client-a".into(), settings_store, None, cx.new(ConnectionTraffic::new), cx));
+    let store = cx.new(|cx| {
+        SessionStore::new(conn, "client-a".into(), settings_store.clone(), None, cx.new(ConnectionTraffic::new), cx)
+    });
     wait_until(cx, &store, |s| loaded(s, "a"));
     let workspace = store.read_with(cx, |s, _| ws(s, "a"));
-    (store, workspace)
+    (store, workspace, settings_store)
 }
 
 /// A Web App tab whose server's port is already known (1: nothing answers there).
@@ -3325,6 +3338,39 @@ fn disposing_the_session_stops_a_web_app_starting_up(cx: &mut TestAppContext) {
     for _ in 0..30 {
         cx.run_until_parked();
         std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert_eq!(app.read_with(cx, |a, _| (a.phase().clone(), a.port())), (WebAppPhase::AllocatingPort, None));
+    let state = workspace.read_with(cx, |w, _| w.file().app_states[&tab].state.clone());
+    assert_eq!(state["port"], serde_json::json!({ "status": "unassigned" }));
+    assert!(pty_ids(&h).is_empty(), "no server was started");
+}
+
+#[gpui_kit::test]
+fn a_disposed_session_starts_no_web_app_when_settings_change(cx: &mut TestAppContext) {
+    use treeterm_model::web_app::{WebAppModel, WebAppPhase};
+    cx.executor().allow_parking();
+    let h = harness();
+    let (session, workspace, settings) = web_app_session(cx, &h, h.conn.clone(), "sleep 300");
+    let tab = workspace.update(cx, |w, cx| w.add_tab("webapp-py", cx)).unwrap();
+    let Some(TabContent::WebApp { app, .. }) = workspace.read_with(cx, |w, _| w.tab_content(&tab)) else {
+        panic!("not a web app tab");
+    };
+    // Disposed while the page (a view) still holds it, and then the settings change.
+    session.update(cx, |s, cx| s.dispose(cx));
+    settings.update(cx, |s, cx| s.update(|s| s.terminal.font_size = 17.0, cx));
+    assert_eq!(settings.read_with(cx, |s, _| s.settings().terminal.font_size), 17.0);
+
+    // By the time a start-up begun then would have found its free port, and a while after.
+    let exec = h.conn.exec_client();
+    let live = cx.new(|cx| WebAppModel::new(exec, "live".to_owned(), None, None, None, cx));
+    wait_until(cx, &live, |a| a.port().is_some());
+    for _ in 0..30 {
+        cx.run_until_parked();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    // No Web App started again: the tab shows none, or the disposed one.
+    if let Some(TabContent::WebApp { app: shown, .. }) = workspace.read_with(cx, |w, _| w.tab_content(&tab)) {
+        assert_eq!(shown, app, "a new Web App started");
     }
     assert_eq!(app.read_with(cx, |a, _| (a.phase().clone(), a.port())), (WebAppPhase::AllocatingPort, None));
     let state = workspace.read_with(cx, |w, _| w.file().app_states[&tab].state.clone());

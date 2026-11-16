@@ -1001,8 +1001,13 @@ impl SessionStore {
     }
 
     /// Settings changed (here or in another app): rebuild the application registry and
-    /// hand both to every workspace, which applies them to its live terminals.
+    /// hand both to every workspace, which applies them to its live terminals. A disposed
+    /// session's workspaces stay as they were left: applying settings starts their tabs
+    /// again (terminals re-attach, Web Apps start up), which dispose stopped.
     fn on_settings_changed(&mut self, cx: &mut Context<Self>) {
+        if self.disposed {
+            return;
+        }
         let settings = self.settings.read(cx).settings().clone();
         match self.github_settings.write() {
             Ok(mut github) => *github = settings.github.clone(),
