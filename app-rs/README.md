@@ -169,8 +169,8 @@ Done (tested against a real in-process daemon unless noted):
 - **Tool tabs:** GitHub PR details (reviews, checks, unresolved threads), review comments
   (prompt the harness, push to GitHub), analyzer history and system-prompt debugger (from
   the activity badge's right-click menu), Chat, TTY list with orphan kill, workspace
-  settings (also from the tree's Settings item), SSH upload (ssh sessions only; not yet run
-  against a real host).
+  settings (also from the Settings item of a tree row or favourite), SSH upload (ssh
+  sessions only; not yet run against a real host).
 - **Traffic:** download rate per connection (session header) and per workspace (PTY output,
   workspace header), counted at the daemon socket. Totals and rates are kept across
   reconnects and a failed connection connected again, until the connection is disconnected
@@ -367,6 +367,9 @@ The chrome was matched to Electron's computed styles, measured side by side on o
 - Placeholders for refs another window removed are dropped with the ref.
 - A collapsed workspace stays collapsed until it gains a child or is expanded (Electron
   re-expanded every parent whenever any workspace changed).
+- The Settings item of a workspace row's or a favourite's menu opens or focuses that
+  workspace's single Settings tab and shows the workspace (Electron added another Settings
+  tab each time, without switching to it).
 - A replayed OSC 52 copy or bell is ignored (it already happened when it first ran).
 - Corrupt `settings.json` is an error (logged; defaults used) instead of being overwritten.
 - A corrupt `ui-state.json` (session names and order, Recent Directories) is logged and kept as

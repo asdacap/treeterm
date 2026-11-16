@@ -181,6 +181,10 @@ struct SessionTree {
 struct FavouriteRow {
     id: String,
     conn: ConnectionId,
+    /// The workspace, for the row's menu.
+    store: Entity<WorkspaceStore>,
+    /// Its session's tree: the menu's Settings shows the workspace through it.
+    tree: Entity<TreePane>,
     name: String,
     /// Shown on hover (`title={data.path}`).
     path: SharedString,
@@ -960,6 +964,7 @@ impl AppView {
 
     /// Favourite workspaces of every connected session (`FavouritesPanel`); none, no panel.
     fn favourites(&self, window: &Window, cx: &mut Context<Self>) -> Option<AnyElement> {
+        use gpui_kit::component::menu::ContextMenuExt as _;
         let c = colors(cx);
         let (secondary, primary, hover, active, accent, border) =
             (c.text_secondary, c.text_primary, c.bg_hover, c.bg_active, c.accent, c.border);
@@ -967,6 +972,8 @@ impl AppView {
         let mut flashing = false;
         let mut rows = Vec::new();
         for (conn, connected) in &self.sessions {
+            // Every connection has its sidebar tree (made before its session is shown).
+            let Some(tree) = self.trees.get(conn) else { continue };
             let session = connected.session.read(cx);
             let shown = session.viewed_workspace().map(str::to_owned);
             for id in session.workspace_ids() {
@@ -978,6 +985,8 @@ impl AppView {
                     rows.push(FavouriteRow {
                         id: id.clone(),
                         conn: conn.clone(),
+                        store: store.clone(),
+                        tree: tree.pane.clone(),
                         name: workspace.file().display_name().to_owned(),
                         path: workspace.workspace().path.clone().into(),
                         is_worktree: workspace.file().is_worktree,
@@ -1014,13 +1023,14 @@ impl AppView {
                 .child(crate::ui::caps_title("Favourites", cx)),
         );
         for row in rows {
-            let FavouriteRow { id, conn, name, path, is_worktree, unread, pending, flash, activity, is_shown, pr } = row;
+            let FavouriteRow { id, conn, store, tree, name, path, is_worktree, unread, pending, flash, activity, is_shown, pr } =
+                row;
             let icon = if activity == treeterm_model::workspace_store::ActivityState::Idle {
                 crate::ui::icon(if is_worktree { IconName::GitBranch } else { IconName::Folder }, 16., secondary).into_any_element()
             } else {
                 crate::ui::activity_glyph(activity, 14., secondary)
             };
-            let unread_id = SharedString::from(format!("fav-unread-{id}"));
+            let (unread_id, menu_id) = (SharedString::from(format!("fav-unread-{id}")), id.clone());
             panel = panel.child(
                 h_flex()
                     .id(SharedString::from(format!("fav-{id}")))
@@ -1041,7 +1051,19 @@ impl AppView {
                     .when(pending, |d| d.child(crate::ui::attention_saving(primary)))
                     // `WorkspaceAttentionFlash`, over the row's content.
                     .children(flash.map(|flash| crate::ui::attention_flash(flash, 0.)))
-                    .on_click(cx.listener(move |view, _, _, cx| view.select_workspace(&conn, id.clone(), cx))),
+                    .on_click(cx.listener(move |view, _, _, cx| view.select_workspace(&conn, id.clone(), cx)))
+                    // `fav-context-<id>`: Settings, as in the tree row's menu, and Unmark as Favourite.
+                    .context_menu(move |menu, _, _| {
+                        let (settings_store, tree, id) = (store.clone(), tree.clone(), menu_id.clone());
+                        let favourite_store = store.clone();
+                        menu.item(crate::ui::menu_item("Settings").on_click(move |_, _, cx| {
+                            crate::tree_pane::open_workspace_settings(&settings_store, &tree, id.clone(), cx)
+                        }))
+                        .item(
+                            crate::ui::menu_item("Unmark as Favourite")
+                                .on_click(move |_, _, cx| favourite_store.update(cx, |w, cx| w.toggle_favourite(cx))),
+                        )
+                    }),
             );
         }
         Some(panel.into_any_element())

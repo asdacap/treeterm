@@ -137,6 +137,26 @@ fn the_settings_tab_opens_once_and_edits_the_workspace_in_electrons_format(cx: &
     assert_eq!(raw["settings"]["defaultApplicationId"], "filesystem");
 }
 
+/// "Mark as Favourite" and the favourite's "Unmark as Favourite" (`toggleFavourite`): marked,
+/// the metadata says `isFavourite: "true"`; unmarked, the key is gone, as Electron leaves it.
+#[gpui_kit::test]
+fn a_workspace_is_marked_and_unmarked_as_favourite_in_electrons_format(cx: &mut TestAppContext) {
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let store = open_store(cx, &h, Settings::default(), None);
+    let (id, _dir, workspace) = open_workspace(cx, &h, &store, json!({}));
+    assert!(!workspace.read_with(cx, |w, _| w.is_favourite()));
+
+    workspace.update(cx, |w, cx| w.toggle_favourite(cx));
+    assert!(workspace.read_with(cx, |w, _| w.is_favourite()));
+    wait_for_disk(cx, || file_on_disk(&h, &id)["metadata"]["isFavourite"] == "true");
+
+    workspace.update(cx, |w, cx| w.toggle_favourite(cx));
+    assert!(!workspace.read_with(cx, |w, _| w.is_favourite()));
+    wait_for_disk(cx, || file_on_disk(&h, &id)["metadata"].get("isFavourite").is_none());
+}
+
 #[gpui_kit::test]
 fn the_comments_tab_lists_comments_with_their_code_and_acts_on_them(cx: &mut TestAppContext) {
     let _serial = serial();

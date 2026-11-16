@@ -868,12 +868,9 @@ impl TreePane {
             let file = store.read(cx).file().clone();
             let child = file.is_worktree && has_parent;
             let (settings_store, settings_pane, settings_id) = (store.clone(), pane.clone(), menu_id.clone());
-            let mut menu = menu
-                .item(ui::menu_item("Settings").on_click(move |_, _, cx| {
-                    if settings_store.update(cx, |w, cx| w.open_or_focus_tab("workspace-settings", cx)).is_some() {
-                        settings_pane.update(cx, |pane, cx| pane.select(settings_id.clone(), cx));
-                    }
-                }));
+            let mut menu = menu.item(ui::menu_item("Settings").on_click(move |_, _, cx| {
+                open_workspace_settings(&settings_store, &settings_pane, settings_id.clone(), cx)
+            }));
             let favourite_store = store.clone();
             menu = menu.item(
                 ui::menu_item(if favourite { "Unmark as Favourite" } else { "Mark as Favourite" })
@@ -930,6 +927,19 @@ impl TreePane {
             menu
         })
         .into_any_element()
+    }
+}
+
+/// The Settings item of a tree row's or a favourite's menu: show the workspace's Settings tab,
+/// adding one if it has none, and show the workspace (`tree` picks it).
+pub(crate) fn open_workspace_settings(
+    store: &Entity<treeterm_model::workspace_store::WorkspaceStore>,
+    tree: &Entity<TreePane>,
+    id: String,
+    cx: &mut gpui_kit::App,
+) {
+    if store.update(cx, |w, cx| w.open_or_focus_tab("workspace-settings", cx)).is_some() {
+        tree.update(cx, |tree, cx| tree.select(id, cx));
     }
 }
 
