@@ -1,5 +1,6 @@
 //! The System Prompt Debugger tab (`SystemPromptDebugger.tsx`).
 
+use gpui_kit::base::SelectableText;
 use gpui_kit::component::input::{InputEvent, InputState, TextareaState};
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::{h_flex, v_flex};
@@ -7,7 +8,7 @@ use gpui_kit::prelude::*;
 use gpui_kit::{AnyElement, Context, Entity, FontWeight, Subscription, Window, div, px, rgb};
 use treeterm_core::settings::ClassifierProvider;
 use treeterm_model::settings_store::SettingsStore;
-use treeterm_model::tool_tabs::prompt_debugger::{DebugMode, DebugRun, PromptDebugger, REASONING_CHOICES};
+use treeterm_model::tool_tabs::prompt_debugger::{DebugMode, PromptDebugger, REASONING_CHOICES};
 
 use crate::ui::{FieldStyle, MONO, field, normal_line, pane_select_box, pane_text_area, text_button};
 
@@ -86,7 +87,8 @@ impl PromptDebuggerView {
 impl Render for PromptDebuggerView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let debugger = self.model.read(cx);
-        let (mode, run, reasoning, provider) = (debugger.mode(), debugger.run().clone(), debugger.reasoning(), debugger.provider(cx));
+        let (mode, running, output, reasoning, provider) =
+            (debugger.mode(), debugger.is_running(), debugger.output().clone(), debugger.reasoning(), debugger.provider(cx));
         let classifier = provider == ClassifierProvider::Classifier;
         let inputs = self.inputs(mode);
         let (model_input, prompt_input) = (inputs.model.clone(), inputs.prompt.clone());
@@ -146,11 +148,6 @@ impl Render for PromptDebuggerView {
                 .text_color(rgb(LABEL))
                 .child(text)
                 .child(control)
-        };
-        let running = run == DebugRun::Running;
-        let (duration, outcome) = match run {
-            DebugRun::Idle | DebugRun::Running => (None, None),
-            DebugRun::Finished { duration, outcome } => (duration, Some(outcome)),
         };
         v_flex()
             .id("prompt-debugger")
@@ -221,11 +218,12 @@ impl Render for PromptDebuggerView {
                             .line_height(normal_line(13.))
                             .text_color(gpui_kit::white())
                             .child(if running { "Testing..." } else { "Test" })
+                            .when(running, |d| d.cursor_not_allowed())
                             .when(!running, |d| {
                                 d.cursor_pointer().on_click(cx.listener(|view, _, _, cx| view.model.update(cx, |d, cx| d.test(cx))))
                             }),
                     )
-                    .when_some(duration, |d, duration| {
+                    .when_some(output.duration(), |d, duration| {
                         d.child(
                             div()
                                 .text_size(px(12.))
@@ -235,8 +233,19 @@ impl Render for PromptDebuggerView {
                         )
                     }),
             )
-            .when_some(outcome, |d, outcome| match outcome {
-                Ok(result) => d.child(
+            // The error above the result, both selectable (Cmd/Ctrl+C copies).
+            .when_some(output.error().map(str::to_owned), |d, message| {
+                d.child(
+                    div()
+                        .font_family(MONO)
+                        .text_size(px(12.))
+                        .line_height(normal_line(12.))
+                        .text_color(rgb(0xf14c4c))
+                        .child(SelectableText::new("debugger-error", message)),
+                )
+            })
+            .when_some(output.result().map(str::to_owned), |d, result| {
+                d.child(
                     div()
                         .p(px(8.))
                         .rounded(px(4.))
@@ -247,16 +256,8 @@ impl Render for PromptDebuggerView {
                         .text_size(px(12.))
                         .line_height(normal_line(12.))
                         .text_color(rgb(0x23d18b))
-                        .child(result),
-                ),
-                Err(message) => d.child(
-                    div()
-                        .font_family(MONO)
-                        .text_size(px(12.))
-                        .line_height(normal_line(12.))
-                        .text_color(rgb(0xf14c4c))
-                        .child(message),
-                ),
+                        .child(SelectableText::new("debugger-result", result)),
+                )
             })
     }
 }

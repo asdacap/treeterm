@@ -15,7 +15,7 @@ use treeterm_model::settings_store::SettingsStore;
 use treeterm_model::tool_tabs::analyzer_history::HistorySource;
 use treeterm_model::tool_tabs::chat::{ChatRole, MISSING_API_KEY};
 use treeterm_model::tool_tabs::comments::PushState;
-use treeterm_model::tool_tabs::prompt_debugger::{DebugMode, DebugRun};
+use treeterm_model::tool_tabs::prompt_debugger::{DebugMode, DebugOutput};
 use treeterm_model::tool_tabs::ssh_upload::UploadTarget;
 use treeterm_model::tool_tabs::tty_list::{ProcessList, referenced_pty_ids};
 use treeterm_model::workspace_store::{TabContent, WorkspaceStore};
@@ -315,14 +315,13 @@ fn the_prompt_debugger_runs_both_prompts_and_its_history_shows_the_runs(cx: &mut
     cx.executor().allow_parking();
     let h = harness();
     let fake = FakeLlm::default();
-    fake.on_complete_chat(|messages, settings| {
-        Ok(match settings.model.as_str() {
-            "title-model" => r#"{"title":"T","description":"D","branchName":"b"}"#.to_owned(),
-            _ if messages.iter().any(|m| m.content.contains("Allow?")) => {
-                r#"{"state":"permission_request","reason":"asks"}"#.to_owned()
-            }
-            _ => r#"{"state":"idle","reason":"nothing"}"#.to_owned(),
-        })
+    fake.on_complete_chat(|messages, settings| match settings.model.as_str() {
+        "title-model" => Ok(r#"{"title":"T","description":"D","branchName":"b"}"#.to_owned()),
+        "failing-model" => Err(LlmError::Timeout),
+        _ if messages.iter().any(|m| m.content.contains("Allow?")) => {
+            Ok(r#"{"state":"permission_request","reason":"asks"}"#.to_owned())
+        }
+        _ => Ok(r#"{"state":"idle","reason":"nothing"}"#.to_owned()),
     });
     let llm = LlmService::new(Arc::new(fake.clone()), h.rt.clone());
     let settings = llm_settings();
@@ -333,34 +332,74 @@ fn the_prompt_debugger_runs_both_prompts_and_its_history_shows_the_runs(cx: &mut
     let read = |cx: &mut TestAppContext| debugger.read_with(cx, |d, _| (d.buffer().to_owned(), d.model().to_owned()));
     assert_eq!(read(cx), ("Allow? (y/n)".to_owned(), "classifier-model".to_owned()));
     assert_eq!(debugger.read_with(cx, |d, _| d.prompt(DebugMode::Analyzer).to_owned()), settings.terminal_analyzer.system_prompt);
+    let output = |cx: &mut TestAppContext| debugger.read_with(cx, |d, _| d.output().clone());
+    let activity = |cx: &mut TestAppContext| workspace.read_with(cx, |w, _| w.activity(&tab));
 
     debugger.update(cx, |d, cx| d.test(cx));
-    assert_eq!(workspace.read_with(cx, |w, _| w.activity(&tab)), ActivityState::Working);
-    wait_until(cx, &debugger, |d| matches!(d.run(), DebugRun::Finished { .. }));
-    let DebugRun::Finished { duration, outcome } = debugger.read_with(cx, |d, _| d.run().clone()) else { unreachable!() };
-    assert!(duration.is_some());
-    let result: serde_json::Value = serde_json::from_str(&outcome.unwrap()).unwrap();
+    assert!(debugger.read_with(cx, |d, _| d.is_running()));
+    assert_eq!(activity(cx), ActivityState::Working);
+    wait_until(cx, &debugger, |d| !d.is_running());
+    let analyzed = output(cx);
+    assert!(analyzed.duration().is_some());
+    assert_eq!(analyzed.error(), None);
+    let result: serde_json::Value = serde_json::from_str(analyzed.result().unwrap()).unwrap();
     assert_eq!((result["state"].as_str(), result["reason"].as_str()), (Some("permission_request"), Some("asks")));
-    assert_eq!(workspace.read_with(cx, |w, _| w.activity(&tab)), ActivityState::PermissionRequest);
+    assert_eq!(activity(cx), ActivityState::PermissionRequest);
 
-    // The title generator, with its own model.
+    // The title generator, with its own model; switching clears the output.
     debugger.update(cx, |d, cx| d.set_mode(DebugMode::Title, cx));
+    assert_eq!(output(cx), DebugOutput::default());
     assert_eq!(debugger.read_with(cx, |d, _| d.model().to_owned()), "title-model");
     debugger.update(cx, |d, cx| d.test(cx));
-    wait_until(cx, &debugger, |d| matches!(d.run(), DebugRun::Finished { .. }));
-    let DebugRun::Finished { outcome, .. } = debugger.read_with(cx, |d, _| d.run().clone()) else { unreachable!() };
-    assert_eq!(serde_json::from_str::<serde_json::Value>(&outcome.unwrap()).unwrap()["branchName"], "b");
-    assert_eq!(workspace.read_with(cx, |w, _| w.activity(&tab)), ActivityState::Completed);
+    wait_until(cx, &debugger, |d| !d.is_running());
+    let titled = output(cx);
+    assert_eq!(serde_json::from_str::<serde_json::Value>(titled.result().unwrap()).unwrap()["branchName"], "b");
+    assert_eq!(activity(cx), ActivityState::Completed);
 
-    // Without a model nothing is sent.
+    // Without a model nothing is sent: the error shows above the last result and its time.
     let calls = fake.calls().len();
     debugger.update(cx, |d, _| d.set_model(DebugMode::Title, ""));
     debugger.update(cx, |d, cx| d.test(cx));
-    assert_eq!(
-        debugger.read_with(cx, |d, _| d.run().clone()),
-        DebugRun::Finished { duration: None, outcome: Err("Model must be configured.".into()) }
-    );
+    let refused = output(cx);
+    assert_eq!(refused.error(), Some("Model must be configured."));
+    assert_eq!((refused.result(), refused.duration()), (titled.result(), titled.duration()));
+    assert!(!debugger.read_with(cx, |d, _| d.is_running()));
     assert_eq!(fake.calls().len(), calls);
+    assert_eq!(activity(cx), ActivityState::Completed, "a refused test drives no activity");
+
+    // A failed request shows why, with its time; a refusal then replaces only the error.
+    debugger.update(cx, |d, _| d.set_model(DebugMode::Title, "failing-model"));
+    debugger.update(cx, |d, cx| d.test(cx));
+    assert_eq!(output(cx), DebugOutput::default(), "a new test clears the output");
+    wait_until(cx, &debugger, |d| !d.is_running());
+    let failed = output(cx);
+    assert!(failed.error().is_some_and(|error| !error.is_empty()));
+    assert_eq!(failed.result(), None);
+    assert!(failed.duration().is_some());
+    assert_eq!(activity(cx), ActivityState::Error);
+    debugger.update(cx, |d, _| d.set_model(DebugMode::Title, ""));
+    debugger.update(cx, |d, cx| d.test(cx));
+    let refused = output(cx);
+    assert_eq!((refused.error(), refused.result()), (Some("Model must be configured."), None));
+    assert_eq!(refused.duration(), failed.duration());
+
+    // A mode switch while a test runs clears the output but not the test: Test stays
+    // disabled, and the old mode's result and final activity land when it comes back.
+    debugger.update(cx, |d, cx| {
+        d.set_mode(DebugMode::Analyzer, cx);
+        d.test(cx);
+        d.set_mode(DebugMode::Title, cx);
+        d.test(cx); // disabled: neither sent nor refused
+    });
+    assert!(debugger.read_with(cx, |d, _| d.is_running()));
+    assert_eq!(output(cx), DebugOutput::default());
+    assert_eq!(activity(cx), ActivityState::Working);
+    wait_until(cx, &debugger, |d| !d.is_running());
+    let landed = output(cx);
+    assert!(landed.duration().is_some());
+    assert_eq!(serde_json::from_str::<serde_json::Value>(landed.result().unwrap()).unwrap()["state"], "permission_request");
+    assert_eq!(debugger.read_with(cx, |d, _| d.mode()), DebugMode::Title);
+    assert_eq!(activity(cx), ActivityState::PermissionRequest);
 
     // The debugger tab's history shows the transitions its runs drove.
     let history_tab = workspace.update(cx, |w, cx| w.open_activity_history(&tab, cx)).unwrap();
@@ -370,7 +409,16 @@ fn the_prompt_debugger_runs_both_prompts_and_its_history_shows_the_runs(cx: &mut
     let targets: Vec<ActivityState> = transitions.iter().map(|t| t.to).collect();
     assert_eq!(
         targets,
-        vec![ActivityState::Completed, ActivityState::Working, ActivityState::PermissionRequest, ActivityState::Working],
+        vec![
+            ActivityState::PermissionRequest,
+            ActivityState::Working,
+            ActivityState::Error,
+            ActivityState::Working,
+            ActivityState::Completed,
+            ActivityState::Working,
+            ActivityState::PermissionRequest,
+            ActivityState::Working
+        ],
         "newest first"
     );
     assert!(matches!(&transitions[0].detail, TransitionDetail::Debugger { snapshot } if snapshot == "Allow? (y/n)"));
@@ -385,6 +433,23 @@ fn the_prompt_debugger_runs_both_prompts_and_its_history_shows_the_runs(cx: &mut
     let broken = workspace.update(cx, |w, cx| w.add_tab("analyzer-history", cx)).unwrap();
     let TabContent::AnalyzerHistory(broken) = content(cx, &workspace, &broken) else { panic!("not a history tab") };
     assert_eq!(broken.read_with(cx, |h, _| h.source().clone()), HistorySource::Missing);
+}
+
+#[gpui_kit::test]
+fn the_prompt_debugger_without_an_llm_client_sends_nothing(cx: &mut TestAppContext) {
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let store = open_store(cx, &h, llm_settings(), None);
+    let (_id, _dir, workspace) = open_workspace(cx, &h, &store, json!({}));
+    let tab = workspace.update(cx, |w, cx| w.open_prompt_debugger("$ ls", cx)).unwrap();
+    let TabContent::PromptDebugger(debugger) = content(cx, &workspace, &tab) else { panic!("not a debugger tab") };
+    // Like a missing model: only the error, and no activity.
+    debugger.update(cx, |d, cx| d.test(cx));
+    let output = debugger.read_with(cx, |d, _| d.output().clone());
+    assert_eq!(output, DebugOutput { run: None, refused: Some("No LLM client is available in this session".into()) });
+    assert!(!debugger.read_with(cx, |d, _| d.is_running()));
+    assert_eq!(workspace.read_with(cx, |w, _| w.activity(&tab)), ActivityState::Idle);
 }
 
 #[gpui_kit::test]

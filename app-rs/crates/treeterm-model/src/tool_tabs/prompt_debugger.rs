@@ -33,13 +33,45 @@ impl DebugMode {
     }
 }
 
-/// The last test.
+/// A request that came back: how long it took, and its result as JSON or why it failed.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum DebugRun {
-    Idle,
-    Running,
-    /// The result as JSON, or why it failed; `duration` once a request was made.
-    Finished { duration: Option<Duration>, outcome: Result<String, String> },
+pub struct DebugRun {
+    pub duration: Duration,
+    pub outcome: Result<String, String>,
+}
+
+/// What the pane shows under Test (Electron's `result`, `error` and `duration`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DebugOutput {
+    /// The last request that came back since the output was cleared.
+    pub run: Option<DebugRun>,
+    /// A test refused before sending ("Model must be configured."): it takes the error's
+    /// place and leaves the last run's result and duration on screen.
+    pub refused: Option<String>,
+}
+
+impl DebugOutput {
+    /// The red error line.
+    pub fn error(&self) -> Option<&str> {
+        match (&self.refused, &self.run) {
+            (Some(refused), _) => Some(refused),
+            (None, Some(DebugRun { outcome: Err(error), .. })) => Some(error),
+            (None, Some(DebugRun { outcome: Ok(_), .. }) | None) => None,
+        }
+    }
+
+    /// The green result block.
+    pub fn result(&self) -> Option<&str> {
+        match &self.run {
+            Some(DebugRun { outcome: Ok(result), .. }) => Some(result),
+            Some(DebugRun { outcome: Err(_), .. }) | None => None,
+        }
+    }
+
+    /// The `{n}ms` next to Test.
+    pub fn duration(&self) -> Option<Duration> {
+        self.run.as_ref().map(|run| run.duration)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -61,7 +93,9 @@ pub struct PromptDebugger {
     classifier_model: String,
     title_model: String,
     reasoning: ReasoningEffort,
-    run: DebugRun,
+    /// A request is out (Test is disabled); it lands even after a mode switch.
+    running: bool,
+    output: DebugOutput,
     _run: Option<Task<()>>,
 }
 
@@ -79,7 +113,8 @@ impl PromptDebugger {
             classifier_model: analyzer.model.clone(),
             title_model: analyzer.title_model.clone(),
             reasoning: analyzer.reasoning_effort,
-            run: DebugRun::Idle,
+            running: false,
+            output: DebugOutput::default(),
             _run: None,
         }
     }
@@ -88,16 +123,21 @@ impl PromptDebugger {
         self.mode
     }
 
-    /// Switching clears the last result.
+    /// Switching clears the output; a running test keeps running and shows its result
+    /// when it comes back.
     pub fn set_mode(&mut self, mode: DebugMode, cx: &mut Context<Self>) {
         self.mode = mode;
-        self.run = DebugRun::Idle;
-        self._run = None;
+        self.output = DebugOutput::default();
         cx.notify();
     }
 
-    pub fn run(&self) -> &DebugRun {
-        &self.run
+    /// A test is out: Test reads "Testing..." and is disabled.
+    pub fn is_running(&self) -> bool {
+        self.running
+    }
+
+    pub fn output(&self) -> &DebugOutput {
+        &self.output
     }
 
     pub fn buffer(&self) -> &str {
@@ -184,23 +224,32 @@ impl PromptDebugger {
         cx.emit(PromptDebuggerEvent::SetActivity { state, detail });
     }
 
-    fn finish(&mut self, duration: Option<Duration>, outcome: Result<String, String>, cx: &mut Context<Self>) {
-        self.run = DebugRun::Finished { duration, outcome };
+    /// The request came back after `duration`.
+    fn finish(&mut self, duration: Duration, outcome: Result<String, String>, cx: &mut Context<Self>) {
+        self.running = false;
+        self.output = DebugOutput { run: Some(DebugRun { duration, outcome }), refused: None };
+        cx.notify();
+    }
+
+    /// Nothing is sent; the last run stays on screen under `message`.
+    fn refuse(&mut self, message: &str, cx: &mut Context<Self>) {
+        self.output.refused = Some(message.to_owned());
         cx.notify();
     }
 
     /// "Test": run the current mode's request on the buffer.
     pub fn test(&mut self, cx: &mut Context<Self>) {
-        if self.run == DebugRun::Running {
+        if self.running {
             return;
         }
         if self.model().is_empty() {
-            return self.finish(None, Err("Model must be configured.".to_owned()), cx);
+            return self.refuse("Model must be configured.", cx);
         }
         let (Some(settings), Some(llm)) = (self.settings(cx), self.llm.clone()) else {
-            return self.finish(None, Err("No LLM client is available in this session".to_owned()), cx);
+            return self.refuse("No LLM client is available in this session", cx);
         };
-        self.run = DebugRun::Running;
+        self.running = true;
+        self.output = DebugOutput::default();
         self.set_activity(ActivityState::Working, cx);
         let started = cx.background_executor().now();
         let finished = move |cx: &App| cx.background_executor().now().saturating_duration_since(started);
@@ -228,7 +277,7 @@ impl PromptDebugger {
                 cx.spawn(async move |this, cx| {
                     let outcome = request.await;
                     match this.update(cx, |model, cx| {
-                        let duration = Some(finished(cx));
+                        let duration = finished(cx);
                         match outcome {
                             Ok(outcome) => match &outcome.result {
                                 Ok(analyzed) => {
@@ -262,7 +311,7 @@ impl PromptDebugger {
                 cx.spawn(async move |this, cx| {
                     let outcome = request.await;
                     match this.update(cx, |model, cx| {
-                        let duration = Some(finished(cx));
+                        let duration = finished(cx);
                         match outcome {
                             Ok(outcome) => match &outcome.result {
                                 Ok(_) => {
