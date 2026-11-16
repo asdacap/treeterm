@@ -528,7 +528,7 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   that button; Electron's dialog then also ran Connect with the form as it was.
 - `treeterm ssh` rejects a target whose host contains `@` or whose port is outside 1–65535
   (`me@a@box`, `me@box:0`, `me@box:70000`); Electron passed them on to ssh, which cannot
-  connect to them.
+  use such a port and splits `me@a@box` on its last `@`, connecting to `box` as user `me@a`.
 - A panic on the UI thread ends the app process: GPUI cannot recover inside the process, so
   there are no per-workspace or per-tab error fallbacks. A new process shows Electron's
   "Application Error" screen, with the panic's message and a Show Stack Trace toggle (Electron's
