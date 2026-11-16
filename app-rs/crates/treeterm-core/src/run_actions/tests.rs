@@ -544,6 +544,64 @@ mod create_run_actions_api {
         );
     }
 
+    /// TS read any failure as "no file" and went on to the next name.
+    #[test]
+    fn detect_falls_through_to_justfile_when_justfile_cannot_be_read() {
+        let fs = filesystem(&[("justfile", "build:\n  echo build\n")]);
+        fs.set(
+            "/workspace/Justfile",
+            FakeRead::Fails("Permission denied (os error 13)".to_owned()),
+        );
+        let detected = block_on(client(&fs, &FakeTerminal::new("pty-1")).detect("/workspace"));
+        assert_eq!(
+            names(&of_source(&detected, RunActionSource::Just)),
+            vec!["build"]
+        );
+        assert!(detected.failures.is_empty());
+    }
+
+    #[test]
+    fn detect_falls_through_to_taskfile_yaml_when_taskfile_yml_is_unreachable() {
+        let fs = filesystem(&[("Taskfile.yaml", "tasks:\n  lint:\n    cmds: []\n")]);
+        fs.set(
+            "/workspace/Taskfile.yml",
+            FakeRead::Unreachable("read error".to_owned()),
+        );
+        let detected = block_on(client(&fs, &FakeTerminal::new("pty-1")).detect("/workspace"));
+        assert_eq!(
+            names(&of_source(&detected, RunActionSource::Task)),
+            vec!["lint"]
+        );
+        assert!(detected.failures.is_empty());
+    }
+
+    /// No candidate could be read: the first failure is reported, not taken as no file.
+    #[test]
+    fn detect_reports_the_first_failure_when_no_candidate_can_be_read() {
+        let fs = filesystem(&[]);
+        fs.set("/workspace/Taskfile.yml", FakeRead::TooLarge(2 << 20));
+        let detected = block_on(client(&fs, &FakeTerminal::new("pty-1")).detect("/workspace"));
+        assert_eq!(detected.actions, vec![]);
+        assert_eq!(detected.failures.len(), 1);
+        assert_eq!(detected.failures[0].source, RunActionSource::Task);
+        assert!(matches!(
+            &detected.failures[0].error,
+            RunActionsError::Read(TextReadError::TooLarge { path, .. })
+                if path == "/workspace/Taskfile.yml"
+        ));
+
+        fs.set(
+            "/workspace/Taskfile.yaml",
+            FakeRead::Fails("Permission denied (os error 13)".to_owned()),
+        );
+        let detected = block_on(client(&fs, &FakeTerminal::new("pty-1")).detect("/workspace"));
+        assert_eq!(detected.failures.len(), 1);
+        assert!(matches!(
+            &detected.failures[0].error,
+            RunActionsError::Read(TextReadError::TooLarge { .. })
+        ));
+    }
+
     #[test]
     fn run_npm_action_creates_session_with_correct_command() {
         let terminal = FakeTerminal::new("pty-npm");

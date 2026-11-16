@@ -5,7 +5,9 @@
 //!
 //! Unlike the TS client, a provider whose file cannot be read or parsed is reported in
 //! [`DetectedActions::failures`] instead of being skipped silently; a missing file is still
-//! just no actions.
+//! just no actions. As in the TS client, a provider with several candidate files (`Justfile`
+//! then `justfile`, `Taskfile.yml` then `Taskfile.yaml`) goes on to the next when one is
+//! missing or cannot be read, so its failure is reported only when none of them can be read.
 
 mod parse;
 
@@ -166,14 +168,24 @@ impl Files<'_> {
         }
     }
 
-    /// The first of `candidates` that exists.
+    /// The first of `candidates` that can be read, going on to the next when one is missing
+    /// or cannot be read (the TS `readFile(a) ?? readFile(b)`). `None` when all are missing;
+    /// the first failure when none can be read.
     async fn read_first(&self, candidates: &[&str]) -> Result<Option<String>, RunActionsError> {
+        let mut first_failure = None;
         for candidate in candidates {
-            if let Some(content) = self.read(candidate).await? {
-                return Ok(Some(content));
+            match self.read(candidate).await {
+                Ok(Some(content)) => return Ok(Some(content)),
+                Ok(None) => {}
+                Err(error) => {
+                    first_failure = first_failure.or(Some(error));
+                }
             }
         }
-        Ok(None)
+        match first_failure {
+            Some(error) => Err(error),
+            None => Ok(None),
+        }
     }
 }
 
