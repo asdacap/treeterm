@@ -121,6 +121,8 @@ struct Connected {
     traffic_badges: HashMap<String, Entity<crate::traffic_badge::TrafficBadge>>,
     /// Web App and Browser tabs not on their Browser sub-tab, by (workspace, tab).
     page_subtabs: HashMap<(String, String), PageSubTab>,
+    /// Each shown workspace's tab strip scroll, by workspace id.
+    tab_strips: HashMap<String, crate::tab_strip::TabStripState>,
     /// Views of tool tabs (GitHub, Comments, Chat, …).
     tool_views: crate::tool_views::ToolViews,
     /// The header's in-place name or description editor.
@@ -308,6 +310,7 @@ impl AppView {
             review_views: HashMap::new(),
             browser_views: HashMap::new(),
             page_subtabs: HashMap::new(),
+            tab_strips: HashMap::new(),
             run_actions: HashMap::new(),
             traffic_badges: HashMap::new(),
             header_edit: None,
@@ -1798,6 +1801,66 @@ fn escape_description(cx: &mut Context<AppView>) -> impl Fn(&gpui_kit::KeyDownEv
     })
 }
 
+/// The workspace's tab strip: its tabs in layout order, then "+" and the new-tab menu.
+fn workspace_tab_strip(
+    connected: &mut Connected,
+    workspace: &Entity<WorkspaceStore>,
+    workspace_id: &str,
+    active: Option<String>,
+    cx: &mut Context<AppView>,
+) -> AnyElement {
+    use std::rc::Rc;
+    use crate::tab_strip::{NewTabApp, OnId, StripTab, TabStrip};
+    let registry = connected.session.read(cx).registry().clone();
+    let store = workspace.read(cx);
+    let file = &store.workspace().file;
+    let order = treeterm_core::layout::order_tabs(file.app_states.keys(), file.metadata.get("layoutModel").map(String::as_str));
+    let tabs: Vec<StripTab> = order
+        .iter()
+        .filter_map(|id| file.app_states.get_key_value(id))
+        .map(|(tab_id, tab)| {
+            let app = registry.get(&tab.application_id);
+            StripTab {
+                id: tab_id.clone(),
+                title: tab.title.clone(),
+                icon: app.map(|app| app.icon.clone()).unwrap_or_default(),
+                closable: app.is_some_and(|app| app.can_close),
+                activity: store.activity(tab_id),
+            }
+        })
+        .collect();
+    let apps: Vec<NewTabApp> = registry
+        .new_tab_menu_for(store.is_remote())
+        .map(|app| NewTabApp { id: app.id.clone(), name: app.name.clone(), icon: app.icon.clone() })
+        .collect();
+    let view = cx.entity();
+    let on_select: OnId = {
+        let (workspace, view) = (workspace.clone(), view.clone());
+        Rc::new(move |tab: &str, _: &mut Window, cx: &mut App| {
+            workspace.update(cx, |w, cx| w.set_active_tab(tab, cx));
+            // Electron reloads a Review tab whenever it is shown again.
+            if let Some(TabContent::Review(review)) = workspace.read(cx).tab_content(tab) {
+                review.update(cx, |r, cx| r.refresh(cx));
+            }
+            view.update(cx, |view, cx| view.focus_active_tab(cx));
+        })
+    };
+    let on_close: OnId = {
+        let workspace = workspace.clone();
+        Rc::new(move |tab: &str, _: &mut Window, cx: &mut App| workspace.update(cx, |w, cx| w.remove_tab(tab, cx)))
+    };
+    let on_new_tab: OnId = {
+        let workspace = workspace.clone();
+        Rc::new(move |app: &str, _: &mut Window, cx: &mut App| {
+            workspace.update(cx, |w, cx| w.add_tab(app, cx));
+            view.update(cx, |view, cx| view.focus_active_tab(cx));
+        })
+    };
+    let strip = TabStrip { tabs, active, apps, on_select, on_close, on_new_tab };
+    let state = connected.tab_strips.entry(workspace_id.to_owned()).or_default();
+    strip.render(workspace_id, state, cx.entity_id(), cx)
+}
+
 fn workspace_pane(
     connected: &mut Connected,
     header_inset: gpui_kit::Pixels,
@@ -1805,9 +1868,7 @@ fn workspace_pane(
     cx: &mut Context<AppView>,
 ) -> AnyElement {
     let c = colors(cx);
-    let (secondary, error, border, active_bg, hover, primary) =
-        (c.text_secondary, c.error, c.border, c.bg_primary, c.bg_hover, c.text_primary);
-    let tab_bar_bg = c.bg_secondary;
+    let (secondary, error) = (c.text_secondary, c.error);
     prune_terminal_views(connected, cx);
     connected.tool_views.prune(connected.session.read(cx), cx);
     let ActiveView::Workspace(id) = &connected.active else {
@@ -1876,134 +1937,13 @@ fn workspace_pane(
     let file = workspace.read(cx).workspace().file.clone();
     let active = file.active_tab_id.clone().filter(|tab| file.app_states.contains_key(tab));
 
-    // flex-layout's tab strip (`flexlayout-overrides.css`): 33px plus a 1px rule, tabs 31px
-    // high from a 2px inset, rounded on top, 4px apart.
-    let mut strip = h_flex().h_full().pt(px(2.)).px(px(4.)).gap(px(4.)).items_end();
-    let registry = connected.session.read(cx).registry().clone();
-    let order = treeterm_core::layout::order_tabs(
-        file.app_states.keys(),
-        file.metadata.get("layoutModel").map(String::as_str),
-    );
-    for (tab_id, tab) in order.iter().filter_map(|id| file.app_states.get_key_value(id)) {
-        let is_active = active.as_deref() == Some(tab_id.as_str());
-        let app = registry.get(&tab.application_id);
-        // Tabs of applications the native app lacks (or that cannot close) keep no close button.
-        // Every other tab has one, active or not, shown while the tab is hovered (flex-layout's
-        // `.flexlayout__tab_button_trailing` at `opacity: 0` until `:hover`).
-        let closable = app.is_some_and(|app| app.can_close);
-        let app_icon = app.map(|app| app.icon.clone()).unwrap_or_default();
-        let select = (workspace.clone(), tab_id.clone());
-        let close = (workspace.clone(), tab_id.clone());
-        let group = SharedString::from(format!("tab-group-{tab_id}"));
-        let text = if is_active { primary } else { secondary };
-        let activity = workspace.read(cx).activity(tab_id);
-        strip = strip.child(
-            h_flex()
-                .id(SharedString::from(format!("tab-{tab_id}")))
-                .group(group.clone())
-                .h(px(31.))
-                .px(px(12.))
-                .gap(px(3.6))
-                .items_center()
-                .rounded_t(px(4.))
-                .text_size(px(12.))
-                .text_color(text)
-                .when(is_active, |d| d.bg(active_bg))
-                .when(!is_active, |d| d.hover(move |s| s.bg(hover).text_color(primary)))
-                .cursor_pointer()
-                .child(div().flex_shrink_0().mr(px(6.)).child(app_icon))
-                .child(div().whitespace_nowrap().child(tab.title.clone()))
-                .child(div().ml(px(4.)).flex_shrink_0().child(crate::ui::activity_glyph(activity, 10., text)))
-                .when(closable, |d| {
-                    d.child(
-                        div()
-                            .id(SharedString::from(format!("tab-close-{tab_id}")))
-                            .size(px(13.))
-                            .flex_shrink_0()
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .rounded(px(4.))
-                            .invisible()
-                            .group_hover(group.clone(), |d| d.visible())
-                            .hover(move |s| s.bg(hover))
-                            .child(crate::ui::icon(IconName::X, 11., secondary))
-                            .on_click(cx.listener(move |_, _, _, cx| {
-                                cx.stop_propagation();
-                                let (workspace, tab) = &close;
-                                workspace.update(cx, |w, cx| w.remove_tab(tab, cx));
-                            })),
-                    )
-                })
-                .on_click(cx.listener(move |view, _, _, cx| {
-                    let (workspace, tab) = &select;
-                    workspace.update(cx, |w, cx| w.set_active_tab(tab, cx));
-                    // Electron reloads a Review tab whenever it is shown again.
-                    if let Some(TabContent::Review(review)) = workspace.read(cx).tab_content(tab) {
-                        review.update(cx, |r, cx| r.refresh(cx));
-                    }
-                    if let Some(connected) = view.current_mut() {
-                        connected.focus_pending = true;
-                    }
-                    cx.notify();
-                })),
-        );
-    }
-    // "+" (`flexlayout-new-tab-btn`) opens the new-tab menu: every application offered.
-    let menu_apps: Vec<(String, String, String)> = registry
-        .new_tab_menu_for(workspace.read(cx).is_remote())
-        .map(|app| (app.id.clone(), app.name.clone(), app.icon.clone()))
-        .collect();
-    if !menu_apps.is_empty() {
-        use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
-        let target = workspace.clone();
-        let view_entity = cx.entity();
-        strip = strip.child(
-            div().h(px(31.)).pl(px(5.)).flex().items_center().child(
-                crate::ui::Trigger::new(
-                    crate::ui::item_action("new-tab", cx)
-                        .text_size(px(16.))
-                        .tooltip(|window, cx| gpui_kit::component::tooltip::Tooltip::new("New tab").build(window, cx))
-                        .child("+"),
-                )
-                .dropdown_menu(move |mut menu, _window, _cx| {
-                    for (id, name, icon) in &menu_apps {
-                        let (target, view, id) = (target.clone(), view_entity.clone(), id.clone());
-                        // `.app-menu-item`: a 16px centred icon, 8px gap, the name (13px).
-                        let (icon, name) = (icon.clone(), name.clone());
-                        let item = PopupMenuItem::element(move |_, _| {
-                            h_flex()
-                                .h(px(29.5))
-                                .gap(px(8.))
-                                .text_size(px(13.))
-                                .child(div().w(px(16.)).flex_shrink_0().flex().justify_center().child(icon.clone()))
-                                .child(div().flex_1().whitespace_nowrap().child(name.clone()))
-                        });
-                        menu = menu.item(item.on_click(
-                            move |_, _, cx| {
-                                target.update(cx, |w, cx| w.add_tab(&id, cx));
-                                view.update(cx, |view, cx| view.focus_active_tab(cx));
-                            },
-                        ));
-                    }
-                    menu
-                }),
-            ),
-        );
-    }
-    let tabs = h_flex()
-        .h(px(34.))
-        .flex_shrink_0()
-        .px(px(2.))
-        .bg(tab_bar_bg)
-        .border_b_1()
-        .border_color(border)
-        .child(strip);
+    let tabs = workspace_tab_strip(connected, &workspace, &id, active.clone(), cx);
 
     let header = workspace_header(connected, &workspace, &id, header_inset, operation_error, cx);
 
     let content: AnyElement = match &active {
-        None => centered(div().text_color(secondary).child("No tabs")),
+        // An empty tabset: blank under a strip of only "+".
+        None => div().size_full().into_any_element(),
         Some(tab_id) => match workspace.read(cx).tab_content(tab_id) {
             Some(TabContent::Terminal(model)) => {
                 let view = connected
