@@ -348,6 +348,22 @@ enum Seen {
     Again,
 }
 
+/// How deep arrays and objects may nest. jsonParser descends a level of JavaScript's stack
+/// for each: deeper than a few thousand levels it runs out, the worker's validation fails
+/// and Monaco marks nothing. The parser here gives up deeper than this and marks nothing
+/// either, inside a background thread's stack (2 MiB) even unoptimized, where a level of
+/// objects takes some 2.7 KiB.
+const MAX_NESTING: usize = 512;
+
+/// How far the parser got.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Reading {
+    /// Reading a value inside this many arrays and objects.
+    Nested(usize),
+    /// Values were nested deeper than [`MAX_NESTING`]: the parser stopped there.
+    TooDeep,
+}
+
 /// jsonParser's `parse`, collecting comments.
 struct Parser<'a> {
     text: &'a str,
@@ -355,6 +371,7 @@ struct Parser<'a> {
     problems: Vec<Problem>,
     last_problem_offset: Option<usize>,
     comments: Vec<Range<usize>>,
+    reading: Reading,
 }
 
 /// JavaScript's `\s`.
@@ -575,10 +592,30 @@ impl<'a> Parser<'a> {
         Some(string)
     }
 
+    /// An array or object, one level deeper; past [`MAX_NESTING`] the parser gives up: it
+    /// skips to the end of the text, where every value being read ends.
+    fn parse_nested(&mut self, parse: fn(&mut Self) -> Option<Node>) -> Option<Node> {
+        let Reading::Nested(depth) = self.reading else {
+            return None;
+        };
+        if depth == MAX_NESTING {
+            self.reading = Reading::TooDeep;
+            self.scanner.pos = self.text.len();
+            self.scanner.scan();
+            return None;
+        }
+        self.reading = Reading::Nested(depth + 1);
+        let node = parse(self);
+        if let Reading::Nested(depth) = &mut self.reading {
+            *depth -= 1;
+        }
+        node
+    }
+
     fn parse_value(&mut self) -> Option<Node> {
         match self.token() {
-            Token::OpenBracket => self.parse_array(),
-            Token::OpenBrace => self.parse_object(),
+            Token::OpenBracket => self.parse_nested(Self::parse_array),
+            Token::OpenBrace => self.parse_nested(Self::parse_object),
             Token::String => {
                 self.parse_string().map(|Key { range, value }| Node { range, kind: NodeKind::String(value) })
             }
@@ -756,10 +793,17 @@ fn schema_display(url: &str) -> String {
     }
 }
 
-/// The problems Monaco marks in `text`, a `json` file, by start.
+/// The problems Monaco marks in `text`, a `json` file, by start; none when its arrays and
+/// objects nest deeper than the worker can read.
 pub fn problems(text: &str) -> Vec<Problem> {
-    let mut parser =
-        Parser { text, scanner: Scanner::new(text), problems: Vec::new(), last_problem_offset: None, comments: Vec::new() };
+    let mut parser = Parser {
+        text,
+        scanner: Scanner::new(text),
+        problems: Vec::new(),
+        last_problem_offset: None,
+        comments: Vec::new(),
+        reading: Reading::Nested(0),
+    };
     let mut root = None;
     if parser.scan_next() != Token::Eof {
         root = parser.parse_value();
@@ -769,7 +813,11 @@ pub fn problems(text: &str) -> Vec<Problem> {
             parser.error("End of file expected.", &[], &[]);
         }
     }
-    let Parser { problems: syntax_errors, comments, .. } = parser;
+    let Parser { problems: syntax_errors, comments, reading, .. } = parser;
+    match reading {
+        Reading::Nested(_) => {}
+        Reading::TooDeep => return Vec::new(),
+    }
     let mut problems: Vec<Problem> = Vec::new();
     let mut add = |problem: Problem| {
         if !problems.iter().any(|added| added.range.start == problem.range.start && added.message == problem.message) {
@@ -926,6 +974,23 @@ mod tests {
         assert_eq!(marked("{\"$schema\": \"http://json-schema.org/draft-07/schema#\"}"), []);
         assert_eq!(marked("{\"$schema\": 3}"), []);
         assert_eq!(marked("[{\"$schema\": \"x\"}]"), []);
+    }
+
+    #[test]
+    fn values_nested_deeper_than_the_worker_reads_mark_nothing() {
+        use crate::code_intel::on_background_stack;
+        // JSONTestSuite's n_structure_100000_opening_arrays.json, and objects as deep.
+        assert_eq!(on_background_stack(|| problems(&"[".repeat(100_000))), []);
+        assert_eq!(on_background_stack(|| problems(&"{\"a\":".repeat(100_000))), []);
+        // As deep as it reads, on the same stack: marked (as Monaco marks it).
+        let nested = |open: &str, close: &str, depth: usize| format!("{}1,{}", open.repeat(depth), close.repeat(depth));
+        let arrays = nested("[", "]", MAX_NESTING);
+        assert_eq!(on_background_stack(move || marked(&arrays)), [error(",", "Trailing comma")]);
+        let objects = nested("{\"a\":", "}", MAX_NESTING);
+        assert_eq!(on_background_stack(move || marked(&objects)), [error(",", "Trailing comma")]);
+        // One level deeper: nothing.
+        let deeper = [nested("[", "]", MAX_NESTING + 1), nested("{\"a\":[", "]}", MAX_NESTING / 2 + 1)];
+        assert_eq!(on_background_stack(move || deeper.map(|text| problems(&text))), [vec![], vec![]]);
     }
 
     #[test]

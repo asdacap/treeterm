@@ -75,6 +75,16 @@ enum Item {
     AtRule { name: Range<usize>, range: Range<usize>, body: Option<Vec<Item>> },
 }
 
+/// How deep blocks may nest. The worker's parser descends a level of JavaScript's stack for
+/// each: deeper than a thousand or so it runs out, its validation and colours fail, and
+/// Monaco marks and paints nothing. The reader here gives up deeper than this and finds
+/// nothing either, well inside a background thread's stack (2 MiB) even unoptimized.
+const MAX_NESTING: usize = 512;
+
+/// The blocks of a style sheet nest deeper than [`MAX_NESTING`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct TooDeep;
+
 /// Reads the rules, at-rules and declarations of a style sheet.
 struct Reader<'a> {
     text: &'a str,
@@ -196,14 +206,17 @@ impl Reader<'_> {
     }
 
     /// The items from `pos` up to the `}` that closes them (or the end of the text), and
-    /// where that is.
-    fn items(&self, mut pos: usize, nested: bool) -> (Vec<Item>, usize) {
+    /// where that is; `depth` blocks deep (0 at the top of the style sheet).
+    fn items(&self, mut pos: usize, depth: usize) -> Result<(Vec<Item>, usize), TooDeep> {
+        if depth > MAX_NESTING {
+            return Err(TooDeep);
+        }
         let mut items = Vec::new();
         loop {
             pos = self.skip_trivia(pos);
             match self.bytes.get(pos) {
-                None => return (items, pos),
-                Some(b'}') if nested => return (items, pos),
+                None => return Ok((items, pos)),
+                Some(b'}') if depth > 0 => return Ok((items, pos)),
                 // A stray `}` at the top: skipped.
                 Some(b'}' | b';') => {
                     pos += 1;
@@ -230,7 +243,7 @@ impl Reader<'_> {
             let at_rule = self.bytes[start] == b'@'
                 && !(self.dialect == Dialect::Less && self.text[name().end..].starts_with(':'));
             if self.bytes.get(end) == Some(&b'{') {
-                let (body, close) = self.items(end + 1, true);
+                let (body, close) = self.items(end + 1, depth + 1)?;
                 let after = (close + 1).min(self.text.len());
                 items.push(match at_rule {
                     true => Item::AtRule { name: name(), range: start..after, body: Some(body) },
@@ -252,8 +265,9 @@ impl Reader<'_> {
     }
 }
 
-fn read(text: &str, dialect: Dialect) -> Vec<Item> {
-    Reader { text, bytes: text.as_bytes(), dialect }.items(0, false).0
+fn read(text: &str, dialect: Dialect) -> Result<Vec<Item>, TooDeep> {
+    let (items, _) = Reader { text, bytes: text.as_bytes(), dialect }.items(0, 0)?;
+    Ok(items)
 }
 
 /// Every declaration of `items`, nested ones included, in order.
@@ -509,14 +523,19 @@ fn value_colors(text: &str, range: Range<usize>, found: &mut Vec<(Range<usize>, 
     }
 }
 
-/// The colours Monaco decorates in `text`, a style sheet of Monaco's `language`, by start.
+/// The colours Monaco decorates in `text`, a style sheet of Monaco's `language`, by start;
+/// none when its blocks nest deeper than the worker can read.
 pub fn colors(language: &str, text: &str) -> Vec<(Range<usize>, Rgba)> {
     let Some(dialect) = Dialect::of(language) else {
         return Vec::new();
     };
+    let items = match read(text, dialect) {
+        Ok(items) => items,
+        Err(TooDeep) => return Vec::new(),
+    };
     let mut found = Vec::new();
     let mut all = Vec::new();
-    declarations(&read(text, dialect), &mut all);
+    declarations(&items, &mut all);
     for declaration in all {
         // The worker reads no colours in a custom property its block ends.
         if text[declaration.property.clone()].starts_with("--") && declaration.end == End::Block {
@@ -648,10 +667,15 @@ fn lint_declarations(text: &str, declarations: &[&Declaration], problems: &mut V
     }
 }
 
-/// The warnings Monaco's CSS lint gives `text`, a `css` file, by start.
+/// The warnings Monaco's CSS lint gives `text`, a `css` file, by start; none when its blocks
+/// nest deeper than the worker can read.
 pub fn problems(text: &str) -> Vec<Problem> {
+    let items = match read(text, Dialect::Css) {
+        Ok(items) => items,
+        Err(TooDeep) => return Vec::new(),
+    };
     let mut found = Vec::new();
-    lint(text, &read(text, Dialect::Css), &mut found);
+    lint(text, &items, &mut found);
     found.sort_by_key(|problem| problem.range.start);
     found
 }
@@ -877,6 +901,25 @@ mod tests {
         assert_eq!(offered("css", "a { color: red;| }", Trigger::Invoked), None);
         assert_eq!(offered("css", "a { | }", Trigger::Typing), None);
         assert_eq!(offered("html", "a { co| }", Trigger::Typing), None);
+    }
+
+    #[test]
+    fn blocks_nested_deeper_than_the_worker_reads_have_nothing() {
+        use crate::code_intel::on_background_stack;
+        let nested = |depth: usize, closed: bool| {
+            let close = if closed { "}".repeat(depth) } else { String::new() };
+            format!("{}color: red; colr: x;{close}", "a {".repeat(depth))
+        };
+        let deep = nested(100_000, false);
+        assert_eq!(on_background_stack(move || (problems(&deep), colors("scss", &deep))), (vec![], vec![]));
+        // As deep as it reads, on the same stack: found (as Monaco finds them).
+        let deepest = nested(MAX_NESTING, true);
+        let (warnings, colours) = on_background_stack(move || (warned(&deepest), found("css", &deepest)));
+        assert_eq!(warnings, [warning("colr", "Unknown property: 'colr'")]);
+        assert_eq!(colours, [color("red", [1000, 0, 0, 1000])]);
+        // One level deeper: nothing.
+        let deeper = nested(MAX_NESTING + 1, true);
+        assert_eq!(on_background_stack(move || (problems(&deeper), colors("less", &deeper))), (vec![], vec![]));
     }
 
     /// Non-ASCII selectors, values and escapes, and a `//` line (not a comment in CSS), as

@@ -111,6 +111,14 @@ pub fn problems(language: &str, path: &str, text: &str) -> Vec<Problem> {
         .collect()
 }
 
+/// Run `work` on a thread with the stack of GPUI's background threads (Rust's default,
+/// 2 MiB), where the code editors find problems and colours.
+#[cfg(test)]
+fn on_background_stack<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> T {
+    let thread = std::thread::Builder::new().stack_size(2 << 20).spawn(work).expect("a thread");
+    thread.join().expect("the work to finish")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

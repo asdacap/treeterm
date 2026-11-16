@@ -280,7 +280,10 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   expected."-style messages or "Unexpected token.", and a `.tsx` file is read with JSX
   (Monaco's worker reads it as plain TypeScript and marks the JSX). CSS files get the lint
   warnings that read rules and declarations, not the CSS parser's errors; SCSS and Less files
-  get none. Colours are painted behind their text, not as a swatch before it. A completed CSS
+  get none. JSON whose arrays and objects nest more than 512 deep, and style sheets whose
+  blocks do, get no marks or colours (Monaco's workers give up only where JavaScript's stack
+  runs out, a few thousand and about a thousand levels deep). Colours are painted behind
+  their text, not as a swatch before it. A completed CSS
   property is inserted as `name: ` and an HTML attribute as `name=""` with the cursor after
   it (Monaco's snippets put it between `:` and `;`, or the quotes). Other suggestions are the
   file's own words (Monaco also takes words from other open files of the same language, and
