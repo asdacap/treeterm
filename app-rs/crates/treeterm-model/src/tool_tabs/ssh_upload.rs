@@ -1,10 +1,11 @@
 //! The Upload tab (`SshUploadPane.tsx`, ssh sessions only): copy a local file into a
 //! directory on the session's host with `scp` (`ConnectionManager::upload_file`).
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use gpui_kit::{App, Context, Subscription, Task};
-use treeterm_core::connection::{ConnectionTarget, StatusKind};
+use gpui_kit::{App, AppContext as _, Context, Entity, Subscription, Task};
+use treeterm_core::connection::{ConnectionId, ConnectionTarget, StatusKind};
 use treeterm_core::fs::FsClient;
 
 use crate::app_store::ConnState;
@@ -59,6 +60,68 @@ pub struct SshUpload {
     upload: UploadState,
     _upload: Option<Task<()>>,
     _connection: Option<Subscription>,
+}
+
+/// The Upload tabs' models of the ssh connections, by connection, workspace and tab. Each
+/// connection generation (every reconnect) builds its workspaces' tabs anew; an Upload tab
+/// takes its model from here, so the chosen file, the directory and an upload under way, with
+/// its result, survive reconnects, as Electron's `SshUploadPane` stays mounted through them. A
+/// model goes when its tab is closed, its workspace removed or its connection closed.
+#[derive(Default)]
+pub struct UploadTabs {
+    tabs: HashMap<UploadTabKey, Entity<SshUpload>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct UploadTabKey {
+    connection: ConnectionId,
+    workspace: String,
+    tab: String,
+}
+
+impl UploadTabKey {
+    fn new(connection: &ConnectionId, workspace: &str, tab: &str) -> Self {
+        Self { connection: connection.clone(), workspace: workspace.to_owned(), tab: tab.to_owned() }
+    }
+}
+
+impl UploadTabs {
+    /// The model of Upload tab `tab` of `workspace` on `remote`'s connection, made on first use.
+    pub fn tab(
+        &mut self,
+        remote: &RemoteHost,
+        workspace: &str,
+        tab: &str,
+        cx: &mut Context<Self>,
+    ) -> Entity<SshUpload> {
+        self.tabs
+            .entry(UploadTabKey::new(&remote.connection, workspace, tab))
+            .or_insert_with(|| {
+                let remote = remote.clone();
+                cx.new(|cx| SshUpload::new(Some(remote), cx))
+            })
+            .clone()
+    }
+
+    /// The model kept for that tab, if any.
+    pub fn get(&self, connection: &ConnectionId, workspace: &str, tab: &str) -> Option<&Entity<SshUpload>> {
+        self.tabs.get(&UploadTabKey::new(connection, workspace, tab))
+    }
+
+    /// The tab was closed.
+    pub fn forget_tab(&mut self, connection: &ConnectionId, workspace: &str, tab: &str) {
+        self.tabs.remove(&UploadTabKey::new(connection, workspace, tab));
+    }
+
+    /// The workspace was removed from the connection's session.
+    pub fn forget_workspace(&mut self, connection: &ConnectionId, workspace: &str) {
+        self.tabs.retain(|key, _| !(key.connection == *connection && key.workspace == workspace));
+    }
+
+    /// The connection was closed for good.
+    pub fn forget_connection(&mut self, connection: &ConnectionId) {
+        self.tabs.retain(|key, _| key.connection != *connection);
+    }
 }
 
 /// The last path segment (`basename`), for POSIX or Windows separators.

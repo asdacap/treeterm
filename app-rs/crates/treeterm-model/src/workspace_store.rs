@@ -1254,10 +1254,14 @@ impl WorkspaceStore {
                 });
                 ToolTab::PromptDebugger { model, _events: events }
             }
-            ToolApp::SshUpload => {
-                let remote = self.remote.clone();
-                ToolTab::SshUpload(cx.new(|cx| ssh_upload::SshUpload::new(remote, cx)))
-            }
+            // On an ssh session the tab's model outlives this connection generation.
+            ToolApp::SshUpload => ToolTab::SshUpload(match &self.remote {
+                Some(remote) => {
+                    let workspace = &self.workspace.id;
+                    remote.uploads.update(cx, |uploads, cx| uploads.tab(remote, workspace, tab_id, cx))
+                }
+                None => cx.new(|cx| ssh_upload::SshUpload::new(None, cx)),
+            }),
         }
     }
 
@@ -1512,6 +1516,15 @@ impl WorkspaceStore {
         self.web_apps.remove(tab_id);
         self.activity.remove_tab_state(tab_id);
         self.activity_version += 1;
+    }
+
+    /// The tab was closed: on an ssh session, the model kept for it if it is an Upload tab
+    /// goes ([`init_tool_tab`](Self::init_tool_tab)).
+    fn forget_upload(&self, tab_id: &str, cx: &mut Context<Self>) {
+        if let Some(remote) = &self.remote {
+            let workspace = &self.workspace.id;
+            remote.uploads.update(cx, |uploads, _| uploads.forget_tab(&remote.connection, workspace, tab_id));
+        }
     }
 
     /// Re-baseline attention after tabs came or went (state removal is not completion).
@@ -1807,6 +1820,7 @@ impl WorkspaceStore {
             | None => {}
         }
         self.dispose_tab(tab_id);
+        self.forget_upload(tab_id, cx);
 
         let file = &mut self.workspace.file;
         let removed_index = file.app_states.get_index_of(tab_id);
@@ -2208,6 +2222,7 @@ impl WorkspaceStore {
             .collect();
         for tab_id in &removed {
             self.dispose_tab(tab_id);
+            self.forget_upload(tab_id, cx);
         }
         if file.active_tab_id.as_deref().is_none_or(str::is_empty) {
             file.active_tab_id = file.app_states.keys().next().cloned();

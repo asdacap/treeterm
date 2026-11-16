@@ -35,6 +35,7 @@ use treeterm_core::wire::workspace_file::WorktreeSettings;
 
 use crate::session_store::{ConnectionStatus as SessionConnection, Restore, SessionEvent, SessionState, SessionStore};
 use crate::settings_store::SettingsStore;
+use crate::tool_tabs::ssh_upload::UploadTabs;
 use crate::traffic::ConnectionTraffic;
 
 /// What a connection is doing, with its session store once connected.
@@ -202,6 +203,8 @@ pub struct AppStore {
     client_id: String,
     manager: ConnectionManager<GrpcDialer>,
     sessions: IndexMap<ConnectionId, SessionSlot>,
+    /// The ssh connections' Upload tab models: they outlive the connections' generations.
+    uploads: Entity<UploadTabs>,
     /// Where Exit and Kill Daemon reaches the local daemon, on `rt`.
     rt: Rt,
     local_socket: PathBuf,
@@ -259,6 +262,7 @@ impl AppStore {
             client_id: uuid::Uuid::new_v4().to_string(),
             manager,
             sessions: IndexMap::new(),
+            uploads: cx.new(|_| UploadTabs::default()),
             rt,
             local_socket,
             _status: status,
@@ -318,6 +322,11 @@ impl AppStore {
         &self.settings
     }
 
+    /// The ssh connections' Upload tab models.
+    pub fn upload_tabs(&self) -> &Entity<UploadTabs> {
+        &self.uploads
+    }
+
     /// The connection picker's Connect (`startRemoteConnect`, then `ssh.connect`): the window
     /// shows the session pane while it connects, then lands as with
     /// [`AppStore::connect_remote`].
@@ -362,7 +371,7 @@ impl AppStore {
     pub fn disconnect(&mut self, id: &ConnectionId, cx: &mut Context<Self>) {
         self.manager.disconnect(id);
         if let Some(slot) = self.sessions.shift_remove(id) {
-            Self::retire(slot, cx);
+            self.retire(slot, cx);
         }
         cx.notify();
     }
@@ -392,8 +401,9 @@ impl AppStore {
     }
 
     /// The connection is closed for good: dispose its stores. A kept store's unsaved bodies
-    /// go with it, as with Electron's `disconnectSession`.
-    fn retire(slot: SessionSlot, cx: &mut Context<Self>) {
+    /// go with it, as with Electron's `disconnectSession`, and so do its Upload tabs' models.
+    fn retire(&self, slot: SessionSlot, cx: &mut Context<Self>) {
+        self.uploads.update(cx, |uploads, _| uploads.forget_connection(&slot.id));
         if let ConnState::Connected(session) = slot.state {
             session.update(cx, |session, cx| session.dispose(cx));
         }
@@ -439,7 +449,7 @@ impl AppStore {
         let ConnectionInfo { id, target, status } = info;
         if matches!(status, ConnectionStatus::Disconnected) {
             if let Some(slot) = self.sessions.shift_remove(&id) {
-                Self::retire(slot, cx);
+                self.retire(slot, cx);
             }
             cx.notify();
             return;
@@ -509,7 +519,11 @@ impl AppStore {
         };
         let (client_id, settings, llm) = (self.client_id.clone(), self.settings.clone(), self.llm.clone());
         let traffic = slot.traffic.clone();
-        let remote = (!slot.is_local()).then(|| crate::web_app::RemoteHost { app: cx.weak_entity(), connection: id.clone() });
+        let remote = (!slot.is_local()).then(|| crate::web_app::RemoteHost {
+            app: cx.weak_entity(),
+            connection: id.clone(),
+            uploads: self.uploads.clone(),
+        });
         let session = cx.new(|cx| {
             let mut session = SessionStore::new(daemon, client_id, settings, llm, traffic, cx);
             session.set_restore(restore);
@@ -525,7 +539,9 @@ impl AppStore {
             SessionEvent::Failed(reason) => store.on_session_failed(&owned, session, reason, cx),
             SessionEvent::LoadFailed(failure) => store.on_session_load_failed(&owned, session, failure.clone(), cx),
             SessionEvent::Restored => store.on_restored(&owned, &session, cx),
-            SessionEvent::WorkspaceRemoved(_) => {}
+            SessionEvent::WorkspaceRemoved(workspace) => {
+                store.uploads.update(cx, |uploads, _| uploads.forget_workspace(&owned, workspace));
+            }
             SessionEvent::AttentionRecorded(workspace) => {
                 cx.emit(AppEvent::Attention { workspace: workspace.clone() });
             }

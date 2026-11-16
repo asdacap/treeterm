@@ -196,7 +196,8 @@ Done (tested against a real in-process daemon unless noted):
   (prompt the harness, push to GitHub), analyzer history and system-prompt debugger (from
   the activity badge's right-click menu), Chat, TTY list with orphan kill, workspace
   settings (also from the Settings item of a tree row or favourite), SSH upload (ssh
-  sessions only; not yet run against a real host).
+  sessions only; the tab keeps its file, directory and an upload's result across reconnects
+  until it is closed; not yet run against a real host).
 - **Traffic:** download rate per connection (session header: the gRPC messages received,
   without HTTP/2 framing or message prefixes, as Electron counts them) and per workspace (PTY
   output, workspace header). Totals and rates are kept across

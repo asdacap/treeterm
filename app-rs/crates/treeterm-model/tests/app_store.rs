@@ -11,7 +11,7 @@ use std::sync::{Arc, LazyLock, Mutex};
 
 use gpui_kit::{AppContext as _, Entity, Subscription, TestAppContext};
 use tempfile::TempDir;
-use treeterm_core::connection::fake::{FakeResponse, FakeSpawner};
+use treeterm_core::connection::fake::{FakeProcess, FakeResponse, FakeSpawner};
 use treeterm_core::connection::process::ProcessCommand;
 use treeterm_core::connection::{ConnectionId, OutdatedDaemon, OutputKind, StatusKind};
 use treeterm_core::local_daemon::LocalDaemonSpec;
@@ -23,9 +23,10 @@ use treeterm_model::session_info::SessionInfo;
 use treeterm_model::session_store::{SessionState, SessionStore, WorkspaceEntry};
 use treeterm_model::settings_store::SettingsStore;
 use treeterm_model::system_monitor::{Metrics, POLL_INTERVAL, SystemMonitor};
-use treeterm_model::tool_tabs::ssh_upload::{LinkStatus, SshUpload, UploadTarget};
+use treeterm_model::tool_tabs::ssh_upload::{LinkStatus, SshUpload, UploadState, UploadTarget};
 use treeterm_model::traffic::{ConnectionTraffic, Reading, TrafficMeter};
 use treeterm_model::web_app::RemoteHost;
+use treeterm_model::workspace_store::{TabContent, WorkspaceStore};
 use treeterm_proto::treeterm::WorkspaceRef;
 use treeterm_testkit::fake_ssh::{Proxy, fake_ssh_response, remote_config, ssh_env};
 
@@ -60,6 +61,8 @@ struct App {
     host_daemon: Arc<Mutex<PathBuf>>,
     /// The ssh tunnels to the host's daemon: clearing them cuts the connection.
     tunnels: Arc<Mutex<Vec<Proxy>>>,
+    /// Every ssh and scp run; an scp runs until the test ends it.
+    spawner: FakeSpawner,
     _dir: TempDir,
 }
 
@@ -81,7 +84,7 @@ fn app(cx: &mut TestAppContext, h: &Harness, local: Option<&Path>) -> App {
                         .to_owned(),
                     code: 255,
                 }
-            } else if is_port_forward(command) {
+            } else if is_port_forward(command) || command.program == "scp" {
                 FakeResponse::Run
             } else {
                 fake_ssh_response(command, &socket.lock().unwrap(), &tunnels)
@@ -97,7 +100,7 @@ fn app(cx: &mut TestAppContext, h: &Harness, local: Option<&Path>) -> App {
     };
     let settings = cx.new(|_| SettingsStore::in_memory(Default::default()));
     let (rt, ssh) = (h.rt.clone(), ssh_env(dir.path()));
-    let app = cx.new(|cx| AppStore::with_ssh(rt, spec, Arc::new(spawner), ssh, settings, cx));
+    let app = cx.new(|cx| AppStore::with_ssh(rt, spec, Arc::new(spawner.clone()), ssh, settings, cx));
     let events = Rc::new(RefCell::new(Vec::new()));
     let subscription = cx.update(|cx| {
         let events = events.clone();
@@ -112,6 +115,7 @@ fn app(cx: &mut TestAppContext, h: &Harness, local: Option<&Path>) -> App {
         refuse,
         host_daemon,
         tunnels,
+        spawner,
         _dir: dir,
     }
 }
@@ -1229,12 +1233,18 @@ fn monitor_and_upload(
     app: &App,
 ) -> (Entity<SystemMonitor>, Entity<SshUpload>) {
     let monitor = cx.new(|cx| SystemMonitor::new(app.app.clone(), remote_id(), cx));
-    let remote = RemoteHost {
-        app: app.app.downgrade(),
-        connection: remote_id(),
-    };
+    let remote = remote_host(cx, app);
     let upload = cx.new(|cx| SshUpload::new(Some(remote), cx));
     (monitor, upload)
+}
+
+/// The remote connection, as its session's stores reach it.
+fn remote_host(cx: &mut TestAppContext, app: &App) -> RemoteHost {
+    RemoteHost {
+        app: app.app.downgrade(),
+        connection: remote_id(),
+        uploads: app.app.read_with(cx, |a, _| a.upload_tabs().clone()),
+    }
 }
 
 fn link(cx: &mut TestAppContext, upload: &Entity<SshUpload>) -> LinkStatus {
@@ -1365,6 +1375,145 @@ fn a_failed_connection_reads_error_in_the_monitor_and_upload(cx: &mut TestAppCon
     });
 }
 
+/// Workspace `id` of `session`, once loaded.
+fn loaded(cx: &mut TestAppContext, session: &Entity<SessionStore>, id: &str) -> Entity<WorkspaceStore> {
+    let id = id.to_owned();
+    wait_until(cx, session, |s| matches!(s.entry(&id), Some(WorkspaceEntry::Loaded(_))));
+    session.read_with(cx, |s, _| s.workspace_store(&id).unwrap().clone())
+}
+
+/// The model of Upload tab `tab` of `workspace`.
+fn upload_tab(cx: &mut TestAppContext, workspace: &Entity<WorkspaceStore>, tab: &str) -> Entity<SshUpload> {
+    match workspace.read_with(cx, |w, _| w.tab_content(tab)) {
+        Some(TabContent::SshUpload(model)) => model,
+        _ => panic!("not an upload tab"),
+    }
+}
+
+/// Whether the app keeps a model for Upload tab `tab` of `workspace` on the remote connection.
+fn kept(app: &AppStore, cx: &gpui_kit::App, workspace: &str, tab: &str) -> bool {
+    app.upload_tabs().read(cx).get(&remote_id(), workspace, tab).is_some()
+}
+
+/// Wait for workspace `id`'s body on the host to list `tab`.
+fn wait_for_tab_on_host(cx: &mut TestAppContext, h: &Harness, id: &str, tab: &str) {
+    let path = h.daemon.workspaces_dir().join(format!("{id}.json"));
+    for _ in 0..1000 {
+        cx.run_until_parked();
+        let body: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        if body["appStates"].get(tab).is_some() {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    panic!("tab {tab} never reached {id}'s body");
+}
+
+/// The scp runs so far.
+fn scp_runs(app: &App) -> Vec<FakeProcess> {
+    app.spawner
+        .processes()
+        .into_iter()
+        .filter(|process| process.command().program == "scp")
+        .collect()
+}
+
+#[gpui_kit::test]
+fn the_upload_tab_keeps_its_file_directory_and_upload_result_across_a_reconnect(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    isolated_home();
+    let h = harness();
+    publish(&h, &[("a", body("a"))]);
+    let app = app(cx, &h, None);
+    app.connect(cx);
+    let first = app.restored(cx);
+    let workspace = loaded(cx, &first, "a");
+    let tab = workspace.update(cx, |w, cx| w.add_tab("ssh-upload", cx)).unwrap();
+    let upload = upload_tab(cx, &workspace, &tab);
+    upload.update(cx, |u, cx| {
+        u.set_local_path(PathBuf::from("/tmp/notes.txt"), cx);
+        u.set_remote_dir("/srv/drop", cx);
+        u.upload(cx);
+    });
+    assert_eq!(upload.read_with(cx, |u, _| u.upload_state().clone()), UploadState::Uploading);
+    wait_for_tab_on_host(cx, &h, "a", &tab);
+
+    // scp is still copying when the connection is lost and comes back: the next generation
+    // builds the workspace and its tabs anew, and the first one's store is disposed.
+    let forced = app.app.read_with(cx, |a, _| a.manager().force_reconnect(&remote_id()));
+    forced.unwrap();
+    let second = restored_anew(cx, &app, &first);
+    let rebuilt = loaded(cx, &second, "a");
+    assert_ne!(rebuilt.entity_id(), workspace.entity_id());
+    let upload_id = upload.entity_id();
+    drop((upload, workspace, first));
+    settle(cx);
+
+    // The tab keeps its model: the file, the directory and the upload under way.
+    let upload = upload_tab(cx, &rebuilt, &tab);
+    assert_eq!(upload.entity_id(), upload_id);
+    upload.read_with(cx, |u, cx| {
+        assert_eq!(u.local_path(), Some(Path::new("/tmp/notes.txt")));
+        assert_eq!(u.remote_dir(cx), "/srv/drop");
+        assert_eq!(*u.upload_state(), UploadState::Uploading);
+    });
+    // scp finishes: the result shows.
+    let scp = scp_runs(&app);
+    assert_eq!(scp.len(), 1);
+    assert_eq!(scp[0].args().last().map(String::as_str), Some("test@example.com:/srv/drop/notes.txt"));
+    scp[0].exit(0);
+    wait_until(cx, &upload, |u| *u.upload_state() == UploadState::Done("/srv/drop/notes.txt".to_owned()));
+
+    // Closed, the tab's model goes.
+    assert!(app.app.read_with(cx, |a, cx| kept(a, cx, "a", &tab)));
+    rebuilt.update(cx, |w, cx| w.remove_tab(&tab, cx));
+    assert!(!app.app.read_with(cx, |a, cx| kept(a, cx, "a", &tab)));
+}
+
+#[gpui_kit::test]
+fn upload_tab_models_go_with_their_tab_their_workspace_and_their_connection(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    isolated_home();
+    let h = harness();
+    publish_a_and_b(&h);
+    let app = app(cx, &h, None);
+    app.connect(cx);
+    let session = app.restored(cx);
+    let (a, b) = (loaded(cx, &session, "a"), loaded(cx, &session, "b"));
+    let closed = a.update(cx, |w, cx| w.add_tab("ssh-upload", cx)).unwrap();
+    let in_a = a.update(cx, |w, cx| w.add_tab("ssh-upload", cx)).unwrap();
+    let in_b = b.update(cx, |w, cx| w.add_tab("ssh-upload", cx)).unwrap();
+    wait_for_tab_on_host(cx, &h, "a", &in_a);
+    wait_for_tab_on_host(cx, &h, "b", &in_b);
+    assert!(app.app.read_with(cx, |app, cx| [("a", &closed), ("a", &in_a), ("b", &in_b)]
+        .iter()
+        .all(|(workspace, tab)| kept(app, cx, workspace, tab))));
+
+    // Another window closes a tab.
+    let settings = cx.new(|_| SettingsStore::in_memory(Default::default()));
+    let other = cx.new(|cx| {
+        SessionStore::new(h.conn.clone(), "other-window".to_owned(), settings, None, cx.new(ConnectionTraffic::new), cx)
+    });
+    let other_a = loaded(cx, &other, "a");
+    wait_until(cx, &other_a, |w| w.file().app_states.contains_key(&in_a));
+    other_a.update(cx, |w, cx| w.remove_tab(&closed, cx));
+    wait_until_app(cx, &app.app, |app, cx| !kept(app, cx, "a", &closed));
+    assert!(app.app.read_with(cx, |app, cx| kept(app, cx, "a", &in_a)));
+    other.update(cx, |s, cx| s.dispose(cx));
+
+    // Workspace a leaves the session.
+    let path = h.daemon.root().to_string_lossy().into_owned();
+    let refs = vec![WorkspaceRef { id: "b".into(), path }];
+    futures::executor::block_on(h.conn.update_session(refs, None, "test-writer")).unwrap().unwrap();
+    wait_until(cx, &session, |s| s.workspace_store("a").is_none());
+    assert!(!app.app.read_with(cx, |app, cx| kept(app, cx, "a", &in_a)));
+    assert!(app.app.read_with(cx, |app, cx| kept(app, cx, "b", &in_b)));
+
+    // The connection is closed.
+    app.app.update(cx, |a, cx| a.disconnect(&remote_id(), cx));
+    assert!(!app.app.read_with(cx, |app, cx| kept(app, cx, "b", &in_b)));
+}
+
 /// Real time for the forward to settle (the ssh forward is Active after its stabilization),
 /// the executor's clock for the page's polls of it.
 fn wait_for_page(
@@ -1393,10 +1542,7 @@ fn a_remote_browser_page_opens_anew_on_its_forward_after_a_restart(cx: &mut Test
     let app = app(cx, &h, None);
     app.connect(cx);
     app.restored(cx);
-    let remote = RemoteHost {
-        app: app.app.downgrade(),
-        connection: remote_id(),
-    };
+    let remote = remote_host(cx, &app);
     let home = "http://localhost:3000/app/".to_owned();
     let page = cx.new(|cx| BrowserPageModel::new(home, "tab-1".to_owned(), None, Some(remote), cx));
     let mount = |cx: &mut TestAppContext| page.read_with(cx, |p, _| p.page_mount());

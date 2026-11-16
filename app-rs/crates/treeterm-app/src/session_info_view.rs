@@ -413,7 +413,11 @@ impl SessionInfoView {
         let upload = match &self.upload {
             Some(upload) => upload.clone(),
             None => {
-                let remote = treeterm_model::web_app::RemoteHost { app: self.app.downgrade(), connection: self.connection(cx) };
+                let remote = treeterm_model::web_app::RemoteHost {
+                    app: self.app.downgrade(),
+                    connection: self.connection(cx),
+                    uploads: self.app.read(cx).upload_tabs().clone(),
+                };
                 let model = cx.new(|cx| treeterm_model::tool_tabs::ssh_upload::SshUpload::new(Some(remote), cx));
                 let upload = cx.new(|cx| crate::tool_views::SshUploadView::new(model, window, cx));
                 self.upload = Some(upload.clone());

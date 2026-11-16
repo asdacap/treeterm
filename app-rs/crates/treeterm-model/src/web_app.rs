@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use futures::channel::oneshot;
-use gpui_kit::{AsyncApp, Context, EventEmitter, Task, WeakEntity};
+use gpui_kit::{AsyncApp, Context, Entity, EventEmitter, Task, WeakEntity};
 use treeterm_core::connection::{
     ConnectionId, Persistence, PortForwardConfig, PortForwardId, PortForwardStatus,
 };
@@ -77,6 +77,9 @@ impl EventEmitter<WebAppEvent> for WebAppModel {}
 pub struct RemoteHost {
     pub app: WeakEntity<AppStore>,
     pub connection: ConnectionId,
+    /// The app store's Upload tab models ([`AppStore::upload_tabs`]), at hand while the app
+    /// store itself may be being updated.
+    pub uploads: Entity<crate::tool_tabs::ssh_upload::UploadTabs>,
 }
 
 pub struct WebAppModel {
