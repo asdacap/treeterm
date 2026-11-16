@@ -259,10 +259,19 @@ fn route_edit(window: AnyWindowHandle, cx: &mut App) {
         in_window(window, cx, |window, cx| window.dispatch_action(Box::new(input::Paste), cx));
     });
     cx.on_action(move |_: &DeleteSelection, cx| {
-        in_window(window, cx, |window, cx| {
-            if has_selected_text(window, cx) {
-                window.dispatch_action(Box::new(input::Backspace), cx);
-            }
+        in_window(window, cx, |window, _| {
+            // GPUI Kit learns which input has focus as the input draws. Off macOS the menu bar
+            // drawn in the window held focus while its menu was open, and gives it back as it
+            // sends Delete, before the input draws again. Next-frame callbacks run before that
+            // frame is drawn: look after the next frame.
+            window.refresh();
+            window.on_next_frame(|window, _| {
+                window.on_next_frame(|window, cx| {
+                    if has_selected_text(window, cx) {
+                        window.dispatch_action(Box::new(input::Backspace), cx);
+                    }
+                });
+            });
         });
     });
 }
@@ -275,7 +284,8 @@ fn in_window(window: AnyWindowHandle, cx: &mut App, act: impl FnOnce(&mut Window
     });
 }
 
-/// Whether the focused input, text area or editor has text selected.
+/// Whether the focused input, text area or editor has text selected. GPUI Kit records which
+/// input has focus as the input draws (`WindowExt::focused_input`).
 fn has_selected_text(window: &mut Window, cx: &mut App) -> bool {
     match window.focused_input(cx) {
         Some(AnyInputState::Input(state)) => !state.read(cx).selected_range().is_empty(),
@@ -764,6 +774,7 @@ mod tests {
         ] {
             cx.update(|window, cx| window.dispatch_action(action, cx));
             cx.run_until_parked();
+            next_frames(cx);
         }
         let (keys, commands) = terminal.read_with(cx, |t, _| (t.keys.clone(), t.commands.clone()));
         assert_eq!(commands, ["Copy", "Paste", "SelectAll", "Paste", "Copy", "Paste", "SelectAll", "Paste"]);
@@ -810,6 +821,7 @@ mod tests {
         let menu = |cx: &mut VisualTestContext, action: &dyn Action| {
             cx.update(|window, cx| window.dispatch_action(action.boxed_clone(), cx));
             cx.run_until_parked();
+            next_frames(cx);
             state.read_with(cx, |state, _| state.value().to_string())
         };
 
@@ -825,6 +837,78 @@ mod tests {
         menu(cx, &input::SelectAll);
         assert_eq!(menu(cx, &input::Cut), "");
         assert_eq!(cx.read_from_clipboard().and_then(|item| item.text()).as_deref(), Some("hellohello"));
+    }
+
+    /// A text input under the menu bar drawn in the window.
+    struct FieldWithMenuBar {
+        bar: Entity<AppMenuBar>,
+        field: Entity<input::InputState>,
+    }
+
+    impl Render for FieldWithMenuBar {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .size_full()
+                .flex()
+                .flex_col()
+                .child(in_window_bar(&self.bar, cx))
+                .child(input::Input::new(&self.field))
+        }
+    }
+
+    /// Off macOS, Edit > Delete clicked in the menu bar drawn in the window removes the selected
+    /// text of the input the menu gives focus back to, and with only a caret leaves the text as
+    /// it is. The menu's popup had focus, so the Kit's focused-input registry named no input when
+    /// Delete ran.
+    #[gpui_kit::test]
+    fn delete_in_the_in_window_menu_bar_removes_the_focused_inputs_selection(cx: &mut TestAppContext) {
+        use gpui_kit::test::TestWindowExt as _;
+
+        let (window, view) = cx.update(|cx| {
+            gpui_kit::init(cx);
+            crate::theme::install(cx);
+            set_menus(false, cx);
+            let (window, view) = gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
+                let field = cx.new(|cx| input::InputState::new(window, cx).default_value("hello world"));
+                cx.new(|cx| FieldWithMenuBar { bar: AppMenuBar::new(cx), field })
+            })
+            .expect("open a window");
+            route_edit(window, cx);
+            (window, view)
+        });
+        let cx = VisualTestContext::from_window(window, cx).into_mut();
+        let state = view.read_with(cx, |view, _| view.field.clone());
+        let delete = |cx: &mut VisualTestContext, selected: std::ops::Range<usize>| {
+            cx.update(|window, cx| {
+                state.update(cx, |state, cx| {
+                    state.focus(window, cx);
+                    state.set_selected_range(selected, cx);
+                });
+            });
+            cx.run_until_parked();
+            // Edit, then Delete, with the pointer.
+            cx.update(|window, cx| window.within("app-menu-bar").within(1usize).click("menu", cx));
+            cx.run_until_parked();
+            assert_eq!(cx.update(|window, cx| window.focused_input(cx)), None, "the menu has focus");
+            cx.update(|window, cx| window.within("popup-menu").click(6usize, cx));
+            cx.run_until_parked();
+            let focus = state.read_with(cx, gpui_kit::Focusable::focus_handle);
+            assert!(cx.update(|window, _| focus.is_focused(window)), "the menu gave focus back");
+            next_frames(cx);
+            state.read_with(cx, |state, _| state.value().to_string())
+        };
+
+        assert_eq!(delete(cx, 5..5), "hello world", "nothing selected");
+        assert_eq!(delete(cx, 5..11), "hello");
+        assert_eq!(cx.read_from_clipboard(), None, "Delete is not Cut");
+    }
+
+    /// Delivers two frames, as the platform would: each runs what the last scheduled, then draws.
+    fn next_frames(cx: &mut VisualTestContext) {
+        for _ in 0..2 {
+            cx.update(|window, cx| window.simulate_next_frame(cx));
+            cx.run_until_parked();
+        }
     }
 
     /// Redo is Electron's Ctrl+Shift+Z off macOS too, as well as GPUI Kit's Ctrl+Y.
