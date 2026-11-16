@@ -729,7 +729,7 @@ impl AppView {
             return self.rail(cx);
         }
         let c = colors(cx);
-        let (bg, border, fg) = (c.bg_secondary, c.border, c.text_primary);
+        let (bg, border, fg, secondary) = (c.bg_secondary, c.border, c.text_primary, c.text_secondary);
         let names = self.names.read(cx);
         let mut slots: Vec<_> = self.store.read(cx).sessions().collect();
         names.sort(&mut slots, |slot| &slot.target);
@@ -739,6 +739,12 @@ impl AppView {
             .filter_map(|slot| Some((slot.id.clone(), names.name(&slot.target), self.trees.get(&slot.id)?.pane.clone())))
             .collect();
         let mut list = v_flex().w_full();
+        // `.tree-empty`: every session was disconnected.
+        if sections.is_empty() {
+            list = list.child(
+                div().p(px(16.)).text_size(px(12.)).text_color(secondary).text_center().child("No sessions. Click + to browse."),
+            );
+        }
         for (id, name, tree) in sections {
             list = list.child(self.session_drag_handle(id, name, tree.into_any_element(), cx));
         }

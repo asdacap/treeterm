@@ -138,7 +138,8 @@ Done (tested against a real in-process daemon unless noted):
   being created shows git's output once there is some; one that failed shows why, with
   Dismiss. A failed operation (merge, removal) shows "Operation failed" with Force Unlock
   and Cancel in place of the tabs.
-- **Tree and sidebar:** sessions (dragged into order, kept in `ui-state.json`), favourites,
+- **Tree and sidebar:** sessions (dragged into order, kept in `ui-state.json`; "No
+  sessions. Click + to browse." once all are disconnected), favourites,
   drag and drop (reorder / reparent), unread markers, PR badges, collapsible rail,
   title/branch refresh, Auto Open All Recent Worktrees (worktree registry shared with
   Electron), upstream warning before forking,
