@@ -1598,16 +1598,13 @@ fn run_menu(
                     .child(crate::ui::icon(IconName::ChevronDown, 12., fg)),
             )
                 .dropdown_menu_with_anchor(gpui_kit::Anchor::TopRight, move |menu, window, cx| {
-                    // The open menu follows the model, as the React component re-renders: it
-                    // turns from "Loading..." into the actions when detection finishes. The
-                    // observation goes with the menu.
-                    let menu = fill_run_menu(menu, &menu_model, &menu_workspace, &runners, cx);
-                    let (model, workspace, runners) = (menu_model.clone(), menu_workspace.clone(), runners.clone());
-                    cx.observe_in(&menu_model, window, move |menu, _, window, cx| {
-                        menu.rebuild(window, cx, |menu, _, cx| fill_run_menu(menu, &model, &workspace, &runners, cx));
+                    // The open menu follows the model: it turns from "Loading..." into the
+                    // actions when detection finishes. The refill holds the workspace only as
+                    // long as the menu, as its items do.
+                    let (workspace, runners) = (menu_workspace.clone(), runners.clone());
+                    crate::ui::menu_following(menu, &menu_model, window, cx, move |menu, model, cx| {
+                        fill_run_menu(menu, model, &workspace, &runners, cx)
                     })
-                    .detach();
-                    menu
                 }),
         )
         .when_some(error, |d, error| d.child(div().text_xs().text_color(colors(cx).error).child(error)))

@@ -296,9 +296,9 @@ pub fn attention_saving(color: impl Into<Hsla>) -> gpui_kit::AnyElement {
 
 use gpui_kit::component::dialog::{Dialog, DialogEntrance};
 use gpui_kit::component::input::{Input, InputState, Textarea, TextareaState};
-use gpui_kit::component::menu::PopupMenuItem;
+use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
 use gpui_kit::component::{Sizable as _, Size, WindowExt as _};
-use gpui_kit::{Entity, FontWeight, SharedString, relative};
+use gpui_kit::{Context, Entity, FontWeight, SharedString, relative};
 
 /// The dialog box: bg-secondary, 8px radius, no border or padding, centred, shown at once
 /// (no entrance animation). Callers add [`dialog_header`], their content and
@@ -557,6 +557,28 @@ pub fn select_box(id: impl Into<ElementId>, label: impl Into<SharedString>, cx: 
 pub fn menu_item(label: impl Into<SharedString>) -> PopupMenuItem {
     let label: SharedString = label.into();
     PopupMenuItem::element(move |_, _| div().h(px(29.5)).flex().items_center().text_size(px(BODY)).child(label.clone()))
+}
+
+/// Fill a popup menu from `model`, and fill it again whenever `model` notifies while the menu
+/// is open, as a React menu re-renders when its store changes (GPUI Kit builds a dropdown's
+/// menu once per open).
+///
+/// The observation belongs to the menu and ends when the menu is released. The observer is
+/// stored under `model`, so it gets the model as an argument instead of holding it: a strong
+/// handle there would keep the model alive for good.
+pub fn menu_following<M: 'static>(
+    menu: PopupMenu,
+    model: &Entity<M>,
+    window: &mut Window,
+    cx: &mut Context<PopupMenu>,
+    fill: impl Fn(PopupMenu, &Entity<M>, &mut Context<PopupMenu>) -> PopupMenu + 'static,
+) -> PopupMenu {
+    let menu = fill(menu, model, cx);
+    let observation = cx.observe_in(model, window, move |menu, model, window, cx| {
+        menu.rebuild(window, cx, |menu, _, cx| fill(menu, &model, cx));
+    });
+    cx.on_release(move |_, _| drop(observation)).detach();
+    menu
 }
 
 /// Electron's `window.confirm(message)`: the platform's message box with OK and Cancel;
@@ -1344,5 +1366,79 @@ mod tests {
         focus_next(cx);
         press("space", cx);
         assert_eq!(presses.get(), 3);
+    }
+
+    struct Model;
+
+    struct Empty;
+
+    impl Render for Empty {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+        }
+    }
+
+    fn menu_window(cx: &mut TestAppContext) -> &mut VisualTestContext {
+        cx.update(gpui_kit::init);
+        cx.add_window_view(|_, _| Empty).1
+    }
+
+    /// GPUI releases the entities whose last handle was dropped when it flushes an update's
+    /// effects.
+    fn release_dropped(cx: &mut VisualTestContext) {
+        cx.update(|_, _| {});
+    }
+
+    /// A menu following `model`, whose fill counts its calls in `fills`.
+    fn following_menu(model: &Entity<Model>, fills: &Rc<Cell<usize>>, cx: &mut VisualTestContext) -> Entity<PopupMenu> {
+        let (model, fills) = (model.clone(), fills.clone());
+        let menu = cx.update(|window, cx| {
+            PopupMenu::build(window, cx, move |menu, window, cx| {
+                menu_following(menu, &model, window, cx, move |menu, _, _| {
+                    fills.set(fills.get() + 1);
+                    menu
+                })
+            })
+        });
+        cx.run_until_parked();
+        menu
+    }
+
+    /// The open menu is filled again on each notify of its model, and the observation ends
+    /// with the menu: what the fill holds is dropped at once, not at the model's next notify.
+    #[gpui_kit::test]
+    fn a_following_menu_refills_on_notify_until_it_is_released(cx: &mut TestAppContext) {
+        let cx = menu_window(cx);
+        let model = cx.update(|_, cx| cx.new(|_| Model));
+        let fills = Rc::new(Cell::new(0));
+        let menu = following_menu(&model, &fills, cx);
+        assert_eq!(fills.get(), 1, "filled when built");
+
+        model.update(cx, |_, cx| cx.notify());
+        cx.run_until_parked();
+        assert_eq!(fills.get(), 2, "filled again");
+
+        drop(menu);
+        release_dropped(cx);
+        assert_eq!(Rc::strong_count(&fills), 1, "the observation went with the menu");
+        model.update(cx, |_, cx| cx.notify());
+        cx.run_until_parked();
+        assert_eq!(fills.get(), 2);
+    }
+
+    /// The observation does not keep the model alive: an open menu lets it go.
+    #[gpui_kit::test]
+    fn a_following_menu_does_not_keep_its_model_alive(cx: &mut TestAppContext) {
+        let cx = menu_window(cx);
+        let model = cx.update(|_, cx| cx.new(|_| Model));
+        let fills = Rc::new(Cell::new(0));
+        let menu = following_menu(&model, &fills, cx);
+        let weak = model.downgrade();
+        drop(model);
+        release_dropped(cx);
+        assert!(weak.upgrade().is_none(), "released while the menu is open");
+        assert_eq!(Rc::strong_count(&fills), 1, "and the observation with it");
+        assert_eq!(fills.get(), 1);
+        drop(menu);
     }
 }
