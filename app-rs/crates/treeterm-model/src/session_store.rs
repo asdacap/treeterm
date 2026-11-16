@@ -2687,26 +2687,29 @@ fn report_fork(done: oneshot::Sender<Result<String, String>>, outcome: Result<St
 }
 
 /// Parents before children: an item comes once its parent (the root, an open workspace or
-/// an earlier item) is known; items with a missing or cyclic parent come last.
+/// an earlier item) is known; items with a missing or cyclic parent come last, in the order
+/// they are left in. Each pass walks the items left from the last to the first, as
+/// Electron's loop does, and an item it takes is known at once to the items after it in the
+/// walk: rows A, B, C under the root are created C, B, A, so A is the one shown.
 fn order_auto_open(items: Vec<AutoOpenItem>, root_path: &str, open: &[(String, String)]) -> Vec<AutoOpenItem> {
     let mut known: HashSet<String> = open.iter().map(|(path, _)| path.clone()).collect();
     known.insert(root_path.to_owned());
     let mut ordered = Vec::new();
     let mut remaining = items;
-    loop {
-        let (ready, waiting): (Vec<AutoOpenItem>, Vec<AutoOpenItem>) = remaining
-            .into_iter()
-            .partition(|item| item.parent_path.as_ref().is_none_or(|parent| known.contains(parent)));
-        if ready.is_empty() {
-            ordered.extend(waiting);
-            return ordered;
+    let mut progressed = true;
+    while !remaining.is_empty() && progressed {
+        progressed = false;
+        for i in (0..remaining.len()).rev() {
+            if remaining[i].parent_path.as_ref().is_none_or(|parent| known.contains(parent)) {
+                let item = remaining.remove(i);
+                known.insert(item.path.clone());
+                ordered.push(item);
+                progressed = true;
+            }
         }
-        for item in &ready {
-            known.insert(item.path.clone());
-        }
-        ordered.extend(ready);
-        remaining = waiting;
     }
+    ordered.extend(remaining);
+    ordered
 }
 
 /// `removeWorkspaceInternal`, with the session lock already held: children first, kill
@@ -2875,11 +2878,37 @@ mod tests {
         }
     }
 
+    fn order(items: Vec<AutoOpenItem>, open: &[(String, String)]) -> Vec<String> {
+        order_auto_open(items, "/root", open).into_iter().map(|i| i.path).collect()
+    }
+
+    /// Electron's walk, from the last item to the first: an item taken is known at once to
+    /// the items after it in the walk (`/leaf` comes in the same pass as `/mid`).
     #[test]
     fn auto_open_creates_parents_before_children() {
         let items = vec![item("/leaf", Some("/mid")), item("/mid", None), item("/other", Some("/open")), item("/lost", Some("/gone"))];
         let open = vec![("/open".to_owned(), "ws-open".to_owned())];
-        let order: Vec<String> = order_auto_open(items, "/root", &open).into_iter().map(|i| i.path).collect();
-        assert_eq!(order, vec!["/mid", "/other", "/leaf", "/lost"]);
+        assert_eq!(order(items, &open), vec!["/other", "/mid", "/leaf", "/lost"]);
+    }
+
+    /// Items under the root (or the root's own path) are created last row first.
+    #[test]
+    fn auto_open_creates_root_siblings_from_the_last() {
+        let items = vec![item("/a", None), item("/b", Some("/root")), item("/c", None)];
+        assert_eq!(order(items, &[]), vec!["/c", "/b", "/a"]);
+    }
+
+    /// A child walked before its parent waits for the next pass; items whose parent never
+    /// comes keep their order at the end.
+    #[test]
+    fn auto_open_takes_a_child_after_its_parent_on_a_later_pass() {
+        let items = vec![
+            item("/p", None),
+            item("/c", Some("/p")),
+            item("/x", Some("/gone")),
+            item("/y", Some("/x2")),
+            item("/q", Some("/c")),
+        ];
+        assert_eq!(order(items, &[]), vec!["/p", "/c", "/q", "/x", "/y"]);
     }
 }

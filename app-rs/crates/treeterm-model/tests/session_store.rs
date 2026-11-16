@@ -3623,6 +3623,51 @@ fn auto_open_adopts_worktrees_under_their_detected_parents(cx: &mut TestAppConte
     assert_eq!(sub_file.metadata.get("branchIsUserDefined").map(String::as_str), Some("true"));
 }
 
+/// Auto Open walks the rows from the last, as Electron does: rows A, B, C under the root are
+/// created C, B, A, so the tree lists them in that order and A, created last, is shown.
+#[gpui_kit::test]
+fn auto_open_shows_the_first_row_created_last(cx: &mut TestAppContext) {
+    use treeterm_model::session_store::AutoOpenItem;
+    cx.executor().allow_parking();
+    let h = harness();
+    publish(&h, &[]);
+    let repo = TempRepo::new(&h);
+    let path = |p: &std::path::Path| p.to_string_lossy().into_owned();
+    let branches = ["a", "b", "c"];
+    let paths: Vec<String> = branches
+        .iter()
+        .map(|branch| {
+            let worktree = h.daemon.root().join(format!("wt-{branch}"));
+            repo.git(&["worktree", "add", "-q", "-b", branch, worktree.to_str().unwrap()]);
+            path(&worktree)
+        })
+        .collect();
+    let store = open_store(cx, &h, "client-a");
+    let root = open_repo_workspace(cx, &store, &repo);
+    let items = branches
+        .iter()
+        .zip(&paths)
+        .map(|(branch, path)| AutoOpenItem {
+            path: path.clone(),
+            branch: (*branch).to_owned(),
+            parent_path: None,
+            display_name: None,
+            description: None,
+        })
+        .collect();
+    let opened = store.update(cx, |s, cx| s.auto_open_worktrees(&root, items, cx));
+    assert_eq!(recv(cx, opened), Ok(()));
+    let (rows, active) = cx.read(|cx| {
+        let s = store.read(cx);
+        let path_of = |id: &str| s.workspace_store(id).map(|w| w.read(cx).workspace().path.clone());
+        let rows: Vec<Option<String>> = s.tree_rows(&HashSet::new(), cx).iter().map(|row| path_of(&row.id)).collect();
+        (rows, s.active_workspace().and_then(path_of))
+    });
+    let tree = [path(&repo.path), paths[2].clone(), paths[1].clone(), paths[0].clone()];
+    assert_eq!(rows, tree.map(Some).to_vec());
+    assert_eq!(active, Some(paths[0].clone()));
+}
+
 #[gpui_kit::test]
 fn a_lock_held_elsewhere_shows_and_can_be_forced_open(cx: &mut TestAppContext) {
     cx.executor().allow_parking();
