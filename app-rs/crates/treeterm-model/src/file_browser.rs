@@ -449,8 +449,12 @@ impl FileBrowser {
         cx: &mut Context<Self>,
     ) -> Self {
         let observe = cx.observe(workspace, |browser, workspace, cx| {
-            let paths = workspace.read(cx).all_favourite_paths();
+            let (paths, in_repo) = {
+                let workspace = workspace.read(cx);
+                (workspace.all_favourite_paths(), workspace.file().is_git_repo)
+            };
             browser.sync_favourites(paths, cx);
+            browser.follow_repo(in_repo, cx);
         });
         let mut browser = Self {
             fs,
@@ -487,13 +491,13 @@ impl FileBrowser {
             _workspace: observe,
             name_search: NameSearch { query: String::new(), results: NameResults::Idle },
             _name_search: None,
-            comments: comments::Comments::new(in_repo),
+            comments: comments::Comments::new(),
         };
         // An invalid tab shows nothing, so it reads nothing.
         if browser.validity == Validity::Invalid {
             return browser;
         }
-        browser.refresh_anchor(cx);
+        browser.refresh_anchor(in_repo, cx);
         browser.resolve_favourites(cx);
         browser.load(root, cx);
         browser.expand(expanded_dirs_of(state), cx);

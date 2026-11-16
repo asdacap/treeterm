@@ -2274,8 +2274,8 @@ fn tabset_strip(
 
 /// No workspace's tabs are on screen (none picked, or the one picked was removed, is loading,
 /// failed or shows an operation's failure): the session's native webviews are hidden, and
-/// its Review views too, so they refresh when shown again; Files and Editor tabs save their
-/// scroll offset.
+/// its Review and Files views too, so they refresh (Files read `HEAD`) when shown again; Files
+/// and Editor tabs save their scroll offset.
 fn hide_tab_views(connected: &Connected, cx: &mut Context<AppView>) {
     let browsers: Vec<Entity<crate::browser_view::BrowserView>> = connected.browser_views.values().cloned().collect();
     for view in browsers {
@@ -2518,6 +2518,8 @@ fn workspace_pane(
         .collect();
     let file_views: Vec<(EntityId, Entity<crate::file_browser_view::FileBrowserView>)> =
         connected.file_views.iter().map(|(k, v)| (*k, v.clone())).collect();
+    // A Files tab hidden saves its scroll offset, and shown again reads `HEAD` again for its
+    // comments (Electron unmounts it, then mounts it again).
     for (model_id, view) in file_views {
         let visible = shown_files.contains(&model_id);
         view.update(cx, |v, cx| {

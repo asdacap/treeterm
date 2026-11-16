@@ -704,9 +704,10 @@ impl FileBrowserView {
         }
     }
 
-    /// Whether the Files tab is on screen. Hidden, it saves where the shown file's text was
-    /// scrolled to, as `FileViewer` does on unmount; the cached editor keeps that offset, in
-    /// the markdown preview too.
+    /// Whether the Files tab is on screen (a dialog over it aside). Hidden, it saves where the
+    /// shown file's text was scrolled to, as `FileViewer` does on unmount; the cached editor
+    /// keeps that offset, in the markdown preview too. Shown again, it reads `HEAD` again for
+    /// its comments.
     pub fn set_visible(&mut self, visible: bool, cx: &mut Context<Self>) {
         if self.visible
             && !visible
@@ -716,6 +717,7 @@ impl FileBrowserView {
             self.model.update(cx, |model, cx| model.save_scroll_top(top, cx));
         }
         self.visible = visible;
+        self.model.update(cx, |m, cx| m.set_visible(visible, cx));
     }
 
     /// Drop the webview page once another file, or another read of the same file, is shown:

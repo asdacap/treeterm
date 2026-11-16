@@ -718,6 +718,10 @@ fn a_files_tab_without_a_state_is_an_invalid_tab(cx: &mut TestAppContext) {
         assert!(matches!(m.view(), FileView::Nothing));
     });
     assert_eq!(tab_state(cx, &workspace, "t1"), serde_json::Value::Null);
+    // Shown, it still reads no `HEAD` for comments.
+    browser.update(cx, |m, cx| m.set_visible(true, cx));
+    cx.run_until_parked();
+    assert!(!matches!(browser.read_with(cx, |m, _| m.anchor().clone()), Anchor::Head(_)));
 
     // A state with a selection is valid.
     let (_, valid) = files_tab(cx, &workspace, serde_json::json!({ "selectedPath": format!("{}/a.txt", repo.root()) }));
@@ -1188,6 +1192,104 @@ fn a_repo_without_commits_takes_files_comments_without_a_commit(cx: &mut TestApp
     assert_eq!((&comment.commit, &comment.line), (&CommitAnchor::NotInRepo, &LineAnchor::Untracked));
     let stored = metadata(cx, &workspace, "reviewComments").unwrap();
     assert_eq!((&stored[0]["commitHash"], &stored[0]["lineCommitHash"]), (&serde_json::Value::Null, &serde_json::Value::Null));
+
+    // After the first commit, the tab shown reads it; the comment does not go outdated.
+    repo.commit_all("first");
+    let head = repo.git(&["rev-parse", "HEAD"]).trim().to_owned();
+    browser.update(cx, |b, cx| b.set_visible(true, cx));
+    wait_files(cx, &browser, "HEAD read", |b, _| *b.anchor() == Anchor::Head(head.clone()));
+    let comment = browser.read_with(cx, |b, cx| b.file_comments(cx).unwrap()).remove(0);
+    assert_eq!(comment.freshness, Freshness::Current);
+}
+
+#[gpui_kit::test]
+fn a_files_tab_shown_again_reads_head_again(cx: &mut TestAppContext) {
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let repo = TempRepo::new(&h);
+    repo.write("a.txt", "one\ntwo\n");
+    repo.commit_all("base");
+    let first = repo.git(&["rev-parse", "HEAD"]).trim().to_owned();
+    let (_store, _workspace, browser) = open_browser(cx, &h, &repo, "a.txt");
+    wait_files(cx, &browser, "HEAD read", |b, _| *b.anchor() == Anchor::Head(first.clone()));
+    let anchor = |cx: &mut TestAppContext| browser.read_with(cx, |b, _| b.anchor().clone());
+
+    // Shown for the first time (it was made before): `HEAD` is read again.
+    browser.update(cx, |b, cx| b.set_visible(true, cx));
+    assert_eq!(anchor(cx), Anchor::Reading);
+    wait_files(cx, &browser, "HEAD read again", |b, _| *b.anchor() == Anchor::Head(first.clone()));
+    // Shown while shown: nothing is read.
+    browser.update(cx, |b, cx| b.set_visible(true, cx));
+    assert_eq!(anchor(cx), Anchor::Head(first.clone()));
+
+    browser.update(cx, |b, cx| b.start_comment(2, cx));
+    browser.update(cx, |b, cx| b.submit_comment("two?", cx));
+    wait_files(cx, &browser, "comment saved", |b, _| b.comment_draft().is_none());
+    let before = browser.read_with(cx, |b, cx| b.file_comments(cx).unwrap()).remove(0);
+    assert_eq!(before.commit, CommitAnchor::Head(first.clone()));
+
+    // A commit changes the line while the tab is hidden: nothing is read until it shows.
+    browser.update(cx, |b, cx| b.set_visible(false, cx));
+    repo.write("a.txt", "one\nTWO\n");
+    repo.commit_all("shout");
+    let second = repo.git(&["rev-parse", "HEAD"]).trim().to_owned();
+    cx.run_until_parked();
+    assert_eq!(anchor(cx), Anchor::Head(first.clone()));
+    browser.update(cx, |b, cx| b.set_visible(true, cx));
+    assert_eq!(anchor(cx), Anchor::Reading);
+    wait_files(cx, &browser, "HEAD moved", |b, _| *b.anchor() == Anchor::Head(second.clone()));
+
+    // The comment on the changed line went outdated; a new one is anchored to the new `HEAD`.
+    let comments = browser.read_with(cx, |b, cx| b.file_comments(cx).unwrap());
+    assert_eq!((comments[0].id.as_str(), comments[0].freshness), (before.id.as_str(), Freshness::Outdated));
+    browser.update(cx, |b, cx| b.start_comment(1, cx));
+    browser.update(cx, |b, cx| b.submit_comment("one?", cx));
+    wait_files(cx, &browser, "second comment saved", |b, _| b.comment_draft().is_none());
+    let after = browser.read_with(cx, |b, cx| b.file_comments(cx).unwrap()).remove(1);
+    assert_eq!((after.text.as_str(), after.commit), ("one?", CommitAnchor::Head(second)));
+}
+
+#[gpui_kit::test]
+fn files_comments_follow_the_workspace_becoming_a_repository(cx: &mut TestAppContext) {
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let repo = TempRepo::new(&h);
+    let head = repo.git(&["rev-parse", "HEAD"]).trim().to_owned();
+    repo.write("a.txt", "one\n");
+    let store = open_store(cx, &h);
+    let id = format!("ws-{}", uuid::Uuid::new_v4().simple());
+    let file = h.daemon.workspaces_dir().join(format!("{id}.json"));
+    let tab = serde_json::json!({
+        "applicationId": "filesystem", "title": "Files",
+        "state": { "selectedPath": format!("{}/a.txt", repo.root()), "expandedDirs": [] }
+    });
+    // Each body differs (writers chain `parentHash`, so a body is never seen twice).
+    let body = |is_git_repo: bool, last_activity: i64| {
+        serde_json::json!({
+            "name": "repo", "status": "active", "isGitRepo": is_git_repo, "isWorktree": false, "gitBranch": "main",
+            "appStates": { "files": tab }, "activeTabId": "files", "metadata": {}, "createdAt": 1,
+            "lastActivity": last_activity, "parentHash": ""
+        })
+        .to_string()
+    };
+    std::fs::write(&file, body(false, 1)).unwrap();
+    let refs = vec![WorkspaceRef { id: id.clone(), path: repo.root() }];
+    futures::executor::block_on(h.conn.update_session(refs, None, "test-writer")).unwrap().unwrap();
+    wait_until(cx, &store, |s| matches!(s.state(), SessionState::Live) && matches!(s.entry(&id), Some(WorkspaceEntry::Loaded(_))));
+    let workspace = store.read_with(cx, |s, _| s.workspace_store(&id).unwrap().clone());
+    let Some(TabContent::Files(browser)) = workspace.read_with(cx, |w, _| w.tab_content("files")) else {
+        panic!("not a files tab");
+    };
+    assert_eq!(browser.read_with(cx, |b, _| b.anchor().clone()), Anchor::NotInRepo);
+
+    // Another window finds the workspace is a repository: `HEAD` is read.
+    std::fs::write(&file, body(true, 2)).unwrap();
+    wait_files(cx, &browser, "HEAD read", |b, _| *b.anchor() == Anchor::Head(head.clone()));
+    // And that it is not: comments have no commit again.
+    std::fs::write(&file, body(false, 3)).unwrap();
+    wait_files(cx, &browser, "not a repository", |b, _| *b.anchor() == Anchor::NotInRepo);
 }
 
 // ---- review ----------------------------------------------------------------------------

@@ -1,7 +1,8 @@
 //! Review comments on the Files tab's file (the comment half of `FilesystemBrowser.tsx`):
-//! a click on a line number starts one, `HEAD` (read when the tab opens, marking comments
-//! outdated whose line moved since; none outside git or before the first commit) anchors it,
-//! and the file's comments show with it.
+//! a click on a line number starts one, `HEAD` (read when the tab opens, each time it is
+//! shown again and when the workspace's `isGitRepo` changes, marking comments outdated whose
+//! line moved since; none outside git or before the first commit) anchors it, and the
+//! file's comments show with it.
 //!
 //! New comments get the workspace-relative path the Review tab writes, so they show in both
 //! tabs and can be pushed to GitHub. Electron's Files tab writes the absolute path; those
@@ -30,6 +31,13 @@ pub enum Anchor {
     Failed(String),
 }
 
+/// Whether the tab is on screen (Electron's `FilesystemBrowser` mounted), as last told.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Visibility {
+    Hidden,
+    Shown,
+}
+
 /// The comment being written under a line of the shown file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LineDraft {
@@ -42,6 +50,7 @@ pub struct LineDraft {
 /// The comment state of the tab.
 pub(super) struct Comments {
     pub anchor: Anchor,
+    pub visibility: Visibility,
     pub draft: Option<LineDraft>,
     pub adding: GitOp,
     /// A failed delete or outdated check, until the next comment action succeeds.
@@ -51,9 +60,12 @@ pub(super) struct Comments {
 }
 
 impl Comments {
-    pub fn new(in_repo: bool) -> Self {
+    /// Its anchor is set as the tab is made ([`FileBrowser::refresh_anchor`]), and a view
+    /// shows it later.
+    pub fn new() -> Self {
         Self {
-            anchor: if in_repo { Anchor::Reading } else { Anchor::NotInRepo },
+            anchor: Anchor::Reading,
+            visibility: Visibility::Hidden,
             draft: None,
             adding: GitOp::Idle,
             notice: Notice::Clear,
@@ -84,10 +96,17 @@ impl FileBrowser {
         &self.comments.notice
     }
 
-    /// Read `HEAD` and mark comments outdated whose line moved since (git repositories
-    /// only; elsewhere comments are not tracked).
-    pub(super) fn refresh_anchor(&mut self, cx: &mut Context<Self>) {
-        if self.comments.anchor == Anchor::NotInRepo {
+    /// Read `HEAD` and mark comments outdated whose line moved since, if the workspace is a
+    /// git repository (`in_repo`, its `isGitRepo`); elsewhere comments have no commit and
+    /// are not tracked. An "Invalid tab" shows no comments, so it reads nothing.
+    pub(super) fn refresh_anchor(&mut self, in_repo: bool, cx: &mut Context<Self>) {
+        if self.is_invalid() {
+            return;
+        }
+        cx.notify();
+        if !in_repo {
+            self.comments.anchor = Anchor::NotInRepo;
+            self.comments._anchor = None;
             return;
         }
         let (git, root, workspace, blame) = (self.git.clone(), self.root.clone(), self.workspace.clone(), self.blame());
@@ -114,6 +133,33 @@ impl FileBrowser {
                 Ok(()) | Err(_) => {} // Err: tab closed
             }
         }));
+    }
+
+    /// The workspace's `isGitRepo` as it is now: once it changes, `HEAD` is read, or comments
+    /// have no commit (Electron's effect runs again when `isGitRepo` changes).
+    pub(super) fn follow_repo(&mut self, in_repo: bool, cx: &mut Context<Self>) {
+        if in_repo != (self.comments.anchor != Anchor::NotInRepo) {
+            self.refresh_anchor(in_repo, cx);
+        }
+    }
+
+    /// The tab is on screen (the shown tab of a tabset of the workspace shown) or not. Shown
+    /// after being hidden, it reads `HEAD` again and marks comments outdated whose line moved
+    /// since, as Electron does each time it mounts the tab (a tab switch, back to the
+    /// workspace), so comments made after a commit anchor to it. Shown for the first time
+    /// too: every Files tab of a session is made when the session connects, and a view
+    /// shows it later.
+    pub fn set_visible(&mut self, visible: bool, cx: &mut Context<Self>) {
+        let next = if visible { Visibility::Shown } else { Visibility::Hidden };
+        let was = std::mem::replace(&mut self.comments.visibility, next);
+        if !visible || was == Visibility::Shown {
+            return;
+        }
+        let Some(workspace) = self.workspace.upgrade() else {
+            return;
+        };
+        let in_repo = workspace.read(cx).file().is_git_repo;
+        self.refresh_anchor(in_repo, cx);
     }
 
     /// The review comments on the shown file, in the order they were made.
