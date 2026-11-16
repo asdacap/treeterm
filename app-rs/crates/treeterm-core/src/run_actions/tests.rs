@@ -166,6 +166,66 @@ mod parse_vscode_launch {
             vec![]
         );
     }
+
+    /// TS: `configurations ?? []`.
+    #[test]
+    fn returns_empty_for_null_configurations() {
+        assert_eq!(
+            parse_vscode_launch(r#"{"configurations": null}"#).unwrap(),
+            vec![]
+        );
+    }
+
+    /// TS cast the entries unchecked, so one malformed entry never hid the others; one without
+    /// a name (TS: "undefined") is skipped.
+    #[test]
+    fn keeps_the_other_configurations_when_one_is_malformed() {
+        let content = r#"{"configurations": [
+            { "name": "a", "type": "node", "program": "x.js" },
+            { "type": "node" },
+            { "name": "b", "program": 42 },
+            { "name": { "nested": true } },
+            "not a configuration",
+            null,
+            { "name": 7, "type": "go", "program": null }
+        ]}"#;
+        assert_eq!(
+            parse_vscode_launch(content).unwrap(),
+            vec![
+                action(RunActionSource::VscodeLaunch, "a", "node — x.js"),
+                action(RunActionSource::VscodeLaunch, "b", ""),
+                action(RunActionSource::VscodeLaunch, "7", "go"),
+            ]
+        );
+    }
+
+    /// TS: a truthy `type` or `program` is shown as JS prints it.
+    #[test]
+    fn describes_non_string_type_and_program_as_js_prints_them() {
+        let content = r#"{"configurations": [
+            { "name": "a", "type": 3, "program": true },
+            { "name": "b", "type": "", "program": "x.js" },
+            { "name": "c", "type": "node", "program": 0 }
+        ]}"#;
+        let descriptions: Vec<_> = parse_vscode_launch(content)
+            .unwrap()
+            .into_iter()
+            .map(|action| action.description)
+            .collect();
+        assert_eq!(descriptions, vec!["3 — true", "", "node"]);
+    }
+
+    /// TS: `.map` on anything but an array throws, and the provider lists nothing.
+    #[test]
+    fn fails_when_configurations_is_not_an_array() {
+        assert!(parse_vscode_launch(r#"{"configurations": {"name": "a"}}"#).is_err());
+        assert!(parse_vscode_launch(r#"{"configurations": "a"}"#).is_err());
+    }
+
+    #[test]
+    fn fails_when_the_file_is_not_json() {
+        assert!(parse_vscode_launch(r#"{"configurations": ["#).is_err());
+    }
 }
 
 mod parse_vscode_tasks {
@@ -208,6 +268,82 @@ mod parse_vscode_tasks {
     fn filters_tasks_without_labels() {
         let content = r#"{ "tasks": [ { "command": "echo hi" }, { "label": "Build", "command": "npm run build" } ] }"#;
         assert_eq!(names(&parse_vscode_tasks(content).unwrap()), vec!["Build"]);
+    }
+
+    /// TS: `Boolean(t.label)`.
+    #[test]
+    fn filters_tasks_whose_label_is_falsy_or_not_text() {
+        let content = r#"{ "tasks": [
+            { "label": "", "command": "a" },
+            { "label": null, "command": "b" },
+            { "label": 0, "command": "c" },
+            { "label": false, "command": "d" },
+            { "label": { "value": "e" }, "command": "e" },
+            "not a task",
+            null,
+            { "label": "Build", "command": "f" }
+        ] }"#;
+        assert_eq!(names(&parse_vscode_tasks(content).unwrap()), vec!["Build"]);
+    }
+
+    /// TS: `tasks ?? []`.
+    #[test]
+    fn returns_empty_for_null_tasks() {
+        assert_eq!(parse_vscode_tasks(r#"{"tasks": null}"#).unwrap(), vec![]);
+    }
+
+    /// VS Code's `{ value, quoting }` form, which TS cast unchecked: the task and the ones
+    /// after it are listed, described by the command's value.
+    #[test]
+    fn lists_tasks_with_quoted_commands_and_args() {
+        let content = r#"{ "tasks": [
+            { "label": "Quoted", "command": { "value": "npm", "quoting": "escape" } },
+            { "label": "Args", "command": "npm", "args": [1, { "value": "x", "quoting": "strong" }] },
+            { "label": "Split", "command": ["npm", "run", "build"] },
+            { "label": "After", "command": "make" }
+        ] }"#;
+        assert_eq!(
+            parse_vscode_tasks(content).unwrap(),
+            vec![
+                action(RunActionSource::VscodeTask, "Quoted", "npm"),
+                action(RunActionSource::VscodeTask, "Args", "npm"),
+                action(RunActionSource::VscodeTask, "Split", "npm run build"),
+                action(RunActionSource::VscodeTask, "After", "make"),
+            ]
+        );
+    }
+
+    /// TS listed a truthy non-string label as JS prints it.
+    #[test]
+    fn lists_a_numeric_label_as_text() {
+        let content = r#"{ "tasks": [ { "label": 5, "command": "echo five" } ] }"#;
+        assert_eq!(
+            parse_vscode_tasks(content).unwrap(),
+            vec![action(RunActionSource::VscodeTask, "5", "echo five")]
+        );
+    }
+
+    /// TS: `command ?? type ?? ''`: an empty command is still the description; a command that
+    /// has no text falls back to the type.
+    #[test]
+    fn describes_by_command_then_type() {
+        let content = r#"{ "tasks": [
+            { "label": "Empty", "command": "", "type": "shell" },
+            { "label": "NoValue", "command": { "quoting": "escape" }, "type": "shell" },
+            { "label": "Nothing", "command": null }
+        ] }"#;
+        let descriptions: Vec<_> = parse_vscode_tasks(content)
+            .unwrap()
+            .into_iter()
+            .map(|action| action.description)
+            .collect();
+        assert_eq!(descriptions, vec!["", "shell", ""]);
+    }
+
+    /// TS: `.filter` on anything but an array throws, and the provider lists nothing.
+    #[test]
+    fn fails_when_tasks_is_not_an_array() {
+        assert!(parse_vscode_tasks(r#"{"tasks": {"label": "a"}}"#).is_err());
     }
 }
 
@@ -363,6 +499,29 @@ mod create_run_actions_api {
     }
 
     #[test]
+    fn detect_lists_vscode_entries_beside_malformed_ones_without_failures() {
+        let fs = filesystem(&[
+            (
+                ".vscode/launch.json",
+                r#"{"configurations":[{"type":"node"},{"name":"Debug","type":"node"}]}"#,
+            ),
+            (
+                ".vscode/tasks.json",
+                r#"{"tasks":[{"label":"Build","command":{"value":"npm","quoting":"escape"},"args":[{"value":"run"}]}]}"#,
+            ),
+        ]);
+        let detected = block_on(client(&fs, &FakeTerminal::new("pty-1")).detect("/workspace"));
+        assert_eq!(
+            detected.actions,
+            vec![
+                action(RunActionSource::VscodeLaunch, "Debug", "node"),
+                action(RunActionSource::VscodeTask, "Build", "npm"),
+            ]
+        );
+        assert!(detected.failures.is_empty());
+    }
+
+    #[test]
     fn detect_finds_taskfile_yaml_when_taskfile_yml_missing() {
         let fs = filesystem(&[(
             "Taskfile.yaml",
@@ -484,6 +643,57 @@ mod create_run_actions_api {
             result.unwrap_err().to_string(),
             "Task \"NoCmd\" has no command"
         );
+    }
+
+    /// VS Code's `{ value, quoting }` command and args run by their values (TS ran
+    /// `[object Object]`); a malformed task does not keep the others from running.
+    #[test]
+    fn run_vscode_task_runs_quoted_command_and_args_by_their_values() {
+        let tasks = r#"{"tasks":[
+            {"label":"a","command":"echo","args":"not an array"},
+            {"label":"b","command":{"value":"npm","quoting":"escape"},"args":["run",{"value":"build","quoting":"strong"}]},
+            {"label":"c","command":"echo","args":[1,true,null]}
+        ]}"#;
+        let fs = filesystem(&[(".vscode/tasks.json", tasks)]);
+        let terminal = FakeTerminal::new("pty-vscode");
+        for id in ["vscode-task:b", "vscode-task:c", "vscode-task:a"] {
+            block_on(client(&fs, &terminal).run("/workspace", id)).unwrap();
+        }
+        assert_eq!(
+            terminal.sessions(),
+            vec![
+                session("/workspace", "npm run build"),
+                session("/workspace", "echo 1 true "),
+                session("/workspace", "echo"),
+            ]
+        );
+    }
+
+    /// Listed as "5", so it runs as "5" (TS listed it but compared `5 === "5"` and failed).
+    #[test]
+    fn run_vscode_task_finds_a_numeric_label() {
+        let fs = filesystem(&[(
+            ".vscode/tasks.json",
+            r#"{"tasks":[{"label":5,"command":"echo five"}]}"#,
+        )]);
+        let terminal = FakeTerminal::new("pty-five");
+        block_on(client(&fs, &terminal).run("/workspace", "vscode-task:5")).unwrap();
+        assert_eq!(
+            terminal.sessions(),
+            vec![session("/workspace", "echo five")]
+        );
+    }
+
+    #[test]
+    fn run_vscode_task_returns_error_when_the_quoted_command_has_no_value() {
+        let fs = filesystem(&[(
+            ".vscode/tasks.json",
+            r#"{"tasks":[{"label":"Q","command":{"quoting":"escape"}}]}"#,
+        )]);
+        let terminal = FakeTerminal::new("pty-1");
+        let result = block_on(client(&fs, &terminal).run("/workspace", "vscode-task:Q"));
+        assert_eq!(result.unwrap_err().to_string(), "Task \"Q\" has no command");
+        assert_eq!(terminal.sessions(), vec![]);
     }
 
     #[test]

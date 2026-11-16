@@ -236,9 +236,8 @@ async fn command_for(
                 .await?
                 .filter(|content| !content.is_empty())
                 .ok_or(RunActionsError::TasksJsonMissing)?;
-            let tasks = parse::parse_tasks_file(&content).map_err(invalid(".vscode/tasks.json"))?;
-            let task = tasks
-                .tasks
+            let task = parse::tasks_of(&content)
+                .map_err(invalid(".vscode/tasks.json"))?
                 .into_iter()
                 .find(|task| task.label.as_deref() == Some(name));
             let Some((command, args)) = task.and_then(|task| {

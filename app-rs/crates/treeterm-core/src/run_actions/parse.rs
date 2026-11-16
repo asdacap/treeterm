@@ -72,67 +72,126 @@ pub fn strip_jsonc_comments(content: &str) -> String {
     BLOCK_COMMENT.replace_all(&without_lines, "").into_owned()
 }
 
+/// What JS shows for a string, number or boolean; `None` for anything else.
+fn scalar_text(value: &Value) -> Option<String> {
+    match value {
+        Value::String(text) => Some(text.clone()),
+        Value::Number(number) => Some(number.to_string()),
+        Value::Bool(flag) => Some(flag.to_string()),
+        Value::Null | Value::Array(_) | Value::Object(_) => None,
+    }
+}
+
+/// [`scalar_text`] of a value JS counts as true: a non-empty string, a non-zero number or
+/// `true`.
+fn truthy_text(value: &Value) -> Option<String> {
+    let truthy = match value {
+        Value::String(text) => !text.is_empty(),
+        Value::Number(number) => number.as_f64() != Some(0.0),
+        Value::Bool(flag) => *flag,
+        Value::Null | Value::Array(_) | Value::Object(_) => false,
+    };
+    if truthy { scalar_text(value) } else { None }
+}
+
+/// The text of a VS Code `CommandString`: a string, parts joined with spaces, or a
+/// `{ value, quoting }` object's value (unquoted, as the TS client ran its commands).
+fn command_text(value: &Value) -> Option<String> {
+    match value {
+        Value::String(text) => Some(text.clone()),
+        Value::Array(parts) => Some(parts.iter().map(arg_text).collect::<Vec<_>>().join(" ")),
+        Value::Object(quoted) => quoted.get("value").and_then(command_text),
+        Value::Null | Value::Bool(_) | Value::Number(_) => None,
+    }
+}
+
+/// One argument as JS `args.join(' ')` shows it, a `CommandString` by its text: a number or
+/// boolean stringified, null (or an object without a value) as nothing.
+fn arg_text(value: &Value) -> String {
+    command_text(value)
+        .or_else(|| scalar_text(value))
+        .unwrap_or_default()
+}
+
 #[derive(Deserialize)]
 struct LaunchFile {
+    /// Missing or null: none (TS `?? []`).
     #[serde(default)]
-    configurations: Vec<LaunchConfiguration>,
+    configurations: Option<Vec<Value>>,
 }
 
-#[derive(Deserialize)]
-struct LaunchConfiguration {
-    name: String,
-    #[serde(rename = "type", default)]
-    kind: Option<String>,
-    #[serde(default)]
-    program: Option<String>,
-}
-
-/// Configurations of `.vscode/launch.json`, described as `type — program`.
+/// Configurations of `.vscode/launch.json`, described as `type — program`. Read one by one,
+/// as leniently as the TS client's unchecked cast: an entry without a string or number
+/// `name` (TS listed it as "undefined"), or that is not an object, is skipped.
 pub fn parse_vscode_launch(content: &str) -> Result<Vec<RunAction>, serde_json::Error> {
     let file: LaunchFile = serde_json::from_str(&strip_jsonc_comments(content))?;
     Ok(file
         .configurations
-        .into_iter()
-        .map(|config| {
-            let description = match (config.kind.as_deref(), config.program.as_deref()) {
-                (None | Some(""), _) => String::new(),
-                (Some(kind), None | Some("")) => kind.to_owned(),
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|config| {
+            let name = match config.get("name")? {
+                Value::String(name) => name.clone(),
+                Value::Number(name) => name.to_string(),
+                _ => return None,
+            };
+            let field = |key| config.get(key).and_then(truthy_text);
+            let description = match (field("type"), field("program")) {
+                (None, _) => String::new(),
+                (Some(kind), None) => kind,
                 (Some(kind), Some(program)) => format!("{kind} — {program}"),
             };
-            action(RunActionSource::VscodeLaunch, &config.name, description)
+            Some(action(RunActionSource::VscodeLaunch, &name, description))
         })
         .collect())
 }
 
 #[derive(Deserialize)]
-pub(super) struct TasksFile {
+struct TasksFile {
+    /// Missing or null: none (TS `?? []`).
     #[serde(default)]
-    pub(super) tasks: Vec<VscodeTask>,
+    tasks: Option<Vec<Value>>,
 }
 
-#[derive(Deserialize)]
+/// A task of `.vscode/tasks.json`, read as leniently as the TS client's unchecked cast.
 pub(super) struct VscodeTask {
-    #[serde(default)]
+    /// What the task is listed and run by; `None` (not listed) when JS counts it false.
     pub(super) label: Option<String>,
-    #[serde(default)]
     pub(super) command: Option<String>,
-    #[serde(rename = "type", default)]
     kind: Option<String>,
-    #[serde(default)]
+    /// Present when `args` is an array.
     pub(super) args: Option<Vec<String>>,
 }
 
-pub(super) fn parse_tasks_file(content: &str) -> Result<TasksFile, serde_json::Error> {
-    serde_json::from_str(&strip_jsonc_comments(content))
+/// The tasks of `.vscode/tasks.json`, for listing and running; an entry that is not an
+/// object is skipped.
+pub(super) fn tasks_of(content: &str) -> Result<Vec<VscodeTask>, serde_json::Error> {
+    let file: TasksFile = serde_json::from_str(&strip_jsonc_comments(content))?;
+    Ok(file
+        .tasks
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|task| {
+            let task = task.as_object()?;
+            Some(VscodeTask {
+                label: task.get("label").and_then(truthy_text),
+                command: task.get("command").and_then(command_text),
+                kind: task.get("type").and_then(scalar_text),
+                args: match task.get("args") {
+                    Some(Value::Array(args)) => Some(args.iter().map(arg_text).collect()),
+                    _ => None,
+                },
+            })
+        })
+        .collect())
 }
 
 /// Labelled tasks of `.vscode/tasks.json`, described by their command (or type).
 pub fn parse_vscode_tasks(content: &str) -> Result<Vec<RunAction>, serde_json::Error> {
-    Ok(parse_tasks_file(content)?
-        .tasks
+    Ok(tasks_of(content)?
         .into_iter()
         .filter_map(|task| {
-            let label = task.label.filter(|label| !label.is_empty())?;
+            let label = task.label?;
             let description = task.command.or(task.kind).unwrap_or_default();
             Some(action(RunActionSource::VscodeTask, &label, description))
         })
