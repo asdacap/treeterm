@@ -10,7 +10,9 @@ use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::component::menu::DropdownMenu as _;
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::prelude::*;
-use gpui_kit::{App, Context, Div, Entity, Focusable as _, FontWeight, Hsla, SharedString, Subscription, Window, div, px};
+use gpui_kit::{
+    App, Context, Div, Entity, FocusHandle, Focusable as _, FontWeight, Hsla, SharedString, Subscription, Window, div, px,
+};
 use treeterm_core::wire::workspace_file::WorktreeSettings;
 use treeterm_model::session_store::SessionStore;
 use treeterm_model::settings_store::SettingsStore;
@@ -42,7 +44,7 @@ enum Picker {
 pub struct OpenWorkspaceDialog {
     folder: Entity<InputState>,
     /// "Recent Directories", most recent first; the section is hidden when empty.
-    recent: Vec<String>,
+    recent: Vec<RecentDir>,
     picker: Picker,
     /// "Default Application": "Use Global Default", then the new-tab menu's applications
     /// (`availableApps`).
@@ -52,6 +54,12 @@ pub struct OpenWorkspaceDialog {
     settings: WorktreeSettings,
     on_open: OnOpen,
     _subscriptions: Vec<Subscription>,
+}
+
+/// A "Recent Directories" row: a `<button>` that takes the focus on a click as from Tab.
+struct RecentDir {
+    path: String,
+    focus: FocusHandle,
 }
 
 /// What Enter did in the dialog.
@@ -99,6 +107,7 @@ impl OpenWorkspaceDialog {
             InputEvent::Change => cx.notify(),
             InputEvent::PressEnter { .. } | InputEvent::Focus | InputEvent::Blur => {}
         });
+        let recent = recent.into_iter().map(|path| RecentDir { path, focus: cx.focus_handle() }).collect();
         Self {
             folder,
             recent,
@@ -228,15 +237,18 @@ impl OpenWorkspaceDialog {
 
     /// `.recent-directories-list`: each row a `<button>`, the folder name over its path, with
     /// the full path as its tooltip; a click fills the folder field (`handleSelectRecent`).
+    /// `.recent-directory-item:focus`: the focused row has an accent border and no focus ring.
     fn render_recent(&self, window: &mut Window, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
         let c = colors(cx);
-        let (primary, secondary, border, hover, tertiary) =
-            (c.text_primary, c.text_secondary, c.border, c.bg_hover, c.bg_tertiary);
+        let (primary, secondary, border, hover, tertiary, accent) =
+            (c.text_primary, c.text_secondary, c.border, c.bg_hover, c.bg_tertiary, c.accent);
         let mut list = div().id("recent-directories").flex().flex_col().gap(px(4.)).max_h(px(200.)).overflow_y_scroll();
-        for (i, dir) in self.recent.iter().enumerate() {
+        for (i, RecentDir { path: dir, focus }) in self.recent.iter().enumerate() {
             let (path, tooltip) = (dir.clone(), SharedString::from(dir.clone()));
+            let edge = if focus.is_focused(window) { accent } else { border };
             list = list.child(
-                ui::key_button(SharedString::from(format!("recent-{i}")), 4., window, cx)
+                ui::ringless_key_button(SharedString::from(format!("recent-{i}")), focus, 4.)
+                    .debug_selector(|| format!("recent-{i}"))
                     .flex_col()
                     .items_stretch()
                     .justify_start()
@@ -245,7 +257,7 @@ impl OpenWorkspaceDialog {
                     .py(px(8.))
                     .rounded(px(4.))
                     .border_1()
-                    .border_color(border)
+                    .border_color(edge)
                     .bg(tertiary)
                     .cursor_pointer()
                     .hover(move |d| d.bg(hover))
@@ -400,6 +412,11 @@ pub fn open(
     cx: &mut App,
 ) {
     let view = cx.new(|cx| OpenWorkspaceDialog::new(location, recent, choices, on_open, window, cx));
+    show(view, window, cx);
+}
+
+/// Shows `view` as the dialog.
+fn show(view: Entity<OpenWorkspaceDialog>, window: &mut Window, cx: &mut App) {
     // `autoFocus` on the folder, once the dialog has taken the focus.
     let folder = view.read(cx).folder.clone();
     window.defer(cx, move |window, cx| folder.update(cx, |input, cx| input.focus(window, cx)));
@@ -422,12 +439,15 @@ mod tests {
     use std::cell::RefCell;
     use std::rc::Rc;
 
-    use gpui_kit::{AppContext as _, KeyDownEvent, KeyUpEvent, Keystroke, TestAppContext, VisualTestContext, WindowOptions};
+    use gpui_kit::{
+        AppContext as _, Entity, KeyDownEvent, KeyUpEvent, Keystroke, Modifiers, TestAppContext, VisualTestContext,
+        WindowOptions,
+    };
     use treeterm_core::settings::Settings;
     use treeterm_model::settings_store::SettingsStore;
     use treeterm_model::tool_tabs::workspace_settings::DefaultAppChoice;
 
-    use super::{Location, OnOpen, folder_name, open};
+    use super::{Location, OnOpen, OpenWorkspaceDialog, folder_name, show};
 
     struct Blank;
 
@@ -437,9 +457,16 @@ mod tests {
         }
     }
 
-    /// A window showing Open Workspace on this machine with `recent` offered; returns the
-    /// paths it opened.
-    fn open_dialog<'a>(recent: &[&str], cx: &'a mut TestAppContext) -> (&'a mut VisualTestContext, Rc<RefCell<Vec<String>>>) {
+    /// What [`open_dialog`] shows.
+    struct Shown<'a> {
+        cx: &'a mut VisualTestContext,
+        dialog: Entity<OpenWorkspaceDialog>,
+        /// The paths it opened.
+        opened: Rc<RefCell<Vec<String>>>,
+    }
+
+    /// A window showing Open Workspace on this machine with `recent` offered.
+    fn open_dialog<'a>(recent: &[&str], cx: &'a mut TestAppContext) -> Shown<'a> {
         let window = cx.update(|cx| {
             gpui_kit::init(cx);
             crate::theme::install(cx);
@@ -451,12 +478,19 @@ mod tests {
         let on_open: OnOpen = Rc::new(move |path, _, _, _| sink.borrow_mut().push(path));
         let recent = recent.iter().map(|dir| (*dir).to_owned()).collect();
         let choices = vec![DefaultAppChoice { id: String::new(), label: "Use Global Default".to_owned() }];
-        cx.update(|window, cx| {
-            let settings = cx.new(|_| SettingsStore::in_memory(Settings::default()));
-            open(Location::Local(settings), recent, choices, on_open, window, cx);
+        let dialog = cx.update(|window, cx| {
+            let location = Location::Local(cx.new(|_| SettingsStore::in_memory(Settings::default())));
+            let dialog = cx.new(|cx| OpenWorkspaceDialog::new(location, recent, choices, on_open, window, cx));
+            show(dialog.clone(), window, cx);
+            dialog
         });
         draw(cx);
-        (cx, opened)
+        Shown { cx, dialog, opened }
+    }
+
+    /// Which recent rows have the focus, in order.
+    fn focused_rows(dialog: &Entity<OpenWorkspaceDialog>, cx: &mut VisualTestContext) -> Vec<bool> {
+        cx.update(|window, cx| dialog.read(cx).recent.iter().map(|row| row.focus.is_focused(window)).collect())
     }
 
     fn draw(cx: &mut VisualTestContext) {
@@ -479,7 +513,7 @@ mod tests {
 
     #[gpui_kit::test]
     fn enter_opens_the_typed_folder_once(cx: &mut TestAppContext) {
-        let (cx, opened) = open_dialog(&[], cx);
+        let Shown { cx, opened, .. } = open_dialog(&[], cx);
         cx.simulate_input("/srv/app");
         draw(cx);
         press("enter", cx);
@@ -487,14 +521,17 @@ mod tests {
         assert!(!is_open(cx));
     }
 
-    /// Recent rows are buttons: Enter or Space presses the focused one while no folder is
-    /// chosen; once there is one, Enter opens it (`handleKeyDown`).
+    /// Recent rows are buttons: Shift-Tab from the folder field focuses the last one, and
+    /// Enter or Space presses the focused one while no folder is chosen; once there is one,
+    /// Enter opens it (`handleKeyDown`).
     #[gpui_kit::test]
     fn enter_presses_a_focused_button_until_a_folder_is_chosen(cx: &mut TestAppContext) {
         for key in ["enter", "space"] {
-            let (cx, opened) = open_dialog(&["/home/me/src", "/home/me/web"], cx);
+            let Shown { cx, dialog, opened } = open_dialog(&["/home/me/src", "/home/me/web"], cx);
+            assert_eq!(focused_rows(&dialog, cx), vec![false, false], "{key}");
             // Back from the folder field to the last recent row.
             press("shift-tab", cx);
+            assert_eq!(focused_rows(&dialog, cx), vec![false, true], "{key}");
             press(key, cx);
             assert!(opened.borrow().is_empty(), "{key}");
             assert!(is_open(cx), "{key}");
@@ -504,11 +541,26 @@ mod tests {
         }
     }
 
-    /// Tab passes over Open while there is no folder; Space or Enter on Cancel closes.
+    /// A click on a recent row fills the folder field and focuses the row, as Chromium focuses
+    /// a clicked `<button>` (its accent border is `.recent-directory-item:focus`); Enter then
+    /// opens the folder.
+    #[gpui_kit::test]
+    fn a_clicked_recent_row_takes_the_focus(cx: &mut TestAppContext) {
+        let Shown { cx, dialog, opened } = open_dialog(&["/home/me/src", "/home/me/web"], cx);
+        let row = cx.debug_bounds("recent-0").expect("the first recent row is drawn");
+        cx.simulate_click(row.center(), Modifiers::none());
+        draw(cx);
+        assert_eq!(focused_rows(&dialog, cx), vec![true, false]);
+        assert_eq!(cx.update(|_, cx| dialog.read(cx).selected(cx)), "/home/me/src");
+        press("enter", cx);
+        assert_eq!(*opened.borrow(), vec!["/home/me/src".to_owned()]);
+    }
+
+    /// Space, or Enter while there is no folder, on a focused Cancel closes without opening.
     #[gpui_kit::test]
     fn a_focused_cancel_closes_without_opening(cx: &mut TestAppContext) {
         for key in ["space", "enter"] {
-            let (cx, opened) = open_dialog(&[], cx);
+            let Shown { cx, opened, .. } = open_dialog(&[], cx);
             // The folder field, Browse..., Cancel.
             press("tab", cx);
             press("tab", cx);

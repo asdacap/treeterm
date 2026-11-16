@@ -1021,13 +1021,19 @@ fn key_focus(id: &ElementId, window: &mut Window, cx: &mut App) -> (FocusHandle,
 pub fn key_button(id: impl Into<ElementId>, radius: f32, window: &mut Window, cx: &mut App) -> gpui_kit::base::Button {
     let id = id.into();
     let (focus, ring) = key_focus(&id, window, cx);
+    ringless_key_button(id, &focus, radius).when(ring, |button| button.child(focus_outline(radius)))
+}
+
+/// A [`key_button`] whose CSS replaces the focus ring (`:focus { outline: none; ... }`): it
+/// draws none, and the caller styles it while `focus` is focused. A `<button>` takes the focus
+/// on a click as well as from Tab, so that style shows after either.
+pub fn ringless_key_button(id: impl Into<ElementId>, focus: &FocusHandle, radius: f32) -> gpui_kit::base::Button {
     gpui_kit::base::Button::new(id)
-        .track_focus(&focus)
+        .track_focus(focus)
         .key_context(KEY_CONTROL)
         // The line box the button inherits (the base button sets the font size's).
         .line_height(relative(1.2))
         .rounded(px(radius))
-        .when(ring, |button| button.child(focus_outline(radius)))
 }
 
 /// A native `<input type="checkbox">` of `size` px ([`checkbox_box`]) with its `<label>`:
