@@ -2,6 +2,7 @@
 //! npm scripts, make targets, just recipes, Taskfile tasks and VS Code tasks found in the
 //! workspace, each started in a new terminal tab.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use gpui_kit::{Context, Entity, Task, WeakEntity};
@@ -24,7 +25,10 @@ pub struct RunActions {
     /// Why the last run failed to start.
     error: Option<String>,
     _detect: Option<Task<()>>,
-    _run: Option<Task<()>>,
+    /// The runs still starting, by number (`next_run`): each Run click is its own call,
+    /// as in Electron, so a second run must not cancel one still waiting for its PTY.
+    runs: HashMap<u64, Task<()>>,
+    next_run: u64,
 }
 
 impl RunActions {
@@ -38,7 +42,8 @@ impl RunActions {
             detection: Detection::Detecting,
             error: None,
             _detect: None,
-            _run: None,
+            runs: HashMap::new(),
+            next_run: 0,
         };
         model.detect(cx);
         model
@@ -72,10 +77,13 @@ impl RunActions {
     }
 
     /// Start `action` in a new PTY and show it as a terminal tab titled with the action id.
+    /// Runs started together all open their tabs; the error is that of the last to finish.
     pub fn run(&mut self, action: &RunAction, cx: &mut Context<Self>) {
         let (client, path, id) = (self.client.clone(), self.path.clone(), action.id());
         let workspace = self.workspace.clone();
-        self._run = Some(cx.spawn(async move |this, cx| {
+        let run = self.next_run;
+        self.next_run += 1;
+        let task = cx.spawn(async move |this, cx| {
             let result = client.run(&path, &id).await.map_err(|e| e.to_string());
             let opened = match result {
                 Ok(pty_id) => workspace
@@ -93,11 +101,18 @@ impl RunActions {
                 Err(error) => Err(format!("Failed to run {id}: {error}")),
             };
             match this.update(cx, |model, cx| {
+                model.runs.remove(&run);
                 model.error = opened.err();
                 cx.notify();
             }) {
                 Ok(()) | Err(_) => {}
             }
-        }));
+        });
+        self.runs.insert(run, task);
+    }
+
+    /// How many runs are still starting.
+    pub fn running(&self) -> usize {
+        self.runs.len()
     }
 }

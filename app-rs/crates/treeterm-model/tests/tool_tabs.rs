@@ -10,6 +10,7 @@ use treeterm_core::llm::{FakeLlm, LlmError};
 use treeterm_core::review::Resolution;
 use treeterm_core::settings::{ClassifierProvider, Settings};
 use treeterm_model::analyzer::LlmService;
+use treeterm_model::run_actions::{Detection, RunActions};
 use treeterm_model::session_store::{SessionState, SessionStore, WorkspaceEntry};
 use treeterm_model::settings_store::SettingsStore;
 use treeterm_model::tool_tabs::analyzer_history::HistorySource;
@@ -595,4 +596,90 @@ fn github_and_upload_tabs_read_the_session(cx: &mut TestAppContext) {
     assert_eq!(model.read_with(cx, |m, cx| m.target(cx)), UploadTarget::Local);
     model.update(cx, |m, cx| m.set_local_path("/tmp/file".into(), cx));
     assert!(!model.read_with(cx, |m, cx| m.can_upload(cx)));
+}
+
+/// The Run menu's model for `workspace`, once detection has finished; and what it found.
+fn detected_run_actions(
+    cx: &mut TestAppContext,
+    h: &Harness,
+    workspace: &Entity<WorkspaceStore>,
+) -> (Entity<RunActions>, Vec<treeterm_core::run_actions::RunAction>) {
+    let conn = h.conn.clone();
+    let model = cx.new(|cx| RunActions::new(&conn, workspace, cx));
+    wait_until(cx, &model, |m| matches!(m.detection(), Detection::Done(_)));
+    let Detection::Done(actions) = model.read_with(cx, |m, _| m.detection().clone()) else { unreachable!() };
+    (model, actions)
+}
+
+/// The workspace's terminal tabs: (title, ptyId, keepOnExit), by title.
+fn terminal_tabs(cx: &mut TestAppContext, workspace: &Entity<WorkspaceStore>) -> Vec<(String, String, serde_json::Value)> {
+    let mut tabs: Vec<_> = workspace.read_with(cx, |w, _| {
+        w.file()
+            .app_states
+            .values()
+            .filter(|tab| tab.application_id == "terminal")
+            .map(|tab| (tab.title.clone(), tab.state["ptyId"].as_str().unwrap().to_owned(), tab.state["keepOnExit"].clone()))
+            .collect()
+    });
+    tabs.sort_by(|a, b| a.0.cmp(&b.0));
+    tabs
+}
+
+#[gpui_kit::test]
+fn two_runs_started_back_to_back_both_open_tabs(cx: &mut TestAppContext) {
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let store = open_store(cx, &h, Settings::default(), None);
+    let (_id, dir, workspace) = open_workspace(cx, &h, &store, json!({}));
+    std::fs::write(dir.join("package.json"), r#"{"scripts": {"a": "echo a", "b": "echo b"}}"#).unwrap();
+    let (model, actions) = detected_run_actions(cx, &h, &workspace);
+    let ids: Vec<String> = actions.iter().map(|a| a.id()).collect();
+    assert_eq!(ids, ["npm:a", "npm:b"]);
+
+    // The second starts before the first has its PTY (`handleRun` is a fresh call per click).
+    model.update(cx, |m, cx| {
+        m.run(&actions[0], cx);
+        m.run(&actions[1], cx);
+    });
+    assert_eq!(model.read_with(cx, |m, _| m.running()), 2);
+    wait_until(cx, &model, |m| m.running() == 0);
+
+    let tabs = terminal_tabs(cx, &workspace);
+    let titles: Vec<&str> = tabs.iter().map(|(title, _, _)| title.as_str()).collect();
+    assert_eq!(titles, ["npm:a", "npm:b"]);
+    assert_ne!(tabs[0].1, tabs[1].1, "each run has its own PTY");
+    assert!(tabs.iter().all(|(_, _, keep)| *keep == json!(true)));
+    assert_eq!(model.read_with(cx, |m, _| m.error().map(str::to_owned)), None);
+}
+
+#[gpui_kit::test]
+fn a_run_that_cannot_start_says_why_until_a_later_run_starts(cx: &mut TestAppContext) {
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let store = open_store(cx, &h, Settings::default(), None);
+    let (_id, dir, workspace) = open_workspace(cx, &h, &store, json!({}));
+    std::fs::write(dir.join("package.json"), r#"{"scripts": {"a": "echo a"}}"#).unwrap();
+    std::fs::create_dir_all(dir.join(".vscode")).unwrap();
+    std::fs::write(dir.join(".vscode/tasks.json"), r#"{"tasks": [{"label": "build", "command": "echo build"}]}"#).unwrap();
+    let (model, actions) = detected_run_actions(cx, &h, &workspace);
+    let ids: Vec<String> = actions.iter().map(|a| a.id()).collect();
+    assert_eq!(ids, ["npm:a", "vscode-task:build"]);
+
+    // The task's command is read when it runs; the file has gone since detection.
+    std::fs::remove_file(dir.join(".vscode/tasks.json")).unwrap();
+    model.update(cx, |m, cx| m.run(&actions[1], cx));
+    wait_until(cx, &model, |m| m.running() == 0);
+    assert_eq!(
+        model.read_with(cx, |m, _| m.error().map(str::to_owned)).as_deref(),
+        Some("Failed to run vscode-task:build: tasks.json not found")
+    );
+    assert!(terminal_tabs(cx, &workspace).is_empty());
+
+    model.update(cx, |m, cx| m.run(&actions[0], cx));
+    wait_until(cx, &model, |m| m.running() == 0);
+    assert_eq!(model.read_with(cx, |m, _| m.error().map(str::to_owned)), None);
+    let titles: Vec<String> = terminal_tabs(cx, &workspace).into_iter().map(|(title, _, _)| title).collect();
+    assert_eq!(titles, ["npm:a"]);
 }
