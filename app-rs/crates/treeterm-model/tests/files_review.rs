@@ -1235,6 +1235,113 @@ fn a_review_shown_again_refreshes(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn the_workspaces_own_branch_changing_reloads_the_review(cx: &mut TestAppContext) {
+    use treeterm_model::review::Loaded;
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let repo = TempRepo::new(&h);
+    repo.write("a.txt", "one\n");
+    repo.commit_all("base");
+    repo.git(&["checkout", "-q", "-b", "other"]);
+    repo.write("b.txt", "bee\n");
+    repo.commit_all("on other");
+    repo.git(&["checkout", "-q", "main"]);
+    repo.git(&["checkout", "-q", "-b", "feature"]);
+    repo.write("a.txt", "ONE\n");
+    repo.commit_all("on feature");
+    let store = open_store(cx, &h);
+    let workspace = open_repo_workspace(cx, &h, &store, &repo);
+    let (_, review) =
+        open_review_with(cx, &workspace, serde_json::json!({ "viewMode": "commits", "baseBranchOverride": "main" }));
+    let messages = |r: &ReviewModel| match r.content() {
+        ReviewContent::Commits(commits) => commits.into_iter().map(|c| c.message).collect::<Vec<_>>(),
+        _ => Vec::new(),
+    };
+    wait_review(cx, &review, "commits", |r, _| messages(r) == ["on feature"] && !r.is_loading());
+    let commit = review.read_with(cx, |r, _| match r.content() {
+        ReviewContent::Commits(commits) => commits[0].hash.clone(),
+        other => panic!("{other:?}"),
+    });
+    review.update(cx, |r, cx| r.select_commit(&commit, cx));
+    wait_review(cx, &review, "commit diff", |r, _| matches!(r.selected_commit().map(|s| &s.diff), Some(Loaded::Ready(_))));
+
+    // Checked out elsewhere: the branch's commits and changes reload; the old pick goes.
+    repo.git(&["checkout", "-q", "other"]);
+    workspace.update(cx, |w, cx| w.set_git_branch("other", cx));
+    assert!(review.read_with(cx, |r, _| r.selected_commit().is_none()));
+    assert!(!review.read_with(cx, |r, _| r.is_refreshing()));
+    wait_review(cx, &review, "the other branch", |r, _| messages(r) == ["on other"] && !r.is_loading());
+    review.update(cx, |r, cx| r.set_mode(ReviewMode::Committed, cx));
+    let ReviewContent::Committed(committed) = review.read_with(cx, |r, _| r.content()) else { unreachable!() };
+    assert_eq!(committed.files.iter().map(|f| f.path.as_str()).collect::<Vec<_>>(), ["b.txt"]);
+}
+
+#[gpui_kit::test]
+fn the_parents_branch_changing_keeps_the_review_and_moves_its_default_base(cx: &mut TestAppContext) {
+    use treeterm_model::review::ReviewBase;
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let repo = TempRepo::new(&h);
+    repo.write("a.txt", "one\n");
+    repo.commit_all("base");
+    repo.git(&["checkout", "-q", "-b", "feature"]);
+    repo.write("a.txt", "ONE\n");
+    repo.commit_all("on feature");
+    // `dev` already has the feature's commit.
+    repo.git(&["branch", "dev"]);
+    let store = open_store(cx, &h);
+    // A parent on `main` and a child on `feature`, both on the repo.
+    let (parent_id, child_id) = (format!("ws-{}", uuid::Uuid::new_v4().simple()), format!("ws-{}", uuid::Uuid::new_v4().simple()));
+    let body = |branch: &str, parent: Option<&str>| {
+        let mut body = serde_json::json!({
+            "name": branch, "status": "active", "isGitRepo": true, "isWorktree": false, "gitBranch": branch,
+            "appStates": {}, "metadata": {}, "createdAt": 1, "lastActivity": 1, "parentHash": ""
+        });
+        if let Some(parent) = parent {
+            body["parentId"] = serde_json::json!(parent);
+        }
+        body.to_string()
+    };
+    std::fs::write(h.daemon.workspaces_dir().join(format!("{parent_id}.json")), body("main", None)).unwrap();
+    std::fs::write(h.daemon.workspaces_dir().join(format!("{child_id}.json")), body("feature", Some(&parent_id))).unwrap();
+    let refs = vec![
+        WorkspaceRef { id: parent_id.clone(), path: repo.root() },
+        WorkspaceRef { id: child_id.clone(), path: repo.root() },
+    ];
+    futures::executor::block_on(h.conn.update_session(refs, None, "test-writer")).unwrap().unwrap();
+    let loaded = |s: &SessionStore, id: &str| matches!(s.entry(id), Some(WorkspaceEntry::Loaded(_)));
+    wait_until(cx, &store, |s| matches!(s.state(), SessionState::Live) && loaded(s, &parent_id) && loaded(s, &child_id));
+    let parent = store.read_with(cx, |s, _| s.workspace_store(&parent_id).unwrap().clone());
+    let child = store.read_with(cx, |s, _| s.workspace_store(&child_id).unwrap().clone());
+    // The session tells children their parent's branch whenever a workspace changes.
+    parent.update(cx, |_, cx| cx.notify());
+    wait_until_app(cx, &child, |w, _| w.parent_branch() == Some("main"));
+    let (follows_tab, follows) = open_review_with(cx, &child, serde_json::json!({ "viewMode": "committed" }));
+    let (_, pinned) = open_review_with(cx, &child, serde_json::json!({ "viewMode": "committed", "baseBranchOverride": "main" }));
+    for review in [&follows, &pinned] {
+        wait_review(cx, review, "loaded", |r, _| !r.is_loading() && r.overview().committed == 1);
+    }
+
+    // The parent moves to `dev`: the tab following it compares against `dev` (nothing left
+    // to review), as the same model; the tab with an override keeps comparing with `main`.
+    parent.update(cx, |w, cx| w.set_git_branch("dev", cx));
+    wait_until_app(cx, &child, |w, _| w.parent_branch() == Some("dev"));
+    assert_eq!(follows.read_with(cx, |r, _| r.base().clone()), ReviewBase::Branch("dev".into()));
+    let same = child.read_with(cx, |w, _| match w.tab_content(&follows_tab) {
+        Some(TabContent::Review(model)) => model.entity_id() == follows.entity_id(),
+        _ => false,
+    });
+    assert!(same, "the Review tab keeps its model (and so its view)");
+    wait_review(cx, &follows, "reloaded", |r, _| !r.is_loading() && r.overview().committed == 0);
+    assert!(matches!(follows.read_with(cx, |r, _| r.content()), ReviewContent::Committed(c) if c.base_branch == "dev"));
+    assert_eq!(pinned.read_with(cx, |r, _| r.base().clone()), ReviewBase::Branch("main".into()));
+    assert!(!pinned.read_with(cx, |r, _| r.is_loading()));
+    assert_eq!(pinned.read_with(cx, |r, _| r.overview().committed), 1);
+}
+
+#[gpui_kit::test]
 fn the_review_header_takes_the_child_actions_from_the_tabs_parent_id(cx: &mut TestAppContext) {
     let _serial = serial();
     cx.executor().allow_parking();

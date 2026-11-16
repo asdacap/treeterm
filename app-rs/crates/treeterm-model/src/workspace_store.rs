@@ -512,17 +512,43 @@ impl WorkspaceStore {
             return;
         }
         self.parent_branch = branch;
-        let reviews: Vec<String> = self
-            .tabs
+        // Review tabs following the parent (no `baseBranchOverride`) compare against its new
+        // branch, keeping their view (Electron's effect on `effectiveBaseBranch`).
+        let reviews: Vec<(Entity<crate::review::ReviewModel>, crate::review::ReviewBase)> = self
+            .workspace
+            .file
+            .app_states
             .iter()
-            .filter(|(_, tab)| matches!(tab, TabRef::Review { .. }))
-            .map(|(id, _)| id.clone())
+            .filter_map(|(tab_id, tab)| match self.tabs.get(tab_id) {
+                Some(TabRef::Review { model, .. }) => {
+                    Some((model.clone(), review_base(&tab.state, self.parent_branch.as_deref())))
+                }
+                Some(TabRef::Terminal(_) | TabRef::Files { .. } | TabRef::Editor { .. } | TabRef::Browser { .. } | TabRef::Tool(_))
+                | None => None,
+            })
             .collect();
-        for tab_id in reviews {
-            self.dispose_tab(&tab_id);
-            self.init_tab(&tab_id, cx);
+        for (review, base) in reviews {
+            review.update(cx, |r, cx| r.compare_against(base, cx));
         }
         cx.notify();
+    }
+
+    /// The Review tabs' models.
+    fn reviews(&self) -> Vec<Entity<crate::review::ReviewModel>> {
+        self.tabs
+            .values()
+            .filter_map(|tab| match tab {
+                TabRef::Review { model, .. } => Some(model.clone()),
+                TabRef::Terminal(_) | TabRef::Files { .. } | TabRef::Editor { .. } | TabRef::Browser { .. } | TabRef::Tool(_) => None,
+            })
+            .collect()
+    }
+
+    /// The workspace is on another branch: its Review tabs compare it again.
+    fn reload_reviews_for_branch(&mut self, cx: &mut Context<Self>) {
+        for review in self.reviews() {
+            review.update(cx, |r, cx| r.branch_changed(cx));
+        }
     }
 
     /// The parent workspace's branch, when known (Review's base, the rebase prompt).
@@ -821,11 +847,7 @@ impl WorkspaceStore {
                 self.tabs.insert(tab_id.to_owned(), TabRef::Browser { page, forward, _events: events });
             }
             AppKind::Review => {
-                let base = match (tab.state.get("baseBranchOverride").and_then(Value::as_str), &self.parent_branch) {
-                    (Some(branch), _) if !branch.is_empty() => crate::review::ReviewBase::Branch(branch.to_owned()),
-                    (_, Some(branch)) => crate::review::ReviewBase::Branch(branch.clone()),
-                    (_, None) => crate::review::ReviewBase::None,
-                };
+                let base = review_base(&tab.state, self.parent_branch.as_deref());
                 let (exec, git, path, state) =
                     (self.conn.exec_client(), self.conn.git(), self.workspace.path.clone(), tab.state.clone());
                 let workspace = cx.entity();
@@ -1586,15 +1608,7 @@ impl WorkspaceStore {
             }
         }
         if result.is_ok() && output.after == crate::session_store::AfterMerge::Keep {
-            let reviews: Vec<Entity<crate::review::ReviewModel>> = self
-                .tabs
-                .values()
-                .filter_map(|tab| match tab {
-                    TabRef::Review { model, .. } => Some(model.clone()),
-                    TabRef::Terminal(_) | TabRef::Files { .. } | TabRef::Editor { .. } | TabRef::Browser { .. } | TabRef::Tool(_) => None,
-                })
-                .collect();
-            for review in reviews {
+            for review in self.reviews() {
                 review.update(cx, |r, cx| r.reload_changes(cx));
             }
         }
@@ -1614,6 +1628,7 @@ impl WorkspaceStore {
             return;
         }
         self.workspace.file.git_branch = Some(branch.to_owned());
+        self.reload_reviews_for_branch(cx);
         self.changed(cx);
     }
 
@@ -1690,7 +1705,12 @@ impl WorkspaceStore {
         if let Err(error) = self.attention.reconcile_write(&file.metadata, "") {
             tracing::warn!(%error, "unreadable attention metadata in an incoming body");
         }
+        let branch_moved = file.git_branch != self.workspace.file.git_branch;
         self.workspace.file = file;
+        // The Review tabs open before it (new ones load as they open).
+        if branch_moved {
+            self.reload_reviews_for_branch(cx);
+        }
         let tab_ids: Vec<String> = self.workspace.file.app_states.keys().cloned().collect();
         for tab_id in tab_ids {
             self.init_tab(&tab_id, cx);
@@ -1755,6 +1775,16 @@ impl WorkspaceStore {
     pub fn dispose(&mut self) {
         self.tabs.clear();
         self.writers.clear();
+    }
+}
+
+/// A Review tab's base: its `baseBranchOverride`, else the parent's branch
+/// (`effectiveBaseBranch`), else none.
+fn review_base(state: &Value, parent: Option<&str>) -> crate::review::ReviewBase {
+    match (state.get("baseBranchOverride").and_then(Value::as_str), parent) {
+        (Some(branch), _) if !branch.is_empty() => crate::review::ReviewBase::Branch(branch.to_owned()),
+        (_, Some(branch)) => crate::review::ReviewBase::Branch(branch.to_owned()),
+        (_, None) => crate::review::ReviewBase::None,
     }
 }
 

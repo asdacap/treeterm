@@ -730,6 +730,13 @@ impl ReviewModel {
             Some(branch) => cx.emit(ReviewEvent::StateChanged(json!({ "baseBranchOverride": branch }))),
             None => cx.emit(ReviewEvent::StateRemoved("baseBranchOverride")),
         }
+        self.compare_against(base, cx);
+    }
+
+    /// Compare against `base` from now on (the picker's choice, or the parent's new branch
+    /// for a tab without an override), keeping the view. Without a base, Committed has
+    /// nothing to show: Uncommitted is shown.
+    pub(crate) fn compare_against(&mut self, base: ReviewBase, cx: &mut Context<Self>) {
         if base == self.base {
             return;
         }
@@ -737,6 +744,11 @@ impl ReviewModel {
         if self.base == ReviewBase::None && self.mode == ReviewMode::Committed {
             self.mode = ReviewMode::Uncommitted;
         }
+        self.reload_all(cx);
+    }
+
+    /// The workspace is on another branch (a checkout, a rename): everything reloads.
+    pub(crate) fn branch_changed(&mut self, cx: &mut Context<Self>) {
         self.reload_all(cx);
     }
 
