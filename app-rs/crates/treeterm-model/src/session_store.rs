@@ -843,12 +843,16 @@ impl SessionStore {
         let remote = self.remote.clone();
         let store = cx.new(|cx| WorkspaceStore::new(workspace, conn, registry, settings, llm, remote, cx));
         let owned = id.clone();
-        let subscription = cx.subscribe(&store, move |session, _, event: &WorkspaceEvent, cx| match event {
+        let subscription = cx.subscribe(&store, move |session, store, event: &WorkspaceEvent, cx| match event {
             WorkspaceEvent::Changed => session.enqueue_content_sync(&owned, cx),
             WorkspaceEvent::AttentionRecorded => cx.emit(SessionEvent::AttentionRecorded(owned.clone())),
             WorkspaceEvent::LabelsChanged => session.save_registry_entry(&owned, cx),
             WorkspaceEvent::MergeRequested { squash, after } => session.merge_workspace(&owned, *squash, *after, cx),
-            WorkspaceEvent::RemoveRequested(mode) => session.remove_workspace(&owned, *mode, cx),
+            WorkspaceEvent::CloseAndCleanRequested { tab } => {
+                if let Err(error) = session.close_and_clean_workspace(&owned, cx) {
+                    store.update(cx, |w, cx| w.close_failed(tab, &error, cx));
+                }
+            }
         });
         let viewed = self.viewed.as_deref() == Some(id.as_str());
         if let Some(github) = self.github.clone() {
@@ -2052,11 +2056,13 @@ impl SessionStore {
     /// Remove a workspace and its descendants (`removeWorkspace*`): under the session lock,
     /// children first, kill each one's tabs, clean up git as `mode` says, drop it; then
     /// publish the smaller membership and delete the body files. A failure stops the
-    /// removal and shows on the workspace.
+    /// removal and shows on the workspace. Until then the workspace is marked removing (its
+    /// Review's actions wait).
     pub fn remove_workspace(&mut self, id: &str, mode: RemoveMode, cx: &mut Context<Self>) {
         let Some(store) = self.workspace_store(id).cloned() else {
             return;
         };
+        store.update(cx, |w, cx| w.set_removing(true, cx));
         let id = id.to_owned();
         let lock = self.acquire_lock(cx);
         let git = self.conn.git();
@@ -2065,18 +2071,39 @@ impl SessionStore {
             match locked {
                 Ok(()) => {
                     if let Err(error) = remove_locked(&this, &id, mode, &git, cx).await {
-                        match this.update(cx, |session, cx| session.set_operation_error(&id, &store, error, cx)) {
+                        match this.update(cx, |session, cx| session.removal_failed(&id, &store, error, cx)) {
                             Ok(()) | Err(_) => {}
                         }
                     }
                     release(&this, cx).await;
                 }
-                Err(error) => match this.update(cx, |session, cx| session.set_operation_error(&id, &store, error, cx)) {
+                Err(error) => match this.update(cx, |session, cx| session.removal_failed(&id, &store, error, cx)) {
                     Ok(()) | Err(_) => {} // Err: store dropped
                 },
             }
         })
         .detach();
+    }
+
+    /// `closeAndCleanWorkspace` (Review's "Close and Clean"): remove a worktree child, keeping
+    /// its branch, once its parent is a loaded git repo. A refusal is returned for the tab to
+    /// show; a failed removal shows on the workspace, as any removal's.
+    pub fn close_and_clean_workspace(&mut self, id: &str, cx: &mut Context<Self>) -> Result<(), String> {
+        let file = self.workspace_store(id).ok_or("Workspace not found")?.read(cx).file();
+        let (true, Some(parent_id)) = (file.is_worktree, file.parent_id.clone().filter(|p| !p.is_empty())) else {
+            return Err("Not a worktree workspace".to_owned());
+        };
+        self.workspace_store(&parent_id)
+            .filter(|parent| parent.read(cx).file().git_root_path.is_some())
+            .ok_or("Parent workspace not found or not a git repo")?;
+        self.remove_workspace(id, RemoveMode::KeepBranch, cx);
+        Ok(())
+    }
+
+    /// A removal stopped: the workspace stays, showing why.
+    fn removal_failed(&mut self, id: &str, store: &Entity<WorkspaceStore>, error: String, cx: &mut Context<Self>) {
+        store.update(cx, |w, cx| w.set_removing(false, cx));
+        self.set_operation_error(id, store, error, cx);
     }
 
     /// Merge a child worktree's branch into its parent (`mergeAndRemoveWorkspace` /

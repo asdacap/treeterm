@@ -24,8 +24,8 @@ use gpui_kit::{
 };
 use treeterm_core::git::{GitLogCommit, Staging};
 use treeterm_model::review::{
-    ConflictCheck, FavouriteSelection, GitOp, Loaded, Notice, ReviewBase, ReviewContent, ReviewEvent, ReviewHeader,
-    ReviewMode, ReviewModel, StageTarget,
+    ConflictCheck, FavouriteSelection, GitOp, Loaded, Notice, Processing, ReviewBase, ReviewContent, ReviewEvent,
+    ReviewHeader, ReviewMode, ReviewModel, StageTarget,
 };
 use treeterm_model::session_store::AfterMerge;
 use treeterm_model::workspace_store::{MergeOutput, MergeState, WorkspaceStore};
@@ -96,18 +96,19 @@ pub struct ReviewView {
 }
 
 impl ReviewView {
-    pub fn new(model: Entity<ReviewModel>, workspace: Entity<WorkspaceStore>, cx: &mut Context<Self>) -> Self {
+    pub fn new(model: Entity<ReviewModel>, workspace: Entity<WorkspaceStore>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let observe = cx.observe(&model, |_, _, cx| cx.notify());
-        let events = cx.subscribe(&model, |view, _, event: &ReviewEvent, cx| match event {
+        let events = cx.subscribe_in(&model, window, |view, _, event: &ReviewEvent, window, cx| match event {
             ReviewEvent::Committed => {
                 view.clear_message = true;
                 cx.notify();
             }
+            ReviewEvent::Alert(message) => alert(message.clone(), window, cx),
             ReviewEvent::StateChanged(_)
             | ReviewEvent::StateRemoved(_)
             | ReviewEvent::CloseRequested
             | ReviewEvent::MergeRequested { .. }
-            | ReviewEvent::RemoveRequested(_) => {}
+            | ReviewEvent::CloseAndCleanRequested => {}
         });
         Self {
             model,
@@ -379,13 +380,13 @@ impl ReviewView {
     fn header_actions(&mut self, header: &ReviewHeader, cx: &mut Context<Self>) -> AnyElement {
         let c = colors(cx);
         let (secondary, tertiary, hover, primary, accent) = (c.text_secondary, c.bg_tertiary, c.bg_hover, c.text_primary, c.accent);
-        let (overview, conflicts, refreshing, merge) = {
+        let (overview, conflicts, refreshing, merge, processing) = {
             let model = self.model.read(cx);
-            (model.overview(), model.conflicts().clone(), model.is_refreshing(), model.merge_output(cx))
+            (model.overview(), model.conflicts().clone(), model.is_refreshing(), model.merge_output(cx), model.processing(cx))
         };
-        // `isProcessing`: the actions wait for a running merge.
-        let merging = merge.as_ref().filter(|m| m.state == MergeState::Running);
-        let idle = merging.is_none();
+        // `isProcessing`: every action waits for a merge or a removal running.
+        let idle = processing == Processing::Idle;
+        let merging = merge.filter(|m| m.state == MergeState::Running);
         let has_uncommitted = overview.uncommitted > 0;
         let white = gpui_kit::white();
         let mut actions = h_flex().gap(px(8.)).items_center().flex_shrink_0();
@@ -426,11 +427,14 @@ impl ReviewView {
                 actions = actions.children(prompt_commit).child(cancel("Close", cx));
             }
             (true, true) => {
+                let removing = processing == Processing::Removing;
                 actions = actions
                     .children(prompt_commit)
                     .child(
                         action_button("review-close-and-clean", rgb(0x0066cc).into(), rgb(0x0077ee).into(), white, idle)
-                            .child("Close and Clean")
+                            // `.btn-spinner`: 12px, 6px before the label.
+                            .when(removing, |d| d.child(div().mr(px(6.)).child(spinner(12., white))))
+                            .child(if removing { "Closing..." } else { "Close and Clean" })
                             .when(idle, |d| {
                                 d.on_click(cx.listener(|view, _: &ClickEvent, window, cx| view.confirm_close_and_clean(window, cx)))
                             }),
@@ -468,18 +472,20 @@ impl ReviewView {
                                 }),
                         )
                     })
-                    .child(self.merge_group(has_conflicts, has_uncommitted, merging.cloned(), accent, cx))
+                    .child(self.merge_group(has_conflicts, idle, has_uncommitted, merging, accent, cx))
                     .child(cancel("Cancel", cx));
             }
         }
         actions.into_any_element()
     }
 
-    /// `.merge-btn-group`: "Merge" and a chevron opening the other merges.
+    /// `.merge-btn-group`: "Merge" and a chevron opening the other merges, all disabled with
+    /// conflicts or while something runs (`!idle`).
     /// `merging`: the merge running, whose button reads "Merging..." (`processingAction`).
     fn merge_group(
         &mut self,
         has_conflicts: bool,
+        idle: bool,
         has_uncommitted: bool,
         merging: Option<MergeOutput>,
         accent: gpui_kit::Hsla,
@@ -487,7 +493,7 @@ impl ReviewView {
     ) -> AnyElement {
         let c = colors(cx);
         let (hover, primary, bg) = (c.bg_hover, c.text_primary, c.bg_secondary);
-        let enabled = !has_conflicts && merging.is_none();
+        let enabled = !has_conflicts && idle;
         let white = gpui_kit::white();
         let blue_hover: gpui_kit::Hsla = rgb(0x006cbf).into();
         // Only the plain merge is on the button; the others are in the closed menu.
@@ -515,6 +521,8 @@ impl ReviewView {
         let mut group = h_flex().relative().child(main).child(toggle);
         if self.merge_menu {
             let suffix = if has_conflicts { " (has conflicts)" } else { "" };
+            // `.merge-dropdown-item:disabled`: conflicts found or something started while the
+            // menu was open.
             let item = |id: &'static str, label: &'static str, squash: bool, after: AfterMerge, cx: &mut Context<Self>| {
                 div()
                     .id(id)
@@ -524,13 +532,14 @@ impl ReviewView {
                     .text_size(px(13.))
                     .text_color(primary)
                     .whitespace_nowrap()
-                    .cursor_pointer()
-                    .hover(move |d| d.bg(hover))
                     .child(format!("{label}{suffix}"))
-                    .on_click(cx.listener(move |view, _: &ClickEvent, window, cx| {
-                        view.merge_menu = false;
-                        view.start_merge(squash, after, has_uncommitted, window, cx);
-                    }))
+                    .when(!enabled, |d| d.opacity(0.5))
+                    .when(enabled, |d| {
+                        d.cursor_pointer().hover(move |d| d.bg(hover)).on_click(cx.listener(move |view, _: &ClickEvent, window, cx| {
+                            view.merge_menu = false;
+                            view.start_merge(squash, after, has_uncommitted, window, cx);
+                        }))
+                    })
             };
             let menu = v_flex()
                 .id("merge-dropdown")
@@ -1456,6 +1465,11 @@ impl ReviewView {
             ReviewContent::Commits(commits) => self.commits(commits, window, cx),
         }
     }
+}
+
+/// Electron's `alert()`: the message and OK.
+fn alert(message: String, window: &mut Window, cx: &mut App) {
+    window.open_alert_dialog(cx, move |alert, _, _| alert.description(message.clone()));
 }
 
 /// `.diff-action-btn` as Electron draws it: two rules share the class, so the button keeps

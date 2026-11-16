@@ -1961,7 +1961,7 @@ fn workspace_pane(
                 let view = connected
                     .review_views
                     .entry(model.entity_id())
-                    .or_insert_with(|| cx.new(|cx| crate::review_view::ReviewView::new(model.clone(), workspace.clone(), cx)))
+                    .or_insert_with(|| cx.new(|cx| crate::review_view::ReviewView::new(model.clone(), workspace.clone(), window, cx)))
                     .clone();
                 if std::mem::take(&mut connected.focus_pending) {
                     let focus = view.read(cx).focus_handle().clone();

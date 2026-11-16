@@ -31,8 +31,8 @@ use crate::file_browser::FileBrowser;
 use crate::review_find::{DiffLayout, DiffMatch, find_in_patch, in_file_first};
 use crate::search_panel::{RepoResults, SearchRow, count_label, push_repo_section, spawn_repo_search};
 use crate::review_metadata::{Blame, Later, Now};
-use crate::session_store::{AfterMerge, RemoveMode};
-use crate::workspace_store::WorkspaceStore;
+use crate::session_store::AfterMerge;
+use crate::workspace_store::{MergeState, WorkspaceStore};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReviewMode {
@@ -119,11 +119,23 @@ pub enum ReviewEvent {
     CloseRequested,
     /// The merge buttons: merge this workspace's branch into its parent.
     MergeRequested { squash: bool, after: AfterMerge },
-    /// "Close and Clean": remove this (detached) workspace.
-    RemoveRequested(RemoveMode),
+    /// "Close and Clean": remove this (detached) workspace, keeping its branch.
+    CloseAndCleanRequested,
+    /// Electron's `alert()`: the view shows the message until it is dismissed.
+    Alert(String),
 }
 
 impl EventEmitter<ReviewEvent> for ReviewModel {}
+
+/// What the header's actions wait for (`isProcessing`): all of them are disabled meanwhile.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Processing {
+    Idle,
+    /// This workspace is merging into its parent.
+    Merging,
+    /// This workspace is being removed ("Close and Clean", or from the tree).
+    Removing,
+}
 
 /// The branch a worktree is reviewed against.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -787,9 +799,19 @@ impl ReviewModel {
         self.workspace.upgrade()?.read(cx).merge_output().cloned()
     }
 
-    /// A merge is running (`isProcessing`): the header's actions wait for it.
-    pub fn is_merging(&self, cx: &App) -> bool {
-        self.merge_output(cx).is_some_and(|o| o.state == crate::workspace_store::MergeState::Running)
+    /// What the header's actions wait for (`isProcessing`).
+    pub fn processing(&self, cx: &App) -> Processing {
+        let Some(workspace) = self.workspace.upgrade() else {
+            return Processing::Idle;
+        };
+        let workspace = workspace.read(cx);
+        if workspace.merge_output().is_some_and(|o| o.state == MergeState::Running) {
+            Processing::Merging
+        } else if workspace.is_removing() {
+            Processing::Removing
+        } else {
+            Processing::Idle
+        }
     }
 
     /// The merge output's close button.
@@ -799,9 +821,15 @@ impl ReviewModel {
         }
     }
 
-    /// "Close and Clean": remove the worktree, keep the branch.
+    /// "Close and Clean": remove the worktree, keep the branch. The session refuses it
+    /// unless this is a worktree of a loaded git repo ([`Self::close_failed`]).
     pub fn close_and_clean(&mut self, cx: &mut Context<Self>) {
-        cx.emit(ReviewEvent::RemoveRequested(RemoveMode::KeepBranch));
+        cx.emit(ReviewEvent::CloseAndCleanRequested);
+    }
+
+    /// "Close and Clean" was refused before anything ran.
+    pub(crate) fn close_failed(&mut self, error: &str, cx: &mut Context<Self>) {
+        cx.emit(ReviewEvent::Alert(format!("Close failed: {error}")));
     }
 
     /// "Prompt Rebase": ask the harness to rebase onto the parent's branch.

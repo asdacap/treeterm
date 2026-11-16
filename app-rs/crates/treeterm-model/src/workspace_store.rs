@@ -46,8 +46,9 @@ pub enum WorkspaceEvent {
     LabelsChanged,
     /// Review's merge buttons: merge this workspace into its parent (the session runs it).
     MergeRequested { squash: bool, after: crate::session_store::AfterMerge },
-    /// Review's "Close and Clean": remove this workspace.
-    RemoveRequested(crate::session_store::RemoveMode),
+    /// Review's "Close and Clean" in tab `tab`: remove this workspace, keeping its branch
+    /// (a refusal goes back to that tab, [`WorkspaceStore::close_failed`]).
+    CloseAndCleanRequested { tab: String },
 }
 
 impl EventEmitter<WorkspaceEvent> for WorkspaceStore {}
@@ -256,6 +257,8 @@ pub struct WorkspaceStore {
     merge_output: Option<MergeOutput>,
     /// Background writers by PTY id, for harness prompts and auto-approve (`ttyWriters`).
     writers: HashMap<String, PtyWriter>,
+    /// The session is removing this workspace; runtime only.
+    removing: bool,
     _git_refresh: Option<Task<()>>,
 }
 
@@ -321,6 +324,7 @@ impl WorkspaceStore {
             traffic_counter,
             merge_output: None,
             writers: HashMap::new(),
+            removing: false,
             _git_refresh: None,
         };
         let tab_ids: Vec<String> = store.workspace.file.app_states.keys().cloned().collect();
@@ -836,7 +840,10 @@ impl WorkspaceStore {
                         crate::review::ReviewEvent::MergeRequested { squash, after } => {
                             cx.emit(WorkspaceEvent::MergeRequested { squash: *squash, after: *after });
                         }
-                        crate::review::ReviewEvent::RemoveRequested(mode) => cx.emit(WorkspaceEvent::RemoveRequested(*mode)),
+                        crate::review::ReviewEvent::CloseAndCleanRequested => {
+                            cx.emit(WorkspaceEvent::CloseAndCleanRequested { tab: owned_tab.clone() });
+                        }
+                        crate::review::ReviewEvent::Alert(_) => {}
                     }
                 });
                 self.tabs.insert(tab_id.to_owned(), TabRef::Review { model, _events: events });
@@ -1513,6 +1520,25 @@ impl WorkspaceStore {
             self.merge_output = None;
             cx.notify();
         }
+    }
+
+    /// The session is removing this workspace (Review's actions wait).
+    pub fn is_removing(&self) -> bool {
+        self.removing
+    }
+
+    pub(crate) fn set_removing(&mut self, removing: bool, cx: &mut Context<Self>) {
+        self.removing = removing;
+        cx.notify();
+    }
+
+    /// Review's "Close and Clean" was refused before anything ran: the tab that asked says
+    /// why (`Close failed: ...`).
+    pub(crate) fn close_failed(&mut self, tab_id: &str, error: &str, cx: &mut Context<Self>) {
+        let Some(TabRef::Review { model, .. }) = self.tabs.get(tab_id) else {
+            return; // not a Review tab: it closed and its id was reused
+        };
+        model.clone().update(cx, |review, cx| review.close_failed(error, cx));
     }
 
     /// The session started merging this workspace into its parent.

@@ -4,6 +4,7 @@ use std::collections::HashSet;
 
 use gpui_kit::{AppContext as _, Entity, TestAppContext};
 use treeterm_core::wire::workspace_file::{WorkspaceFile, WorkspaceStatus, WorktreeSettings};
+use treeterm_model::review::{Processing, ReviewEvent};
 use treeterm_model::session_store::{RemoveMode, SessionState, SessionStore, WorkspaceEntry};
 use treeterm_model::settings_store::SettingsStore;
 use treeterm_model::workspace_store::{MergeState, TabContent, Workspace, WorkspaceStore};
@@ -554,7 +555,7 @@ fn a_failed_merge_shows_on_the_merged_workspace_only(cx: &mut TestAppContext) {
         panic!("not a review tab");
     };
     review.update(cx, |r, cx| r.merge(true, AfterMerge::Keep, cx));
-    assert!(review.read_with(cx, |r, cx| r.is_merging(cx)));
+    assert_eq!(review.read_with(cx, |r, cx| r.processing(cx)), Processing::Merging);
     // A running merge's output cannot be hidden.
     review.update(cx, |r, cx| r.dismiss_merge_output(cx));
     assert!(review.read_with(cx, |r, cx| r.merge_output(cx).is_some()));
@@ -567,7 +568,7 @@ fn a_failed_merge_shows_on_the_merged_workspace_only(cx: &mut TestAppContext) {
         "{}",
         output.output
     );
-    assert!(!review.read_with(cx, |r, cx| r.is_merging(cx)));
+    assert_eq!(review.read_with(cx, |r, cx| r.processing(cx)), Processing::Idle);
     assert!(store.read_with(cx, |s, _| matches!(s.entry(&child), Some(WorkspaceEntry::OperationError { .. }))));
     let root_ws = store.read_with(cx, |s, _| ws(s, &root));
     assert!(root_ws.read_with(cx, |w, _| w.merge_output().is_none()), "the parent shows no merge output");
@@ -674,6 +675,147 @@ fn the_last_conflicts_stay_while_rechecking(cx: &mut TestAppContext) {
     for state in seen.borrow().iter() {
         assert!(state.has_conflicts() && state.parent_has_new_commits, "{state:?}");
     }
+}
+
+type Events = std::rc::Rc<std::cell::RefCell<Vec<ReviewEvent>>>;
+
+/// Every event `review` emits from now on.
+fn record_events(cx: &mut TestAppContext, review: &Entity<treeterm_model::review::ReviewModel>) -> (Events, gpui_kit::Subscription) {
+    let events = Events::default();
+    let seen = events.clone();
+    let subscription = cx.update(|cx| cx.subscribe(review, move |_, event: &ReviewEvent, _| seen.borrow_mut().push(event.clone())));
+    (events, subscription)
+}
+
+fn alerts(events: &Events) -> Vec<String> {
+    events
+        .borrow()
+        .iter()
+        .filter_map(|event| match event {
+            ReviewEvent::Alert(message) => Some(message.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// A Review tab on `workspace` with `state`.
+fn review_tab(cx: &mut TestAppContext, workspace: &Entity<WorkspaceStore>, state: serde_json::Value) -> Entity<treeterm_model::review::ReviewModel> {
+    let tab = workspace.update(cx, |w, cx| w.add_tab_with("review", state, cx)).unwrap();
+    let Some(TabContent::Review(review)) = workspace.read_with(cx, |w, _| w.tab_content(&tab)) else {
+        panic!("not a review tab");
+    };
+    review
+}
+
+/// A detached worktree body under `parent` (`isWorktree` as given).
+fn detached_body(name: &str, worktree: bool, parent: &str) -> String {
+    serde_json::json!({
+        "name": name, "status": "active", "isGitRepo": true, "isWorktree": worktree, "isDetached": true,
+        "parentId": parent, "appStates": {}, "metadata": {}, "createdAt": 1, "lastActivity": 1, "parentHash": ""
+    })
+    .to_string()
+}
+
+#[gpui_kit::test]
+fn close_and_clean_is_refused_with_an_alert_unless_the_parent_is_a_loaded_repo(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    let write = |id: &str, body: String| std::fs::write(h.daemon.workspaces_dir().join(format!("{id}.json")), body).unwrap();
+    // "root" is not a git repo (no gitRootPath); "orphan"'s parent is not in the session;
+    // "plain" is not a worktree.
+    write("root", body("root", None));
+    write("nogit", detached_body("nogit", true, "root"));
+    write("orphan", detached_body("orphan", true, "missing"));
+    write("plain", detached_body("plain", false, "root"));
+    publish(&h, &["root", "nogit", "orphan", "plain"]);
+    let store = open_store(cx, &h, "client-a");
+    wait_until(cx, &store, |s| ["root", "nogit", "orphan", "plain"].iter().all(|id| loaded(s, id)));
+
+    let refusals = [
+        ("nogit", "root", "Parent workspace not found or not a git repo"),
+        ("orphan", "missing", "Parent workspace not found or not a git repo"),
+        ("plain", "root", "Not a worktree workspace"),
+    ];
+    for (id, parent, error) in refusals {
+        let workspace = store.read_with(cx, |s, _| ws(s, id));
+        // The tab names its parent, so Close and Clean shows.
+        let review = review_tab(cx, &workspace, serde_json::json!({ "parentWorkspaceId": parent }));
+        let header = review.read_with(cx, |r, cx| r.header(cx));
+        assert!(header.has_parent && header.detached, "{header:?}");
+        let (events, _events) = record_events(cx, &review);
+        review.update(cx, |r, cx| r.close_and_clean(cx));
+        cx.run_until_parked();
+        assert_eq!(alerts(&events), vec![format!("Close failed: {error}")], "{id}");
+        assert_eq!(review.read_with(cx, |r, cx| r.processing(cx)), Processing::Idle, "{id}");
+        assert!(store.read_with(cx, |s, _| loaded(s, id)), "{id} stays");
+    }
+    assert_eq!(store.update(cx, |s, cx| s.close_and_clean_workspace("gone", cx)), Err("Workspace not found".to_owned()));
+}
+
+#[gpui_kit::test]
+fn close_and_clean_disables_the_review_until_the_workspace_is_gone(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    publish(&h, &[]);
+    let repo = TempRepo::new(&h);
+    let store = open_store(cx, &h, "client-a");
+    let root = open_repo_workspace(cx, &store, &repo);
+    let child = store.update(cx, |s, cx| s.add_child_workspace(&root, "det-close".into(), true, None, cx)).unwrap();
+    wait_child(cx, &store, &child);
+    // The child's creation released the lock (else the removal would be refused).
+    wait_until(cx, &store, |s| !s.is_locked());
+    let child_ws = store.read_with(cx, |s, _| ws(s, &child));
+    let child_dir = std::path::PathBuf::from(child_ws.read_with(cx, |w, _| w.workspace().path.clone()));
+    let review = review_tab(cx, &child_ws, serde_json::json!({}));
+    wait_until(cx, &review, |r| !r.is_refreshing());
+    let header = review.read_with(cx, |r, cx| r.header(cx));
+    assert!(header.has_parent && header.detached, "{header:?}");
+
+    let (events, _events) = record_events(cx, &review);
+    review.update(cx, |r, cx| r.close_and_clean(cx));
+    // "Closing...": every action waits.
+    assert_eq!(review.read_with(cx, |r, cx| r.processing(cx)), Processing::Removing);
+    wait_until(cx, &store, |s| s.entry(&child).is_none());
+    wait_for_disk(cx, || !child_dir.exists());
+    assert!(alerts(&events).is_empty());
+    assert!(loaded_now(&store, cx, &root));
+}
+
+#[gpui_kit::test]
+fn a_close_and_clean_that_cannot_run_shows_on_the_workspace_and_frees_the_review(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    let root = serde_json::json!({
+        "name": "root", "status": "active", "isGitRepo": true, "isWorktree": false, "gitBranch": "main",
+        "gitRootPath": h.daemon.root().to_string_lossy(), "appStates": {}, "metadata": {}, "createdAt": 1,
+        "lastActivity": 1, "parentHash": ""
+    });
+    std::fs::write(h.daemon.workspaces_dir().join("root.json"), root.to_string()).unwrap();
+    std::fs::write(h.daemon.workspaces_dir().join("child.json"), detached_body("child", true, "root")).unwrap();
+    publish(&h, &["root", "child"]);
+    let store = open_store(cx, &h, "client-a");
+    wait_until(cx, &store, |s| loaded(s, "root") && loaded(s, "child"));
+    // Another connection holds the session lock: the removal cannot start.
+    let other = futures::executor::block_on(treeterm_core::daemon::DaemonConnection::open(&h.rt, h.daemon.socket_path()))
+        .unwrap()
+        .unwrap();
+    let locked = futures::executor::block_on(other.lock_session(std::time::Duration::from_secs(600))).unwrap().unwrap();
+    assert!(matches!(locked, treeterm_core::daemon::SessionLockResult::Acquired(_)));
+    let child_ws = store.read_with(cx, |s, _| ws(s, "child"));
+    let review = review_tab(cx, &child_ws, serde_json::json!({}));
+    let (events, _events) = record_events(cx, &review);
+
+    review.update(cx, |r, cx| r.close_and_clean(cx));
+    assert_eq!(review.read_with(cx, |r, cx| r.processing(cx)), Processing::Removing);
+    wait_until(cx, &store, |s| matches!(s.entry("child"), Some(WorkspaceEntry::OperationError { .. })));
+    let error = store.read_with(cx, |s, _| match s.entry("child") {
+        Some(WorkspaceEntry::OperationError { error, .. }) => error.clone(),
+        _ => unreachable!(),
+    });
+    assert_eq!(error, "Session is locked by another window");
+    // The failure is the workspace's warning, not an alert; the actions work again.
+    assert!(alerts(&events).is_empty());
+    assert_eq!(review.read_with(cx, |r, cx| r.processing(cx)), Processing::Idle);
 }
 
 /// A temp git repo with one commit, plus cleanup of what tests create for it under the
