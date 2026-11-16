@@ -232,7 +232,8 @@
 
 ; Keywords
 
-; TreeTerm patch: `satisfies`, `type` in an import or export and `require` in
+; TreeTerm patch: `satisfies`, `type` in an import or export (`import type { T }`,
+; `export type { T }`, `import { type T }`, `export { type T }`) and `require` in
 ; `import x = require(…)` are control keywords, as VS Code's TypeScript grammar scopes them
 ; (`keyword.control.satisfies.ts`, `keyword.control.type.ts`, `keyword.control.require.ts`);
 ; `export` is one already (above).
@@ -240,6 +241,7 @@
 (import_statement "type" @keyword.control)
 (export_statement "type" @keyword.control)
 (import_specifier "type" @keyword.control)
+(export_specifier "type" @keyword.control)
 (import_require_clause "require" @keyword.control)
 
 [ "abstract"

@@ -305,21 +305,20 @@ mod tests {
         assert_colors("a.ts", javascript, &tokens);
         assert_colors("a.tsx", javascript, &tokens);
         // TypeScript's own: `type` is a control keyword in an import or export only.
-        let typescript = "import type { T } from 'm'\nimport { type V } from 'n'\nexport type { U }\nimport fs = require('fs')\nconst v = x as T satisfies U\ntype A = B\ninterface I {}\n";
-        assert_colors(
-            "a.ts",
-            typescript,
-            &[
-                ("type { T", CONTROL),
-                ("type V", CONTROL),
-                ("type { U", CONTROL),
-                ("require", CONTROL),
-                ("as T", CONTROL),
-                ("satisfies", CONTROL),
-                ("type A", KEYWORD),
-                ("interface", KEYWORD),
-            ],
-        );
+        let typescript = "import type { T } from 'm'\nimport { type V } from 'n'\nexport type { U }\nexport { type W } from 'p'\nimport fs = require('fs')\nconst v = x as T satisfies U\ntype A = B\ninterface I {}\n";
+        let tokens = [
+            ("type { T", CONTROL),
+            ("type V", CONTROL),
+            ("type { U", CONTROL),
+            ("type W", CONTROL),
+            ("require", CONTROL),
+            ("as T", CONTROL),
+            ("satisfies", CONTROL),
+            ("type A", KEYWORD),
+            ("interface", KEYWORD),
+        ];
+        assert_colors("a.ts", typescript, &tokens);
+        assert_colors("a.tsx", typescript, &tokens);
         let python = "import os\nfrom a import b as c\nasync def f(xs):\n    for x in xs:\n        if x: pass\n        elif x: continue\n        else: break\n    while True: return [y async for y in xs if y]\n    try: assert x\n    except E as e: raise\n    finally: del x\n    async with a as b: await g()\n    with a: yield from xs\n    match x:\n        case 1: pass\n    global g\n    lambda: 1\nclass C: pass\n";
         assert_colors(
             "a.py",
