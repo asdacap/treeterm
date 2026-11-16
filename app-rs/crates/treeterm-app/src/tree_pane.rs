@@ -623,11 +623,12 @@ impl TreePane {
             .context_menu(move |menu, _window, cx| {
                 let store = session.read(cx).workspace_store(&menu_id).cloned();
                 let Some(store) = store else {
-                    // Not loaded: only Dismiss.
-                    let (session, id, label) = (session.clone(), menu_id.clone(), label.clone());
-                    return menu.item(danger_item("Dismiss").on_click(move |_, window, cx| {
-                        confirm_remove(session.clone(), id.clone(), label.clone(), RemoveMode::KeepWorktreeAndBranch, window, cx)
-                    }));
+                    // Not loaded: only Dismiss, at once (`dismissWorkspace`).
+                    let (session, id) = (session.clone(), menu_id.clone());
+                    return menu.item(
+                        danger_item("Dismiss")
+                            .on_click(move |_, _, cx| session.update(cx, |s, cx| s.dismiss_workspace(&id, cx))),
+                    );
                 };
                 let file = store.read(cx).file().clone();
                 let child = file.is_worktree && has_parent;

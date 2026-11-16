@@ -543,6 +543,11 @@ impl SessionStore {
         self.entries.get(id)
     }
 
+    /// The workspace this session's window shows (`activeWorkspaceId`), if any.
+    pub fn viewed_workspace(&self) -> Option<&str> {
+        self.viewed.as_deref()
+    }
+
     pub fn workspace_store(&self, id: &str) -> Option<&Entity<WorkspaceStore>> {
         self.entries.get(id).and_then(WorkspaceEntry::store)
     }
@@ -1609,17 +1614,23 @@ impl SessionStore {
         }
     }
 
-    /// Drop a placeholder or failed workspace from this window (`dismissWorkspace`).
+    /// Drop a placeholder or failed workspace from this window (`dismissWorkspace`): the
+    /// window stops showing it. Its watch stays, so a later valid body for a ref the daemon
+    /// still lists brings it back.
     pub fn dismiss_workspace(&mut self, id: &str, cx: &mut Context<Self>) {
-        if matches!(
+        if !matches!(
             self.entries.get(id),
             Some(WorkspaceEntry::Loading { .. } | WorkspaceEntry::Error { .. })
         ) {
-            self.entries.shift_remove(id);
-            self.git_controllers.remove(id);
-        cx.emit(SessionEvent::WorkspaceRemoved(id.to_owned()));
-            cx.notify();
+            return;
         }
+        self.entries.shift_remove(id);
+        self.git_controllers.remove(id);
+        if self.viewed.as_deref() == Some(id) {
+            self.viewed = None;
+        }
+        cx.emit(SessionEvent::WorkspaceRemoved(id.to_owned()));
+        cx.notify();
     }
 
     /// Add a workspace built here (`createWorkspaceFile` + ref sync): write its first body

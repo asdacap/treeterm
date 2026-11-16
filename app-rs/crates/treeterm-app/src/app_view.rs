@@ -11,7 +11,7 @@ use treeterm_core::connection::ConnectionId;
 use treeterm_model::app_store::{AppStore, ConnState};
 use treeterm_model::keybinding_store::KeybindingStore;
 use treeterm_model::session_names::Side;
-use treeterm_model::session_store::{SessionStore, WorkspaceEntry};
+use treeterm_model::session_store::{SessionEvent, SessionStore, WorkspaceEntry};
 use treeterm_model::workspace_store::{ActivityStyle as _, PageHost, TabContent, WorkspaceStore};
 
 use crate::terminal_view::TerminalView;
@@ -136,6 +136,7 @@ struct Connected {
     shown_terminal: Option<EntityId>,
     reselect: Reselect,
     _selection: Subscription,
+    _session_events: Subscription,
 }
 
 /// What a session view selects once its session is live.
@@ -340,6 +341,24 @@ impl AppView {
             cx.notify();
         })
         .detach();
+        // The shown workspace was dismissed or removed (`activeWorkspaceId` cleared): the
+        // pane reads "No workspace selected" and no row is selected.
+        let removed_id = id.clone();
+        let session_events = cx.subscribe(&session, move |view, _, event: &SessionEvent, cx| match event {
+            SessionEvent::WorkspaceRemoved(workspace) => {
+                let Some(connected) = view.sessions.get_mut(&removed_id) else {
+                    return;
+                };
+                if !matches!(&connected.active, ActiveView::Workspace(shown) if shown == workspace) {
+                    return;
+                }
+                connected.active = ActiveView::Nothing;
+                connected.header_edit = None;
+                connected.tree.update(cx, |tree, cx| tree.clear_selection(cx));
+                cx.notify();
+            }
+            SessionEvent::AttentionRecorded(_) | SessionEvent::Failed(_) => {}
+        });
         let viewed = session.clone();
         let selection = cx.subscribe(&tree, move |view, _, WorkspaceSelected(workspace), cx| {
             view.info = None;
@@ -371,6 +390,7 @@ impl AppView {
             shown_terminal: None,
             reselect: Reselect::Nothing,
             _selection: selection,
+            _session_events: session_events,
         }
     }
 

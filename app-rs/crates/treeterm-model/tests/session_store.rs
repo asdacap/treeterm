@@ -1905,6 +1905,100 @@ fn a_lock_held_elsewhere_shows_and_can_be_forced_open(cx: &mut TestAppContext) {
     wait_until(cx, &store, |s| !s.is_locked());
 }
 
+/// Every `WorkspaceRemoved` the store emits, in order.
+fn record_removals(cx: &mut TestAppContext, store: &Entity<SessionStore>) -> std::rc::Rc<std::cell::RefCell<Vec<String>>> {
+    use treeterm_model::session_store::SessionEvent;
+    let removed = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let sink = removed.clone();
+    cx.update(|cx| {
+        cx.subscribe(store, move |_, event: &SessionEvent, _| {
+            if let SessionEvent::WorkspaceRemoved(id) = event {
+                sink.borrow_mut().push(id.clone());
+            }
+        })
+        .detach()
+    });
+    removed
+}
+
+#[gpui_kit::test]
+fn a_loading_or_failed_child_is_dismissed_at_once_and_no_longer_shown(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    publish(&h, &[]);
+    let repo = TempRepo::new(&h);
+    let store = open_store(cx, &h, "client-a");
+    let removed = record_removals(cx, &store);
+    let root = open_repo_workspace(cx, &store, &repo);
+    // Another window holds the lock: a new child fails before git runs.
+    let other = futures::executor::block_on(treeterm_core::daemon::DaemonConnection::open(&h.rt, h.daemon.socket_path()))
+        .unwrap()
+        .unwrap();
+    let locked = futures::executor::block_on(other.lock_session(std::time::Duration::from_secs(600))).unwrap().unwrap();
+    assert!(matches!(locked, treeterm_core::daemon::SessionLockResult::Acquired(_)));
+
+    // A row still waiting for the lock goes, and the shown workspace stays shown.
+    store.update(cx, |s, cx| s.set_viewed_workspace(Some(root.clone()), cx));
+    let pending = store.update(cx, |s, cx| s.add_child_workspace(&root, "feature-x".into(), false, None, cx)).unwrap();
+    assert!(store.read_with(cx, |s, _| {
+        matches!(s.entry(&pending), Some(WorkspaceEntry::Loading { name, .. }) if name == "feature-x")
+    }));
+    store.update(cx, |s, cx| s.dismiss_workspace(&pending, cx));
+    store.read_with(cx, |s, _| {
+        assert!(s.entry(&pending).is_none());
+        assert_eq!(s.viewed_workspace(), Some(root.as_str()));
+    });
+    assert_eq!(*removed.borrow(), vec![pending.clone()]);
+
+    // A failed row goes, and is no longer shown. (Its lock is asked for after the first's.)
+    let failed = store.update(cx, |s, cx| s.add_child_workspace(&root, "feature-y".into(), false, None, cx)).unwrap();
+    wait_until(cx, &store, |s| matches!(s.entry(&failed), Some(WorkspaceEntry::Error { .. })));
+    store.read_with(cx, |s, _| match s.entry(&failed) {
+        Some(WorkspaceEntry::Error { name, error }) => {
+            assert_eq!(name, "feature-y");
+            assert_eq!(error, "Session is locked by another window");
+        }
+        _ => unreachable!(),
+    });
+    store.update(cx, |s, cx| s.set_viewed_workspace(Some(failed.clone()), cx));
+    store.update(cx, |s, cx| s.dismiss_workspace(&failed, cx));
+    store.read_with(cx, |s, _| {
+        assert!(s.entry(&failed).is_none());
+        assert_eq!(s.viewed_workspace(), None);
+    });
+    assert_eq!(*removed.borrow(), vec![pending, failed]);
+
+    // A loaded workspace is not dismissed.
+    store.update(cx, |s, cx| s.set_viewed_workspace(Some(root.clone()), cx));
+    store.update(cx, |s, cx| s.dismiss_workspace(&root, cx));
+    store.read_with(cx, |s, _| {
+        assert!(loaded(s, &root));
+        assert_eq!(s.viewed_workspace(), Some(root.as_str()));
+    });
+    assert_eq!(removed.borrow().len(), 2);
+}
+
+#[gpui_kit::test]
+fn a_dismissed_workspace_comes_back_once_its_file_is_valid(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    let path = h.daemon.workspaces_dir().join("broken.json");
+    std::fs::write(&path, "{").unwrap();
+    publish(&h, &["broken"]);
+    let store = open_store(cx, &h, "client-a");
+    let removed = record_removals(cx, &store);
+    wait_until(cx, &store, |s| matches!(s.entry("broken"), Some(WorkspaceEntry::Error { .. })));
+
+    store.update(cx, |s, cx| s.dismiss_workspace("broken", cx));
+    assert!(store.read_with(cx, |s, _| s.entry("broken").is_none()));
+    assert_eq!(*removed.borrow(), vec!["broken".to_owned()]);
+
+    // Still in the session: its file is still watched.
+    std::fs::write(&path, body("fixed", None)).unwrap();
+    wait_until(cx, &store, |s| loaded(s, "broken"));
+    assert_eq!(store.read_with(cx, |s, cx| ws(s, "broken").read(cx).file().name.clone()), "fixed");
+}
+
 #[gpui_kit::test]
 fn a_file_downloads_to_a_local_path(cx: &mut TestAppContext) {
     cx.executor().allow_parking();
