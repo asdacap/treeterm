@@ -29,7 +29,8 @@ const CONNECT_BACKOFF_MULTIPLIER: f64 = 1.6;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConnectError {
-    #[error("daemon socket not found at {0}")]
+    /// Electron's `grpcClient.ts` text.
+    #[error("Daemon socket not found at {0}")]
     SocketMissing(PathBuf),
     #[error("cannot connect to daemon socket {path}: {source}")]
     Io { path: PathBuf, source: io::Error },
@@ -141,18 +142,20 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn a_missing_socket_fails_at_once() {
         let dir = scratch();
+        let path = dir.path().join("d.sock");
         let started = Instant::now();
-        let result = connect_unix_ready(
-            &dir.path().join("d.sock"),
-            ByteCounter::default(),
-            started + CONNECT_TIMEOUT,
-        )
-        .await;
+        let result =
+            connect_unix_ready(&path, ByteCounter::default(), started + CONNECT_TIMEOUT).await;
         assert!(
             matches!(result, Err(ConnectError::SocketMissing(_))),
             "{result:?}"
         );
         assert_eq!(started.elapsed(), Duration::ZERO);
+        // Electron's text, shown in remote connect errors.
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            format!("Daemon socket not found at {}", path.display())
+        );
     }
 
     #[tokio::test(start_paused = true)]
