@@ -27,7 +27,7 @@ use treeterm_core::review::{
     ViewedFilesStore, build_prompt_for_comments, generate_review_prompt,
 };
 
-use treeterm_core::files::FavouriteFile;
+use treeterm_core::files::{FavouriteFile, is_image_path};
 
 use crate::file_browser::FileBrowser;
 use crate::review_find::{DiffLayout, DiffMatch, find_in_patch, in_file_first};
@@ -495,12 +495,6 @@ pub enum ImageSides {
         after: Option<std::sync::Arc<Vec<u8>>>,
     },
     Failed(String),
-}
-
-/// Image files Review shows side by side (`isImagePath`).
-pub fn is_image_path(path: &str) -> bool {
-    let ext = path.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
-    matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "gif" | "webp" | "svg" | "bmp" | "ico")
 }
 
 /// Which way "next unviewed" goes.
@@ -1801,7 +1795,7 @@ impl ReviewModel {
         self.images.get(path)
     }
 
-    /// Load both sides of every image file shown, once per load.
+    /// Load both sides of every image file shown (`isImagePath`), once per load.
     fn load_images(&mut self, cx: &mut Context<Self>) {
         let paths: Vec<String> =
             self.shown_files().iter().map(|file| file.path.to_owned()).filter(|path| is_image_path(path)).collect();

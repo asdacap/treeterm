@@ -421,13 +421,13 @@ pub fn language_for(path: &str) -> &'static str {
 
 /// Who draws an image the viewer shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ImageDrawing {
+pub(crate) enum ImageDrawing {
     Gpui(gpui_kit::ImageFormat),
     /// GPUI has no AVIF decoder: WebKit draws it ([`crate::browser_view::AssetPageView::image`]).
     Webview,
 }
 
-fn image_drawing(format: ImageFormat) -> ImageDrawing {
+pub(crate) fn image_drawing(format: ImageFormat) -> ImageDrawing {
     match format {
         ImageFormat::Png => ImageDrawing::Gpui(gpui_kit::ImageFormat::Png),
         ImageFormat::Jpeg => ImageDrawing::Gpui(gpui_kit::ImageFormat::Jpeg),
@@ -1425,15 +1425,7 @@ impl FileBrowserView {
                 let body = match image_drawing(format) {
                     ImageDrawing::Gpui(gpui_format) => {
                         let image = std::sync::Arc::new(gpui_kit::Image::from_bytes(gpui_format, (*bytes).clone()));
-                        // Chromium's broken-image icon and the `alt` text when it cannot decode.
-                        let (name, icon_color, text_color) = (file_name(&path).to_owned(), c.text_secondary, c.text_primary);
-                        let broken = move || {
-                            h_flex()
-                                .gap(px(4.))
-                                .child(ui::icon(IconName::ImageOff, 16., icon_color))
-                                .child(div().text_size(px(16.)).text_color(text_color).child(name.clone()))
-                                .into_any_element()
-                        };
+                        let broken = ui::broken_image(file_name(&path).to_owned(), cx);
                         div()
                             .size_full()
                             .p(px(16.))

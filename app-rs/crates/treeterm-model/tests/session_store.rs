@@ -2220,6 +2220,10 @@ fn review_shows_both_sides_of_a_changed_image(cx: &mut TestAppContext) {
     repo.git(&["add", "logo.png"]);
     repo.git(&["commit", "-q", "-m", "logo"]);
     std::fs::write(repo.path.join("logo.png"), b"\x89PNG-after!").unwrap();
+    // An AVIF is an image too (`isImagePath`); added, so it has no before side.
+    let avif = b"\0\0\0\x1cftypavif\0\0\0\0avifmif1miaf".to_vec();
+    std::fs::write(repo.path.join("photo.avif"), &avif).unwrap();
+    repo.git(&["add", "photo.avif"]);
     let store = open_store(cx, &h, "client-a");
     let root = open_repo_workspace(cx, &store, &repo);
     let workspace = store.read_with(cx, |s, _| ws(s, &root));
@@ -2238,4 +2242,11 @@ fn review_shows_both_sides_of_a_changed_image(cx: &mut TestAppContext) {
     };
     assert_eq!(before.as_deref().map(Vec::as_slice), Some(&b"\x89PNG-before"[..]));
     assert_eq!(after.as_deref().map(Vec::as_slice), Some(&b"\x89PNG-after!"[..]));
+    wait_until(cx, &review, |r| matches!(r.image("photo.avif"), Some(ImageSides::Loaded { .. })));
+    let sides = review.read_with(cx, |r, _| r.image("photo.avif").cloned());
+    let Some(ImageSides::Loaded { before, after }) = sides else {
+        panic!("not loaded: {sides:?}");
+    };
+    assert_eq!(before, None);
+    assert_eq!(after.as_deref(), Some(&avif));
 }

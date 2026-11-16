@@ -1062,6 +1062,19 @@ pub fn viewer_placeholder(text: impl Into<gpui_kit::SharedString>, cx: &App) -> 
         .child(text)
 }
 
+/// Chromium's broken image, for an `<img>` it cannot decode: the image-off icon and the `alt`
+/// text, in the 16px text the image inherits, wrapped to the width the image may take.
+pub fn broken_image(alt: String, cx: &App) -> impl Fn() -> gpui_kit::AnyElement + 'static {
+    let (icon_color, text_color) = (colors(cx).text_secondary, colors(cx).text_primary);
+    move || {
+        gpui_kit::component::h_flex()
+            .gap(px(4.))
+            .child(icon(IconName::ImageOff, 16., icon_color).flex_shrink_0())
+            .child(div().min_w_0().text_size(px(16.)).text_color(text_color).child(alt.clone()))
+            .into_any_element()
+    }
+}
+
 /// `.file-viewer-error`: centred red 14px text in 20px of padding.
 pub fn viewer_error(child: impl IntoElement) -> Div {
     div()

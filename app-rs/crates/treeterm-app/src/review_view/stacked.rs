@@ -19,6 +19,7 @@ use gpui_kit::{
     AnyElement, App, Bounds, ClickEvent, Context, Element, ElementId, GlobalElementId, InspectorElementId, LayoutId, Pixels, Entity, MouseButton, SharedString, Subscription,
     WeakEntity, Window, div, px, rgb,
 };
+use treeterm_core::files::image_format;
 use treeterm_core::git::{FileChangeStats, FileChangeStatus, Staging, UncommittedFile};
 use treeterm_core::review::{ReviewComment, Side};
 use treeterm_model::review::{CollapseAll, CommentDraft, DiffList, GitOp, ImageSides, ReviewMode, ReviewModel, StageTarget};
@@ -26,7 +27,7 @@ use treeterm_model::review::{CollapseAll, CommentDraft, DiffList, GitOp, ImageSi
 use super::ReviewView;
 use crate::comment_ui::{CommentActions, Placement, comment_display, comment_input};
 use super::parts::{change_stats, checkbox, disabled_checkbox, outline_button, plain_icon, spinner, status_badge};
-use crate::file_browser_view::language_for;
+use crate::file_browser_view::{ImageDrawing, image_drawing, language_for};
 use crate::theme::colors;
 use treeterm_model::review_find::{DIFF_CONTEXT, MIN_COLLAPSED_LINES};
 
@@ -899,16 +900,9 @@ fn header_row(
 fn image_diff(path: &str, sides: ImageSides, cx: &App) -> AnyElement {
     let c = colors(cx);
     let (secondary, bg) = (c.text_secondary, c.bg_primary);
-    let format = match path.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).as_deref() {
-        Some("jpg" | "jpeg") => gpui_kit::ImageFormat::Jpeg,
-        Some("gif") => gpui_kit::ImageFormat::Gif,
-        Some("webp") => gpui_kit::ImageFormat::Webp,
-        Some("svg") => gpui_kit::ImageFormat::Svg,
-        Some("bmp") => gpui_kit::ImageFormat::Bmp,
-        Some("ico") => gpui_kit::ImageFormat::Ico,
-        Some(_) | None => gpui_kit::ImageFormat::Png,
-    };
-    let side = |label: &'static str, bytes: Option<std::sync::Arc<Vec<u8>>>| {
+    let side = |label: &'static str, bytes: Option<std::sync::Arc<Vec<u8>>>, drawing: ImageDrawing| {
+        // The `<img alt>`, which Chromium shows when it cannot decode the image.
+        let broken = crate::ui::broken_image(format!("{label}: {path}"), cx);
         v_flex()
             .flex_1()
             .min_w_0()
@@ -917,16 +911,27 @@ fn image_diff(path: &str, sides: ImageSides, cx: &App) -> AnyElement {
             .child(div().self_start().text_size(px(11.)).text_color(secondary).child(label.to_uppercase()))
             .child(match bytes {
                 Some(bytes) => {
-                    let image = std::sync::Arc::new(gpui_kit::Image::from_bytes(format, (*bytes).clone()));
-                    div()
-                        .max_w_full()
-                        .bg(rgb(0x2a2a2a))
-                        .child(gpui_kit::img(image).max_w_full().max_h(px(480.)).object_fit(gpui_kit::ObjectFit::Contain))
-                        .into_any_element()
+                    let image = match drawing {
+                        ImageDrawing::Gpui(format) => {
+                            let image = std::sync::Arc::new(gpui_kit::Image::from_bytes(format, (*bytes).clone()));
+                            gpui_kit::img(image)
+                                .max_w_full()
+                                .max_h(px(480.))
+                                .object_fit(gpui_kit::ObjectFit::Contain)
+                                .with_fallback(broken)
+                                .into_any_element()
+                        }
+                        // GPUI has no AVIF decoder (that needs an AV1 decoder dependency). The
+                        // Files viewer has WebKit draw one, which does not fit a diff scrolled in
+                        // a list, so the side shows the broken image and its alt text.
+                        ImageDrawing::Webview => broken(),
+                    };
+                    div().max_w_full().bg(rgb(0x2a2a2a)).child(image).into_any_element()
                 }
                 None => div().p(px(24.)).text_size(px(12.)).italic().text_color(secondary).child("No file").into_any_element(),
             })
     };
+    let failed = |error: String| div().p(px(12.)).text_size(px(12.)).text_color(rgb(0xf85149)).child(error).into_any_element();
     let body = match sides {
         ImageSides::Loading => h_flex()
             .gap(px(6.))
@@ -938,14 +943,17 @@ fn image_diff(path: &str, sides: ImageSides, cx: &App) -> AnyElement {
             .child(spinner(16., secondary))
             .child("Loading diff...")
             .into_any_element(),
-        ImageSides::Failed(error) => div().p(px(12.)).text_size(px(12.)).text_color(rgb(0xf85149)).child(error).into_any_element(),
-        ImageSides::Loaded { before, after } => h_flex()
-            .items_start()
-            .gap(px(12.))
-            .p(px(12.))
-            .child(side("Before", before))
-            .child(side("After", after))
-            .into_any_element(),
+        ImageSides::Failed(error) => failed(error),
+        ImageSides::Loaded { before, after } => match image_format(path) {
+            Ok(format) => h_flex()
+                .items_start()
+                .gap(px(12.))
+                .p(px(12.))
+                .child(side("Before", before, image_drawing(format)))
+                .child(side("After", after, image_drawing(format)))
+                .into_any_element(),
+            Err(error) => failed(error.to_string()),
+        },
     };
     div().bg(bg).child(body).into_any_element()
 }

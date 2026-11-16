@@ -232,7 +232,9 @@ The chrome was matched to Electron's computed styles, measured side by side on o
 - With the sidebar collapsed the header keeps clear of the macOS window buttons (Electron's
   title runs under them).
 - GPUI cannot decode AVIF, so the Files viewer shows `.avif` images in a webview (WebKit
-  draws them, centred and scaled down as Electron's `<img>`).
+  draws them, centred and scaled down as Electron's `<img>`). Review's image diffs, which
+  scroll in a list, show the sides of an `.avif` change as broken images with their alt text
+  (`Before: <path>`), as Electron shows an image it cannot decode.
 - PDFs show in WebKit's viewer, which has no toolbar: a strip above it has Chromium's Zoom
   out, zoom level, Zoom in and Print (100% is the width WebKit fits the pages to, not the
   pages' own size). There is no page box, thumbnails, fit or rotate; those need a bundled
