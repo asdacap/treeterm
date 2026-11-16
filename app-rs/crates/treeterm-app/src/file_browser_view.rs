@@ -713,9 +713,11 @@ impl FileBrowserView {
             .child(if is_dir { "\u{1F4C1}" } else { "\u{1F4C4}" })
     }
 
-    /// A message row (`Loading...`, an error, `No files found`).
+    /// A message row (`Loading...`, an error, `No files found`): a `.file-tree-item` too,
+    /// hover-filled under a pointer cursor.
     fn message_row(text: impl Into<SharedString>, indent: f32, error: bool, cx: &App) -> AnyElement {
-        let secondary = colors(cx).text_secondary;
+        let c = colors(cx);
+        let (secondary, hover) = (c.text_secondary, c.bg_hover);
         let text: SharedString = text.into();
         h_flex()
             .flex_shrink_0()
@@ -725,6 +727,8 @@ impl FileBrowserView {
             .pl(px(indent))
             .text_size(px(ui::BODY))
             .whitespace_nowrap()
+            .cursor_pointer()
+            .hover(move |d| d.bg(hover))
             .map(|d| if error { d.text_color(rgb(ui::FILE_ERROR)) } else { d.text_color(secondary).italic() })
             .child(text)
             .into_any_element()
