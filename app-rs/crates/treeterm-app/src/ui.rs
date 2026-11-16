@@ -201,6 +201,22 @@ pub fn menu_item_with_hint(label: &'static str, hint: &'static str) -> gpui_kit:
     })
 }
 
+/// The `.activity-*` colour of `state`; idle has none and keeps `current`, the colour of the
+/// text around it.
+pub fn activity_color(state: treeterm_model::workspace_store::ActivityState, current: impl Into<Hsla>) -> Hsla {
+    use treeterm_model::workspace_store::ActivityState;
+    match state {
+        ActivityState::Idle => current.into(),
+        ActivityState::Working => rgb(0xe5e510).into(),
+        ActivityState::UserInputRequired => rgb(0x00bcd4).into(),
+        ActivityState::PermissionRequest => rgb(0xcd6600).into(),
+        ActivityState::SafePermissionRequested => rgb(0x0dbc79).into(),
+        ActivityState::Completed => rgb(0x23d18b).into(),
+        ActivityState::ApplicationError => rgb(0xd16969).into(),
+        ActivityState::Error => rgb(0xf44747).into(),
+    }
+}
+
 /// `ActivityIndicator`: the state's glyph in its `.activity-*` colour (idle keeps `idle`'s
 /// colour, the text around it); working spins.
 pub fn activity_glyph(
@@ -209,24 +225,35 @@ pub fn activity_glyph(
     idle: impl Into<Hsla>,
 ) -> gpui_kit::AnyElement {
     use treeterm_model::workspace_store::ActivityState;
-    let (glyph, color): (&str, Hsla) = match state {
-        ActivityState::Idle => ("○", idle.into()),
+    let color = activity_color(state, idle);
+    let glyph = match state {
+        ActivityState::Idle => "○",
         ActivityState::Working => {
             use gpui_kit::component::Sizable as _;
             return gpui_kit::component::spinner::Spinner::new()
                 .icon(Icon::new(IconName::LoaderCircle))
                 .with_size(px(size))
-                .color(rgb(0xe5e510).into())
+                .color(color)
                 .into_any_element();
         }
-        ActivityState::UserInputRequired => ("▶", rgb(0x00bcd4).into()),
-        ActivityState::PermissionRequest => ("●", rgb(0xcd6600).into()),
-        ActivityState::SafePermissionRequested => ("●", rgb(0x0dbc79).into()),
-        ActivityState::Completed => ("✓", rgb(0x23d18b).into()),
-        ActivityState::ApplicationError => ("✗", rgb(0xd16969).into()),
-        ActivityState::Error => ("●", rgb(0xf44747).into()),
+        ActivityState::UserInputRequired => "▶",
+        ActivityState::PermissionRequest | ActivityState::SafePermissionRequested | ActivityState::Error => "●",
+        ActivityState::Completed => "✓",
+        ActivityState::ApplicationError => "✗",
     };
     div().text_size(px(size)).text_color(color).child(glyph).into_any_element()
+}
+
+/// `.tree-item-flash`: a wash of the flashing state's colour over a row or rail icon (absolute,
+/// inset 0, no pointer events, the parent's `radius`) at the flash's opacity now, from
+/// `WorkspaceStore::attention_flash`. The parent is `relative`; added after the row's content,
+/// it paints over it, as the positioned span did. Idle and working never flash.
+pub fn attention_flash(
+    (state, opacity): (treeterm_model::workspace_store::ActivityState, f32),
+    radius: f32,
+) -> Div {
+    let color = activity_color(state, gpui_kit::transparent_black());
+    div().absolute().inset_0().rounded(px(radius)).bg(color.opacity(opacity))
 }
 
 // --- dialogs ---

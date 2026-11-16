@@ -147,7 +147,8 @@ Done (tested against a real in-process daemon unless noted):
   and Cancel in place of the tabs.
 - **Tree and sidebar:** sessions (dragged into order in the sidebar or the collapsed rail,
   kept in `ui-state.json`; "No sessions. Click + to browse." once all are disconnected),
-  favourites, drag and drop (reorder / reparent), unread markers, PR badges, collapsible rail,
+  favourites, drag and drop (reorder / reparent), unread markers, the attention flash on tree,
+  favourite and rail rows, PR badges, collapsible rail,
   title/branch refresh, Auto Open All Recent Worktrees (worktree registry shared with
   Electron), upstream warning before forking,
   force-unlock of a held session lock; session renaming (double-click its name; kept in
@@ -334,6 +335,10 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   while it is the one on screen. Electron counted the one its navigation last named (the
   one last clicked, or a session's first), also after a quick fork or a new workspace put
   another one on screen.
+- A workspace's attention flash plays once per change of its activity, on every row that shows
+  it. Electron also replayed it whenever a row was drawn anew (a folded session unfolded, the
+  sidebar collapsed or expanded, a workspace newly marked favourite) while the workspace was
+  in an attention state and its unread marker was not showing.
 - A workspace write still in flight when the connection drops is written after the reconnect
   too (Electron's flush waited for it to fail and then dropped it).
 - The session's force-unlock button hides once the lock has expired (the daemon ignores an

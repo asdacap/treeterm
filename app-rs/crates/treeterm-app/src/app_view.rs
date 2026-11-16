@@ -592,10 +592,12 @@ impl AppView {
     /// The collapsed sidebar (`.tree-pane-collapsed`, 36px): sound toggle and expand, then each
     /// session's block (`CollapsedSessionPanel`), dragged to reorder the sessions as in the
     /// expanded sidebar: one 32px icon per workspace (`WorkspaceIcon`, favourite star overlay).
-    fn rail(&mut self, cx: &mut Context<Self>) -> AnyElement {
+    fn rail(&mut self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let c = colors(cx);
         let (bg, border, hover, active, secondary, primary) =
             (c.bg_secondary, c.border, c.bg_hover, c.bg_active, c.text_secondary, c.text_primary);
+        let now = cx.background_executor().now();
+        let mut flashing = false;
         let (store, names) = (self.store.read(cx), self.names.read(cx));
         let mut rail = v_flex().py(px(4.)).items_center();
         for (conn, connected) in &self.sessions {
@@ -608,7 +610,7 @@ impl AppView {
                 let is_shown = shown.as_deref() == Some(row.id.as_str());
                 let color = if is_shown { primary } else { secondary };
                 // A placeholder shows a spinner and a failed workspace an alert, under its name.
-                let (name, icon, favourite) = match entry {
+                let (name, icon, favourite, flash) = match entry {
                     WorkspaceEntry::Loaded(store) | WorkspaceEntry::OperationError { store, .. } => {
                         let workspace = store.read(cx);
                         let activity = workspace.overall_activity();
@@ -618,19 +620,21 @@ impl AppView {
                         } else {
                             crate::ui::activity_glyph(activity, 14., color)
                         };
-                        (workspace.file().display_name().to_owned(), icon, workspace.is_favourite())
+                        let flash = workspace.attention_flash(now);
+                        (workspace.file().display_name().to_owned(), icon, workspace.is_favourite(), flash)
                     }
                     WorkspaceEntry::Loading { name, .. } => {
                         let spinner = Spinner::new()
                             .icon(gpui_kit::component::Icon::new(IconName::LoaderCircle))
                             .with_size(px(16.))
                             .color(color);
-                        (name.clone(), spinner.into_any_element(), false)
+                        (name.clone(), spinner.into_any_element(), false, None)
                     }
                     WorkspaceEntry::Error { name, .. } => {
-                        (name.clone(), crate::ui::icon(IconName::CircleAlert, 16., c.error).into_any_element(), false)
+                        (name.clone(), crate::ui::icon(IconName::CircleAlert, 16., c.error).into_any_element(), false, None)
                     }
                 };
+                flashing |= flash.is_some();
                 let name = SharedString::from(name);
                 let (conn, id) = (conn.clone(), row.id.clone());
                 block = block.child(
@@ -648,6 +652,8 @@ impl AppView {
                         .when(!is_shown, |d| d.hover(move |d| d.bg(hover)))
                         .tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(name.clone()).build(window, cx))
                         .child(icon)
+                        // `WorkspaceStoreAttentionFlash`: over the icon, under the star.
+                        .children(flash.map(|flash| crate::ui::attention_flash(flash, 4.)))
                         .when(favourite, |d| {
                             d.child(
                                 div()
@@ -664,6 +670,10 @@ impl AppView {
                 );
             }
             rail = rail.child(self.session_drag_handle(conn.clone(), names.name(&slot.target), block.into_any_element(), cx));
+        }
+        // A flash fades frame by frame until it is over.
+        if flashing {
+            window.request_animation_frame();
         }
         let sound_toggle = self.sound_toggle(crate::ui::icon_button("sound-toggle", cx), primary, cx);
         v_flex()
@@ -788,9 +798,9 @@ impl AppView {
     }
 
     /// The left column: every connection with its tree, status and actions.
-    fn sidebar(&mut self, cx: &mut Context<Self>) -> AnyElement {
+    fn sidebar(&mut self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         if self.sidebar_collapsed {
-            return self.rail(cx);
+            return self.rail(window, cx);
         }
         let c = colors(cx);
         let (bg, border, fg, secondary) = (c.bg_secondary, c.border, c.text_primary, c.text_secondary);
@@ -859,7 +869,7 @@ impl AppView {
                             ),
                     ),
             )
-            .children(self.favourites(cx))
+            .children(self.favourites(window, cx))
             .child(div().id("sessions").flex_1().overflow_y_scroll().child(list))
             .into_any_element()
     }
@@ -928,10 +938,12 @@ impl AppView {
     }
 
     /// Favourite workspaces of every connected session (`FavouritesPanel`); none, no panel.
-    fn favourites(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    fn favourites(&self, window: &Window, cx: &mut Context<Self>) -> Option<AnyElement> {
         let c = colors(cx);
         let (secondary, primary, hover, active, accent, border) =
             (c.text_secondary, c.text_primary, c.bg_hover, c.bg_active, c.accent, c.border);
+        let now = cx.background_executor().now();
+        let mut flashing = false;
         let mut rows = Vec::new();
         for (conn, connected) in &self.sessions {
             let session = connected.session.read(cx);
@@ -940,11 +952,14 @@ impl AppView {
                 let Some(store) = session.workspace_store(id) else { continue };
                 let workspace = store.read(cx);
                 if workspace.is_favourite() {
+                    let flash = workspace.attention_flash(now);
+                    flashing |= flash.is_some();
                     rows.push((
                         id.clone(),
                         workspace.file().display_name().to_owned(),
                         workspace.file().is_worktree,
                         workspace.has_unread_attention(),
+                        flash,
                         workspace.overall_activity(),
                         shown.as_deref() == Some(id.as_str()),
                         conn.clone(),
@@ -954,6 +969,10 @@ impl AppView {
         }
         if rows.is_empty() {
             return None;
+        }
+        // A flash fades frame by frame until it is over.
+        if flashing {
+            window.request_animation_frame();
         }
         // `.favourites-header`: filled star and "FAVOURITES", 11px semibold secondary.
         let mut panel = v_flex().pb(px(6.)).border_b(px(2.)).border_color(border).child(
@@ -966,7 +985,7 @@ impl AppView {
                 .child(div().text_size(px(12.)).line_height(px(12.)).text_color(secondary).child("★"))
                 .child(crate::ui::caps_title("Favourites", cx)),
         );
-        for (id, name, is_worktree, unread, activity, is_shown, conn) in rows {
+        for (id, name, is_worktree, unread, flash, activity, is_shown, conn) in rows {
             let icon = if activity == treeterm_model::workspace_store::ActivityState::Idle {
                 crate::ui::icon(if is_worktree { IconName::GitBranch } else { IconName::Folder }, 16., secondary).into_any_element()
             } else {
@@ -975,6 +994,7 @@ impl AppView {
             panel = panel.child(
                 h_flex()
                     .id(SharedString::from(format!("fav-{id}")))
+                    .relative()
                     .min_h(px(36.))
                     .py(px(6.))
                     .px(px(4.))
@@ -986,6 +1006,8 @@ impl AppView {
                     .child(div().mr(px(8.)).flex_shrink_0().child(icon))
                     .child(div().flex_1().min_w_0().truncate().text_size(px(crate::ui::BODY)).text_color(primary).child(name))
                     .when(unread, |d| d.child(div().mx(px(4.)).text_size(px(10.)).text_color(accent).child("●")))
+                    // `WorkspaceAttentionFlash`, over the row's content.
+                    .children(flash.map(|flash| crate::ui::attention_flash(flash, 0.)))
                     .on_click(cx.listener(move |view, _, _, cx| view.select_workspace(&conn, id.clone(), cx))),
             );
         }
@@ -1021,7 +1043,7 @@ impl Render for AppView {
         if !cx.has_active_drag() {
             self.session_drag = SessionDrag::Idle;
         }
-        let sidebar = self.sidebar(cx);
+        let sidebar = self.sidebar(window, cx);
         let info = self.info.clone();
         let collapsed = self.sidebar_collapsed && cfg!(target_os = "macos");
         // Native webviews draw above GPUI: hide those of every workspace pane not on screen

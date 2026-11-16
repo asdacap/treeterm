@@ -448,6 +448,51 @@ fn the_prompt_debugger_runs_both_prompts_and_its_history_shows_the_runs(cx: &mut
 }
 
 #[gpui_kit::test]
+fn a_workspace_flashes_on_entering_an_attention_state_unless_its_unread_marker_was_showing(cx: &mut TestAppContext) {
+    use treeterm_core::attention_flash::{FLASH_PERIOD, FLASH_REPEATS};
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let fake = FakeLlm::default();
+    fake.on_complete_chat(|_, _| Ok(r#"{"state":"permission_request","reason":"asks"}"#.to_owned()));
+    let llm = LlmService::new(Arc::new(fake.clone()), h.rt.clone());
+    let store = open_store(cx, &h, llm_settings(), Some(llm));
+    let (_id, _dir, workspace) = open_workspace(cx, &h, &store, json!({}));
+    // The debugger drives its tab's activity: Working while it asks, then the answer.
+    let tab = workspace.update(cx, |w, cx| w.open_prompt_debugger("Allow? (y/n)", cx)).unwrap();
+    let TabContent::PromptDebugger(debugger) = content(cx, &workspace, &tab) else { panic!("not a debugger tab") };
+    let flash = |cx: &mut TestAppContext| {
+        let now = cx.executor().now();
+        workspace.read_with(cx, |w, _| w.attention_flash(now)).map(|(state, _)| state)
+    };
+    let run = |cx: &mut TestAppContext| {
+        debugger.update(cx, |d, cx| d.test(cx));
+        assert_eq!(flash(cx), None, "working does not flash");
+        wait_until(cx, &debugger, |d| !d.is_running());
+        assert_eq!(workspace.read_with(cx, |w, _| w.activity(&tab)), ActivityState::PermissionRequest);
+    };
+    assert_eq!(flash(cx), None);
+
+    // Not shown: finishing marks it unread, and its rows flash in the state's colour.
+    run(cx);
+    assert!(workspace.read_with(cx, |w, _| w.has_unread_attention()));
+    assert_eq!(flash(cx), Some(ActivityState::PermissionRequest));
+    cx.executor().advance_clock(FLASH_PERIOD * FLASH_REPEATS);
+    assert_eq!(flash(cx), None, "three pulses, then over");
+
+    // Again while the marker shows: quiet, like the ding.
+    run(cx);
+    assert_eq!(flash(cx), None);
+
+    // Shown, it is marked read; the next attention state flashes, though no marker is set.
+    store.update(cx, |s, cx| s.set_shown(true, cx));
+    wait_until(cx, &workspace, |w| !w.has_unread_attention());
+    run(cx);
+    assert!(!workspace.read_with(cx, |w, _| w.has_unread_attention()));
+    assert_eq!(flash(cx), Some(ActivityState::PermissionRequest));
+}
+
+#[gpui_kit::test]
 fn the_prompt_debugger_without_an_llm_client_sends_nothing(cx: &mut TestAppContext) {
     let _serial = serial();
     cx.executor().allow_parking();

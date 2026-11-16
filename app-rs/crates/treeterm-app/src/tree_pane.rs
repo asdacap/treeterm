@@ -253,7 +253,7 @@ impl TreePane {
 }
 
 impl Render for TreePane {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let c = colors(cx);
         let (text_secondary, hover, accent, primary, border) = (c.text_secondary, c.bg_hover, c.accent, c.text_primary, c.border);
         // The connection (`SessionPanel`'s `connection.status`); `None` only while this view
@@ -274,7 +274,7 @@ impl Render for TreePane {
             ),
             // No session yet (its first connect failed): the banner only.
             (_, Shown::Nothing) => None,
-            (_, Shown::Session { store, .. }) => Some(self.tree(&store.clone(), link.as_ref(), cx)),
+            (_, Shown::Session { store, .. }) => Some(self.tree(&store.clone(), link.as_ref(), window, cx)),
         };
         let banner = self.connection_banner(link.as_ref(), cx);
         let status_icon = status_icon(link.as_ref(), cx);
@@ -399,9 +399,10 @@ impl Render for TreePane {
 
 impl TreePane {
     /// The session's rows, its loading line or its empty state.
-    fn tree(&self, entity: &Entity<SessionStore>, link: Option<&ConnState>, cx: &mut Context<Self>) -> AnyElement {
+    fn tree(&self, entity: &Entity<SessionStore>, link: Option<&ConnState>, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let c = colors(cx);
         let (text_secondary, error) = (c.text_secondary, c.error);
+        let now = cx.background_executor().now();
         let session = entity.read(cx);
         let rows: Result<Vec<RowData>, AnyElement> = match session.state() {
             SessionState::Waiting => Err(status_line("Loading session…", text_secondary)),
@@ -420,6 +421,7 @@ impl TreePane {
                     unread: session
                         .workspace_store(&row.id)
                         .is_some_and(|w| w.read(cx).has_unread_attention()),
+                    flash: session.workspace_store(&row.id).and_then(|w| w.read(cx).attention_flash(now)),
                     favourite: session.workspace_store(&row.id).is_some_and(|w| w.read(cx).is_favourite()),
                     has_parent: session
                         .workspace_store(&row.id)
@@ -451,6 +453,10 @@ impl TreePane {
                 .child("No workspaces. Click + to add one.")
                 .into_any_element(),
             Ok(rows) => {
+                // A flash fades frame by frame until it is over.
+                if rows.iter().any(|row| row.flash.is_some()) {
+                    window.request_animation_frame();
+                }
                 let mut list = v_flex().w_full();
                 for row in rows {
                     list = list.child(self.render_row(entity, row, cx));
@@ -599,7 +605,20 @@ fn connection_banner(
 
 impl TreePane {
     fn render_row(&self, session: &Entity<SessionStore>, row: RowData, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        let RowData { id, depth, has_children, label, is_worktree, unread, favourite, has_parent, pr, git_repo, activity } = row;
+        let RowData {
+            id,
+            depth,
+            has_children,
+            label,
+            is_worktree,
+            unread,
+            flash,
+            favourite,
+            has_parent,
+            pr,
+            git_repo,
+            activity,
+        } = row;
         let busy = activity != treeterm_model::workspace_store::ActivityState::Idle;
         let c = colors(cx);
         let (secondary, primary) = (c.text_secondary, c.text_primary);
@@ -647,6 +666,7 @@ impl TreePane {
         h_flex()
             .id(SharedString::from(format!("ws-row-{id}")))
             .group(group.clone())
+            .relative()
             .w_full()
             .min_h(px(36.))
             .py(px(6.))
@@ -786,6 +806,8 @@ impl TreePane {
                         })),
                 )
             })
+            // `WorkspaceAttentionFlash`, over the row's content.
+            .children(flash.map(|flash| ui::attention_flash(flash, 0.)))
             // `SessionPanel`'s row menu: the same items, conditions and order.
             .context_menu(move |menu, _window, cx| {
                 let store = session.read(cx).workspace_store(&menu_id).cloned();
@@ -877,6 +899,8 @@ struct RowData {
     is_worktree: bool,
     /// Background work finished while the workspace was not shown.
     unread: bool,
+    /// The attention flash's state and opacity now.
+    flash: Option<(treeterm_model::workspace_store::ActivityState, f32)>,
     favourite: bool,
     /// A child worktree (it has a parent): its title and branch can be re-suggested.
     has_parent: bool,

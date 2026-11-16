@@ -16,6 +16,7 @@ use treeterm_core::attention::{
     ActiveView as AttentionView, AttentionAction, AttentionMutation, AttentionSyncState, AttentionTracker, Metadata,
     ObservedSession, ObservedWorkspace, SessionStatus, apply_attention_mutations, has_unread_workspace_attention,
 };
+use treeterm_core::attention_flash::AttentionFlash;
 use treeterm_core::daemon::DaemonConnection;
 use treeterm_core::layout::{DropTarget, Layout, LayoutTab, Side};
 use treeterm_core::pty::{CreatePty, Sandbox};
@@ -250,6 +251,8 @@ pub struct WorkspaceStore {
     /// activity change as it happens: observers are coalesced, and a short burst goes
     /// Working → Idle within one update.
     attention_tracker: AttentionTracker,
+    /// The flash this workspace's rows play on entering an attention state; runtime only.
+    flash: AttentionFlash,
     /// The window shows this workspace.
     viewed: bool,
     /// Web App tabs' servers and pages (their PTYs are ordinary terminal tabs).
@@ -341,6 +344,7 @@ impl WorkspaceStore {
             activity_version: 0,
             attention: AttentionSyncState::default(),
             attention_tracker: AttentionTracker::default(),
+            flash: AttentionFlash::default(),
             viewed: false,
             web_apps: HashMap::new(),
             remote,
@@ -662,6 +666,10 @@ impl WorkspaceStore {
 
     /// Run the attention tracker over the current state and apply what it decides.
     fn observe_attention(&mut self, activity_changed: bool, cx: &mut Context<Self>) {
+        // Before the tracker: the flash compares the unread marker from before this change,
+        // which may record attention below.
+        let unread_before = self.has_unread_attention();
+        self.flash.observe(self.overall_activity(), unread_before, cx.background_executor().now());
         let observed = [ObservedWorkspace {
             id: &self.workspace.id,
             tab_ids: self.workspace.file.app_states.keys().map(String::as_str).collect(),
@@ -690,6 +698,12 @@ impl WorkspaceStore {
 
     pub fn activity_version(&self) -> u64 {
         self.activity_version
+    }
+
+    /// The attention flash on this workspace's rows at `now` (`WorkspaceAttentionFlash`):
+    /// the state whose colour flashes and its opacity, `None` when nothing flashes.
+    pub fn attention_flash(&self, now: std::time::Instant) -> Option<(ActivityState, f32)> {
+        self.flash.frame(now)
     }
 
     /// The workspace carries an unread attention marker.

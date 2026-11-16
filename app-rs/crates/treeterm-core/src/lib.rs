@@ -7,6 +7,7 @@
 pub mod activity;
 pub mod analyzer;
 pub mod attention;
+pub mod attention_flash;
 pub mod classification;
 pub mod clock;
 pub mod concurrency;
