@@ -419,11 +419,13 @@ impl ReviewView {
                 .child(label)
                 .when(idle, |d| d.on_click(cx.listener(|view, _: &ClickEvent, _, cx| view.model.update(cx, |m, cx| m.close(cx)))))
         };
-        match (&header.parent_branch, header.detached) {
-            (None, _) => {
+        // The tab's parent id picks the arm (`hasParent`); the parent's branch, when known,
+        // is what the prompts name.
+        match (header.has_parent, header.detached) {
+            (false, _) => {
                 actions = actions.children(prompt_commit).child(cancel("Close", cx));
             }
-            (Some(_), true) => {
+            (true, true) => {
                 actions = actions
                     .children(prompt_commit)
                     .child(
@@ -435,13 +437,14 @@ impl ReviewView {
                     )
                     .child(cancel("Cancel", cx));
             }
-            (Some(parent), false) => {
+            (true, false) => {
                 // The last answers, also while a check runs and after one failed.
                 let (has_conflicts, parent_moved) = (conflicts.has_conflicts(), conflicts.parent_has_new_commits);
                 let violet = (rgb(0x8b5cf6).into(), rgb(0xa78bfa).into());
+                let parent = header.parent_branch.as_ref().filter(|_| header.harness);
                 actions = actions
                     .children(prompt_commit)
-                    .when(has_conflicts && header.harness, |d| {
+                    .when(has_conflicts && parent.is_some(), |d| {
                         d.child(
                             action_button("review-prompt-rebase", violet.0, violet.1, white, idle)
                                 .child("Prompt Rebase")
@@ -450,7 +453,7 @@ impl ReviewView {
                                 }),
                         )
                     })
-                    .when(parent_moved && header.harness, |d| {
+                    .when_some(parent.filter(|_| parent_moved), |d, parent| {
                         d.child(
                             action_button("review-prompt-update", violet.0, violet.1, white, idle)
                                 .tooltip({

@@ -308,7 +308,11 @@ pub struct Overview {
 pub struct ReviewHeader {
     pub name: String,
     pub branch: String,
-    /// The parent's branch, the default base (`None`: a top-level workspace).
+    /// The tab names a parent workspace (`parentWorkspaceId`): the child's actions show
+    /// (merge, or Close and Clean), even while the parent's branch is unknown.
+    pub has_parent: bool,
+    /// The parent's branch, the default base (`None`: a top-level workspace, or a parent
+    /// not loaded or not on a branch).
     pub parent_branch: Option<String>,
     pub detached: bool,
     /// An AI harness tab is running (the prompt buttons show).
@@ -327,6 +331,8 @@ pub struct ReviewModel {
     git: GitApi,
     path: String,
     base: ReviewBase,
+    /// The tab state's `parentWorkspaceId` is set (Electron's `hasParent`).
+    has_parent: bool,
     mode: ReviewMode,
     content: ReviewContent,
     staging: GitOp,
@@ -440,6 +446,7 @@ impl ReviewModel {
         cx: &mut Context<Self>,
     ) -> Self {
         let requested = ReviewMode::parse(state.get("viewMode").and_then(Value::as_str).unwrap_or(""));
+        let has_parent = state.get("parentWorkspaceId").and_then(Value::as_str).is_some_and(|id| !id.is_empty());
         // No base: nothing to diff the branch against; Commits lists the whole history.
         let mode = match (&base, requested) {
             (ReviewBase::None, ReviewMode::Committed) => ReviewMode::Uncommitted,
@@ -461,6 +468,7 @@ impl ReviewModel {
             git,
             path,
             base,
+            has_parent,
             mode,
             content: ReviewContent::Loading,
             staging: GitOp::Idle,
@@ -563,16 +571,24 @@ impl ReviewModel {
         self.ignore_whitespace
     }
 
-    /// The workspace's name and branch, its parent's branch and whether a harness runs.
+    /// The workspace's name and branch, its parent and its branch, and whether a harness runs.
     pub fn header(&self, cx: &App) -> ReviewHeader {
         let Some(workspace) = self.workspace.upgrade() else {
-            return ReviewHeader { name: String::new(), branch: String::new(), parent_branch: None, detached: false, harness: false };
+            return ReviewHeader {
+                name: String::new(),
+                branch: String::new(),
+                has_parent: self.has_parent,
+                parent_branch: None,
+                detached: false,
+                harness: false,
+            };
         };
         let workspace = workspace.read(cx);
         let file = workspace.file();
         ReviewHeader {
             name: file.display_name().to_owned(),
             branch: file.git_branch.clone().unwrap_or_default(),
+            has_parent: self.has_parent,
             parent_branch: workspace.parent_branch().map(str::to_owned),
             detached: file.is_detached == Some(true),
             harness: workspace.has_running_harness(),

@@ -900,3 +900,25 @@ fn review_counts_views_lists_commits_and_shows_a_commits_changes(cx: &mut TestAp
     assert!(events.borrow().contains(&ReviewEvent::CloseRequested));
     assert!(workspace.read_with(cx, |w, _| !w.file().app_states.contains_key(&tab)));
 }
+
+#[gpui_kit::test]
+fn the_review_header_takes_the_child_actions_from_the_tabs_parent_id(cx: &mut TestAppContext) {
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let repo = TempRepo::new(&h);
+    let store = open_store(cx, &h);
+    let workspace = open_repo_workspace(cx, &h, &store, &repo);
+    // Electron's `hasParent`: the tab names a parent, here one that is not loaded, so its
+    // branch is unknown; the child's actions still show.
+    let (_, child) = open_review_with(cx, &workspace, serde_json::json!({ "parentWorkspaceId": "not-loaded" }));
+    let (_, blank) = open_review_with(cx, &workspace, serde_json::json!({ "parentWorkspaceId": "" }));
+    let (_, top) = open_review_with(cx, &workspace, serde_json::json!({}));
+    for review in [&child, &blank, &top] {
+        wait_review(cx, review, "loaded", |r, _| !r.is_refreshing());
+    }
+    let header = child.read_with(cx, |r, cx| r.header(cx));
+    assert!(header.has_parent && header.parent_branch.is_none(), "{header:?}");
+    assert!(!blank.read_with(cx, |r, cx| r.header(cx)).has_parent);
+    assert!(!top.read_with(cx, |r, cx| r.header(cx)).has_parent);
+}
