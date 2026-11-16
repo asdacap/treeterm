@@ -271,6 +271,75 @@ mod watch_bootstrap_output {
             .unwrap();
         assert_eq!(after.initial.len(), before.initial.len());
     }
+
+    #[tokio::test(start_paused = true)]
+    async fn watchers_see_a_new_tunnel_start_the_bootstrap_and_tunnel_logs_over() {
+        let (mut harness, _) = Harness::with_local().await;
+        harness.connect_remote().await;
+        let watch = |kind| harness.manager.watch_output(&remote_id(), kind).unwrap();
+        let mut bootstrap = watch(OutputKind::Bootstrap);
+        let mut tunnel = watch(OutputKind::Tunnel);
+        let mut daemon = watch(OutputKind::Daemon);
+
+        harness.manager.force_reconnect(&remote_id()).unwrap();
+        advance(Duration::from_secs(1)).await;
+        assert_eq!(status_of(&harness, &remote_id()), StatusKind::Connected);
+
+        // Cleared, then exactly the new tunnel's lines.
+        for (kind, events) in [
+            (OutputKind::Bootstrap, bootstrap.updates.drain_ready()),
+            (OutputKind::Tunnel, tunnel.updates.drain_ready()),
+        ] {
+            let scrollback = watch(kind).initial;
+            assert!(!scrollback.is_empty(), "{kind:?}");
+            let mut expected = vec![LogEvent::Cleared];
+            expected.extend(scrollback.into_iter().map(LogEvent::Line));
+            assert_eq!(events, expected, "{kind:?}");
+        }
+        // The daemon log is the connection's (Electron's `daemonBuffer`): it goes on.
+        let connected = ["Connecting to daemon via gRPC...", "Connected to daemon"];
+        assert_eq!(
+            daemon.updates.drain_ready(),
+            connected.map(|line| LogEvent::Line(line.to_owned()))
+        );
+        assert_eq!(
+            watch(OutputKind::Daemon).initial,
+            [connected, connected].concat()
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_logs_end_when_a_connect_again_replaces_the_connection() {
+        let (mut harness, _) = Harness::with_local().await;
+        harness.connect_remote().await;
+        harness.latest(SpawnKind::Tunnel).exit(255);
+        flush().await;
+        harness.manager.cancel_reconnect(&remote_id());
+        let watch =
+            |harness: &Harness, kind| harness.manager.watch_output(&remote_id(), kind).unwrap();
+        let bootstrap = watch(&harness, OutputKind::Bootstrap);
+        let daemon = watch(&harness, OutputKind::Daemon);
+
+        // Manual "Retry": a fresh connection takes over the same id, with its own logs.
+        harness.connect_remote().await;
+
+        assert_eq!(
+            bootstrap.updates.collect::<Vec<_>>().await,
+            Vec::<LogEvent>::new()
+        );
+        assert_eq!(
+            daemon.updates.collect::<Vec<_>>().await,
+            Vec::<LogEvent>::new()
+        );
+        assert_eq!(
+            watch(&harness, OutputKind::Daemon).initial,
+            ["Connecting to daemon via gRPC...", "Connected to daemon"]
+        );
+        assert_eq!(
+            watch(&harness, OutputKind::Bootstrap).initial[0],
+            "Bootstrapping remote daemon on test@example.com..."
+        );
+    }
 }
 
 mod watch_connection_status {
@@ -497,7 +566,7 @@ mod connect_remote {
             watch
                 .updates
                 .drain_ready()
-                .contains(&"hello from bootstrap".to_owned())
+                .contains(&LogEvent::Line("hello from bootstrap".to_owned()))
         );
     }
 
@@ -513,7 +582,10 @@ mod connect_remote {
             .latest(SpawnKind::Tunnel)
             .stdout("hello from tunnel\n");
         flush().await;
-        assert_eq!(watch.updates.drain_ready(), vec!["hello from tunnel"]);
+        assert_eq!(
+            watch.updates.drain_ready(),
+            vec![LogEvent::Line("hello from tunnel".to_owned())]
+        );
         assert!(
             watch
                 .initial

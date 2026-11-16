@@ -25,7 +25,7 @@ use super::output::{self, Listeners, Updates, Watch};
 use super::process::ProcessSpawner;
 use super::ssh::{UploadError, upload_file};
 use super::types::{
-    ConnectionError, ConnectionId, ConnectionInfo, ConnectionStatus, ConnectionTarget,
+    ConnectionError, ConnectionId, ConnectionInfo, ConnectionStatus, ConnectionTarget, LogEvent,
     OutdatedDaemon, OutputKind, Persistence, PortForwardConfig, PortForwardId, PortForwardInfo,
     StatusKind, WatchFailure,
 };
@@ -216,13 +216,14 @@ impl<D: Dialer> ConnectionManager<D> {
             .map(|entry| entry.shared.read(ConnectionMachine::info))
     }
 
-    /// Scrollback and new lines of one of the connection's logs. The stream ends when the
-    /// connection is removed.
+    /// Scrollback of one of the connection's logs, then its new lines and
+    /// [`LogEvent::Cleared`] when a new tunnel starts it over. The stream ends when the
+    /// connection is removed or replaced ([`Self::connect_remote`]).
     pub fn watch_output(
         &self,
         id: &ConnectionId,
         kind: OutputKind,
-    ) -> Result<Watch<Vec<String>, String>, ConnectionNotFound> {
+    ) -> Result<Watch<Vec<String>, LogEvent>, ConnectionNotFound> {
         Ok(self.entry(id)?.shared.watch_output(kind))
     }
 

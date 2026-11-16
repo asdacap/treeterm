@@ -7,7 +7,8 @@ use std::time::Duration;
 use futures::StreamExt as _;
 use gpui_kit::{App, Context, Entity, Task, WeakEntity};
 use treeterm_core::connection::{
-    ConnectionId, ConnectionTarget, OutputKind, Persistence, PortForwardConfig, PortForwardId, PortForwardInfo,
+    ConnectionId, ConnectionTarget, LogEvent, OutputKind, Persistence, PortForwardConfig, PortForwardId,
+    PortForwardInfo,
 };
 use treeterm_core::settings::PortForwardSpec;
 
@@ -22,11 +23,13 @@ pub struct SessionInfo {
     id: ConnectionId,
     app: WeakEntity<AppStore>,
     logs: HashMap<OutputKind, Vec<String>>,
+    /// Follows each log of the connection's current manager entry ([`Self::follow`]).
+    log_tasks: HashMap<OutputKind, Task<()>>,
     forwards: Vec<PortForwardInfo>,
     error: Option<String>,
     /// Forwards whose output is shown, with what it printed and the task following it.
     forward_logs: HashMap<PortForwardId, (Vec<String>, Option<Task<()>>)>,
-    _tasks: Vec<Task<()>>,
+    _poll: Task<()>,
 }
 
 /// Why the "Add Port Forward" dialog refuses its fields (`PortForwardDialog`'s messages).
@@ -65,42 +68,64 @@ pub fn parse_forward_fields(local: &str, host: &str, remote: &str) -> Result<Por
 
 impl SessionInfo {
     pub fn new(app: &Entity<AppStore>, id: ConnectionId, cx: &mut Context<Self>) -> Self {
-        let mut tasks = Vec::new();
-        let mut logs = HashMap::new();
-        for kind in [OutputKind::Bootstrap, OutputKind::Tunnel, OutputKind::Daemon] {
-            match app.read(cx).manager().watch_output(&id, kind) {
-                Ok(watch) => {
-                    logs.insert(kind, watch.initial);
-                    let mut updates = watch.updates;
-                    tasks.push(cx.spawn(async move |this, cx| {
-                        while let Some(line) = updates.next().await {
-                            if this.update(cx, |info, cx| info.push_line(kind, line, cx)).is_err() {
-                                return;
-                            }
-                        }
-                    }));
-                }
-                Err(error) => tracing::debug!(%error, "no log for this connection"),
-            }
-        }
         let executor = cx.background_executor().clone();
-        tasks.push(cx.spawn(async move |this, cx| {
+        let poll = cx.spawn(async move |this, cx| {
             loop {
                 if this.update(cx, |info, cx| info.refresh_forwards(cx)).is_err() {
                     return;
                 }
                 executor.timer(FORWARD_POLL).await;
             }
-        }));
-        Self {
+        });
+        let mut info = Self {
             id,
             app: app.downgrade(),
-            logs,
+            logs: HashMap::new(),
+            log_tasks: HashMap::new(),
             forwards: Vec::new(),
             error: None,
             forward_logs: HashMap::new(),
-            _tasks: tasks,
+            _poll: poll,
+        };
+        for kind in [OutputKind::Bootstrap, OutputKind::Tunnel, OutputKind::Daemon] {
+            info.follow(kind, cx);
         }
+        info
+    }
+
+    /// Show the log's scrollback on the connection as it is now, and follow it: its new
+    /// lines, and a new tunnel starting it over. A connect that replaces the connection
+    /// (Retry, Refresh daemon, Ignore mismatch) ends the stream, and the replacing
+    /// connection's log is followed instead, as Electron re-subscribes on every connection
+    /// change. No connection: an empty log, as Electron's empty scrollback.
+    fn follow(&mut self, kind: OutputKind, cx: &mut Context<Self>) {
+        let Some(app) = self.app.upgrade() else {
+            return;
+        };
+        let watch = app.read(cx).manager().watch_output(&self.id, kind);
+        match watch {
+            Ok(watch) => {
+                self.logs.insert(kind, watch.initial);
+                let mut updates = watch.updates;
+                let task = cx.spawn(async move |this, cx| {
+                    while let Some(event) = updates.next().await {
+                        if this.update(cx, |info, cx| info.on_log(kind, event, cx)).is_err() {
+                            return;
+                        }
+                    }
+                    match this.update(cx, |info, cx| info.follow(kind, cx)) {
+                        Ok(()) | Err(_) => {} // Err: the pane closed
+                    }
+                });
+                self.log_tasks.insert(kind, task);
+            }
+            Err(error) => {
+                tracing::debug!(%error, "no log for this connection");
+                self.logs.remove(&kind);
+                self.log_tasks.remove(&kind);
+            }
+        }
+        cx.notify();
     }
 
     pub fn id(&self) -> &ConnectionId {
@@ -186,11 +211,16 @@ impl SessionInfo {
         self.error.as_deref()
     }
 
-    fn push_line(&mut self, kind: OutputKind, line: String, cx: &mut Context<Self>) {
+    fn on_log(&mut self, kind: OutputKind, event: LogEvent, cx: &mut Context<Self>) {
         let log = self.logs.entry(kind).or_default();
-        log.push(line);
-        let excess = log.len().saturating_sub(MAX_LINES);
-        log.drain(..excess);
+        match event {
+            LogEvent::Line(line) => {
+                log.push(line);
+                let excess = log.len().saturating_sub(MAX_LINES);
+                log.drain(..excess);
+            }
+            LogEvent::Cleared => log.clear(),
+        }
         cx.notify();
     }
 

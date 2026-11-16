@@ -1,6 +1,7 @@
 //! Where the window lands once a connection's session is restored: the app store's
 //! `ShowSessionPane` / `ShowSession` events (`startRemoteConnect`, `addRemoteSession`,
-//! `local:connect`). Remotes run against a fake ssh host in front of an in-process daemon.
+//! `local:connect`), and what the session pane shows of a connection as it is lost and
+//! replaced. Remotes run against a fake ssh host in front of an in-process daemon.
 
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
@@ -12,11 +13,12 @@ use gpui_kit::{AppContext as _, Entity, Subscription, TestAppContext};
 use tempfile::TempDir;
 use treeterm_core::connection::fake::{FakeResponse, FakeSpawner};
 use treeterm_core::connection::process::ProcessCommand;
-use treeterm_core::connection::{ConnectionId, OutdatedDaemon, StatusKind};
+use treeterm_core::connection::{ConnectionId, OutdatedDaemon, OutputKind, StatusKind};
 use treeterm_core::local_daemon::LocalDaemonSpec;
 use treeterm_core::settings::{Extra, PortForwardSpec, SshConnectionConfig};
 use treeterm_core::traffic::TrafficRate;
 use treeterm_model::app_store::{AppEvent, AppStore, ConnState, SessionSlot};
+use treeterm_model::session_info::SessionInfo;
 use treeterm_model::session_store::{SessionState, SessionStore, WorkspaceEntry};
 use treeterm_model::settings_store::SettingsStore;
 use treeterm_model::traffic::{ConnectionTraffic, TrafficMeter};
@@ -692,4 +694,118 @@ fn a_failed_connection_replaced_by_a_new_connect_keeps_its_download_meter(cx: &m
     let (traffic_after, meter_after, after) = remote_traffic(cx, &app);
     assert_eq!((traffic_after, meter_after), (traffic, meter));
     assert!(after.total_bytes > before.total_bytes);
+}
+
+const LOGS: [OutputKind; 3] = [
+    OutputKind::Bootstrap,
+    OutputKind::Tunnel,
+    OutputKind::Daemon,
+];
+
+/// The session pane's `kind` log.
+fn pane_log(cx: &mut TestAppContext, info: &Entity<SessionInfo>, kind: OutputKind) -> Vec<String> {
+    info.read_with(cx, |info, _| info.log(kind).to_vec())
+}
+
+/// The remote connection's `kind` scrollback, as the manager holds it now.
+fn scrollback(cx: &mut TestAppContext, app: &App, kind: OutputKind) -> Vec<String> {
+    app.app.read_with(cx, |a, _| {
+        a.manager()
+            .watch_output(&remote_id(), kind)
+            .unwrap()
+            .initial
+    })
+}
+
+/// The host's refusal, as the bootstrap log shows it.
+fn refused(lines: &[String]) -> bool {
+    lines
+        .iter()
+        .any(|line| line.ends_with("port 22: Connection refused"))
+}
+
+#[gpui_kit::test]
+fn the_session_panes_logs_follow_the_connection_that_replaces_a_failed_one(
+    cx: &mut TestAppContext,
+) {
+    cx.executor().allow_parking();
+    isolated_home();
+    let h = harness();
+    let app = app(cx, &h, None);
+    app.refuse.store(true, Ordering::SeqCst);
+    app.connect(cx);
+    wait_until(cx, &app.app, |a| {
+        matches!(
+            remote(a).map(|slot| &slot.state),
+            Some(ConnState::Failed { .. })
+        )
+    });
+    let info = cx.new(|cx| SessionInfo::new(&app.app, remote_id(), cx));
+    assert!(refused(&pane_log(cx, &info, OutputKind::Bootstrap)));
+    assert!(pane_log(cx, &info, OutputKind::Daemon).is_empty());
+
+    // The pane's Retry: a new connect replaces the failed connection, whose logs end.
+    app.refuse.store(false, Ordering::SeqCst);
+    app.connect(cx);
+    app.restored(cx);
+    wait_until(cx, &info, |info| {
+        info.log(OutputKind::Daemon).last().map(String::as_str) == Some("Connected to daemon")
+    });
+
+    for kind in LOGS {
+        assert_eq!(
+            pane_log(cx, &info, kind),
+            scrollback(cx, &app, kind),
+            "{kind:?}"
+        );
+    }
+    assert!(!refused(&pane_log(cx, &info, OutputKind::Bootstrap)));
+}
+
+#[gpui_kit::test]
+fn a_reconnect_attempt_starts_the_session_panes_logs_over(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    isolated_home();
+    let h = harness();
+    let app = app(cx, &h, None);
+    app.connect(cx);
+    app.restored(cx);
+    let info = cx.new(|cx| SessionInfo::new(&app.app, remote_id(), cx));
+    let daemon = pane_log(cx, &info, OutputKind::Daemon);
+    assert_eq!(
+        daemon,
+        ["Connecting to daemon via gRPC...", "Connected to daemon"]
+    );
+
+    // Lost, and the host refuses the next attempt.
+    app.refuse.store(true, Ordering::SeqCst);
+    let forced = app
+        .app
+        .read_with(cx, |a, _| a.manager().force_reconnect(&remote_id()));
+    forced.unwrap();
+    app.app.read_with(cx, |a, _| a.reconnect_now(&remote_id()));
+    let app_store = app.app.clone();
+    wait_until_app(cx, &info, |info, cx| {
+        let attempt_failed = matches!(
+            remote(app_store.read(cx)).map(|slot| &slot.state),
+            Some(ConnState::Reconnecting { error, .. }) if error.starts_with("SSH bootstrap failed")
+        );
+        attempt_failed && refused(info.log(OutputKind::Bootstrap))
+    });
+
+    // Only the attempt's own lines: the connected tunnel's are gone.
+    let bootstrap = pane_log(cx, &info, OutputKind::Bootstrap);
+    let starts = bootstrap
+        .iter()
+        .filter(|line| line.starts_with("Bootstrapping remote daemon on "))
+        .count();
+    assert_eq!(starts, 1, "{bootstrap:?}");
+    for kind in LOGS {
+        assert_eq!(
+            pane_log(cx, &info, kind),
+            scrollback(cx, &app, kind),
+            "{kind:?}"
+        );
+    }
+    assert_eq!(pane_log(cx, &info, OutputKind::Daemon), daemon);
 }

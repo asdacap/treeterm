@@ -38,10 +38,12 @@
 //!
 //! User actions map to `reconnect` (retry from error), `reconnect_now`, `force_reconnect`,
 //! `cancel_reconnect`, `disconnect`; a session store whose session did not load reports it
-//! with `session_load_failed`. Logs come from `watch_output(id, OutputKind::…)`,
-//! forwards from `add_port_forward` / `start_saved_port_forwards` and
-//! `watch_port_forward_status` / `watch_port_forward_output`; each watch is the scrollback
-//! (or current value) plus an [`output::Updates`] stream that ends when its source goes away.
+//! with `session_load_failed`. Logs come from `watch_output(id, OutputKind::…)` (their
+//! lines, and [`LogEvent::Cleared`] when a new tunnel starts them over), forwards from
+//! `add_port_forward` / `start_saved_port_forwards` and `watch_port_forward_status` /
+//! `watch_port_forward_output`; each watch is the scrollback (or current value) plus an
+//! [`output::Updates`] stream that ends when its source goes away (for a connection's logs,
+//! also when a new connect replaces it).
 
 pub mod dialer;
 mod driver;
@@ -65,6 +67,7 @@ pub use manager::{
 };
 pub use types::{
     ConnectPhase, ConnectionError, ConnectionErrorKind, ConnectionId, ConnectionInfo,
-    ConnectionStatus, ConnectionTarget, DialFailure, OutdatedDaemon, OutputKind, Persistence,
-    PortForwardConfig, PortForwardId, PortForwardInfo, PortForwardStatus, StatusKind, WatchFailure,
+    ConnectionStatus, ConnectionTarget, DialFailure, LogEvent, OutdatedDaemon, OutputKind,
+    Persistence, PortForwardConfig, PortForwardId, PortForwardInfo, PortForwardStatus, StatusKind,
+    WatchFailure,
 };

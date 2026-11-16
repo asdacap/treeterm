@@ -367,6 +367,15 @@ pub enum OutputKind {
     Daemon,
 }
 
+/// A change to one of a connection's logs, after its scrollback.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LogEvent {
+    Line(String),
+    /// The log starts over: each new tunnel has fresh bootstrap and tunnel logs (Electron's
+    /// new `SSHTunnel` per attempt), so the lines before are no longer its scrollback.
+    Cleared,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

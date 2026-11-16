@@ -29,8 +29,8 @@ use super::process::{ProcessEvent, ProcessSpawner};
 use super::socket_path::remote_forward_socket_path;
 use super::ssh::{BootstrapResult, DaemonBinaries, LogSink, SshConnector, Tunnel};
 use super::types::{
-    ConnectPhase, ConnectionError, ConnectionInfo, OutputKind, PortForwardId, PortForwardInfo,
-    WatchFailure,
+    ConnectPhase, ConnectionError, ConnectionInfo, LogEvent, OutputKind, PortForwardId,
+    PortForwardInfo, WatchFailure,
 };
 
 /// Where remote connections get their daemon binaries and tunnel sockets.
@@ -57,7 +57,7 @@ pub(crate) fn now() -> Instant {
 
 struct LogStream {
     log: OutputLog,
-    listeners: Listeners<String>,
+    listeners: Listeners<LogEvent>,
 }
 
 pub(crate) struct Hub<C> {
@@ -170,11 +170,14 @@ impl<C: Clone + Send + 'static> Shared<C> {
         let mut hub = lock(&self.hub);
         let stream = hub.stream(kind);
         stream.log.push(line.clone());
-        stream.listeners.send(&line);
+        stream.listeners.send(&LogEvent::Line(line));
     }
 
     fn clear_log(&self, kind: OutputKind) {
-        lock(&self.hub).stream(kind).log.clear();
+        let mut hub = lock(&self.hub);
+        let stream = hub.stream(kind);
+        stream.log.clear();
+        stream.listeners.send(&LogEvent::Cleared);
     }
 
     pub(crate) fn watch_status(&self) -> Watch<ConnectionInfo<C>, ConnectionInfo<C>> {
@@ -185,7 +188,7 @@ impl<C: Clone + Send + 'static> Shared<C> {
         }
     }
 
-    pub(crate) fn watch_output(&self, kind: OutputKind) -> Watch<Vec<String>, String> {
+    pub(crate) fn watch_output(&self, kind: OutputKind) -> Watch<Vec<String>, LogEvent> {
         let mut hub = lock(&self.hub);
         let stream = hub.stream(kind);
         Watch {
@@ -421,7 +424,7 @@ fn connect<D: Dialer>(
             }
             AttemptTarget::Remote { config, outdated } => {
                 // A new tunnel starts with fresh bootstrap and tunnel logs (Electron's new
-                // SSHTunnel per attempt); live watchers keep receiving.
+                // SSHTunnel per attempt); live watchers are told and keep receiving.
                 shared.clear_log(OutputKind::Bootstrap);
                 shared.clear_log(OutputKind::Tunnel);
                 let connector = SshConnector::new(
