@@ -92,8 +92,9 @@ Done (tested against a real in-process daemon unless noted):
   workspaces (new branch, existing branch, remote branch, existing worktree, quick fork; live
   git output), merge/squash-merge (keep or remove), remove with or without git cleanup.
 - **Keys and settings (M3):** prefix mode + overlay, workspace focus, Cmd/Ctrl+1–9, app menu
-  (Electron's template: About, Services, Hide, Close Window, Toggle Full Screen, Reset Input,
-  Minimize, Zoom, Bring All to Front, Help; its commands also work while a dialog has focus;
+  (Electron's template: About, Services, Hide, Close Window, Actual Size, Zoom In, Zoom Out
+  (terminal text; Cmd/Ctrl+= zooms in too), Toggle Full Screen, Reset Input, Minimize, Zoom,
+  Bring All to Front, Help; its commands also work while a dialog has focus;
   off macOS the window draws the menu bar, and a focused terminal keeps the keys it encodes,
   as with xterm.js), Exit and Kill Daemon; all 13 Settings sections; live reload when Electron
   edits `settings.json`; close confirmation for unmerged workspaces; Window → Active Processes.
@@ -285,6 +286,9 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   resize grip; GPUI has no backdrop filter, so the prefix-mode overlay does not blur what
   is behind it. Off macOS the menu bar is GPUI Kit's, drawn in the window (not GTK's), above
   dialogs so that it stays usable while one is open, as GTK's is.
+- View → Actual Size, Zoom In and Zoom Out scale terminal text only (in Chromium's steps and
+  25%–500% limits, for every window, until the app quits): GPUI has no page zoom, and the
+  rest of the window is laid out in fixed pixels.
 - The code editors (Files viewer, Editor tab), through GPUI Kit: Tab inserts a whole indent
   step, not spaces up to the next tab stop; 8px of padding stays under the last line; the
   current line's outline is drawn over the text, so it stops at the scrollbar; a scrollbar

@@ -16,6 +16,7 @@ use gpui_kit::{
     OsAction, SystemMenuType, WeakEntity, Window, actions, deferred, div, px,
 };
 use treeterm_model::app_store::AppStore;
+use treeterm_model::zoom::Zoom;
 use treeterm_term::keys::KeyOptions;
 
 use crate::app_view::AppView;
@@ -37,6 +38,9 @@ actions!(
         CloseWindow,
         ToggleFullScreen,
         ResetInput,
+        ResetZoom,
+        ZoomIn,
+        ZoomOut,
         ZoomWindow,
         BringAllToFront,
         LearnMore
@@ -47,9 +51,12 @@ actions!(
 /// GPUI runs bindings before a focused terminal sees the key, so the terminal takes back
 /// those it encodes (`terminal_view::keep_terminal_keys`), as xterm.js consumed them in
 /// Electron.
-pub const ACCELERATORS: &[&str] = &["ctrl-,", "ctrl-q", "ctrl-shift-q", "ctrl-m", "ctrl-w", "f11"];
+pub const ACCELERATORS: &[&str] =
+    &["ctrl-,", "ctrl-q", "ctrl-shift-q", "ctrl-m", "ctrl-w", "ctrl-0", "ctrl-=", "ctrl-+", "ctrl--", "f11"];
 
-/// The menu shortcuts (Electron's role accelerators).
+/// The menu shortcuts (Electron's role accelerators). Zoom In is Electron's Cmd/Ctrl+Plus
+/// (Shift+=), and also Cmd/Ctrl+= as in Chromium. Its menu item shows Plus: the macOS menu
+/// bar shows an action's first binding, GPUI Kit's menu bar (off macOS) its last.
 fn key_bindings(mac: bool) -> Vec<KeyBinding> {
     if mac {
         vec![
@@ -59,6 +66,10 @@ fn key_bindings(mac: bool) -> Vec<KeyBinding> {
             KeyBinding::new("cmd-q", Quit, None),
             KeyBinding::new("cmd-w", CloseWindow, None),
             KeyBinding::new("cmd-shift-q", QuitAndKillDaemon, None),
+            KeyBinding::new("cmd-0", ResetZoom, None),
+            KeyBinding::new("cmd-+", ZoomIn, None),
+            KeyBinding::new("cmd-=", ZoomIn, None),
+            KeyBinding::new("cmd--", ZoomOut, None),
             KeyBinding::new("ctrl-cmd-f", ToggleFullScreen, None),
             KeyBinding::new("cmd-m", Minimize, None),
         ]
@@ -69,6 +80,10 @@ fn key_bindings(mac: bool) -> Vec<KeyBinding> {
             KeyBinding::new("ctrl-shift-q", QuitAndKillDaemon, None),
             KeyBinding::new("ctrl-m", Minimize, None),
             KeyBinding::new("ctrl-w", CloseWindow, None),
+            KeyBinding::new("ctrl-0", ResetZoom, None),
+            KeyBinding::new("ctrl-=", ZoomIn, None),
+            KeyBinding::new("ctrl-+", ZoomIn, None),
+            KeyBinding::new("ctrl--", ZoomOut, None),
             KeyBinding::new("f11", ToggleFullScreen, None),
         ]
     }
@@ -92,6 +107,10 @@ fn menus(mac: bool) -> Vec<Menu> {
         MenuItem::os_action("Select All", terminal_view::SelectAll, OsAction::SelectAll),
     ]);
     let view = Menu::new("View").items([
+        MenuItem::action("Actual Size", ResetZoom),
+        MenuItem::action("Zoom In", ZoomIn),
+        MenuItem::action("Zoom Out", ZoomOut),
+        MenuItem::separator(),
         MenuItem::action("Toggle Full Screen", ToggleFullScreen),
         MenuItem::separator(),
         MenuItem::action("Reset Input", ResetInput),
@@ -174,6 +193,7 @@ pub fn install(store: Entity<AppStore>, cx: &mut App) {
         })
         .detach();
     });
+    install_zoom(cx);
     cx.on_action(|_: &Hide, cx| cx.hide());
     cx.on_action(|_: &HideOthers, cx| cx.hide_other_apps());
     cx.on_action(|_: &ShowAll, cx| cx.unhide_other_apps());
@@ -187,6 +207,15 @@ pub fn install(store: Entity<AppStore>, cx: &mut App) {
     set_menus(mac, cx);
     #[cfg(target_os = "macos")]
     crate::macos::register_help_menu();
+}
+
+/// View > Actual Size, Zoom In and Zoom Out: one level for every window, which terminals
+/// draw their text at (see `treeterm_model::zoom`).
+fn install_zoom(cx: &mut App) {
+    cx.set_global(Zoom::default());
+    cx.on_action(|_: &ResetZoom, cx| cx.update_global::<Zoom, _>(|zoom, _| zoom.reset()));
+    cx.on_action(|_: &ZoomIn, cx| cx.update_global::<Zoom, _>(|zoom, _| zoom.zoom_in()));
+    cx.on_action(|_: &ZoomOut, cx| cx.update_global::<Zoom, _>(|zoom, _| zoom.zoom_out()));
 }
 
 /// The menus, for the system menu bar and for GPUI Kit's `AppMenuBar`: off macOS GPUI only
@@ -291,7 +320,15 @@ mod tests {
         "Paste = terminal::Paste",
         "Select All = terminal::SelectAll",
     ];
-    const VIEW: [&str; 3] = ["Toggle Full Screen = treeterm::ToggleFullScreen", "-", "Reset Input = treeterm::ResetInput"];
+    const VIEW: [&str; 7] = [
+        "Actual Size = treeterm::ResetZoom",
+        "Zoom In = treeterm::ZoomIn",
+        "Zoom Out = treeterm::ZoomOut",
+        "-",
+        "Toggle Full Screen = treeterm::ToggleFullScreen",
+        "-",
+        "Reset Input = treeterm::ResetInput",
+    ];
     const HELP: [&str; 1] = ["Learn More = treeterm::LearnMore"];
 
     #[test]
@@ -389,6 +426,10 @@ mod tests {
                 ("cmd-q", "treeterm::Quit"),
                 ("cmd-w", "treeterm::CloseWindow"),
                 ("cmd-shift-q", "treeterm::QuitAndKillDaemon"),
+                ("cmd-0", "treeterm::ResetZoom"),
+                ("cmd-+", "treeterm::ZoomIn"),
+                ("cmd-=", "treeterm::ZoomIn"),
+                ("cmd--", "treeterm::ZoomOut"),
                 ("ctrl-cmd-f", "treeterm::ToggleFullScreen"),
                 ("cmd-m", "treeterm::Minimize"),
             ])
@@ -401,6 +442,10 @@ mod tests {
                 ("ctrl-shift-q", "treeterm::QuitAndKillDaemon"),
                 ("ctrl-m", "treeterm::Minimize"),
                 ("ctrl-w", "treeterm::CloseWindow"),
+                ("ctrl-0", "treeterm::ResetZoom"),
+                ("ctrl-=", "treeterm::ZoomIn"),
+                ("ctrl-+", "treeterm::ZoomIn"),
+                ("ctrl--", "treeterm::ZoomOut"),
                 ("f11", "treeterm::ToggleFullScreen"),
             ])
         );
@@ -527,6 +572,7 @@ mod tests {
         let (window, terminal) = cx.update(|cx| {
             gpui_kit::init(cx);
             bind_keys(false, linux, cx);
+            install_zoom(cx);
             gpui_kit::open_window(WindowOptions::default(), cx, |_, cx| {
                 cx.new(|cx| Terminal { focus: cx.focus_handle(), keys: Vec::new(), commands: Vec::new() })
             })
@@ -565,5 +611,46 @@ mod tests {
         cx.run_until_parked();
         let commands = terminal.read_with(cx, |t, _| t.commands.clone());
         assert_eq!(commands, ["QuitAndKillDaemon", "OpenSettings"]);
+
+        // Nor the zoom keys (xterm.js leaves Ctrl+- to the app too): the menu zooms.
+        assert_zoom_keys(cx, ["ctrl-+", "ctrl-=", "ctrl--", "ctrl-0"]);
+        let keys = terminal.read_with(cx, |t, _| t.keys.clone());
+        assert_eq!(keys, ["ctrl-w", "ctrl-q", "ctrl-m", "f11", "ctrl-c"], "a zoom key reached the terminal");
+    }
+
+    /// Presses Zoom In's two keys, then Zoom Out's and Actual Size's, checking the app's zoom
+    /// after each.
+    fn assert_zoom_keys(cx: &mut VisualTestContext, [zoom_in, zoom_in_too, zoom_out, actual_size]: [&str; 4]) {
+        let zoom = |cx: &mut VisualTestContext| cx.update(|_, cx| *cx.global::<Zoom>());
+        let mut once = Zoom::default();
+        once.zoom_in();
+        let mut twice = once;
+        twice.zoom_in();
+        for (keys, expected) in [(zoom_in, once), (zoom_in_too, twice), (zoom_out, once), (actual_size, Zoom::default())] {
+            cx.simulate_keystrokes(keys);
+            cx.run_until_parked();
+            assert_eq!(zoom(cx), expected, "after {keys}");
+        }
+    }
+
+    /// The zoom is the app's, as Electron's roles zoom whatever page the window shows: its keys
+    /// work while a dialog has focus.
+    #[gpui_kit::test]
+    fn the_zoom_keys_work_while_a_dialog_has_focus(cx: &mut TestAppContext) {
+        let window = cx.update(|cx| {
+            gpui_kit::init(cx);
+            bind_keys(true, KeyOptions::for_host(), cx);
+            install_zoom(cx);
+            gpui_kit::open_window(WindowOptions::default(), cx, |_, cx| cx.new(|_| Probe::default()))
+                .expect("open a window")
+                .0
+        });
+        let cx = VisualTestContext::from_window(window, cx).into_mut();
+        cx.update(|window, cx| window.open_dialog(cx, |dialog, _, _| dialog));
+        cx.run_until_parked();
+
+        assert_zoom_keys(cx, ["cmd-+", "cmd-=", "cmd--", "cmd-0"]);
+        assert!(cx.update(|window, cx| window.has_active_dialog(cx)), "the dialog stays open");
+        assert!(cx.update(|_, cx| cx.is_action_available(&ZoomIn)), "the menu item stays enabled");
     }
 }

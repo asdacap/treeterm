@@ -177,7 +177,8 @@ fn control_code(key: &str) -> Option<u8> {
         '\\' | '4' => 0x1c,
         ']' | '5' => 0x1d,
         '^' | '6' => 0x1e,
-        '_' | '-' | '/' | '7' => 0x1f,
+        // Not Ctrl+- (Ctrl+_ is Shift+-): xterm.js leaves it to the app, which zooms out.
+        '_' | '/' | '7' => 0x1f,
         '8' => 0x7f,
         _ => return None,
     };
@@ -305,6 +306,8 @@ mod tests {
         assert_eq!(enc(with("[", |m| m.control = true)).unwrap(), b"\x1b");
         assert_eq!(enc(with("space", |m| m.control = true)).unwrap(), b"\x00");
         assert_eq!(enc(with("/", |m| m.control = true)).unwrap(), b"\x1f");
+        assert_eq!(enc(with("_", |m| m.control = true)).unwrap(), b"\x1f");
+        assert_eq!(enc(with("-", |m| m.control = true)), None, "Ctrl+- is the app's Zoom Out");
         assert_eq!(
             enc(with("c", |m| {
                 m.control = true;

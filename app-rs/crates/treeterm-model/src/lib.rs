@@ -45,3 +45,4 @@ pub mod tree_view_state;
 pub mod web_app;
 pub mod words;
 pub mod workspace_store;
+pub mod zoom;
