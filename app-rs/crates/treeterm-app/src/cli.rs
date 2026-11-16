@@ -2,7 +2,7 @@
 //! `treeterm shutdown-daemon`. Electron's `list-sessions` and `status` called RPCs the daemon
 //! does not have and are not ported.
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use treeterm_core::crash_report;
 use treeterm_core::settings::{ConnectionLabel, IdentityFile, SshConnectionConfig};
@@ -68,6 +68,25 @@ fn parse_port(port: &str) -> Option<u16> {
     }
 }
 
+/// `path.resolve(cwd, dir)`, as `bin/treeterm.js` resolves the directory: `dir` against `cwd`,
+/// with `.` and `..` resolved by name (never above the root) and no trailing separator.
+/// Symlinks are kept, so a directory reached through one keeps the path it was named by and
+/// matches a workspace already open under that path.
+fn resolve(cwd: &Path, dir: &str) -> PathBuf {
+    let mut resolved = PathBuf::new();
+    for component in cwd.join(dir).components() {
+        match component {
+            Component::CurDir => {}
+            // At the root there is nothing to pop: `/..` is `/`.
+            Component::ParentDir => {
+                resolved.pop();
+            }
+            Component::Prefix(_) | Component::RootDir | Component::Normal(_) => resolved.push(component),
+        }
+    }
+    resolved
+}
+
 /// `args` without the program name; `cwd` resolves a relative directory.
 pub fn parse(args: &[String], cwd: &Path, now_ms: u128) -> Result<Command, String> {
     if let Some(report) = args.first().and_then(|arg| arg.strip_prefix(crash_report::ARG)) {
@@ -82,18 +101,19 @@ pub fn parse(args: &[String], cwd: &Path, now_ms: u128) -> Result<Command, Strin
             Ok(Command::Gui { workspace: None, ssh: Some(Box::new(config)) })
         }
         _ => {
-            let Some(dir) = args.iter().find(|arg| !arg.starts_with('-')) else {
+            // An empty argument names no directory (`bin/treeterm.js` takes the first truthy one).
+            let Some(dir) = args.iter().find(|arg| !arg.is_empty() && !arg.starts_with('-')) else {
                 return Ok(Command::Gui { workspace: None, ssh: None });
             };
-            let resolved = cwd.join(dir);
+            let resolved = resolve(cwd, dir);
+            // Both follow symlinks, as `fs.existsSync` and `fs.statSync` do.
             if !resolved.exists() {
                 return Err(format!("Error: Directory does not exist: {}", resolved.display()));
             }
             if !resolved.is_dir() {
                 return Err(format!("Error: Path is not a directory: {}", resolved.display()));
             }
-            let canonical = resolved.canonicalize().map_err(|e| format!("Error: {}: {e}", resolved.display()))?;
-            Ok(Command::Gui { workspace: Some(canonical), ssh: None })
+            Ok(Command::Gui { workspace: Some(resolved), ssh: None })
         }
     }
 }
@@ -126,6 +146,14 @@ mod tests {
         }
     }
 
+    /// The workspace `args` open from `cwd`.
+    fn workspace(list: &[&str], cwd: &Path) -> PathBuf {
+        match parse(&args(list), cwd, 1) {
+            Ok(Command::Gui { workspace: Some(path), ssh: None }) => path,
+            other => panic!("{list:?} opens no workspace: {other:?}"),
+        }
+    }
+
     #[test]
     fn commands_and_directories() {
         let cwd = std::env::temp_dir();
@@ -134,11 +162,67 @@ mod tests {
         assert_eq!(parse(&[], &cwd, 1), Ok(Command::Gui { workspace: None, ssh: None }));
         assert!(parse(&args(&["ssh"]), &cwd, 1).is_err());
         let dir = tempfile::tempdir().unwrap();
-        let Ok(Command::Gui { workspace: Some(path), .. }) = parse(&args(&[dir.path().to_str().unwrap()]), &cwd, 1) else {
-            panic!("a directory opens as a workspace");
-        };
-        assert_eq!(path, dir.path().canonicalize().unwrap());
-        assert!(parse(&args(&["/definitely/not/here"]), &cwd, 1).unwrap_err().contains("does not exist"));
+        // As given: on macOS the temporary directory is under the `/var` symlink.
+        assert_eq!(workspace(&[dir.path().to_str().unwrap()], &cwd), dir.path());
+        assert_eq!(workspace(&["-x", dir.path().to_str().unwrap()], &cwd), dir.path());
+        // An empty argument names no directory.
+        assert_eq!(parse(&args(&[""]), &cwd, 1), Ok(Command::Gui { workspace: None, ssh: None }));
+        assert_eq!(workspace(&["", dir.path().to_str().unwrap()], &cwd), dir.path());
+        assert_eq!(
+            parse(&args(&["/definitely/not/here"]), &cwd, 1),
+            Err("Error: Directory does not exist: /definitely/not/here".to_owned())
+        );
+    }
+
+    /// A relative directory resolves against the working directory by name, as
+    /// `path.resolve(cwd, dir)` does, and the errors name the resolved path.
+    #[test]
+    fn a_relative_directory_resolves_by_name() {
+        let cwd = tempfile::tempdir().unwrap();
+        let (cwd, sub) = (cwd.path(), cwd.path().join("sub"));
+        std::fs::create_dir(&sub).unwrap();
+        std::fs::write(cwd.join("file"), "").unwrap();
+        for dir in ["sub", "sub/", "./sub/.", "sub/../sub/", "sub//"] {
+            assert_eq!(workspace(&[dir], cwd), sub, "{dir}");
+        }
+        assert_eq!(workspace(&["."], cwd), cwd);
+        assert_eq!(workspace(&[".."], &sub), cwd);
+        assert_eq!(
+            parse(&args(&["sub/../gone/"]), cwd, 1),
+            Err(format!("Error: Directory does not exist: {}", cwd.join("gone").display()))
+        );
+        assert_eq!(
+            parse(&args(&["./file"]), cwd, 1),
+            Err(format!("Error: Path is not a directory: {}", cwd.join("file").display()))
+        );
+    }
+
+    /// A directory reached through a symlink keeps the link's path, so a workspace already
+    /// open under it is the one selected; `..` after the link goes back up the link's path.
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_directory_keeps_the_link_path() {
+        let root = tempfile::tempdir().unwrap();
+        let target = root.path().join("elsewhere").join("target");
+        std::fs::create_dir_all(&target).unwrap();
+        let link = root.path().join("link");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        assert_eq!(workspace(&[link.to_str().unwrap()], Path::new("/")), link);
+        assert_eq!(workspace(&["link/"], root.path()), link);
+        assert_eq!(workspace(&["link/.."], root.path()), root.path());
+        // The checks follow the link, as `fs.existsSync` and `fs.statSync` do.
+        std::os::unix::fs::symlink(root.path().join("gone"), root.path().join("dangling")).unwrap();
+        assert_eq!(
+            parse(&args(&["dangling"]), root.path(), 1),
+            Err(format!("Error: Directory does not exist: {}", root.path().join("dangling").display()))
+        );
+    }
+
+    #[test]
+    fn resolve_never_goes_above_the_root() {
+        assert_eq!(resolve(Path::new("/a/b"), "../../../c/"), Path::new("/c"));
+        assert_eq!(resolve(Path::new("/a"), "/x/./y//"), Path::new("/x/y"));
+        assert_eq!(resolve(Path::new("/"), ".."), Path::new("/"));
     }
 
     /// The panic hook's argument starts the crash screen, never a workspace (the directory
