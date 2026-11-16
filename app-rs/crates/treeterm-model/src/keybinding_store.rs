@@ -12,6 +12,8 @@ use treeterm_core::keybinding::{
 pub struct KeybindingStore {
     machine: Keybindings,
     timer: Option<Task<()>>,
+    /// What [`Self::handle_key`] made of the keystroke being dispatched (the last one fed).
+    last_outcome: KeyOutcome,
 }
 
 impl KeybindingStore {
@@ -19,6 +21,7 @@ impl KeybindingStore {
         Self {
             machine: Keybindings::new(settings),
             timer: None,
+            last_outcome: KeyOutcome::PassThrough,
         }
     }
 
@@ -41,7 +44,16 @@ impl KeybindingStore {
             self.reschedule(cx);
             cx.notify();
         }
+        self.last_outcome = outcome.clone();
         outcome
+    }
+
+    /// Whether the keystroke being dispatched was taken by the shortcuts in a way that
+    /// keeps it from other key handlers ([`KeyOutcome::claims_key`]). GPUI runs every
+    /// keystroke interceptor even after one stops propagation; the shortcut interceptor
+    /// runs first, so later ones (the settings dialog's key recorder) ask this.
+    pub fn claimed_last_key(&self) -> bool {
+        self.last_outcome.claims_key()
     }
 
     /// Answer to `PrefixAction::WorkspaceFocus`: the flattened tree and the active index.

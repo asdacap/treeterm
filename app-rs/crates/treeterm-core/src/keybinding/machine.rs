@@ -98,6 +98,20 @@ pub enum KeyOutcome {
     Perform(Action),
 }
 
+impl KeyOutcome {
+    /// Whether Electron's capture-phase handler stopped the key's propagation, so that no
+    /// other key handler (the settings dialog's key recorder) saw it: the prefix key from
+    /// idle and in workspace focus, Escape and the action keys in prefix mode, and workspace
+    /// focus' Escape, Enter, Up and Down. Cmd/Ctrl+1–9 only had their default prevented, and
+    /// the prefix key pressed again in prefix mode went on to the terminal: others see them.
+    pub fn claims_key(&self) -> bool {
+        match self {
+            KeyOutcome::PassThrough | KeyOutcome::Perform(Action::SwitchToTab { .. }) => false,
+            KeyOutcome::Consumed | KeyOutcome::Perform(Action::Prefix(_) | Action::SetActiveWorkspace { .. }) => true,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
     /// A prefix-mode action. For [`PrefixAction::WorkspaceFocus`] the UI answers with
@@ -936,6 +950,15 @@ mod tests {
                 assert_eq!(kb.mode(), PrefixMode::Active);
             }
         }
+    }
+
+    #[test]
+    fn only_keys_electron_stopped_are_claimed() {
+        assert!(!KeyOutcome::PassThrough.claims_key());
+        assert!(KeyOutcome::Consumed.claims_key());
+        assert!(KeyOutcome::Perform(Action::Prefix(PrefixAction::NewTab)).claims_key());
+        assert!(KeyOutcome::Perform(Action::SetActiveWorkspace { workspace_id: "ws1".to_owned() }).claims_key());
+        assert!(!KeyOutcome::Perform(Action::SwitchToTab { index: 0 }).claims_key());
     }
 
     /// Port of `prefixKey.integration.test.ts`: the terminal side (Ctrl-B encoding to 0x02)

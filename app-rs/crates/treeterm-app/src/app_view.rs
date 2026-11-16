@@ -1200,7 +1200,8 @@ impl AppView {
     /// Settings (Cmd+, / Ctrl+,), unless it is already open.
     pub fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.settings_dialog.upgrade().is_none() {
-            self.settings_dialog = crate::settings_view::open(self.settings.clone(), window, cx).downgrade();
+            let (settings, keybindings) = (self.settings.clone(), self.keybindings.clone());
+            self.settings_dialog = crate::settings_view::open(settings, keybindings, window, cx).downgrade();
         }
     }
 
@@ -3198,13 +3199,18 @@ mod tests {
         VisualTestContext::from_window(window, cx).into_mut()
     }
 
+    fn keybinding_store(cx: &mut VisualTestContext) -> Entity<KeybindingStore> {
+        cx.update(|_, cx| cx.new(|_| KeybindingStore::new(treeterm_core::keybinding::KeybindingSettings::default())))
+    }
+
     /// `AppView` opens Settings, and the close confirmation, only while its handle to the
     /// last one is dead: the handle must live exactly as long as the dialog.
     #[gpui_kit::test]
     fn the_settings_handle_lives_while_its_dialog_is_open(cx: &mut TestAppContext) {
         let cx = window(cx);
         let store = cx.update(|_, cx| cx.new(|_| SettingsStore::in_memory(Default::default())));
-        let settings = cx.update(|window, cx| crate::settings_view::open(store, window, cx).downgrade());
+        let keybindings = keybinding_store(cx);
+        let settings = cx.update(|window, cx| crate::settings_view::open(store, keybindings, window, cx).downgrade());
         cx.run_until_parked();
         assert!(settings.upgrade().is_some(), "open");
 
@@ -3221,7 +3227,8 @@ mod tests {
     ) -> (Entity<SettingsStore>, Entity<crate::settings_view::SettingsView>) {
         let dir = dir.to_owned();
         let store = cx.update(|_, cx| cx.new(|cx| SettingsStore::new(Some(dir), cx)));
-        let view = cx.update(|window, cx| crate::settings_view::open(store.clone(), window, cx));
+        let keybindings = keybinding_store(cx);
+        let view = cx.update(|window, cx| crate::settings_view::open(store.clone(), keybindings, window, cx));
         cx.run_until_parked();
         (store, view)
     }

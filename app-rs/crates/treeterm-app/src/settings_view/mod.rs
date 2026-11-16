@@ -20,6 +20,7 @@ use treeterm_core::keybinding::Os;
 use treeterm_core::settings::{
     AiHarnessInstance, BrowserInstance, CustomRunnerInstance, Settings, TerminalInstance, WebAppInstance,
 };
+use treeterm_model::keybinding_store::KeybindingStore;
 use treeterm_model::settings_store::SettingsStore;
 
 use self::form::{Lists, SandboxSupport, Section, Texts};
@@ -49,6 +50,8 @@ const TABS_HEIGHT: f32 = 477.5;
 
 pub struct SettingsView {
     store: Entity<SettingsStore>,
+    /// The shortcuts, which take some keys before the recorder sees them.
+    keybindings: Entity<KeybindingStore>,
     section: Section,
     /// The toggles and choices as edited (Electron's `localSettings`). Its instance lists are
     /// empty: they live in the lists below, and the free text in `inputs`; both are read on
@@ -190,7 +193,12 @@ impl Inputs {
 }
 
 impl SettingsView {
-    pub fn new(store: Entity<SettingsStore>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        store: Entity<SettingsStore>,
+        keybindings: Entity<KeybindingStore>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let mut draft = (**store.read(cx).settings()).clone();
         let inputs = Inputs::new(Texts::from_settings(&draft), window, cx);
         let profiles = InstanceList::new(std::mem::take(&mut draft.terminal.instances), window, cx);
@@ -200,6 +208,7 @@ impl SettingsView {
         let browsers = InstanceList::new(std::mem::take(&mut draft.browser.instances), window, cx);
         Self {
             store,
+            keybindings,
             // Electron opens on Terminal too.
             section: Section::Terminal,
             draft,
@@ -275,12 +284,15 @@ impl SettingsView {
     /// Start (or, clicked again, stop) recording a keybinding button's key. While recording,
     /// every keystroke goes to the recorder first (before key bindings such as Tab's focus
     /// move or Escape's close), as Electron's `preventDefault` + `stopPropagation` do.
+    /// Only the keys the shortcuts claim come before it: Electron's prefix handler runs in
+    /// the capture phase, so recording the current prefix key takes a second press.
     fn toggle_recording(&mut self, target: Recording, window: &mut Window, cx: &mut Context<Self>) {
         self.recording = if self.recording == Some(target) { None } else { Some(target) };
         self.intercept = self.recording.map(|_| {
-            let view = cx.entity().downgrade();
+            let (view, keybindings) = (cx.entity().downgrade(), self.keybindings.clone());
             cx.intercept_keystrokes(move |event, window, cx| {
-                if event.keystroke.is_modifier_key() {
+                // GPUI runs every interceptor, the shortcuts' (registered at start-up) first.
+                if event.keystroke.is_modifier_key() || keybindings.read(cx).claimed_last_key() {
                     return;
                 }
                 let keystroke = event.keystroke.clone();
@@ -451,11 +463,104 @@ impl Render for SettingsView {
 }
 
 /// Open the dialog in `window`. Only the dialog keeps the view: it is released on close.
-pub fn open(store: Entity<SettingsStore>, window: &mut Window, cx: &mut App) -> Entity<SettingsView> {
-    let view = cx.new(|cx| SettingsView::new(store, window, cx));
+pub fn open(
+    store: Entity<SettingsStore>,
+    keybindings: Entity<KeybindingStore>,
+    window: &mut Window,
+    cx: &mut App,
+) -> Entity<SettingsView> {
+    let view = cx.new(|cx| SettingsView::new(store, keybindings, window, cx));
     window.open_dialog(cx, {
         let view = view.clone();
         move |dialog, _window, cx| ui::dialog_frame(dialog, 600., cx).child(view.clone())
     });
     view
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui_kit::{TestAppContext, VisualTestContext, WindowOptions};
+    use treeterm_core::keybinding::{KeyOutcome, KeybindingSettings, PrefixMode};
+
+    use super::*;
+
+    struct Empty;
+
+    impl Render for Empty {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+        }
+    }
+
+    /// The dialog over a window whose keystrokes pass the shortcuts first, as `main` sets up.
+    fn dialog(cx: &mut TestAppContext) -> (&mut VisualTestContext, Entity<KeybindingStore>, Entity<SettingsView>) {
+        let window = cx.update(|cx| {
+            gpui_kit::init(cx);
+            crate::theme::install(cx);
+            gpui_kit::open_window(WindowOptions::default(), cx, |_, cx| cx.new(|_| Empty)).expect("open a window").0
+        });
+        let cx = VisualTestContext::from_window(window, cx).into_mut();
+        let keybindings = cx.update(|_, cx| cx.new(|_| KeybindingStore::new(KeybindingSettings::default())));
+        let shortcuts = keybindings.clone();
+        cx.update(|_, cx| {
+            cx.intercept_keystrokes(move |event, _, cx| {
+                let press = crate::key_press(&event.keystroke);
+                if !matches!(shortcuts.update(cx, |kb, cx| kb.handle_key(&press, cx)), KeyOutcome::PassThrough) {
+                    cx.stop_propagation();
+                }
+            })
+            .detach();
+        });
+        let store = cx.update(|_, cx| cx.new(|_| SettingsStore::in_memory(Default::default())));
+        let view = cx.update(|window, cx| open(store, keybindings.clone(), window, cx));
+        cx.run_until_parked();
+        (cx, keybindings, view)
+    }
+
+    fn texts(cx: &mut VisualTestContext, view: &Entity<SettingsView>) -> Texts {
+        cx.update(|_, cx| view.read(cx).inputs.read(cx))
+    }
+
+    fn recording(cx: &mut VisualTestContext, view: &Entity<SettingsView>) -> Option<Recording> {
+        cx.update(|_, cx| view.read(cx).recording)
+    }
+
+    fn mode(cx: &mut VisualTestContext, keybindings: &Entity<KeybindingStore>) -> PrefixMode {
+        cx.update(|_, cx| keybindings.read(cx).machine().mode())
+    }
+
+    /// Electron's prefix handler takes the prefix key from idle in the capture phase, so the
+    /// recorder sees the current prefix key only when it is pressed again in prefix mode.
+    #[gpui_kit::test]
+    fn recording_the_current_prefix_key_takes_a_second_press(cx: &mut TestAppContext) {
+        let (cx, keybindings, view) = dialog(cx);
+        cx.update(|window, cx| view.update(cx, |view, cx| view.toggle_recording(Recording::Prefix, window, cx)));
+
+        cx.simulate_keystrokes("ctrl-b");
+        assert_eq!(mode(cx, &keybindings), PrefixMode::Active);
+        assert_eq!(recording(cx, &view), Some(Recording::Prefix), "still recording");
+        assert_eq!(texts(cx, &view).prefix_key, "Control+B");
+
+        cx.simulate_keystrokes("ctrl-b");
+        assert_eq!(mode(cx, &keybindings), PrefixMode::Idle);
+        assert_eq!(recording(cx, &view), None);
+        assert_eq!(texts(cx, &view).prefix_key, "CommandOrControl+B");
+    }
+
+    /// An action key in prefix mode runs its action, not the recorder; Cmd/Ctrl+1–9 (only
+    /// `preventDefault`ed) reach both.
+    #[gpui_kit::test]
+    fn action_keys_in_prefix_mode_are_not_recorded(cx: &mut TestAppContext) {
+        let (cx, keybindings, view) = dialog(cx);
+        cx.update(|window, cx| view.update(cx, |view, cx| view.toggle_recording(Recording::Action(1), window, cx)));
+
+        cx.simulate_keystrokes("ctrl-b c");
+        assert_eq!(mode(cx, &keybindings), PrefixMode::Idle);
+        assert_eq!(recording(cx, &view), Some(Recording::Action(1)));
+        assert_eq!(texts(cx, &view).action_keys[1], "x");
+
+        cx.simulate_keystrokes("ctrl-1");
+        assert_eq!(recording(cx, &view), None);
+        assert_eq!(texts(cx, &view).action_keys[1], "1");
+    }
 }

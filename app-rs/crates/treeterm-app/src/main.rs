@@ -76,23 +76,21 @@ fn keybinding_settings(settings: &treeterm_core::settings::Settings) -> Keybindi
     keys
 }
 
+/// A GPUI keystroke as the shortcut machine reads it.
+pub(crate) fn key_press(k: &gpui_kit::Keystroke) -> KeyPress {
+    let m = k.modifiers;
+    KeyPress::from_gpui(
+        &k.key,
+        k.key_char.as_deref(),
+        Modifiers { control: m.control, alt: m.alt, shift: m.shift, platform: m.platform, function: m.function },
+    )
+}
+
 /// Every keystroke passes the shortcut machine before the focused view (a terminal) sees
 /// it, so the prefix key and its follow-up never reach the PTY.
 fn intercept_shortcuts(keybindings: Entity<KeybindingStore>, view: Entity<AppView>, cx: &mut App) {
     cx.intercept_keystrokes(move |event, window, cx| {
-        let k = &event.keystroke;
-        let m = k.modifiers;
-        let press = KeyPress::from_gpui(
-            &k.key,
-            k.key_char.as_deref(),
-            Modifiers {
-                control: m.control,
-                alt: m.alt,
-                shift: m.shift,
-                platform: m.platform,
-                function: m.function,
-            },
-        );
+        let press = key_press(&event.keystroke);
         match keybindings.update(cx, |kb, cx| kb.handle_key(&press, cx)) {
             KeyOutcome::PassThrough => {}
             KeyOutcome::Consumed => cx.stop_propagation(),
