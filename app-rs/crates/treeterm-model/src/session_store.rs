@@ -154,6 +154,18 @@ pub struct ChildOptions {
     pub default_application_id: Option<String>,
 }
 
+/// What an adopted worktree's workspace starts with (`adoptExistingWorktree`'s `description`,
+/// `displayName` and `settings`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AdoptOptions {
+    pub description: Option<String>,
+    /// Shown in place of the name (the branch).
+    pub display_name: Option<String>,
+    /// The child's own default application (the dialog's "Use custom default application");
+    /// `None` inherits.
+    pub default_application_id: Option<String>,
+}
+
 /// What happens to a child after its branch is merged into the parent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AfterMerge {
@@ -1751,74 +1763,81 @@ impl SessionStore {
         Ok(())
     }
 
-    /// Add an existing worktree of the parent's repository as a child workspace
-    /// (`adoptExistingWorktree`). No git operation; refused if it is already open.
-    pub fn adopt_existing_worktree(
+    /// Open an existing worktree of the parent's repository as a child workspace named after
+    /// its branch (`adoptExistingWorktree`, called with the branch as the name by the Add
+    /// Child dialog). No git operation. Refused at once when the parent is gone or the
+    /// worktree is already open; then the session lock is taken (a refusal comes back and
+    /// nothing is added), the child is added as Loaded and published, and the lock released.
+    /// Resolves with the child's id, or why it was not added. Runs to the end even when the
+    /// receiver is dropped.
+    pub fn adopt_worktree(
         &mut self,
         parent_id: &str,
         worktree: treeterm_core::git::WorktreeInfo,
-        description: Option<String>,
+        options: AdoptOptions,
         cx: &mut Context<Self>,
-    ) -> Result<String, String> {
-        let mut metadata = std::collections::BTreeMap::new();
-        metadata.insert("branchIsUserDefined".to_owned(), "true".to_owned());
-        if let Some(description) = description.filter(|d| !d.is_empty()) {
-            metadata.insert("description".to_owned(), description);
+    ) -> oneshot::Receiver<Result<String, String>> {
+        let (done, result) = oneshot::channel();
+        if let Err(error) = self.adoptable(parent_id, &worktree.path, cx) {
+            done.send(Err(error)).ok(); // the caller may not wait
+            return result;
         }
-        self.adopt_worktree_with(parent_id, worktree, metadata, cx)
-    }
-
-    /// Open an existing worktree as a child of `parent_id` with `metadata`.
-    pub fn adopt_worktree_with(
-        &mut self,
-        parent_id: &str,
-        worktree: treeterm_core::git::WorktreeInfo,
-        metadata: std::collections::BTreeMap<String, String>,
-        cx: &mut Context<Self>,
-    ) -> Result<String, String> {
-        let parent = self
-            .workspace_store(parent_id)
-            .ok_or("Parent workspace not found")?
-            .clone();
-        let already_open = self
-            .entries
-            .values()
-            .filter_map(WorkspaceEntry::store)
-            .any(|store| store.read(cx).workspace().path == worktree.path);
-        if already_open {
-            return Err("This worktree is already open".to_owned());
-        }
-        let name = name_from_path(&worktree.path);
-        let id = new_workspace_id();
-        self.entries.insert(
-            id.clone(),
-            WorkspaceEntry::Loading {
-                name: name.clone(),
-                message: "Opening worktree...".to_owned(),
-                output: Vec::new(),
-            },
-        );
-        cx.notify();
         let lock = self.acquire_lock(cx);
-        let child_id = id.clone();
+        let parent_id = parent_id.to_owned();
         cx.spawn(async move |this, cx| {
             let locked = lock.await.unwrap_or_else(|_| Err("session store dropped".to_owned()));
             if let Err(error) = locked {
-                match this.update(cx, |s, cx| s.fail_child(&child_id, &name, error, cx)) {
-                    Ok(()) | Err(_) => {}
-                }
+                done.send(Err(error)).ok();
                 return;
             }
-            let published = this.update(cx, |s, cx| s.finish_child(&child_id, &parent, name, worktree, false, metadata, None, cx));
-            if let Ok(Some(published)) = published
-                && published.await.is_err()
-            {
-                tracing::debug!("child publish dropped with the store");
-            }
+            let metadata = adopted_metadata(options.description.as_deref(), options.display_name.as_deref());
+            let name = worktree.branch.clone();
+            let own_default = options.default_application_id;
+            let added = this
+                .update(cx, |s, cx| s.add_adopted(&parent_id, worktree, name, metadata, own_default, cx))
+                .unwrap_or_else(|_| Err("session store dropped".to_owned()));
+            let outcome = match added {
+                Ok((id, published)) => {
+                    if published.await.is_err() {
+                        tracing::debug!("child publish dropped with the store");
+                    }
+                    Ok(id)
+                }
+                Err(error) => Err(error),
+            };
             release(&this, cx).await;
+            done.send(outcome).ok();
         })
         .detach();
-        Ok(id)
+        result
+    }
+
+    /// `adoptExistingWorktree`'s checks: the parent is loaded and no loaded workspace has
+    /// the worktree's path. Returns the parent.
+    fn adoptable(&self, parent_id: &str, path: &str, cx: &App) -> Result<Entity<WorkspaceStore>, String> {
+        let parent = self.workspace_store(parent_id).ok_or("Parent workspace not found")?.clone();
+        if self.open_paths(cx).iter().any(|(open, _)| open == path) {
+            return Err("This worktree is already open".to_owned());
+        }
+        Ok(parent)
+    }
+
+    /// Add an existing worktree as a Loaded child of `parent_id` (`addChildWorkspaceFromResult`),
+    /// with the session lock held: the checks run again, as another window may have changed
+    /// the session while the lock was awaited. Returns the child's id and when it is published.
+    fn add_adopted(
+        &mut self,
+        parent_id: &str,
+        worktree: treeterm_core::git::WorktreeInfo,
+        name: String,
+        metadata: std::collections::BTreeMap<String, String>,
+        own_default: Option<String>,
+        cx: &mut Context<Self>,
+    ) -> Result<(String, oneshot::Receiver<()>), String> {
+        let parent = self.adoptable(parent_id, &worktree.path, cx)?;
+        let id = new_workspace_id();
+        let published = self.add_child(&id, &parent, name, worktree, false, metadata, own_default, cx);
+        Ok((id, published))
     }
 
     fn append_output(&mut self, id: &str, line: String, cx: &mut Context<Self>) {
@@ -1835,6 +1854,8 @@ impl SessionStore {
         }
     }
 
+    /// Replace a created child's Loading row with the workspace, unless it was dismissed while
+    /// git ran.
     #[allow(clippy::too_many_arguments)]
     fn finish_child(
         &mut self,
@@ -1847,11 +1868,28 @@ impl SessionStore {
         own_default: Option<String>,
         cx: &mut Context<Self>,
     ) -> Option<oneshot::Receiver<()>> {
-        use treeterm_core::wire::workspace_file::{AppState, WorkspaceStatus};
-        // Dismissed while git ran.
         if !matches!(self.entries.get(id), Some(WorkspaceEntry::Loading { .. })) {
             return None;
         }
+        Some(self.add_child(id, parent, name, info, detached, extra_metadata, own_default, cx))
+    }
+
+    /// Add a child workspace for the worktree `info` (`addChildWorkspaceFromResult`): its first
+    /// tab is its own default application, else the parent chain's, else the global default.
+    /// Returns when it is published.
+    #[allow(clippy::too_many_arguments)]
+    fn add_child(
+        &mut self,
+        id: &str,
+        parent: &Entity<WorkspaceStore>,
+        name: String,
+        info: treeterm_core::git::WorktreeInfo,
+        detached: bool,
+        extra_metadata: std::collections::BTreeMap<String, String>,
+        own_default: Option<String>,
+        cx: &mut Context<Self>,
+    ) -> oneshot::Receiver<()> {
+        use treeterm_core::wire::workspace_file::{AppState, WorkspaceStatus};
         let (parent_id, git_root_path, settings) = {
             let ws = parent.read(cx).workspace();
             (ws.id.clone(), ws.file.git_root_path.clone(), ws.file.settings.clone())
@@ -1911,7 +1949,7 @@ impl SessionStore {
             cx,
         );
         self.save_registry_entry(id, cx);
-        Some(published)
+        published
     }
 
     /// The PR lookup client, if one could be built (`useGitHubApi`).
@@ -1964,65 +2002,38 @@ impl SessionStore {
         .detach();
     }
 
-    /// Open recently used worktrees of `root_id`'s repository under it (`autoOpenWorktrees`):
-    /// parents before children, each child under its detected parent (or the root). Already
-    /// open paths are skipped. Runs in the background; each child is adopted as an existing
-    /// worktree (session lock per child).
-    pub fn auto_open_worktrees(&mut self, root_id: &str, items: Vec<AutoOpenItem>, cx: &mut Context<Self>) -> Result<(), String> {
-        let root_path = self
-            .workspace_store(root_id)
-            .ok_or("Root workspace not found")?
-            .read(cx)
-            .workspace()
-            .path
-            .clone();
-        let ordered = order_auto_open(items, &root_path, &self.open_paths(cx));
+    /// Open recently used worktrees of `root_id`'s repository under it (`autoOpenWorktrees`),
+    /// under one session lock for the whole batch: parents before children, each child under
+    /// its detected parent (or the root), named after its remembered display name, else its
+    /// branch. Already open paths are skipped. Resolves once every child is published and the
+    /// lock released, or with why the batch stopped (a missing root, a lock held elsewhere).
+    /// Runs to the end even when the receiver is dropped.
+    pub fn auto_open_worktrees(
+        &mut self,
+        root_id: &str,
+        items: Vec<AutoOpenItem>,
+        cx: &mut Context<Self>,
+    ) -> oneshot::Receiver<Result<(), String>> {
+        let (done, result) = oneshot::channel();
+        let Some(root) = self.workspace_store(root_id) else {
+            done.send(Err("Root workspace not found".to_owned())).ok(); // the caller may not wait
+            return result;
+        };
+        let root_path = root.read(cx).workspace().path.clone();
+        let lock = self.acquire_lock(cx);
         let root_id = root_id.to_owned();
         cx.spawn(async move |this, cx| {
-            for item in ordered {
-                let started = this.update(cx, |s, cx| {
-                    let open = s.open_paths(cx);
-                    if open.iter().any(|(path, _)| *path == item.path) {
-                        return Ok(None);
-                    }
-                    let parent = item
-                        .parent_path
-                        .as_ref()
-                        .and_then(|p| open.iter().find(|(path, _)| path == p).map(|(_, id)| id.clone()))
-                        .unwrap_or_else(|| root_id.clone());
-                    let mut metadata = std::collections::BTreeMap::new();
-                    metadata.insert("branchIsUserDefined".to_owned(), "true".to_owned());
-                    for (key, value) in [("displayName", &item.display_name), ("description", &item.description)] {
-                        if let Some(value) = value.as_ref().filter(|v| !v.is_empty()) {
-                            metadata.insert(key.to_owned(), value.clone());
-                        }
-                    }
-                    let worktree = treeterm_core::git::WorktreeInfo { path: item.path.clone(), branch: item.branch.clone() };
-                    s.adopt_worktree_with(&parent, worktree, metadata, cx).map(Some)
-                });
-                let id = match started {
-                    Ok(Ok(Some(id))) => id,
-                    Ok(Ok(None)) => continue,
-                    Ok(Err(error)) => {
-                        tracing::error!(%error, path = %item.path, "auto-open worktree");
-                        continue;
-                    }
-                    Err(_) => return,
-                };
-                // Children of this one need it loaded first.
-                for _ in 0..600 {
-                    let settled = this
-                        .read_with(cx, |s, _| !matches!(s.entries.get(&id), Some(WorkspaceEntry::Loading { .. })))
-                        .unwrap_or(true);
-                    if settled {
-                        break;
-                    }
-                    cx.background_executor().timer(Duration::from_millis(100)).await;
-                }
+            let locked = lock.await.unwrap_or_else(|_| Err("session store dropped".to_owned()));
+            if let Err(error) = locked {
+                done.send(Err(error)).ok();
+                return;
             }
+            let outcome = auto_open_locked(&this, &root_id, &root_path, items, cx).await;
+            release(&this, cx).await;
+            done.send(outcome).ok();
         })
         .detach();
-        Ok(())
+        result
     }
 
     /// `(path, id)` of every loaded workspace.
@@ -2299,6 +2310,60 @@ pub struct AutoOpenItem {
     pub parent_path: Option<String>,
     pub display_name: Option<String>,
     pub description: Option<String>,
+}
+
+/// `autoOpenWorktrees`' batch, with the session lock already held: each item is added and
+/// published before the next, so a child finds its parent open. Stops at the first item that
+/// cannot be added.
+async fn auto_open_locked(
+    this: &WeakSession,
+    root_id: &str,
+    root_path: &str,
+    items: Vec<AutoOpenItem>,
+    cx: &mut gpui_kit::AsyncApp,
+) -> Result<(), String> {
+    let gone = || "session store dropped".to_owned();
+    let ordered = this
+        .update(cx, |session, cx| order_auto_open(items, root_path, &session.open_paths(cx)))
+        .map_err(|_| gone())?;
+    for item in ordered {
+        let added = this
+            .update(cx, |session, cx| {
+                let open = session.open_paths(cx);
+                if open.iter().any(|(path, _)| *path == item.path) {
+                    return Ok(None);
+                }
+                let parent = item
+                    .parent_path
+                    .as_ref()
+                    .and_then(|p| open.iter().find(|(path, _)| path == p).map(|(_, id)| id.clone()))
+                    .unwrap_or_else(|| root_id.to_owned());
+                let name = item.display_name.clone().filter(|n| !n.is_empty()).unwrap_or_else(|| item.branch.clone());
+                let metadata = adopted_metadata(item.description.as_deref(), item.display_name.as_deref());
+                let worktree = treeterm_core::git::WorktreeInfo { path: item.path.clone(), branch: item.branch.clone() };
+                session.add_adopted(&parent, worktree, name, metadata, None, cx).map(Some)
+            })
+            .map_err(|_| gone())??;
+        if let Some((_, published)) = added
+            && published.await.is_err()
+        {
+            tracing::debug!("child publish dropped with the store");
+        }
+    }
+    Ok(())
+}
+
+/// `adoptExistingWorktree`'s metadata: the branch counts as chosen by the user, and the
+/// description and display name are kept when not empty.
+fn adopted_metadata(description: Option<&str>, display_name: Option<&str>) -> std::collections::BTreeMap<String, String> {
+    let mut metadata = std::collections::BTreeMap::new();
+    metadata.insert("branchIsUserDefined".to_owned(), "true".to_owned());
+    for (key, value) in [("description", description), ("displayName", display_name)] {
+        if let Some(value) = value.filter(|v| !v.is_empty()) {
+            metadata.insert(key.to_owned(), value.to_owned());
+        }
+    }
+    metadata
 }
 
 /// Parents before children: an item comes once its parent (the root, an open workspace or

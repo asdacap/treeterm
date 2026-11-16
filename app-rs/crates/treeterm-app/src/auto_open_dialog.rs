@@ -1,12 +1,13 @@
 //! "Auto Open All Recent Worktrees" (`AutoOpenWorktreesDialog.tsx`): the root workspace's
 //! worktrees that are recorded in the worktree registry (optionally all of them), placed in a
-//! hierarchy by git ancestry, opened as child workspaces.
+//! hierarchy by git ancestry, opened as child workspaces. Ok waits for the whole batch: the
+//! dialog closes once every worktree is open, or shows why the batch stopped.
 
 use std::collections::{HashMap, HashSet};
 
 use gpui_kit::component::WindowExt as _;
 use gpui_kit::prelude::*;
-use gpui_kit::{App, Context, Entity, SharedString, Task, Window, div, px};
+use gpui_kit::{App, Context, Entity, SharedString, Subscription, Task, Window, div, px};
 use treeterm_core::worktree_hierarchy::{WorktreeRef, detect_worktree_hierarchy};
 use treeterm_core::worktree_registry::WorktreeRegistryEntry;
 use treeterm_model::session_store::{AutoOpenItem, SessionStore};
@@ -28,6 +29,13 @@ enum Detection {
     Loaded(Vec<Row>),
 }
 
+/// The Ok of the checked rows (`isProcessing`).
+enum Opening {
+    Idle,
+    /// Waits for the batch, which runs on in the session if the dialog goes away.
+    Waiting { _wait: Task<()> },
+}
+
 pub struct AutoOpenDialog {
     session: Entity<SessionStore>,
     root_id: String,
@@ -36,7 +44,12 @@ pub struct AutoOpenDialog {
     checked: HashSet<String>,
     /// Why opening failed.
     error: Option<SharedString>,
+    opening: Opening,
+    /// The dialog has been closed; a later event must not close the dialog under it.
+    closed: bool,
     _load: Option<Task<()>>,
+    /// The dialog goes when its root does (Electron renders it only while the root is loaded).
+    _root: Subscription,
 }
 
 /// Depth of each node from its parent chain (root children are 0).
@@ -59,7 +72,12 @@ fn depths(rows: &[(String, Option<String>)]) -> HashMap<String, usize> {
 }
 
 impl AutoOpenDialog {
-    fn new(session: Entity<SessionStore>, root_id: String, cx: &mut Context<Self>) -> Self {
+    fn new(session: Entity<SessionStore>, root_id: String, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let root = cx.observe_in(&session, window, |dialog, session, window, cx| {
+            if session.read(cx).workspace_store(&dialog.root_id).is_none() {
+                dialog.close(window, cx);
+            }
+        });
         let mut dialog = Self {
             session,
             root_id,
@@ -67,10 +85,28 @@ impl AutoOpenDialog {
             detection: Detection::Loading,
             checked: HashSet::new(),
             error: None,
+            opening: Opening::Idle,
+            closed: false,
             _load: None,
+            _root: root,
         };
         dialog.load(cx);
         dialog
+    }
+
+    /// Close the dialog, once.
+    fn close(&mut self, window: &mut Window, cx: &mut App) {
+        if !self.closed {
+            self.closed = true;
+            window.close_dialog(cx);
+        }
+    }
+
+    fn processing(&self) -> bool {
+        match self.opening {
+            Opening::Idle => false,
+            Opening::Waiting { .. } => true,
+        }
     }
 
     fn load(&mut self, cx: &mut Context<Self>) {
@@ -137,10 +173,11 @@ impl AutoOpenDialog {
         cx.notify();
     }
 
-    /// Open the checked rows. Returns whether the dialog may close.
-    fn confirm(&mut self, cx: &mut Context<Self>) -> bool {
+    /// Open the checked rows (`handleConfirm`): the dialog closes once they are all open, or
+    /// shows why not.
+    fn confirm(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Detection::Loaded(rows) = &self.detection else {
-            return false;
+            return;
         };
         let parents: HashMap<&str, Option<&str>> =
             rows.iter().map(|r| (r.path.as_str(), r.parent_path.as_deref())).collect();
@@ -173,17 +210,27 @@ impl AutoOpenDialog {
             })
             .collect();
         if items.is_empty() {
-            return true;
+            return self.close(window, cx);
         }
         let root = self.root_id.clone();
-        match self.session.update(cx, |s, cx| s.auto_open_worktrees(&root, items, cx)) {
-            Ok(()) => true,
-            Err(error) => {
-                self.error = Some(error.into());
+        let opened = self.session.update(cx, |s, cx| s.auto_open_worktrees(&root, items, cx));
+        let wait = cx.spawn_in(window, async move |dialog, cx| {
+            // Canceled: the batch went away with the session (its errors are never empty).
+            let outcome = opened.await.unwrap_or_else(|_| Err("Failed to open worktrees".to_owned()));
+            match dialog.update_in(cx, |dialog, window, cx| {
+                dialog.opening = Opening::Idle;
+                match outcome {
+                    Ok(()) => dialog.close(window, cx),
+                    Err(error) => dialog.error = Some(error.into()),
+                }
                 cx.notify();
-                false
+            }) {
+                Ok(()) | Err(_) => {} // Err: the dialog closed
             }
-        }
+        });
+        self.error = None;
+        self.opening = Opening::Waiting { _wait: wait };
+        cx.notify();
     }
 
     /// The rows in tree order (each followed by its children), with their depth.
@@ -303,7 +350,9 @@ impl Render for AutoOpenDialog {
             Detection::Loading | Detection::Failed(_) => 0,
         };
         let include = self.include_unknown;
-        let disabled = loading || count == 0;
+        let processing = self.processing();
+        let disabled = processing || loading || count == 0;
+        let ok = if processing { "Opening... Please wait".to_owned() } else { format!("Ok ({count})") };
         ui::dialog_root(cx)
             .child(ui::dialog_header("Auto Open All Recent Worktrees", "x", primary, cx))
             .child(
@@ -372,24 +421,18 @@ impl Render for AutoOpenDialog {
                 ui::dialog_actions(cx)
                     .child(
                         ui::dialog_button("auto-open-cancel", "Cancel", ui::ButtonKind::Secondary, false, cx)
-                            .on_click(|_, window, cx| window.close_dialog(cx)),
+                            .on_click(cx.listener(|dialog, _, window, cx| dialog.close(window, cx))),
                     )
                     .child(
-                        ui::dialog_button("auto-open-ok", format!("Ok ({count})"), ui::ButtonKind::Primary, disabled, cx)
-                            .when(!disabled, |b| {
-                                b.on_click(cx.listener(|dialog, _, window, cx| {
-                                    if dialog.confirm(cx) {
-                                        window.close_dialog(cx);
-                                    }
-                                }))
-                            }),
+                        ui::dialog_button("auto-open-ok", ok, ui::ButtonKind::Primary, disabled, cx)
+                            .when(!disabled, |b| b.on_click(cx.listener(|dialog, _, window, cx| dialog.confirm(window, cx)))),
                     ),
             )
     }
 }
 
 pub fn open(session: Entity<SessionStore>, root_id: String, window: &mut Window, cx: &mut App) {
-    let view = cx.new(|cx| AutoOpenDialog::new(session, root_id, cx));
+    let view = cx.new(|cx| AutoOpenDialog::new(session, root_id, window, cx));
     window.open_dialog(cx, move |dialog, _window, cx| ui::dialog_frame(dialog, 400., cx).child(view.clone()));
 }
 

@@ -11,13 +11,15 @@ use gpui_kit::component::menu::DropdownMenu as _;
 use gpui_kit::component::{WindowExt as _, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{AnyElement, App, Context, Entity, FontWeight, SharedString, Subscription, Window, div, px, rgb, rgba};
-use treeterm_model::child_dialog::{AppChoice, ChildDialogModel, ChildTab, Listing, RowState, name_problem};
+use treeterm_model::child_dialog::{
+    AppChoice, ChildDialogEvent, ChildDialogModel, ChildTab, Listing, RowState, name_problem,
+};
 use treeterm_model::session_store::SessionStore;
 
 use crate::theme::colors;
 use crate::ui;
 
-/// Called with the new child's id once creation has started.
+/// Called with the new child's id once creation has started (or the worktree is open).
 pub type OnCreated = Rc<dyn Fn(String, &mut Window, &mut App)>;
 
 pub struct ChildDialog {
@@ -27,6 +29,8 @@ pub struct ChildDialog {
     search: Entity<InputState>,
     settings_expanded: bool,
     on_created: OnCreated,
+    /// The dialog has been closed; a later event must not close the dialog under it.
+    closed: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -43,18 +47,47 @@ impl ChildDialog {
         let search = cx.new(|cx| InputState::new(window, cx).placeholder("Search branches..."));
         let description =
             cx.new(|cx| TextareaState::new(window, cx).auto_grow(2, 12).placeholder("Optional description..."));
-        let on_input = |dialog: &mut Self, event: &InputEvent, window: &mut Window, cx: &mut Context<Self>| match event {
-            // `handleKeyDown`: Enter submits.
-            InputEvent::PressEnter { .. } => dialog.submit(window, cx),
+        let on_input = |dialog: &mut Self, event: &InputEvent, cx: &mut Context<Self>| match event {
+            // `handleKeyDown`: Enter submits (the model ignores it while processing).
+            InputEvent::PressEnter { .. } => dialog.submit(cx),
             InputEvent::Change => cx.notify(),
             InputEvent::Focus | InputEvent::Blur => {}
         };
         let subscriptions = vec![
             cx.observe(&model, |_, _, cx| cx.notify()),
-            cx.subscribe_in(&name, window, move |dialog, _, event, window, cx| on_input(dialog, event, window, cx)),
-            cx.subscribe_in(&search, window, move |dialog, _, event, window, cx| on_input(dialog, event, window, cx)),
+            cx.subscribe_in(&model, window, |dialog, _, event: &ChildDialogEvent, window, cx| match event {
+                ChildDialogEvent::Created(id) => {
+                    if dialog.close(window, cx) {
+                        (dialog.on_created)(id.clone(), window, cx);
+                    }
+                }
+                ChildDialogEvent::ParentGone => {
+                    dialog.close(window, cx);
+                }
+            }),
+            cx.subscribe(&name, move |dialog, _, event, cx| on_input(dialog, event, cx)),
+            cx.subscribe(&search, move |dialog, _, event, cx| on_input(dialog, event, cx)),
         ];
-        Self { model, name, description, search, settings_expanded: false, on_created, _subscriptions: subscriptions }
+        Self {
+            model,
+            name,
+            description,
+            search,
+            settings_expanded: false,
+            on_created,
+            closed: false,
+            _subscriptions: subscriptions,
+        }
+    }
+
+    /// Close the dialog, once. Returns whether it was still open.
+    fn close(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if self.closed {
+            return false;
+        }
+        self.closed = true;
+        window.close_dialog(cx);
+        true
     }
 
     fn switch(&mut self, tab: ChildTab, window: &mut Window, cx: &mut Context<Self>) {
@@ -100,13 +133,10 @@ impl ChildDialog {
         }
     }
 
-    /// The tab's submit handler; closes the dialog once creation has started.
-    fn submit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// The tab's submit handler; the dialog closes on the model's `Created`.
+    fn submit(&mut self, cx: &mut Context<Self>) {
         let (name, description) = (self.name_text(cx), self.description_text(cx));
-        if let Some(id) = self.model.update(cx, |m, cx| m.submit(&name, &description, cx)) {
-            window.close_dialog(cx);
-            (self.on_created)(id, window, cx);
-        }
+        self.model.update(cx, |m, cx| m.submit(&name, &description, cx));
     }
 
     /// `.create-child-tabs`: 0 20px padding, a bottom border; tabs 12px 16px, the active
@@ -295,12 +325,13 @@ impl ChildDialog {
             let choice = model.app_choice().clone();
             let inherited = model.inherited_app(cx).unwrap_or_else(|| "Global Default".to_owned());
             let apps = model.available_apps(cx);
+            let processing = model.processing().is_some();
             let custom = {
                 let model = self.model.clone();
                 ui::checkbox_label(
                     "child-custom-app",
                     choice != AppChoice::Inherited,
-                    false,
+                    processing,
                     "Use custom default application",
                     move |on, _, cx| {
                         let choice = if on { AppChoice::Custom(None) } else { AppChoice::Inherited };
@@ -317,28 +348,41 @@ impl ChildDialog {
                         .unwrap_or_else(|| "Select an application...".to_owned());
                     let model = self.model.clone();
                     let boxed = ui::select_box("child-app", current, cx).h(px(31.)).pl(px(10.));
-                    let menu = ui::Trigger::new(boxed).dropdown_menu(move |mut menu, _, _| {
-                        let none = model.clone();
-                        menu = menu.item(ui::menu_item("Select an application...").checked(selected.is_none()).on_click(
-                            move |_, _, cx| none.update(cx, |m, cx| m.set_app_choice(AppChoice::Custom(None), cx)),
-                        ));
-                        for (id, name) in &apps {
-                            let (model, id) = (model.clone(), id.clone());
-                            menu = menu.item(ui::menu_item(name.clone()).checked(selected.as_ref() == Some(&id)).on_click(
-                                move |_, _, cx| {
-                                    model.update(cx, |m, cx| m.set_app_choice(AppChoice::Custom(Some(id.clone())), cx))
-                                },
-                            ));
-                        }
-                        menu.min_w(px(200.))
-                    });
+                    // A disabled `<select>`: dimmed, and it opens no menu.
+                    let select = if processing {
+                        boxed.opacity(0.5).cursor_default().into_any_element()
+                    } else {
+                        ui::Trigger::new(boxed)
+                            .dropdown_menu(move |mut menu, _, _| {
+                                let none = model.clone();
+                                menu = menu.item(
+                                    ui::menu_item("Select an application...").checked(selected.is_none()).on_click(
+                                        move |_, _, cx| none.update(cx, |m, cx| m.set_app_choice(AppChoice::Custom(None), cx)),
+                                    ),
+                                );
+                                for (id, name) in &apps {
+                                    let (model, id) = (model.clone(), id.clone());
+                                    menu = menu.item(
+                                        ui::menu_item(name.clone()).checked(selected.as_ref() == Some(&id)).on_click(
+                                            move |_, _, cx| {
+                                                model.update(cx, |m, cx| {
+                                                    m.set_app_choice(AppChoice::Custom(Some(id.clone())), cx)
+                                                })
+                                            },
+                                        ),
+                                    );
+                                }
+                                menu.min_w(px(200.))
+                            })
+                            .into_any_element()
+                    };
                     Some(
                         div()
                             .flex()
                             .flex_col()
                             .gap(px(6.))
                             .child(div().text_size(px(12.)).text_color(secondary).child("Default Application"))
-                            .child(menu),
+                            .child(select),
                     )
                 }
             };
@@ -376,10 +420,13 @@ impl Render for ChildDialog {
             let c = colors(cx);
             (c.text_primary, c.text_secondary, c.bg_tertiary, c.bg_primary)
         };
-        let (tab, parent_name, detached, error) = {
+        let (tab, parent_name, detached, error, processing) = {
             let model = self.model.read(cx);
-            (model.tab(), model.parent_name(cx), model.detached(), model.error().map(SharedString::from))
+            let error = model.error().map(SharedString::from);
+            (model.tab(), model.parent_name(cx), model.detached(), error, model.processing())
         };
+        // `disabled={isProcessing}` on the inputs, checkboxes, select and Cancel.
+        let busy = processing.is_some();
         let info = div()
             .flex()
             .items_center()
@@ -392,7 +439,8 @@ impl Render for ChildDialog {
             .text_size(px(ui::BODY))
             .child(div().text_color(secondary).child("Parent:"))
             .child(div().text_color(primary).font_weight(FontWeight::MEDIUM).child(parent_name));
-        let search = || div().mb(px(12.)).child(Self::input(&self.search, ui::BODY, cx));
+        let search = || div().mb(px(12.)).child(Self::input(&self.search, ui::BODY, cx).disabled(busy));
+        let name_input = || Self::input(&self.name, 14., cx).disabled(busy);
         let name = self.name_text(cx);
         let body: Vec<AnyElement> = match tab {
             ChildTab::Create => {
@@ -401,26 +449,23 @@ impl Render for ChildDialog {
                     div()
                         .mb(px(16.))
                         .child(div().mb(px(6.)).text_size(px(ui::BODY)).text_color(secondary).child("Name"))
-                        .child(Self::input(&self.name, 14., cx))
+                        .child(name_input())
                         .when_some(problem, |d, problem| {
                             d.child(div().mt(px(4.)).text_size(px(12.)).text_color(rgb(0xf14c4c)).child(problem))
                         })
                         .into_any_element(),
                 ]
             }
-            ChildTab::Existing => vec![
-                Self::field("Name (optional)", Self::input(&self.name, 14., cx), cx).into_any_element(),
-                self.list(cx),
-            ],
-            ChildTab::Recent => {
-                vec![Self::field("Name", Self::input(&self.name, 14., cx), cx).into_any_element(), self.list(cx)]
+            ChildTab::Existing => {
+                vec![Self::field("Name (optional)", name_input(), cx).into_any_element(), self.list(cx)]
             }
+            ChildTab::Recent => vec![Self::field("Name", name_input(), cx).into_any_element(), self.list(cx)],
             ChildTab::Branch | ChildTab::Remote | ChildTab::Pr => vec![search().into_any_element(), self.list(cx)],
         };
         let description = (tab != ChildTab::Pr).then(|| {
             Self::field(
                 "Description",
-                ui::text_area(&self.description, cx).bg(bg_primary),
+                ui::text_area(&self.description, cx).bg(bg_primary).disabled(busy),
                 cx,
             )
         });
@@ -437,11 +482,13 @@ impl Render for ChildDialog {
                 .text_size(px(ui::BODY))
                 .text_color(secondary)
                 .cursor_pointer()
-                .child(ui::checkbox_box(detached, false, 14.))
+                .child(ui::checkbox_box(detached, busy, 14.))
                 .child("Detached worktree (no merge, only close and clean)")
-                .on_click(cx.listener(move |dialog, _, _, cx| {
-                    dialog.model.update(cx, |m, cx| m.set_detached(!detached, cx));
-                }))
+                .when(!busy, |d| {
+                    d.on_click(cx.listener(move |dialog, _, _, cx| {
+                        dialog.model.update(cx, |m, cx| m.set_detached(!detached, cx));
+                    }))
+                })
         });
         let error = error.map(|error| {
             div()
@@ -454,10 +501,14 @@ impl Render for ChildDialog {
                 .text_size(px(ui::BODY))
                 .child(error)
         });
-        let action = if tab == ChildTab::Create { "Create" } else { "Open" };
-        let disabled = self.model.read(cx).submit_disabled(&name);
+        // `.create-child-processing` has no style of its own: the page's 16px text.
+        let processing = processing.map(|message| div().text_size(px(16.)).text_color(primary).child(message));
+        let (action, disabled) = {
+            let model = self.model.read(cx);
+            (model.submit_label(), model.submit_disabled(&name))
+        };
         let submit = ui::dialog_button("child-submit", action, ui::ButtonKind::Primary, disabled, cx)
-            .when(!disabled, |b| b.on_click(cx.listener(|dialog, _, window, cx| dialog.submit(window, cx))));
+            .when(!disabled, |b| b.on_click(cx.listener(|dialog, _, _, cx| dialog.submit(cx))));
         ui::dialog_root(cx)
             .child(ui::dialog_header("Add Child Workspace", "x", primary, cx))
             .child(self.tabs(cx))
@@ -469,13 +520,17 @@ impl Render for ChildDialog {
                     .children(description)
                     .children(detached)
                     .child(self.settings_section(cx))
-                    .children(error),
+                    .children(error)
+                    .children(processing),
             )
             .child(
                 ui::dialog_actions(cx)
                     .child(
-                        ui::dialog_button("child-cancel", "Cancel", ui::ButtonKind::Secondary, false, cx)
-                            .on_click(|_, window, cx| window.close_dialog(cx)),
+                        // The × and Escape still close while processing; the adopt goes on.
+                        ui::dialog_button("child-cancel", "Cancel", ui::ButtonKind::Secondary, busy, cx)
+                            .when(!busy, |b| b.on_click(cx.listener(|dialog, _, window, cx| {
+                                dialog.close(window, cx);
+                            }))),
                     )
                     .child(submit),
             )

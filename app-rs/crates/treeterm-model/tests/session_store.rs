@@ -5,13 +5,13 @@ use std::collections::HashSet;
 use gpui_kit::{AppContext as _, Entity, TestAppContext};
 use treeterm_core::wire::workspace_file::{WorkspaceFile, WorkspaceStatus, WorktreeSettings};
 use treeterm_model::review::{Processing, ReviewEvent};
-use treeterm_model::session_store::{RemoveMode, SessionState, SessionStore, WorkspaceEntry};
+use treeterm_model::session_store::{AdoptOptions, RemoveMode, SessionState, SessionStore, WorkspaceEntry};
 use treeterm_model::settings_store::SettingsStore;
 use treeterm_model::workspace_store::{MergeState, TabContent, Workspace, WorkspaceStore};
 use treeterm_proto::treeterm::WorkspaceRef;
 
 mod common;
-use common::{Harness, harness, wait_until, wait_until_app};
+use common::{Harness, harness, recv, wait_until, wait_until_app};
 
 fn body(name: &str, parent: Option<&str>) -> String {
     let mut json = serde_json::json!({
@@ -1014,29 +1014,156 @@ fn a_child_can_check_out_an_existing_branch(cx: &mut TestAppContext) {
     assert_eq!(disk["metadata"]["branchIsUserDefined"], "true");
 }
 
+/// Adopt `worktree` under `parent`; resolves with the child's id.
+fn adopt(
+    cx: &mut TestAppContext,
+    store: &Entity<SessionStore>,
+    parent: &str,
+    worktree: &treeterm_core::git::WorktreeInfo,
+    options: AdoptOptions,
+) -> futures::channel::oneshot::Receiver<Result<String, String>> {
+    store.update(cx, |s, cx| s.adopt_worktree(parent, worktree.clone(), options, cx))
+}
+
+fn file_of(cx: &mut TestAppContext, store: &Entity<SessionStore>, id: &str) -> WorkspaceFile {
+    store.read_with(cx, |s, cx| ws(s, id).read(cx).file().clone())
+}
+
+/// The application of a workspace's active tab.
+fn first_app(file: &WorkspaceFile) -> String {
+    let tab = file.active_tab_id.as_deref().expect("a first tab");
+    file.app_states[tab].application_id.clone()
+}
+
 #[gpui_kit::test]
-fn an_existing_worktree_can_be_adopted_once(cx: &mut TestAppContext) {
+fn an_existing_worktree_is_adopted_once_and_named_after_its_branch(cx: &mut TestAppContext) {
     cx.executor().allow_parking();
     let h = harness();
     publish(&h, &[]);
     let repo = TempRepo::new(&h);
     let outside = h.daemon.root().join("outside-wt");
-    repo.git(&["worktree", "add", "-q", "-b", "side", outside.to_str().unwrap()]);
+    repo.git(&["worktree", "add", "-q", "-b", "team/side", outside.to_str().unwrap()]);
     let store = open_store(cx, &h, "client-a");
     let root = open_repo_workspace(cx, &store, &repo);
-
     let worktree = treeterm_core::git::WorktreeInfo {
         path: outside.to_string_lossy().into_owned(),
-        branch: "side".into(),
+        branch: "team/side".into(),
     };
-    let child = store
-        .update(cx, |s, cx| s.adopt_existing_worktree(&root, worktree.clone(), None, cx))
-        .unwrap();
-    wait_child(cx, &store, &child);
-    let again = store.update(cx, |s, cx| s.adopt_existing_worktree(&root, worktree, None, cx));
-    assert_eq!(again.unwrap_err(), "This worktree is already open");
+
+    let opened = adopt(cx, &store, &root, &worktree, AdoptOptions::default());
+    assert_eq!(store.read_with(cx, |s, _| s.workspace_ids().count()), 1, "no row until it is added");
+    let child = recv(cx, opened).unwrap();
+    assert!(store.read_with(cx, |s, _| loaded(s, &child)));
+    let file = file_of(cx, &store, &child);
+    // Named after the branch, not the directory; with no display name the tree shows it.
+    assert_eq!(file.name, "team/side");
+    assert_eq!(file.display_name(), "team/side");
+    assert_eq!(file.parent_id.as_deref(), Some(root.as_str()));
+    assert_eq!(file.metadata.get("branchIsUserDefined").map(String::as_str), Some("true"));
+    assert!(!file.metadata.contains_key("displayName") && !file.metadata.contains_key("description"));
+    // No default of its own: the global default application.
+    assert_eq!(file.settings.default_application_id, "");
+    assert_eq!(first_app(&file), "terminal");
     wait_for_disk(cx, || h.daemon.workspaces_dir().join(format!("{child}.json")).exists());
-    assert_eq!(file_on_disk(&h, &child)["gitBranch"], "side");
+    assert_eq!(file_on_disk(&h, &child)["name"], "team/side");
+    assert_eq!(file_on_disk(&h, &child)["gitBranch"], "team/side");
+
+    // Refused at once: already open, or no such parent.
+    let again = adopt(cx, &store, &root, &worktree, AdoptOptions::default());
+    assert_eq!(recv(cx, again), Err("This worktree is already open".to_owned()));
+    let orphan = adopt(cx, &store, "ws-gone", &worktree, AdoptOptions::default());
+    assert_eq!(recv(cx, orphan), Err("Parent workspace not found".to_owned()));
+    assert_eq!(store.read_with(cx, |s, _| s.workspace_ids().count()), 2);
+}
+
+#[gpui_kit::test]
+fn a_worktree_adopted_twice_at_once_is_added_once(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    publish(&h, &[]);
+    let repo = TempRepo::new(&h);
+    let outside = h.daemon.root().join("twice-wt");
+    repo.git(&["worktree", "add", "-q", "-b", "twice", outside.to_str().unwrap()]);
+    let store = open_store(cx, &h, "client-a");
+    let root = open_repo_workspace(cx, &store, &repo);
+    let worktree = treeterm_core::git::WorktreeInfo { path: outside.to_string_lossy().into_owned(), branch: "twice".into() };
+
+    // Both pass the first check; the second sees the first under the lock.
+    let first = adopt(cx, &store, &root, &worktree, AdoptOptions::default());
+    let second = adopt(cx, &store, &root, &worktree, AdoptOptions::default());
+    assert!(recv(cx, first).is_ok());
+    assert_eq!(recv(cx, second), Err("This worktree is already open".to_owned()));
+    assert_eq!(store.read_with(cx, |s, _| s.workspace_ids().count()), 2);
+}
+
+#[gpui_kit::test]
+fn an_adopted_worktree_opens_and_passes_on_the_chosen_default_application(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    publish(&h, &[]);
+    let repo = TempRepo::new(&h);
+    let (side, below) = (h.daemon.root().join("side-wt"), h.daemon.root().join("below-wt"));
+    repo.git(&["worktree", "add", "-q", "-b", "side", side.to_str().unwrap()]);
+    repo.git(&["worktree", "add", "-q", "-b", "below", below.to_str().unwrap()]);
+    let store = open_store(cx, &h, "client-a");
+    let root = open_repo_workspace(cx, &store, &repo);
+    let info = |path: &std::path::Path, branch: &str| treeterm_core::git::WorktreeInfo {
+        path: path.to_string_lossy().into_owned(),
+        branch: branch.into(),
+    };
+
+    let options = AdoptOptions {
+        description: Some("notes".into()),
+        display_name: Some("Nice".into()),
+        default_application_id: Some("filesystem".into()),
+    };
+    let opened = adopt(cx, &store, &root, &info(&side, "side"), options);
+    let child = recv(cx, opened).unwrap();
+    let file = file_of(cx, &store, &child);
+    assert_eq!((file.name.as_str(), file.display_name()), ("side", "Nice"));
+    assert_eq!(file.metadata.get("description").map(String::as_str), Some("notes"));
+    assert_eq!(file.settings.default_application_id, "filesystem");
+    assert_eq!(first_app(&file), "filesystem");
+    wait_for_disk(cx, || h.daemon.workspaces_dir().join(format!("{child}.json")).exists());
+    assert_eq!(file_on_disk(&h, &child)["settings"]["defaultApplicationId"], "filesystem");
+
+    // Its own children inherit it.
+    let opened = adopt(cx, &store, &child, &info(&below, "below"), AdoptOptions::default());
+    let grandchild = recv(cx, opened).unwrap();
+    let file = file_of(cx, &store, &grandchild);
+    assert_eq!(file.settings.default_application_id, "");
+    assert_eq!(first_app(&file), "filesystem");
+}
+
+#[gpui_kit::test]
+fn adopting_or_auto_opening_while_another_window_holds_the_lock_adds_nothing(cx: &mut TestAppContext) {
+    use treeterm_model::session_store::AutoOpenItem;
+    cx.executor().allow_parking();
+    let h = harness();
+    publish(&h, &[]);
+    let repo = TempRepo::new(&h);
+    let outside = h.daemon.root().join("locked-wt");
+    repo.git(&["worktree", "add", "-q", "-b", "locked", outside.to_str().unwrap()]);
+    let store = open_store(cx, &h, "client-a");
+    let root = open_repo_workspace(cx, &store, &repo);
+    let other = futures::executor::block_on(treeterm_core::daemon::DaemonConnection::open(&h.rt, h.daemon.socket_path()))
+        .unwrap()
+        .unwrap();
+    let locked = futures::executor::block_on(other.lock_session(std::time::Duration::from_secs(600))).unwrap().unwrap();
+    assert!(matches!(locked, treeterm_core::daemon::SessionLockResult::Acquired(_)));
+    let path = outside.to_string_lossy().into_owned();
+
+    let worktree = treeterm_core::git::WorktreeInfo { path: path.clone(), branch: "locked".into() };
+    let refused = adopt(cx, &store, &root, &worktree, AdoptOptions::default());
+    assert_eq!(recv(cx, refused), Err("Session is locked by another window".to_owned()));
+    let item = AutoOpenItem { path, branch: "locked".into(), parent_path: None, display_name: None, description: None };
+    let refused = store.update(cx, |s, cx| s.auto_open_worktrees(&root, vec![item.clone()], cx));
+    assert_eq!(recv(cx, refused), Err("Session is locked by another window".to_owned()));
+    // No Loading or Error row was left behind.
+    assert_eq!(store.read_with(cx, |s, _| s.workspace_ids().cloned().collect::<Vec<_>>()), vec![root]);
+
+    let unknown = store.update(cx, |s, cx| s.auto_open_worktrees("ws-gone", vec![item], cx));
+    assert_eq!(recv(cx, unknown), Err("Root workspace not found".to_owned()));
 }
 
 #[gpui_kit::test]
@@ -1413,19 +1540,12 @@ fn auto_open_adopts_worktrees_under_their_detected_parents(cx: &mut TestAppConte
         },
         AutoOpenItem { path: path(&feat), branch: "feat".into(), parent_path: None, display_name: None, description: Some("the feature".into()) },
     ];
-    store.update(cx, |s, cx| s.auto_open_worktrees(&root, items, cx)).unwrap();
+    let opened = store.update(cx, |s, cx| s.auto_open_worktrees(&root, items, cx));
+    // Resolves once every child is open.
+    assert_eq!(recv(cx, opened), Ok(()));
     let find = |s: &SessionStore, p: &str, cx: &gpui_kit::App| {
         s.workspace_ids().find(|id| s.workspace_store(id).is_some_and(|w| w.read(cx).workspace().path == p)).cloned()
     };
-    for _ in 0..500 {
-        // Auto-open polls for each parent to finish loading (executor clock).
-        cx.executor().advance_clock(std::time::Duration::from_millis(100));
-        cx.run_until_parked();
-        if cx.read(|cx| find(store.read(cx), &path(&feat), cx).is_some() && find(store.read(cx), &path(&sub), cx).is_some()) {
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(10));
-    }
     let entries = cx.read(|cx| {
         let s = store.read(cx);
         s.workspace_ids()
@@ -1443,12 +1563,15 @@ fn auto_open_adopts_worktrees_under_their_detected_parents(cx: &mut TestAppConte
         let s = store.read(cx);
         (find(s, &path(&feat), cx).unwrap(), find(s, &path(&sub), cx).unwrap())
     });
-    let file_of = |id: &str| store.read_with(cx, |s, cx| ws(s, id).read(cx).file().clone());
-    assert_eq!(file_of(&feat_id).parent_id.as_deref(), Some(root.as_str()));
-    assert_eq!(file_of(&feat_id).metadata.get("description").map(String::as_str), Some("the feature"));
-    assert_eq!(file_of(&sub_id).parent_id.as_deref(), Some(feat_id.as_str()));
-    assert_eq!(file_of(&sub_id).display_name(), "Sub work");
-    assert_eq!(file_of(&sub_id).metadata.get("branchIsUserDefined").map(String::as_str), Some("true"));
+    let (feat_file, sub_file) = (file_of(cx, &store, &feat_id), file_of(cx, &store, &sub_id));
+    assert_eq!(feat_file.parent_id.as_deref(), Some(root.as_str()));
+    assert_eq!(feat_file.metadata.get("description").map(String::as_str), Some("the feature"));
+    // Named after the remembered display name, else the branch (not the directory).
+    assert_eq!(feat_file.name, "feat");
+    assert_eq!(sub_file.name, "Sub work");
+    assert_eq!(sub_file.parent_id.as_deref(), Some(feat_id.as_str()));
+    assert_eq!(sub_file.display_name(), "Sub work");
+    assert_eq!(sub_file.metadata.get("branchIsUserDefined").map(String::as_str), Some("true"));
 }
 
 #[gpui_kit::test]

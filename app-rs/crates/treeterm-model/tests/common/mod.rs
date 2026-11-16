@@ -64,6 +64,19 @@ pub fn wait_until<T: 'static>(
     wait_until_app(cx, entity, |e, _| done(e));
 }
 
+/// Pump the GPUI test scheduler until `result` resolves.
+pub fn recv<T>(cx: &mut TestAppContext, mut result: futures::channel::oneshot::Receiver<T>) -> T {
+    for _ in 0..1000 {
+        cx.run_until_parked();
+        match result.try_recv() {
+            Ok(Some(value)) => return value,
+            Ok(None) => std::thread::sleep(Duration::from_millis(10)),
+            Err(canceled) => panic!("the result was dropped: {canceled}"),
+        }
+    }
+    panic!("no result");
+}
+
 /// [`wait_until`] for conditions that read other entities.
 pub fn wait_until_app<T: 'static>(
     cx: &mut TestAppContext,

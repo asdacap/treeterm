@@ -1,7 +1,9 @@
 //! "Add Child Workspace" against a real in-process daemon and git: each tab reads its list on
 //! every visit, a tab left before its read finished gets nothing, and the rows' rules.
 
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -9,20 +11,23 @@ use futures::FutureExt as _;
 use futures::channel::oneshot;
 use futures::future::BoxFuture;
 use futures::stream::BoxStream;
-use gpui_kit::{AppContext as _, Entity, TestAppContext};
+use gpui_kit::{AppContext as _, Entity, Subscription, TestAppContext};
 use treeterm_core::exec::{ExecApi, ExecClient, ExecError, ExecEvent, ExecRequest};
+use treeterm_core::git::WorktreeInfo;
 use treeterm_core::github::{GitHubApi, GitHubError, HeadRepo, PostCommentsOutcome, PrListItem, PrLookup};
 use treeterm_core::review::ReviewComment;
+use treeterm_core::wire::workspace_file::WorkspaceFile;
 use treeterm_core::worktree_registry::WorktreeRegistry;
 use treeterm_model::child_dialog::{
-    ChildDialogModel, ChildRow, ChildTab, FORK_TOOLTIP, IN_WORKTREE_TOOLTIP, Listing, RowState,
+    AppChoice, ChildDialogEvent, ChildDialogModel, ChildRow, ChildTab, FORK_TOOLTIP, IN_WORKTREE_TOOLTIP, Listing,
+    RowState,
 };
-use treeterm_model::session_store::{SessionState, SessionStore, WorkspaceEntry};
+use treeterm_model::session_store::{AdoptOptions, RemoveMode, SessionState, SessionStore, WorkspaceEntry};
 use treeterm_model::settings_store::SettingsStore;
 use treeterm_proto::treeterm::WorkspaceRef;
 
 mod common;
-use common::{Harness, harness, wait_until, wait_until_app};
+use common::{Harness, harness, recv, wait_until, wait_until_app};
 
 /// The daemon's commands with `HOME` set to a temporary directory, so the worktree registry
 /// lives there and never in the real `~/.treeterm`.
@@ -307,8 +312,11 @@ fn clicking_the_shown_tab_only_drops_its_error_and_pick(cx: &mut TestAppContext)
     let model = f.dialog(cx, &parent, ChildTab::Branch);
     let listed = loaded(cx, &model);
 
-    assert_eq!(model.update(cx, |m, cx| m.submit("", "", cx)), None);
+    let events = events(cx, &model);
+    model.update(cx, |m, cx| m.submit("", "", cx));
     assert_eq!(model.read_with(cx, |m, _| m.error().map(str::to_owned)).as_deref(), Some("Please select a branch"));
+    cx.run_until_parked();
+    assert!(events.seen.borrow().is_empty());
     model.update(cx, |m, cx| m.pick("free", "", "", cx));
     assert!(!model.read_with(cx, |m, _| m.submit_disabled("")));
 
@@ -343,10 +351,181 @@ fn an_existing_pick_outlives_a_reread_and_opens_the_worktree(cx: &mut TestAppCon
         assert_eq!(m.selected_key().as_deref(), Some(side.as_str()));
         assert!(!m.submit_disabled(""));
     });
-    let child = model.update(cx, |m, cx| m.submit("", "", cx)).expect("adopt started");
+    let events = events(cx, &model);
+    model.update(cx, |m, cx| m.submit("", "", cx));
+    let child = events.created(cx);
     wait_until_app(cx, &f.store, |s, cx| {
         s.workspace_store(&child).is_some_and(|w| w.read(cx).workspace().path == side)
     });
+}
+
+/// What a dialog model reported.
+struct Events {
+    seen: Rc<RefCell<Vec<ChildDialogEvent>>>,
+    _subscription: Subscription,
+}
+
+impl Events {
+    /// Wait for the dialog's `Created`.
+    fn created(&self, cx: &mut TestAppContext) -> String {
+        for _ in 0..1000 {
+            cx.run_until_parked();
+            if let Some(ChildDialogEvent::Created(id)) = self.seen.borrow().last() {
+                return id.clone();
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        panic!("not created: {:?}", self.seen.borrow());
+    }
+}
+
+fn events(cx: &mut TestAppContext, model: &Entity<ChildDialogModel>) -> Events {
+    let seen = Rc::new(RefCell::new(Vec::new()));
+    let sink = seen.clone();
+    let subscription =
+        cx.update(|cx| cx.subscribe(model, move |_, event: &ChildDialogEvent, _| sink.borrow_mut().push(event.clone())));
+    Events { seen, _subscription: subscription }
+}
+
+/// The picked worktree's workspace file, once the dialog reported it.
+fn adopted_file(cx: &mut TestAppContext, f: &Fixture, events: &Events) -> WorkspaceFile {
+    let child = events.created(cx);
+    f.store.read_with(cx, |s, cx| s.workspace_store(&child).expect("open").read(cx).file().clone())
+}
+
+#[gpui_kit::test]
+fn open_existing_waits_in_the_dialog_and_uses_the_chosen_application(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let f = Fixture::new(cx);
+    let (repo, parent) = f.open_repo(cx);
+    let side = add_worktree(&repo, "side");
+    let model = f.dialog(cx, &parent, ChildTab::Existing);
+    loaded(cx, &model);
+    let apps = model.read_with(cx, |m, cx| m.available_apps(cx));
+    assert!(apps.iter().any(|(id, _)| id == "filesystem"), "{apps:?}");
+    model.update(cx, |m, cx| {
+        m.pick(&side, "", "", cx);
+        m.set_app_choice(AppChoice::Custom(Some("filesystem".into())), cx);
+    });
+    let events = events(cx, &model);
+    let before = f.store.read_with(cx, |s, _| s.workspace_ids().count());
+
+    model.update(cx, |m, cx| m.submit("", "  notes ", cx));
+    model.read_with(cx, |m, _| {
+        assert_eq!(m.processing(), Some("Opening existing worktree..."));
+        assert_eq!(m.submit_label(), "Opening... Please wait");
+        assert!(m.submit_disabled(""), "Open is disabled");
+    });
+    // Another submit (Enter) does nothing; switching tabs keeps the wait.
+    model.update(cx, |m, cx| m.submit("", "", cx));
+    model.update(cx, |m, cx| m.switch(ChildTab::Create, cx));
+    assert_eq!(model.read_with(cx, |m, _| m.submit_label()), "Creating... Please wait");
+    model.update(cx, |m, cx| m.switch(ChildTab::Existing, cx));
+
+    let file = adopted_file(cx, &f, &events);
+    assert_eq!(events.seen.borrow().len(), 1, "added once");
+    assert_eq!(f.store.read_with(cx, |s, _| s.workspace_ids().count()), before + 1);
+    // Named after the branch, with the dialog's description and default application.
+    assert_eq!((file.name.as_str(), file.display_name()), ("side", "side"));
+    assert_eq!(file.metadata.get("description").map(String::as_str), Some("notes"));
+    assert_eq!(file.settings.default_application_id, "filesystem");
+    let tab = file.active_tab_id.as_deref().unwrap();
+    assert_eq!(file.app_states[tab].application_id, "filesystem");
+    model.read_with(cx, |m, _| {
+        assert_eq!(m.processing(), None);
+        assert_eq!(m.submit_label(), "Open");
+    });
+}
+
+#[gpui_kit::test]
+fn recent_workspace_keeps_a_typed_name_as_the_display_name(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let f = Fixture::new(cx);
+    let (repo, parent) = f.open_repo(cx);
+    let plain = add_worktree(&repo, "team/plain");
+    let named = add_worktree(&repo, "named");
+    f.write_registry(&format!(
+        r#"{{"version":1,"entries":[
+            {{"path":"{plain}","branch":"team/plain","displayName":null,"description":null,"lastUsedAt":2}},
+            {{"path":"{named}","branch":"named","displayName":"Named","description":null,"lastUsedAt":1}}
+        ]}}"#
+    ));
+    let model = f.dialog(cx, &parent, ChildTab::Recent);
+    loaded(cx, &model);
+
+    // A row with no remembered name fills in its branch: no display name then.
+    let fill = model.update(cx, |m, cx| m.pick(&plain, "", "", cx));
+    let name = fill.name.unwrap();
+    assert_eq!(name, "team/plain");
+    let events = events(cx, &model);
+    model.update(cx, |m, cx| m.submit(&name, "", cx));
+    assert_eq!(model.read_with(cx, |m, _| m.processing()), Some("Opening recent workspace..."));
+    let file = adopted_file(cx, &f, &events);
+    assert_eq!((file.name.as_str(), file.display_name()), ("team/plain", "team/plain"));
+    assert_eq!(file.settings.default_application_id, "", "no custom application chosen");
+
+    // A remembered name is filled in and kept as the display name.
+    let fill = model.update(cx, |m, cx| m.pick(&named, "", "", cx));
+    events.seen.borrow_mut().clear();
+    model.update(cx, |m, cx| m.submit(fill.name.as_deref().unwrap(), "", cx));
+    let file = adopted_file(cx, &f, &events);
+    assert_eq!((file.name.as_str(), file.display_name()), ("named", "Named"));
+}
+
+#[gpui_kit::test]
+fn a_refused_open_shows_its_error_and_lets_the_user_try_again(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let f = Fixture::new(cx);
+    let (repo, parent) = f.open_repo(cx);
+    let side = add_worktree(&repo, "side");
+    let model = f.dialog(cx, &parent, ChildTab::Existing);
+    loaded(cx, &model);
+    model.update(cx, |m, cx| m.pick(&side, "", "", cx));
+    let events = events(cx, &model);
+    let ids = |cx: &mut TestAppContext| f.store.read_with(cx, |s, _| s.workspace_ids().cloned().collect::<Vec<_>>());
+    let before = ids(cx);
+
+    // Another window holds the session lock.
+    let other = futures::executor::block_on(treeterm_core::daemon::DaemonConnection::open(&f.h.rt, f.h.daemon.socket_path()))
+        .unwrap()
+        .unwrap();
+    futures::executor::block_on(other.lock_session(Duration::from_secs(600))).unwrap().unwrap();
+    model.update(cx, |m, cx| m.submit("", "", cx));
+    assert!(model.read_with(cx, |m, _| m.processing().is_some()));
+    wait_until(cx, &model, |m| m.processing().is_none());
+    model.read_with(cx, |m, _| {
+        assert_eq!(m.error(), Some("Session is locked by another window"));
+        assert!(!m.submit_disabled(""), "Open can be tried again");
+    });
+    assert_eq!(ids(cx), before, "nothing was added");
+
+    // Opened elsewhere meanwhile: refused, and the error replaces the last one.
+    futures::executor::block_on(other.unlock_session()).unwrap().unwrap();
+    let info = WorktreeInfo { path: side.clone(), branch: "side".into() };
+    let opened = f.store.update(cx, |s, cx| s.adopt_worktree(&parent, info, AdoptOptions::default(), cx));
+    assert!(recv(cx, opened).is_ok());
+    model.update(cx, |m, cx| m.submit("", "", cx));
+    wait_until(cx, &model, |m| m.processing().is_none());
+    assert_eq!(model.read_with(cx, |m, _| m.error().map(str::to_owned)).as_deref(), Some("This worktree is already open"));
+    assert!(events.seen.borrow().is_empty());
+}
+
+#[gpui_kit::test]
+fn the_dialog_goes_when_its_parent_does(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let f = Fixture::new(cx);
+    let (_repo, parent) = f.open_repo(cx);
+    let model = f.dialog(cx, &parent, ChildTab::Branch);
+    loaded(cx, &model);
+    let events = events(cx, &model);
+    f.store.update(cx, |_, cx| cx.notify());
+    cx.run_until_parked();
+    assert!(events.seen.borrow().is_empty(), "the parent is still there");
+
+    f.store.update(cx, |s, cx| s.remove_workspace(&parent, RemoveMode::KeepWorktreeAndBranch, cx));
+    wait_until(cx, &f.store, |s| s.workspace_store(&parent).is_none());
+    cx.run_until_parked();
+    assert!(events.seen.borrow().contains(&ChildDialogEvent::ParentGone));
 }
 
 #[gpui_kit::test]

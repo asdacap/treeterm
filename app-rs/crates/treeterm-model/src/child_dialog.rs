@@ -5,15 +5,19 @@
 //! entered: every visit reads its list afresh (retrying a failed read), and leaving the tab
 //! cancels the read, so a late result or error never lands on another tab. Here the shown
 //! tab's read is one owned task; entering another tab replaces (drops, so cancels) it.
+//!
+//! Opening an existing or recent worktree is awaited in the dialog (`isProcessing`): its
+//! controls are disabled, with a message, until the worktree is open (the dialog closes) or
+//! the error shows.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 
-use gpui_kit::{App, Context, Entity, Subscription, Task};
+use gpui_kit::{App, Context, Entity, EventEmitter, Subscription, Task};
 use treeterm_core::git::WorktreeInfo;
 use treeterm_core::github::{HeadRepo, PrListItem};
 use treeterm_core::worktree_registry::WorktreeRegistryEntry;
 
-use crate::session_store::{ChildOptions, ChildSource, SessionStore};
+use crate::session_store::{AdoptOptions, ChildOptions, ChildSource, SessionStore};
 
 /// `title` of a disabled branch row.
 pub const IN_WORKTREE_TOOLTIP: &str = "Branch is already in a worktree";
@@ -112,6 +116,43 @@ pub enum AppChoice {
     Custom(Option<String>),
 }
 
+/// What the dialog tells its view.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChildDialogEvent {
+    /// The child was added, or its creation has started: the dialog closes and shows it.
+    Created(String),
+    /// The parent is no longer loaded: the dialog closes (Electron renders it only while its
+    /// parent is).
+    ParentGone,
+}
+
+/// Opening an existing or recent worktree (`isProcessing`, `processingMessage`).
+enum Adopting {
+    Idle,
+    /// The task waits for the adopt, which runs on in the session if the dialog goes away.
+    Waiting { message: &'static str, _wait: Task<()> },
+}
+
+/// What Open Existing and Recent Workspace say.
+#[derive(Clone, Copy)]
+struct AdoptTexts {
+    unpicked: &'static str,
+    processing: &'static str,
+    failed: &'static str,
+}
+
+const EXISTING: AdoptTexts = AdoptTexts {
+    unpicked: "Please select a worktree",
+    processing: "Opening existing worktree...",
+    failed: "Failed to open worktree",
+};
+
+const RECENT: AdoptTexts = AdoptTexts {
+    unpicked: "Please select a recent workspace",
+    processing: "Opening recent workspace...",
+    failed: "Failed to open recent workspace",
+};
+
 /// An item a row is made from.
 trait Pickable: Clone {
     /// The row's key.
@@ -194,16 +235,25 @@ pub struct ChildDialogModel {
     detached: bool,
     app: AppChoice,
     error: Option<String>,
+    adopting: Adopting,
     /// The shown tab's read. Replacing it drops the read of the tab left, so its rows and
     /// error never land (Electron's `cancelled` guards).
     _load: Option<Task<()>>,
-    /// The parent's name, its inherited application and the open worktrees follow the session.
+    /// The parent's name, its inherited application and the open worktrees follow the
+    /// session, and the dialog goes when the parent does.
     _session: Subscription,
 }
 
+impl EventEmitter<ChildDialogEvent> for ChildDialogModel {}
+
 impl ChildDialogModel {
     pub fn new(session: Entity<SessionStore>, parent_id: String, tab: ChildTab, cx: &mut Context<Self>) -> Self {
-        let observe = cx.observe(&session, |_, _, cx| cx.notify());
+        let observe = cx.observe(&session, |model, session, cx| {
+            if session.read(cx).workspace_store(&model.parent_id).is_none() {
+                cx.emit(ChildDialogEvent::ParentGone);
+            }
+            cx.notify();
+        });
         let mut model = Self {
             session,
             parent_id,
@@ -216,6 +266,7 @@ impl ChildDialogModel {
             detached: false,
             app: AppChoice::Inherited,
             error: None,
+            adopting: Adopting::Idle,
             _load: None,
             _session: observe,
         };
@@ -229,6 +280,15 @@ impl ChildDialogModel {
 
     pub fn error(&self) -> Option<&str> {
         self.error.as_deref()
+    }
+
+    /// While an existing or recent worktree is being opened: what the dialog says
+    /// (`processingMessage`). Its controls are disabled meanwhile.
+    pub fn processing(&self) -> Option<&'static str> {
+        match &self.adopting {
+            Adopting::Idle => None,
+            Adopting::Waiting { message, .. } => Some(*message),
+        }
     }
 
     pub fn detached(&self) -> bool {
@@ -484,17 +544,32 @@ impl ChildDialogModel {
         fill
     }
 
-    /// Whether the main button is disabled (nothing picked, or an invalid name).
+    /// Whether the main button is disabled (processing, nothing picked, or an invalid name).
     pub fn submit_disabled(&self, name: &str) -> bool {
-        match self.tab {
-            ChildTab::Create => name_problem(name).is_some(),
-            _ => self.selected_key().is_none(),
+        self.processing().is_some()
+            || match self.tab {
+                ChildTab::Create => name_problem(name).is_some(),
+                _ => self.selected_key().is_none(),
+            }
+    }
+
+    /// The main button's label.
+    pub fn submit_label(&self) -> &'static str {
+        match (self.tab, self.processing()) {
+            (ChildTab::Create, None) => "Create",
+            (ChildTab::Create, Some(_)) => "Creating... Please wait",
+            (_, None) => "Open",
+            (_, Some(_)) => "Opening... Please wait",
         }
     }
 
-    /// The tab's submit handler. Returns the new child's id once its creation has started;
-    /// `None` after showing why it could not start.
-    pub fn submit(&mut self, name: &str, description: &str, cx: &mut Context<Self>) -> Option<String> {
+    /// The tab's submit handler. A new child reports `Created` once its creation has started;
+    /// an existing or recent worktree once it is open, while [`Self::processing`] shows.
+    /// Otherwise the error shows. Ignored while processing (Enter does nothing then).
+    pub fn submit(&mut self, name: &str, description: &str, cx: &mut Context<Self>) {
+        if self.processing().is_some() {
+            return;
+        }
         let name = name.trim().to_owned();
         let description = Some(description.trim().to_owned()).filter(|d| !d.is_empty());
         let options = child_options(self.tab, self.detached, description, &self.app);
@@ -509,28 +584,13 @@ impl ChildDialogModel {
                 }
                 ChildSource::NewBranch { name }
             }
-            ChildTab::Existing | ChildTab::Recent => {
-                let picked = match self.tab {
-                    ChildTab::Existing => self.existing.picked.as_ref().map(|w| w.info.clone()),
-                    _ => self.recent.picked.as_ref().map(|r| r.info.clone()),
-                };
-                let Some(info) = picked else {
-                    return self.fail(
-                        if self.tab == ChildTab::Existing { "Please select a worktree" } else { "Please select a recent workspace" },
-                        cx,
-                    );
-                };
-                // `onAdopt`: the typed name becomes the display name when it differs.
-                let mut metadata = BTreeMap::new();
-                metadata.insert("branchIsUserDefined".to_owned(), "true".to_owned());
-                if let Some(description) = options.description {
-                    metadata.insert("description".to_owned(), description);
-                }
-                if !name.is_empty() && name != info.branch {
-                    metadata.insert("displayName".to_owned(), name);
-                }
-                let result = self.session.update(cx, |s, cx| s.adopt_worktree_with(&parent, info, metadata, cx));
-                return self.started(result, cx);
+            ChildTab::Existing => {
+                let picked = self.existing.picked.as_ref().map(|w| w.info.clone());
+                return self.adopt(picked, name, options, EXISTING, cx);
+            }
+            ChildTab::Recent => {
+                let picked = self.recent.picked.as_ref().map(|r| r.info.clone());
+                return self.adopt(picked, name, options, RECENT, cx);
             }
             ChildTab::Branch => match &self.branches.picked {
                 Some(branch) => ChildSource::ExistingBranch { branch: branch.name.clone() },
@@ -545,21 +605,58 @@ impl ChildDialogModel {
                 None => return self.fail("Please select a pull request", cx),
             },
         };
-        let result = self.session.update(cx, |s, cx| s.create_child(&parent, source, options, cx));
-        self.started(result, cx)
-    }
-
-    fn started(&mut self, result: Result<String, String>, cx: &mut Context<Self>) -> Option<String> {
-        match result {
-            Ok(id) => Some(id),
+        match self.session.update(cx, |s, cx| s.create_child(&parent, source, options, cx)) {
+            Ok(id) => cx.emit(ChildDialogEvent::Created(id)),
             Err(error) => self.fail(error, cx),
         }
     }
 
-    fn fail(&mut self, message: impl Into<String>, cx: &mut Context<Self>) -> Option<String> {
+    /// Open the picked worktree (`handleAdoptSubmit`, `handleRecentSubmit`): named after its
+    /// branch, with the typed name as its display name when that differs, and the dialog's
+    /// description and default application. Waits for it with the tab's message; a failure
+    /// shows and the controls come back for another try.
+    fn adopt(
+        &mut self,
+        picked: Option<WorktreeInfo>,
+        name: String,
+        options: ChildOptions,
+        texts: AdoptTexts,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(info) = picked else {
+            return self.fail(texts.unpicked, cx);
+        };
+        let adopt = AdoptOptions {
+            display_name: Some(name).filter(|name| !name.is_empty() && *name != info.branch),
+            description: options.description,
+            default_application_id: options.default_application_id,
+        };
+        let parent = self.parent_id.clone();
+        let opened = self.session.update(cx, |s, cx| s.adopt_worktree(&parent, info, adopt, cx));
+        let wait = cx.spawn(async move |this, cx| {
+            // Canceled: the adopt went away with the session. (Its errors are never empty, so
+            // Electron's `result.error || '…'` fallback shows only then.)
+            let outcome = opened.await.unwrap_or_else(|_| Err(texts.failed.to_owned()));
+            // Err: the dialog is gone (its task would have been dropped with it).
+            match this.update(cx, |model, cx| {
+                model.adopting = Adopting::Idle;
+                match outcome {
+                    Ok(id) => cx.emit(ChildDialogEvent::Created(id)),
+                    Err(error) => model.error = Some(error),
+                }
+                cx.notify();
+            }) {
+                Ok(()) | Err(_) => {}
+            }
+        });
+        self.error = None;
+        self.adopting = Adopting::Waiting { message: texts.processing, _wait: wait };
+        cx.notify();
+    }
+
+    fn fail(&mut self, message: impl Into<String>, cx: &mut Context<Self>) {
         self.error = Some(message.into());
         cx.notify();
-        None
     }
 
     /// `getInheritedDefaultApplicationIds`: the parent's own default application, else its
