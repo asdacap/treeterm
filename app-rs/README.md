@@ -138,9 +138,9 @@ Done (tested against a real in-process daemon unless noted):
   being created shows git's output once there is some; one that failed shows why, with
   Dismiss. A failed operation (merge, removal) shows "Operation failed" with Force Unlock
   and Cancel in place of the tabs.
-- **Tree and sidebar:** sessions (dragged into order, kept in `ui-state.json`; "No
-  sessions. Click + to browse." once all are disconnected), favourites,
-  drag and drop (reorder / reparent), unread markers, PR badges, collapsible rail,
+- **Tree and sidebar:** sessions (dragged into order in the sidebar or the collapsed rail,
+  kept in `ui-state.json`; "No sessions. Click + to browse." once all are disconnected),
+  favourites, drag and drop (reorder / reparent), unread markers, PR badges, collapsible rail,
   title/branch refresh, Auto Open All Recent Worktrees (worktree registry shared with
   Electron), upstream warning before forking,
   force-unlock of a held session lock; session renaming (double-click its name; kept in
@@ -290,6 +290,8 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   slides it there in 0.3 s), the edge docks' arrows are text triangles, and a pane showing a
   web page (Browser, Web App, a PDF) draws its page over the outline and edge docks: native
   webviews draw above the window's content.
+- A session dragged in the sidebar or the rail dims as in Electron, but GPUI has no drag
+  image of its section: a chip with the session's name follows the pointer instead.
 
 ## Known differences from Electron (deliberate)
 

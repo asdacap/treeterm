@@ -50,8 +50,8 @@ pub struct AppView {
     sidebar_collapsed: bool,
     /// Dragged on the divider, 150–400px (`App.tsx` `treeWidth`).
     sidebar_width: f32,
-    /// Where a session being dragged in the sidebar would land.
-    session_drop_hint: Option<(ConnectionId, Side)>,
+    /// A session being dragged in the sidebar or the rail (`dragState`).
+    session_drag: SessionDrag,
     /// The Settings dialog while it is open: Settings again does not stack a second one
     /// (Electron's `isSettingsOpen`).
     settings_dialog: WeakEntity<crate::settings_view::SettingsView>,
@@ -109,6 +109,65 @@ impl Render for DraggedSession {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let c = colors(cx);
         div().px_2().py_1().rounded_sm().bg(c.bg_active).text_sm().child(self.name.clone())
+    }
+}
+
+/// Dragging a session's section to reorder the sessions (`dragState`).
+enum SessionDrag {
+    Idle,
+    /// `dragged`'s section dims (`.dragging`); `over` is the section and side it would land
+    /// on (`drag-before` / `drag-after`), none while over no other section.
+    Dragging { dragged: ConnectionId, over: Option<(ConnectionId, Side)> },
+}
+
+impl SessionDrag {
+    /// Whether `section` is the one dragged (`.dragging`).
+    fn dims(&self, section: &ConnectionId) -> bool {
+        matches!(self, SessionDrag::Dragging { dragged, .. } if dragged == section)
+    }
+
+    /// The side of `section` the dragged session would land on (`drag-before`, `drag-after`).
+    fn hint(&self, section: &ConnectionId) -> Option<Side> {
+        match self {
+            SessionDrag::Dragging { over: Some((over, side)), .. } if over == section => Some(*side),
+            SessionDrag::Dragging { .. } | SessionDrag::Idle => None,
+        }
+    }
+
+    /// The pointer moved to `pointer` while `section` is laid out at `bounds`
+    /// (`handleSessionDragOver`; every section hears every move): over another session's top
+    /// half it would land before it, over its bottom half after it. Whether the hint changed.
+    fn moved(
+        &mut self,
+        section: &ConnectionId,
+        bounds: gpui_kit::Bounds<gpui_kit::Pixels>,
+        pointer: gpui_kit::Point<gpui_kit::Pixels>,
+    ) -> bool {
+        let SessionDrag::Dragging { dragged, over } = self else {
+            return false; // dragged from another window
+        };
+        let next = (bounds.contains(&pointer) && dragged != section).then(|| {
+            let middle = bounds.top() + bounds.size.height / 2.;
+            (section.clone(), if pointer.y < middle { Side::Before } else { Side::After })
+        });
+        let changed = match (&*over, &next) {
+            (Some((old, _)), None) => old == section,
+            (old, Some(_)) => old.as_ref() != next.as_ref(),
+            (None, None) => false,
+        };
+        if changed {
+            *over = next;
+        }
+        changed
+    }
+
+    /// Dropped on `onto`'s section (`handleSessionDrop`): the drag ends, and the dragged
+    /// session moves to the side of it the hint showed; none when dropped on itself.
+    fn drop_on(&mut self, onto: &ConnectionId) -> Option<Side> {
+        match std::mem::replace(self, SessionDrag::Idle) {
+            SessionDrag::Dragging { over: Some((over, side)), .. } if over == *onto => Some(side),
+            SessionDrag::Dragging { .. } | SessionDrag::Idle => None,
+        }
     }
 }
 
@@ -293,7 +352,7 @@ impl AppView {
             open_on_start: None,
             sidebar_collapsed: false,
             sidebar_width: 250.,
-            session_drop_hint: None,
+            session_drag: SessionDrag::Idle,
             settings_dialog: WeakEntity::new_invalid(),
             connection_picker: cx.new(|cx| crate::connection_picker::ConnectionPicker::new(store.clone(), window, cx)),
             processes_dialog: ProcessesDialog::Closed,
@@ -530,16 +589,20 @@ impl AppView {
         self.sessions.get_mut(&id)
     }
 
-    /// The collapsed sidebar (`.tree-pane-collapsed`, 36px): sound toggle and expand, then one
-    /// 32px icon per workspace of every session (`WorkspaceIcon`, favourite star overlay).
+    /// The collapsed sidebar (`.tree-pane-collapsed`, 36px): sound toggle and expand, then each
+    /// session's block (`CollapsedSessionPanel`), dragged to reorder the sessions as in the
+    /// expanded sidebar: one 32px icon per workspace (`WorkspaceIcon`, favourite star overlay).
     fn rail(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let c = colors(cx);
         let (bg, border, hover, active, secondary, primary) =
             (c.bg_secondary, c.border, c.bg_hover, c.bg_active, c.text_secondary, c.text_primary);
+        let (store, names) = (self.store.read(cx), self.names.read(cx));
         let mut rail = v_flex().py(px(4.)).items_center();
         for (conn, connected) in &self.sessions {
+            let Some(slot) = store.session_slot(conn) else { continue };
             let session = connected.session.read(cx);
             let shown = session.viewed_workspace().map(str::to_owned);
+            let mut block = v_flex();
             for row in session.tree_rows(&Default::default(), cx) {
                 let Some(entry) = session.entry(&row.id) else { continue };
                 let is_shown = shown.as_deref() == Some(row.id.as_str());
@@ -570,7 +633,7 @@ impl AppView {
                 };
                 let name = SharedString::from(name);
                 let (conn, id) = (conn.clone(), row.id.clone());
-                rail = rail.child(
+                block = block.child(
                     div()
                         .id(SharedString::from(format!("rail-{}", row.id)))
                         .relative()
@@ -600,6 +663,7 @@ impl AppView {
                         .on_click(cx.listener(move |view, _, _, cx| view.select_workspace(&conn, id.clone(), cx))),
                 );
             }
+            rail = rail.child(self.session_drag_handle(conn.clone(), names.name(&slot.target), block.into_any_element(), cx));
         }
         let sound_toggle = self.sound_toggle(crate::ui::icon_button("sound-toggle", cx), primary, cx);
         v_flex()
@@ -800,36 +864,38 @@ impl AppView {
             .into_any_element()
     }
 
-    /// A session's sidebar section as a drag source and drop target (`.session-drag-handle`):
-    /// dropped on the top half of another session it goes before it, else after it. Rows
-    /// inside drag their workspace instead (the innermost drag source wins).
+    /// A session's section in the sidebar, or its block in the rail, as a drag source and
+    /// drop target (`.session-drag-handle`): dropped on the top half of another session it
+    /// goes before it, else after it. Rows inside drag their workspace instead (the innermost
+    /// drag source wins). While dragged it dims to 40% (`.dragging`); GPUI has no ghost image
+    /// of it, so a chip with its name follows the pointer.
     fn session_drag_handle(
         &self,
         id: ConnectionId,
         name: String,
         section: AnyElement,
-        cx: &mut Context<Self>,
+        cx: &Context<Self>,
     ) -> impl IntoElement + use<> {
         let accent = colors(cx).accent;
-        let hint = self.session_drop_hint.as_ref().filter(|(over, _)| *over == id).map(|(_, side)| *side);
+        let (dragging, hint) = (self.session_drag.dims(&id), self.session_drag.hint(&id));
         let (move_id, drop_id) = (id.clone(), id.clone());
+        let view = cx.entity().downgrade();
         div()
             .id(SharedString::from(format!("session-drag-{id}")))
             .relative()
-            .on_drag(DraggedSession { id, name: name.into() }, |dragged, _, _, cx| cx.new(|_| dragged.clone()))
+            .when(dragging, |d| d.opacity(0.4))
+            .on_drag(DraggedSession { id, name: name.into() }, move |dragged, _, _, cx| {
+                // `handleSessionDragStart`.
+                if let Err(error) = view.update(cx, |view, cx| {
+                    view.session_drag = SessionDrag::Dragging { dragged: dragged.id.clone(), over: None };
+                    cx.notify();
+                }) {
+                    tracing::debug!(%error, "window closed");
+                }
+                cx.new(|_| dragged.clone())
+            })
             .on_drag_move(cx.listener(move |view, event: &gpui_kit::DragMoveEvent<DraggedSession>, _, cx| {
-                let position = event.event.position;
-                let next = (event.bounds.contains(&position) && event.drag(cx).id != move_id).then(|| {
-                    let middle = event.bounds.top() + event.bounds.size.height / 2.;
-                    (move_id.clone(), if position.y < middle { Side::Before } else { Side::After })
-                });
-                let changed = match (&view.session_drop_hint, &next) {
-                    (Some((old, _)), None) => *old == move_id,
-                    (old, Some(_)) => old.as_ref() != next.as_ref(),
-                    (None, None) => false,
-                };
-                if changed {
-                    view.session_drop_hint = next;
+                if view.session_drag.moved(&move_id, event.bounds, event.event.position) {
                     cx.notify();
                 }
             }))
@@ -848,9 +914,8 @@ impl AppView {
     /// `dragged` was dropped on `onto`'s section: move it to the side the hint showed.
     fn drop_session(&mut self, dragged: &ConnectionId, onto: &ConnectionId, cx: &mut Context<Self>) {
         cx.notify();
-        let side = match self.session_drop_hint.take() {
-            Some((over, side)) if over == *onto => side,
-            Some(_) | None => return, // dropped on itself
+        let Some(side) = self.session_drag.drop_on(onto) else {
+            return; // dropped on itself
         };
         let store = self.store.read(cx);
         let target = |id: &ConnectionId| store.session_slot(id).map(|slot| slot.target.clone());
@@ -951,6 +1016,11 @@ impl Render for AppView {
         let (bg, fg, secondary, error, border, accent) =
             (c.bg_primary, c.text_primary, c.text_secondary, c.error, c.border, c.accent);
         self.sync_info(window, cx);
+        // `handleSessionDragEnd`: a session dropped, or let go of where nothing takes it, is no
+        // longer dragged.
+        if !cx.has_active_drag() {
+            self.session_drag = SessionDrag::Idle;
+        }
         let sidebar = self.sidebar(cx);
         let info = self.info.clone();
         let collapsed = self.sidebar_collapsed && cfg!(target_os = "macos");
@@ -3316,5 +3386,71 @@ mod tests {
         cx.update(|window, cx| window.close_dialog(cx));
         cx.run_until_parked();
         assert_eq!(confirm.strong_count(), 0, "closed");
+    }
+
+    /// Sessions "a" (0–100px) and "b" (100–200px), stacked as in the sidebar.
+    fn two_sections() -> [(ConnectionId, gpui_kit::Bounds<gpui_kit::Pixels>); 2] {
+        let section = |id: &str, top: f32| {
+            let bounds = gpui_kit::Bounds::new(gpui_kit::point(px(0.), px(top)), gpui_kit::size(px(200.), px(100.)));
+            (ConnectionId::new(id), bounds)
+        };
+        [section("a", 0.), section("b", 100.)]
+    }
+
+    /// Every section hears the move to `y` (`onDragOver` fires on the one under the pointer):
+    /// whether each one's hint changed.
+    fn move_to(drag: &mut SessionDrag, sections: &[(ConnectionId, gpui_kit::Bounds<gpui_kit::Pixels>)], y: f32) -> Vec<bool> {
+        sections.iter().map(|(id, bounds)| drag.moved(id, *bounds, gpui_kit::point(px(10.), px(y)))).collect()
+    }
+
+    /// `dragState`: the dragged session's section dims; over another session's top half it
+    /// would land before it, over its bottom half after it, and over its own section, or
+    /// outside every section, nowhere.
+    #[test]
+    fn a_dragged_session_dims_and_would_land_beside_the_section_under_the_pointer() {
+        let sections = two_sections();
+        let (a, b) = (sections[0].0.clone(), sections[1].0.clone());
+        let mut drag = SessionDrag::Idle;
+        assert_eq!(move_to(&mut drag, &sections, 10.), [false, false], "nothing dragged");
+        assert!(!drag.dims(&a) && !drag.dims(&b));
+
+        drag = SessionDrag::Dragging { dragged: b.clone(), over: None };
+        assert!(drag.dims(&b) && !drag.dims(&a));
+        assert_eq!(move_to(&mut drag, &sections, 150.), [false, false], "over itself");
+        assert_eq!((drag.hint(&a), drag.hint(&b)), (None, None));
+
+        assert_eq!(move_to(&mut drag, &sections, 49.), [true, false]);
+        assert_eq!((drag.hint(&a), drag.hint(&b)), (Some(Side::Before), None));
+        assert_eq!(move_to(&mut drag, &sections, 20.), [false, false], "the same side");
+        assert_eq!(move_to(&mut drag, &sections, 50.), [true, false]);
+        assert_eq!(drag.hint(&a), Some(Side::After));
+
+        // Back over itself, or out of every section: no line.
+        assert_eq!(move_to(&mut drag, &sections, 150.), [true, false]);
+        assert_eq!(drag.hint(&a), None);
+        assert_eq!(move_to(&mut drag, &sections, 60.), [true, false]);
+        assert_eq!(move_to(&mut drag, &sections, 250.), [true, false]);
+        assert_eq!(drag.hint(&a), None);
+        assert!(drag.dims(&b), "still dragged");
+    }
+
+    /// `handleSessionDrop`: dropped where the line shows, the session moves to that side;
+    /// dropped on itself it stays. Either way the drag ends.
+    #[test]
+    fn a_dropped_session_lands_where_the_line_showed_and_the_drag_ends() {
+        let sections = two_sections();
+        let (a, b) = (sections[0].0.clone(), sections[1].0.clone());
+        let mut drag = SessionDrag::Dragging { dragged: b.clone(), over: None };
+        assert_eq!(move_to(&mut drag, &sections, 80.), [true, false]);
+        assert_eq!(drag.drop_on(&a), Some(Side::After));
+        assert!(matches!(drag, SessionDrag::Idle));
+        assert!(!drag.dims(&b));
+
+        drag = SessionDrag::Dragging { dragged: b.clone(), over: None };
+        assert_eq!(move_to(&mut drag, &sections, 150.), [false, false]);
+        assert_eq!(drag.drop_on(&b), None, "dropped on itself");
+        assert!(matches!(drag, SessionDrag::Idle));
+
+        assert_eq!(drag.drop_on(&a), None, "nothing dragged");
     }
 }
