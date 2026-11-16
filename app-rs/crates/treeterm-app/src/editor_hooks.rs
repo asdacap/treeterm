@@ -24,7 +24,7 @@ use lsp_types::{
     CompletionTextEdit, CompletionTriggerKind, Hover, HoverContents, InsertTextFormat, LocationLink, MarkupContent,
     MarkupKind, Range, ShowDocumentParams, TextEdit, Uri,
 };
-use treeterm_model::code_intel::{self, Asked, Insert, Severity, Suggested, links};
+use treeterm_model::code_intel::{self, Insert, Request, Severity, Suggested, links};
 use treeterm_model::definition::DefinitionProbe;
 use treeterm_model::words;
 
@@ -340,17 +340,28 @@ struct Suggestions {
     /// strings ([`crate::file_browser_view::language_for`]).
     grammar: &'static str,
     others: OtherTexts,
-    /// Where the last suggestions offered were asked for. The Kit closes them at every edit
-    /// and asks again, so a character typed right there goes on with them.
-    shown: Rc<Cell<Shown>>,
+    session: SuggestSession,
 }
 
-/// Where suggestions were last offered.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Shown {
-    Nothing,
-    /// At this cursor offset.
-    At(usize),
+/// The Editor tab's suggest session ([`code_intel::Session`]): its suggestions start and carry
+/// it on as they are asked for, and its view ends it when Escape closes them or the editor
+/// loses focus, as those cancel Monaco's suggest model.
+#[derive(Clone, Default)]
+pub(crate) struct SuggestSession(Rc<Cell<code_intel::Session>>);
+
+impl SuggestSession {
+    pub(crate) fn end(&self) {
+        self.0.set(code_intel::Session::Idle);
+    }
+}
+
+/// The text of the line of the character before byte `offset` of `text`, up to `offset`.
+fn typed_line(text: &Rope, offset: usize) -> String {
+    let Some(typed) = text.chars_at(offset).reversed().next() else {
+        return String::new();
+    };
+    let row = text.offset_to_point(offset - typed.len_utf8()).row;
+    text.slice(text.line_start_offset(row)..offset).to_string()
 }
 
 /// Whether the character before byte `offset` of `text` is in a comment or a string, as GPUI
@@ -372,24 +383,23 @@ impl CompletionProvider for Suggestions {
         _: &mut Window,
         cx: &mut App,
     ) -> Task<gpui_kit::Result<CompletionResponse>> {
-        let typed = trigger.trigger_kind != CompletionTriggerKind::INVOKED;
+        // The session goes on, or ends, as this is asked: the Kit drops the request if a key
+        // comes before its answer.
+        let line;
+        let request = if trigger.trigger_kind == CompletionTriggerKind::INVOKED {
+            Request::Invoked
+        } else {
+            line = typed_line(text, offset);
+            Request::Typed { line: &line }
+        };
+        let (asked, session) = self.session.0.get().ask(self.language, offset, request);
+        self.session.0.set(session);
         let (text, language, grammar, others) = (text.clone(), self.language, self.grammar, (self.others)(cx));
-        let (shown, last_shown) = (self.shown.clone(), self.shown.get());
         let found = cx.background_executor().spawn(async move {
             let string = text.to_string();
-            let asked = if typed {
-                let before = string.get(..offset).and_then(|before| before.chars().next_back());
-                let typed_at = before.map_or(offset, |typed| offset - typed.len_utf8());
-                if last_shown == Shown::At(typed_at) {
-                    Asked::Refined
-                } else {
-                    Asked::Typed { in_comment_or_string: in_comment_or_string(grammar, &string, offset) }
-                }
-            } else {
-                Asked::Invoked
-            };
+            let in_comment_or_string = || in_comment_or_string(grammar, &string, offset);
             let (replace, items, kind): (_, Vec<(String, Insert)>, _) =
-                match code_intel::suggest(language, &string, &others, offset, asked) {
+                match code_intel::suggest(language, &string, &others, offset, asked, in_comment_or_string) {
                     Suggested::Language(found) => {
                         let items = found.items.into_iter().map(|item| (item.label, item.insert)).collect();
                         (found.replace, items, CompletionItemKind::PROPERTY)
@@ -418,9 +428,10 @@ impl CompletionProvider for Suggestions {
                 })
                 .collect::<Vec<_>>()
         });
+        let session = self.session.clone();
         cx.spawn(async move |_| {
             let items = found.await;
-            shown.set(if items.is_empty() { Shown::Nothing } else { Shown::At(offset) });
+            session.0.set(session.0.get().answered(offset, !items.is_empty()));
             Ok(CompletionResponse::Array(items))
         })
     }
@@ -434,19 +445,20 @@ impl CompletionProvider for Suggestions {
 }
 
 /// Give `editor`, a file at `path` of Monaco's `language`, Monaco's suggestions, their
-/// letters that match what was typed highlighted; `others` are the other open files' texts.
+/// letters that match what was typed highlighted; `others` are the other open files' texts,
+/// and `session` the editor's suggest session.
 pub(crate) fn install_suggestions(
     editor: &Entity<EditorState>,
     path: &str,
     language: &'static str,
     others: OtherTexts,
+    session: SuggestSession,
     cx: &mut App,
 ) {
     let grammar = crate::file_browser_view::language_for(path);
-    let shown = Rc::new(Cell::new(Shown::Nothing));
     editor.update(cx, |editor, _| {
         let lsp = editor.lsp_mut();
-        lsp.completion_provider = Some(Rc::new(Suggestions { language, grammar, others, shown }));
+        lsp.completion_provider = Some(Rc::new(Suggestions { language, grammar, others, session }));
         lsp.set_completion_highlighter(Rc::new(|typed: &str, item: &CompletionItem| words::highlights(typed, &item.label)));
     });
 }

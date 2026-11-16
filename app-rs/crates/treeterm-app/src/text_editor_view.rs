@@ -21,7 +21,8 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use gpui_kit::component::input::{
-    Copy as CopyText, Cut, Editor, EditorState, Enter, IndentInline, InputEvent, Paste, Replace, ShowCompletions,
+    Copy as CopyText, Cut, Editor, EditorState, Enter, Escape, IndentInline, InputEvent, Paste, Replace,
+    ShowCompletions,
 };
 use gpui_kit::component::v_flex;
 use gpui_kit::component::h_flex;
@@ -34,7 +35,7 @@ use treeterm_model::code_intel::{self, FormatScope};
 use treeterm_model::indentation::{Indentation, guess_indentation};
 use treeterm_model::text_editor::{EditorDoc, SaveState, ScrollTarget, TextEditor};
 
-use crate::editor_hooks::Follow;
+use crate::editor_hooks::{Follow, SuggestSession};
 use crate::file_browser_view::{GoToDefinition, PeekDefinition, PointerOver, language_for};
 use crate::theme::colors;
 use crate::ui;
@@ -87,6 +88,8 @@ pub struct TextEditorView {
     definition_clicked: Rc<Cell<bool>>,
     /// The language worker's problems in the file, marked again at every change.
     problems: crate::editor_hooks::ProblemMarks,
+    /// Whether suggestions show or are on their way, and where they were asked for.
+    suggestions: SuggestSession,
     /// What the editor indents with, read from the file when it opened (Monaco's model
     /// options), which formatting indents with too.
     indentation: Indentation,
@@ -108,6 +111,7 @@ impl TextEditorView {
             pointer_over: PointerOver::default(),
             definition_clicked: Rc::new(Cell::new(false)),
             problems,
+            suggestions: SuggestSession::default(),
             indentation: Indentation::MONACO_DEFAULT,
             preview_scroll: gpui_kit::ScrollHandle::new(),
             visible: false,
@@ -136,8 +140,8 @@ impl TextEditorView {
         self.problems.mark(&editor, cx);
         crate::editor_hooks::install_colors(&editor, monaco_language, cx);
         let model = self.model.clone();
-        let changes = cx.subscribe(&editor, move |view, editor, event: &InputEvent, cx| {
-            if let InputEvent::Change = event {
+        let changes = cx.subscribe(&editor, move |view, editor, event: &InputEvent, cx| match event {
+            InputEvent::Change => {
                 let text = editor.read(cx).value().to_string();
                 brackets.set(crate::file_browser_view::bracket_colors(&text, monaco_language), cx);
                 links.set(crate::editor_hooks::link_underlines(&text), cx);
@@ -145,6 +149,9 @@ impl TextEditorView {
                 editor.update(cx, |editor, cx| crate::file_browser_view::fit_glyph_strip(editor, false, cx));
                 model.update(cx, |model, cx| model.set_content(text, cx));
             }
+            // Monaco's suggest model is cancelled when the editor loses focus.
+            InputEvent::Blur => view.suggestions.end(),
+            InputEvent::PressEnter { .. } | InputEvent::Focus => {}
         });
         self._subscriptions.push(changes);
         let probe = self.model.read(cx).definition_probe();
@@ -164,7 +171,8 @@ impl TextEditorView {
             None => Vec::new(),
         });
         let path = self.model.read(cx).path().to_owned();
-        crate::editor_hooks::install_suggestions(&editor, &path, monaco_language, others, cx);
+        let suggestions = self.suggestions.clone();
+        crate::editor_hooks::install_suggestions(&editor, &path, monaco_language, others, suggestions, cx);
         self.editor = Some(editor.clone());
         Some(editor)
     }
@@ -311,6 +319,12 @@ impl TextEditorView {
         if accept_suggestion(editor, window, cx) {
             cx.stop_propagation();
         }
+    }
+
+    /// Escape closes the suggestions, and a character typed where they were then starts anew
+    /// (`hideSuggestWidget` cancels Monaco's suggest model).
+    fn on_escape(&mut self, _: &Escape, _: &mut Window, _: &mut Context<Self>) {
+        self.suggestions.end();
     }
 
     /// A failed save is an alert, as in Electron.
@@ -478,6 +492,7 @@ impl Render for TextEditorView {
             .on_action(cx.listener(Self::on_format_document))
             .on_action(cx.listener(Self::on_format_selection))
             .capture_action(cx.listener(Self::on_tab))
+            .capture_action(cx.listener(Self::on_escape))
             .child(
                 h_flex()
                     .flex_shrink_0()
@@ -525,19 +540,45 @@ impl Render for TextEditorView {
 mod tests {
     use super::*;
 
-    /// A code editor in the Editor tab's key context.
+    /// A code editor in the Editor tab's key context, Escape ending its suggest session as the
+    /// tab's does.
     struct Host {
         editor: Entity<EditorState>,
+        suggestions: SuggestSession,
+    }
+
+    impl Host {
+        fn new(editor: Entity<EditorState>) -> Self {
+            Self { editor, suggestions: SuggestSession::default() }
+        }
     }
 
     impl Render for Host {
-        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-            div().key_context(CONTEXT).w(px(400.)).h(px(300.)).child(Editor::new(&self.editor).h_full())
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .key_context(CONTEXT)
+                .capture_action(cx.listener(|host, _: &Escape, _, _| host.suggestions.end()))
+                .w(px(400.))
+                .h(px(300.))
+                .child(Editor::new(&self.editor).h_full())
         }
     }
 
     fn no_others() -> crate::editor_hooks::OtherTexts {
         Rc::new(|_| Vec::new())
+    }
+
+    /// Give the host's editor, a file at `path` of Monaco's `language`, Monaco's suggestions
+    /// with the host's suggest session; `others` are the other open files' texts.
+    fn install(
+        host: &Entity<Host>,
+        path: &str,
+        language: &'static str,
+        others: crate::editor_hooks::OtherTexts,
+        cx: &mut App,
+    ) {
+        let (editor, suggestions) = (host.read(cx).editor.clone(), host.read(cx).suggestions.clone());
+        crate::editor_hooks::install_suggestions(&editor, path, language, others, suggestions, cx);
     }
 
     /// A code editor in the Editor tab's key context, Tab taking a suggestion as the tab's does.
@@ -581,7 +622,8 @@ mod tests {
         });
         let editor = cx.update(|_, cx| host.read(cx).editor.clone());
         cx.update(|window, cx| {
-            crate::editor_hooks::install_suggestions(&editor, "/w/a.rs", "rust", no_others(), cx);
+            let suggestions = SuggestSession::default();
+            crate::editor_hooks::install_suggestions(&editor, "/w/a.rs", "rust", no_others(), suggestions, cx);
             editor.update(cx, |editor, cx| {
                 editor.focus(window, cx);
                 editor.set_selected_range(text.len()..text.len(), cx);
@@ -611,13 +653,13 @@ food");
         });
         let text = "fn food() {}
 // ";
-        let (host, cx) = cx.add_window_view(|window, cx| Host {
-            editor: cx.new(|cx| EditorState::new(window, cx).language("rust").default_value(text)),
+        let (host, cx) = cx.add_window_view(|window, cx| {
+            Host::new(cx.new(|cx| EditorState::new(window, cx).language("rust").default_value(text)))
         });
         let editor = cx.update(|_, cx| host.read(cx).editor.clone());
         let others: crate::editor_hooks::OtherTexts = Rc::new(|_| vec!["fn fond() {}".to_owned()]);
         cx.update(|window, cx| {
-            crate::editor_hooks::install_suggestions(&editor, "/w/a.rs", "rust", others, cx);
+            install(&host, "/w/a.rs", "rust", others, cx);
             editor.update(cx, |editor, cx| {
                 editor.focus(window, cx);
                 editor.set_selected_range(text.len()..text.len(), cx);
@@ -754,8 +796,8 @@ food");
             gpui_kit::init(cx);
             bind_keys(cx);
         });
-        let (host, cx) = cx.add_window_view(|window, cx| Host {
-            editor: cx.new(|cx| EditorState::new(window, cx).language("rust").default_value("fn main() {}\n")),
+        let (host, cx) = cx.add_window_view(|window, cx| {
+            Host::new(cx.new(|cx| EditorState::new(window, cx).language("rust").default_value("fn main() {}\n")))
         });
         let editor = cx.update(|_, cx| host.read(cx).editor.clone());
         cx.update(|window, cx| editor.update(cx, |editor, cx| editor.focus(window, cx)));
@@ -775,12 +817,12 @@ food");
             bind_keys(cx);
         });
         let text = "fn food() {}\n";
-        let (host, cx) = cx.add_window_view(|window, cx| Host {
-            editor: cx.new(|cx| EditorState::new(window, cx).language("rust").default_value(text)),
+        let (host, cx) = cx.add_window_view(|window, cx| {
+            Host::new(cx.new(|cx| EditorState::new(window, cx).language("rust").default_value(text)))
         });
         let editor = cx.update(|_, cx| host.read(cx).editor.clone());
         cx.update(|window, cx| {
-            crate::editor_hooks::install_suggestions(&editor, "/w/a.rs", "rust", no_others(), cx);
+            install(&host, "/w/a.rs", "rust", no_others(), cx);
             editor.update(cx, |editor, cx| {
                 editor.focus(window, cx);
                 editor.set_selected_range(text.len()..text.len(), cx);
@@ -814,12 +856,12 @@ food");
             bind_keys(cx);
         });
         let text = "let fooBar = foobar;\n";
-        let (host, cx) = cx.add_window_view(|window, cx| Host {
-            editor: cx.new(|cx| EditorState::new(window, cx).language("rust").default_value(text)),
+        let (host, cx) = cx.add_window_view(|window, cx| {
+            Host::new(cx.new(|cx| EditorState::new(window, cx).language("rust").default_value(text)))
         });
         let editor = cx.update(|_, cx| host.read(cx).editor.clone());
         cx.update(|window, cx| {
-            crate::editor_hooks::install_suggestions(&editor, "/w/a.rs", "rust", no_others(), cx);
+            install(&host, "/w/a.rs", "rust", no_others(), cx);
             editor.update(cx, |editor, cx| {
                 editor.focus(window, cx);
                 editor.set_selected_range(text.len()..text.len(), cx);
@@ -851,12 +893,12 @@ food");
             bind_keys(cx);
         });
         let kit_language = crate::file_browser_view::language_for(path);
-        let (host, cx) = cx.add_window_view(|window, cx| Host {
-            editor: cx.new(|cx| EditorState::new(window, cx).language(kit_language).default_value(text)),
+        let (host, cx) = cx.add_window_view(|window, cx| {
+            Host::new(cx.new(|cx| EditorState::new(window, cx).language(kit_language).default_value(text)))
         });
         let editor = cx.update(|_, cx| host.read(cx).editor.clone());
         cx.update(|window, cx| {
-            crate::editor_hooks::install_suggestions(&editor, path, language, no_others(), cx);
+            install(&host, path, language, no_others(), cx);
             editor.update(cx, |editor, cx| {
                 editor.focus(window, cx);
                 editor.set_selected_range(text.len()..text.len(), cx);
@@ -895,6 +937,48 @@ food");
     }
 
     #[gpui_kit::test]
+    fn letters_typed_at_once_in_a_json_key_go_on_refining_its_suggestions(cx: &mut gpui_kit::TestAppContext) {
+        let text = "[{\"alpha\": 1, \"beta\": 2, \"bravo\": 3}, {";
+        let (editor, cx) = suggesting_editor(cx, "/w/a.json", "json", text);
+        // The quote asks for the keys of the similar object.
+        cx.simulate_keystrokes("\"");
+        cx.run_until_parked();
+        assert_eq!(shown(&editor, cx), Some(vec!["alpha".to_owned(), "beta".to_owned(), "bravo".to_owned()]));
+        // Two letters, the second typed before the first one's suggestions came back.
+        cx.simulate_keystrokes("b r");
+        cx.run_until_parked();
+        assert_eq!(shown(&editor, cx), Some(vec!["bravo".to_owned()]));
+    }
+
+    #[gpui_kit::test]
+    fn letters_typed_at_once_after_asking_in_a_comment_go_on_refining_until_the_word_ends(
+        cx: &mut gpui_kit::TestAppContext,
+    ) {
+        let text = "fn food() {}\nfn fond() {}\n// ";
+        let (editor, cx) = suggesting_editor(cx, "/w/a.rs", "rust", text);
+        cx.simulate_keystrokes("ctrl-space");
+        cx.run_until_parked();
+        assert_eq!(shown(&editor, cx), Some(vec!["fn".to_owned(), "fond".to_owned(), "food".to_owned()]));
+        cx.simulate_keystrokes("f o");
+        cx.run_until_parked();
+        assert_eq!(shown(&editor, cx), Some(vec!["fond".to_owned(), "food".to_owned()]));
+        // A space ends the word, and with it the suggestions: a letter after it is quiet again.
+        cx.simulate_keystrokes("space f");
+        cx.run_until_parked();
+        assert_eq!(shown(&editor, cx), None);
+        // So does Escape: a letter typed where they were asked for is quiet too.
+        cx.simulate_keystrokes("ctrl-space");
+        cx.run_until_parked();
+        assert!(shown(&editor, cx).is_some());
+        cx.simulate_keystrokes("escape");
+        cx.run_until_parked();
+        assert_eq!(shown(&editor, cx), None);
+        cx.simulate_keystrokes("o");
+        cx.run_until_parked();
+        assert_eq!(shown(&editor, cx), None);
+    }
+
+    #[gpui_kit::test]
     fn an_html_attribute_is_completed_with_the_cursor_between_its_quotes(cx: &mut gpui_kit::TestAppContext) {
         let text = "<a hre";
         let (editor, cx) = suggesting_editor(cx, "/w/a.html", "html", text);
@@ -919,12 +1003,12 @@ food");
             })
         };
         let text = "<ul>\n";
-        let (host, cx) = cx.add_window_view(|window, cx| Host {
-            editor: cx.new(|cx| EditorState::new(window, cx).language("html").default_value(text)),
+        let (host, cx) = cx.add_window_view(|window, cx| {
+            Host::new(cx.new(|cx| EditorState::new(window, cx).language("html").default_value(text)))
         });
         let editor = cx.update(|_, cx| host.read(cx).editor.clone());
         cx.update(|window, cx| {
-            crate::editor_hooks::install_suggestions(&editor, "/w/a.html", "html", no_others(), cx);
+            install(&host, "/w/a.html", "html", no_others(), cx);
             editor.update(cx, |editor, cx| {
                 editor.focus(window, cx);
                 editor.set_selected_range(text.len()..text.len(), cx);
@@ -945,7 +1029,7 @@ food");
         // CSS: property names in a rule, inserted with a colon.
         cx.update(|window, cx| {
             editor.update(cx, |editor, cx| editor.set_value("a { }", window, cx));
-            crate::editor_hooks::install_suggestions(&editor, "/w/a.css", "css", no_others(), cx);
+            install(&host, "/w/a.css", "css", no_others(), cx);
             editor.update(cx, |editor, cx| editor.set_selected_range(4..4, cx));
         });
         cx.simulate_keystrokes("c o l o");

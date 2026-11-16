@@ -289,6 +289,12 @@ pub fn ends_word(text: &str, offset: usize, language: &str) -> bool {
     !word.is_empty() && word.end == offset && !is_number(&text[word])
 }
 
+/// Whether part of a word, by the word pattern of Monaco's `language`, is typed before byte
+/// `offset` of `text`: what suggestions there are filtered by ([`suggestions`]' `replace`).
+pub fn typing_word(text: &str, offset: usize, language: &str) -> bool {
+    pattern_word_around(word_pattern(language), text, offset).start < offset
+}
+
 /// The bytes of a suggested `word` that match what was `typed`, as the suggest widget
 /// highlights them; none when they do not match. A suggestion matched by other text than its
 /// label (a JSON key, by its quoted form) is highlighted where the typed text matches it from
@@ -417,6 +423,18 @@ mod tests {
         assert!(!ends_word("let x = 12", 10, "rust"));
         assert!(!ends_word("let x = ", 8, "rust"));
         assert!(ends_word("{\"a\": tr", 8, "json"));
+    }
+
+    #[test]
+    fn a_word_is_being_typed_while_part_of_it_is_before_the_cursor() {
+        assert!(typing_word("let foo", 7, "rust"));
+        assert!(typing_word("let foo", 6, "rust"));
+        assert!(typing_word("let x = 12", 10, "rust"));
+        assert!(!typing_word("let foo", 4, "rust"));
+        assert!(!typing_word("let x = ", 8, "rust"));
+        assert!(!typing_word("a-", 2, "rust"));
+        assert!(typing_word("a-", 2, "css"));
+        assert!(!typing_word("", 0, "rust"));
     }
 
     #[test]

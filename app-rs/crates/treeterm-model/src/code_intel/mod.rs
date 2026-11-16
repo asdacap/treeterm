@@ -170,17 +170,73 @@ fn trigger_characters(language: &str) -> &'static [char] {
     }
 }
 
-/// What asked the Editor tab for suggestions, as Monaco's suggest controller tells them apart.
+/// What asked the Editor tab for suggestions, as Monaco's suggest controller tells them apart
+/// ([`Session::ask`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Asked {
     /// Ctrl+Space (or Cmd/Ctrl+I).
     Invoked,
-    /// A character typed while suggestions show: they follow what is typed.
+    /// A character typed where the suggestions showing, or on their way, were asked for: they
+    /// follow what is typed.
     Refined,
-    /// A character typed while none show: Monaco's quick suggestions, which it keeps quiet
-    /// while typing in a comment or a string (`quickSuggestions: { comments: 'off', strings:
-    /// 'off' }`), except for a character the language's worker is triggered by.
-    Typed { in_comment_or_string: bool },
+    /// A character typed with no suggestions showing or on their way: Monaco's quick
+    /// suggestions, which it keeps quiet while typing in a comment or a string
+    /// (`quickSuggestions: { comments: 'off', strings: 'off' }`), except for a character the
+    /// language's worker is triggered by.
+    Typed,
+}
+
+/// The Editor tab's suggestions from one keystroke to the next, as Monaco's suggest model keeps
+/// them: a character typed where they were last asked for goes on with them ([`Asked::Refined`]),
+/// in a comment or a string too. GPUI Kit closes them at every edit and asks again, dropping the
+/// request still on its way, so it is the requests that start a session and carry it on (as
+/// Monaco's starts when it asks), not their answers, which arrive only when no key comes first.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum Session {
+    /// No suggestions show or are on their way.
+    #[default]
+    Idle,
+    /// Suggestions show, or are on their way, asked for with the cursor at this byte offset.
+    Active { at: usize },
+}
+
+/// What asks the Editor tab for suggestions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Request<'a> {
+    /// Ctrl+Space (or Cmd/Ctrl+I).
+    Invoked,
+    /// A character typed: `line` is the text of its line up to the cursor, which it ends.
+    Typed { line: &'a str },
+}
+
+impl Session {
+    /// `request` asks for suggestions with the cursor at byte `offset` of a file of Monaco's
+    /// `language`: how it asks ([`suggest`] answers it), and the session from then on. Asking
+    /// starts one, and so does a character the language's worker is triggered by. A character
+    /// typed where the session's last request was made goes on with it while the cursor ends a
+    /// word being typed, which the suggestions are filtered by (Monaco's filtering leaves
+    /// nothing to show once it does not). Any other character ends it: in code, quick
+    /// suggestions ask again at the next one, which is the same as going on.
+    pub fn ask(self, language: &str, offset: usize, request: Request<'_>) -> (Asked, Session) {
+        let Request::Typed { line } = request else {
+            return (Asked::Invoked, Session::Active { at: offset });
+        };
+        let Some(typed) = line.chars().next_back() else {
+            return (Asked::Typed, Session::Idle);
+        };
+        let refined = self == Session::Active { at: offset.saturating_sub(typed.len_utf8()) };
+        let goes_on = trigger_characters(language).contains(&typed)
+            || refined && crate::words::typing_word(line, line.len(), language);
+        let asked = if refined { Asked::Refined } else { Asked::Typed };
+        (asked, if goes_on { Session::Active { at: offset } } else { Session::Idle })
+    }
+
+    /// The answer to the request made with the cursor at byte `offset` came back, `shown`
+    /// whether it has suggestions to show: none end the session that request carried on, as
+    /// Monaco's ends once nothing is left to show. Any other answer leaves the session as it is.
+    pub fn answered(self, offset: usize, shown: bool) -> Session {
+        if !shown && self == (Session::Active { at: offset }) { Session::Idle } else { self }
+    }
 }
 
 /// What the Editor tab suggests.
@@ -196,13 +252,22 @@ pub enum Suggested {
 /// What the Editor tab suggests at byte `offset` of `text`, a file of Monaco's `language`,
 /// given `others`, the texts of the other open files of that language: the language worker's
 /// completions where it offers some, else words ([`crate::words::suggestions`]), as Monaco
-/// asks its word-based provider only when the language's offered nothing.
-pub fn suggest(language: &str, text: &str, others: &[String], offset: usize, asked: Asked) -> Suggested {
+/// asks its word-based provider only when the language's offered nothing. Where it was
+/// [`Asked::Typed`], `in_comment_or_string` tells whether the character typed is in a comment
+/// or a string, where only a trigger character asks, and only the language's worker.
+pub fn suggest(
+    language: &str,
+    text: &str,
+    others: &[String],
+    offset: usize,
+    asked: Asked,
+    in_comment_or_string: impl FnOnce() -> bool,
+) -> Suggested {
     let trigger = match asked {
         Asked::Invoked => Trigger::Invoked,
-        Asked::Refined | Asked::Typed { .. } => Trigger::Typing,
+        Asked::Refined | Asked::Typed => Trigger::Typing,
     };
-    if asked == (Asked::Typed { in_comment_or_string: true }) {
+    if asked == Asked::Typed && in_comment_or_string() {
         let typed = text.get(..offset).and_then(|before| before.chars().next_back());
         if !typed.is_some_and(|typed| trigger_characters(language).contains(&typed)) {
             return Suggested::Nothing;
@@ -344,12 +409,12 @@ mod tests {
 
     #[test]
     fn typing_suggests_the_languages_completions_or_else_words_of_every_open_file() {
-        let typed = Asked::Typed { in_comment_or_string: false };
+        let code = || false;
         let others = ["forest".to_owned()];
-        assert_eq!(words_of(suggest("rust", "food fo", &others, 7, typed)), ["food", "forest"]);
-        assert_eq!(words_of(suggest("rust", "food fo", &others, 7, Asked::Refined)), ["food", "forest"]);
-        assert_eq!(words_of(suggest("rust", "food ", &others, 5, Asked::Invoked)), ["food", "forest"]);
-        match suggest("css", "a { colo }", &others, 8, typed) {
+        assert_eq!(words_of(suggest("rust", "food fo", &others, 7, Asked::Typed, code)), ["food", "forest"]);
+        assert_eq!(words_of(suggest("rust", "food fo", &others, 7, Asked::Refined, code)), ["food", "forest"]);
+        assert_eq!(words_of(suggest("rust", "food ", &others, 5, Asked::Invoked, code)), ["food", "forest"]);
+        match suggest("css", "a { colo }", &others, 8, Asked::Typed, code) {
             Suggested::Language(found) => assert_eq!(found.items[0].label, "color"),
             other => panic!("properties, not {other:?}"),
         }
@@ -357,15 +422,83 @@ mod tests {
 
     #[test]
     fn typing_in_a_comment_or_string_suggests_only_where_a_trigger_character_asks_the_worker() {
-        let quiet = Asked::Typed { in_comment_or_string: true };
-        assert_eq!(suggest("rust", "food // fo", &[], 10, quiet), Suggested::Nothing);
-        // Once suggestions show, typing there goes on refining them.
-        assert_eq!(words_of(suggest("rust", "food // fo", &[], 10, Asked::Refined)), ["food"]);
+        let quiet = || true;
+        assert_eq!(suggest("rust", "food // fo", &[], 10, Asked::Typed, quiet), Suggested::Nothing);
+        // Once suggestions show, typing there goes on refining them, and asking is not quiet:
+        // neither needs to know where the cursor is.
+        let unasked = || panic!("only quick suggestions ask whether the cursor is in a comment or a string");
+        assert_eq!(words_of(suggest("rust", "food // fo", &[], 10, Asked::Refined, unasked)), ["food"]);
+        assert_eq!(words_of(suggest("rust", "food // ", &[], 8, Asked::Invoked, unasked)), ["food"]);
         // `<` asks the HTML worker there; a letter does not.
-        assert!(matches!(suggest("html", "<", &[], 1, quiet), Suggested::Language(_)));
-        assert_eq!(suggest("html", "<!-- <a t", &[], 9, quiet), Suggested::Nothing);
+        assert!(matches!(suggest("html", "<", &[], 1, Asked::Typed, quiet), Suggested::Language(_)));
+        assert_eq!(suggest("html", "<!-- <a t", &[], 9, Asked::Typed, quiet), Suggested::Nothing);
         // A trigger character where the worker has nothing: nothing, not words.
-        assert_eq!(suggest("css", "/* a -", &[], 6, quiet), Suggested::Nothing);
-        assert_eq!(suggest("rust", "", &[], 0, quiet), Suggested::Nothing);
+        assert_eq!(suggest("css", "/* a -", &[], 6, Asked::Typed, quiet), Suggested::Nothing);
+        assert_eq!(suggest("rust", "", &[], 0, Asked::Typed, quiet), Suggested::Nothing);
+    }
+
+    /// A character typed with the cursor at the end of `line` (which starts the text).
+    fn typed(session: Session, language: &str, line: &str) -> (Asked, Session) {
+        session.ask(language, line.len(), Request::Typed { line })
+    }
+
+    #[test]
+    fn asking_or_a_trigger_character_starts_a_session_as_it_asks() {
+        let idle = Session::Idle;
+        assert_eq!(idle.ask("rust", 8, Request::Invoked), (Asked::Invoked, Session::Active { at: 8 }));
+        let active = Session::Active { at: 8 };
+        assert_eq!(active.ask("rust", 8, Request::Invoked), (Asked::Invoked, active));
+        // A JSON key's quote, HTML's `<`: their workers' trigger characters.
+        assert_eq!(typed(idle, "json", "{\""), (Asked::Typed, Session::Active { at: 2 }));
+        assert_eq!(typed(idle, "html", "<"), (Asked::Typed, Session::Active { at: 1 }));
+        // Another character with none showing: quick suggestions, and no session (in code the
+        // next character asks the same again; in a comment or a string, nothing is suggested).
+        assert_eq!(typed(idle, "rust", "// f"), (Asked::Typed, Session::Idle));
+        assert_eq!(typed(idle, "json", "{\"a"), (Asked::Typed, Session::Idle));
+        // Typed elsewhere than the last request: the cursor moved, the session does not go on.
+        assert_eq!(typed(Session::Active { at: 1 }, "rust", "// f"), (Asked::Typed, Session::Idle));
+        // Nothing typed (the Kit never asks so).
+        assert_eq!(typed(Session::Active { at: 0 }, "rust", ""), (Asked::Typed, Session::Idle));
+    }
+
+    #[test]
+    fn letters_typed_one_after_another_go_on_with_the_session_before_any_answer() {
+        // Ctrl+Space in a comment, then two letters before either answer comes back.
+        let (_, session) = Session::Idle.ask("rust", 3, Request::Invoked);
+        let (asked, session) = typed(session, "rust", "// f");
+        assert_eq!((asked, session), (Asked::Refined, Session::Active { at: 4 }));
+        assert_eq!(typed(session, "rust", "// fo"), (Asked::Refined, Session::Active { at: 5 }));
+        // A JSON key, after the quote that asked for the keys.
+        let (_, session) = typed(Session::Idle, "json", "{\"");
+        let (asked, session) = typed(session, "json", "{\"b");
+        assert_eq!((asked, session), (Asked::Refined, Session::Active { at: 3 }));
+        assert_eq!(typed(session, "json", "{\"br"), (Asked::Refined, Session::Active { at: 4 }));
+        // `-` is part of a word in HTML and JSON (their word patterns), not in Rust.
+        assert_eq!(typed(Session::Active { at: 3 }, "html", "<my-"), (Asked::Refined, Session::Active { at: 4 }));
+        assert_eq!(typed(Session::Active { at: 3 }, "json", "{\"a-"), (Asked::Refined, Session::Active { at: 4 }));
+        assert_eq!(typed(Session::Active { at: 4 }, "rust", "// a-"), (Asked::Refined, Session::Idle));
+    }
+
+    #[test]
+    fn a_character_that_leaves_no_word_ends_the_session_unless_it_asks_the_worker() {
+        // A space or a dot after a word: what shows is refined by it once more, and then ends.
+        assert_eq!(typed(Session::Active { at: 5 }, "rust", "// fo "), (Asked::Refined, Session::Idle));
+        assert_eq!(typed(Session::Active { at: 2 }, "rust", "fo."), (Asked::Refined, Session::Idle));
+        // A line break: no word on the new line.
+        assert_eq!(typed(Session::Active { at: 2 }, "rust", "fo\n"), (Asked::Refined, Session::Idle));
+        // The JSON worker's space, HTML's `/`: it goes on, asking the worker.
+        assert_eq!(typed(Session::Active { at: 5 }, "json", "{\"a\": "), (Asked::Refined, Session::Active { at: 6 }));
+        assert_eq!(typed(Session::Active { at: 1 }, "html", "</"), (Asked::Refined, Session::Active { at: 2 }));
+    }
+
+    #[test]
+    fn only_an_answer_with_nothing_to_show_to_the_latest_request_ends_the_session() {
+        let active = Session::Active { at: 4 };
+        assert_eq!(active.answered(4, false), Session::Idle);
+        assert_eq!(active.answered(4, true), active);
+        // The answer to an earlier request (a later one went on with the session), and one after
+        // the session ended (Escape): the session is left as it is.
+        assert_eq!(active.answered(3, false), active);
+        assert_eq!(Session::Idle.answered(4, true), Session::Idle);
     }
 }
