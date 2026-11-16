@@ -10,7 +10,7 @@ use gpui_kit::prelude::*;
 use gpui_kit::{Context, Entity, FontWeight, KeyBinding, PromptLevel, SharedString, Subscription, Window, actions, div, px, rgb};
 use treeterm_model::text_editor::{EditorDoc, SaveState, TextEditor};
 
-use crate::file_browser_view::language_for;
+use crate::file_browser_view::{PointerOver, language_for};
 use crate::theme::colors;
 use crate::ui;
 
@@ -33,6 +33,8 @@ pub struct TextEditorView {
     editor: Option<Entity<EditorState>>,
     /// The editor's glyph margin (Monaco's gutter width).
     gutter: Option<gpui_kit::component::input::GutterDecorationCollection>,
+    /// The pointer is over the editor ([`crate::file_browser_view::pointer_over`]).
+    pointer_over: PointerOver,
     preview_scroll: gpui_kit::ScrollHandle,
     _subscriptions: Vec<Subscription>,
 }
@@ -44,6 +46,7 @@ impl TextEditorView {
             model,
             editor: None,
             gutter: None,
+            pointer_over: PointerOver::default(),
             preview_scroll: gpui_kit::ScrollHandle::new(),
             _subscriptions: vec![observe],
         }
@@ -61,7 +64,7 @@ impl TextEditorView {
         let monaco_language = self.model.read(cx).language();
         let brackets = crate::file_browser_view::bracket_colors(&current, monaco_language);
         let editor = cx.new(|cx| crate::file_browser_view::code_editor(language, current, window, cx));
-        self.gutter = Some(crate::file_browser_view::monaco_gutter(&editor, false, cx));
+        self.gutter = Some(crate::file_browser_view::monaco_gutter(&editor, false, &self.pointer_over, cx));
         let brackets = editor.update(cx, |editor, cx| editor.create_decorations_collection(brackets, cx));
         let model = self.model.clone();
         let changes = cx.subscribe(&editor, move |_, editor, event: &InputEvent, cx| {
@@ -139,11 +142,9 @@ impl Render for TextEditorView {
             match self.editor(window, cx) {
                 Some(editor) => {
                     self.reveal_line(&editor, window, cx);
-                    Editor::new(&editor)
-                        .bordered(false)
-                        .h_full()
-                        .font_family("Menlo")
-                        .text_size(px(14.))
+                    crate::file_browser_view::pointer_over(div().id("text-editor"), &self.pointer_over)
+                        .size_full()
+                        .child(Editor::new(&editor).bordered(false).h_full().font_family("Menlo").text_size(px(14.)))
                         .into_any_element()
                 }
                 None => div().into_any_element(),

@@ -182,22 +182,40 @@ pub(crate) fn code_editor(
         .default_value(text)
 }
 
+/// Whether the pointer is over a code editor ([`pointer_over`]): Monaco's `'auto'`
+/// scrollbars show while it is.
+pub(crate) type PointerOver = Rc<Cell<bool>>;
+
+/// Track the pointer over `frame`, the element around a code editor, for its scrollbar
+/// ([`monaco_gutter`]). Typing does not end the hover, as it does not in Monaco.
+pub(crate) fn pointer_over(frame: gpui_kit::Stateful<gpui_kit::Div>, over: &PointerOver) -> gpui_kit::Stateful<gpui_kit::Div> {
+    let over = over.clone();
+    frame.hover_listener_mode(gpui_kit::HoverListenerMode::InputModalityIndependent).on_hover(move |hovered, window, _| {
+        over.set(*hovered);
+        // The scrollbar picks its mode as it is laid out.
+        window.refresh();
+    })
+}
+
 /// A code editor laid out as Monaco's: its gutter width (keep the returned collection with
-/// the editor) and its always-visible 14px scrollbar (`scrollbarSlider.*` of vs-dark, beside
-/// the overview ruler's border).
+/// the editor) and its 14px scrollbar (`scrollbarSlider.*` of vs-dark, beside the overview
+/// ruler's border), `'auto'` as Electron sets it: shown while the pointer is `over` the
+/// editor ([`pointer_over`]) or it scrolls, fading out otherwise.
 ///
 /// `glyph_margin`: the Files tab's viewer has Monaco's glyph margin, the Editor tab not.
 pub(crate) fn monaco_gutter(
     editor: &Entity<EditorState>,
     glyph_margin: bool,
+    over: &PointerOver,
     cx: &mut App,
 ) -> gpui_kit::component::input::GutterDecorationCollection {
+    let over = over.clone();
     editor.update(cx, |editor, cx| {
-        editor.set_scrollbar_renderer(Some(Rc::new(|context, _, _| {
+        editor.set_scrollbar_renderer(Some(Rc::new(move |context, _, _| {
             use gpui_kit::base::{Scrollbar, ScrollbarMode};
             Scrollbar::new(&context)
                 .axis(context.axis())
-                .mode(ScrollbarMode::Always)
+                .mode(if over.get() { ScrollbarMode::Always } else { ScrollbarMode::Scrolling })
                 .styles(|styles| {
                     styles
                         .track(|track| track.width(px(14.)).bg(gpui_kit::transparent_black()).border_color(rgba(0x7f7f7f4d).into()))
@@ -282,6 +300,8 @@ pub struct FileBrowserView {
     marked: (String, Vec<(u32, Freshness)>),
     /// Where the editor was laid out, to tell a click on a line number.
     editor_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
+    /// The pointer is over the editor ([`pointer_over`]).
+    pointer_over: PointerOver,
     draft_input: Option<DraftInput>,
     comments_scroll: gpui_kit::ScrollHandle,
     _observe: Subscription,
@@ -483,6 +503,7 @@ impl FileBrowserView {
             comment_lines: None,
             marked: (String::new(), Vec::new()),
             editor_bounds: Rc::new(Cell::new(None)),
+            pointer_over: PointerOver::default(),
             draft_input: None,
             comments_scroll: gpui_kit::ScrollHandle::new(),
             _observe: observe,
@@ -550,7 +571,7 @@ impl FileBrowserView {
         let text = text.to_owned();
         // Not searchable: Cmd/Ctrl+F reaches this view's search panel instead.
         let editor = cx.new(|cx| code_editor(language, text, window, cx).searchable(false));
-        self.gutter = Some(monaco_gutter(&editor, true, cx));
+        self.gutter = Some(monaco_gutter(&editor, true, &self.pointer_over, cx));
         self.brackets = Some(editor.update(cx, |editor, cx| editor.create_decorations_collection(brackets, cx)));
         self.comment_lines = Some(editor.update(cx, |editor, cx| editor.create_range_decorations_collection(Vec::new(), cx)));
         self.marked = (String::new(), Vec::new());
@@ -1431,7 +1452,7 @@ impl FileBrowserView {
                     .on_action(cx.listener(Self::on_search_word))
                     .children(overlay)
                     .child(
-                        div()
+                        pointer_over(div().id("file-viewer-editor"), &self.pointer_over)
                             .relative()
                             .flex_1()
                             .min_h_0()
