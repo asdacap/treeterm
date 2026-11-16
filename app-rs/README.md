@@ -294,6 +294,10 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   resize grip; GPUI has no backdrop filter, so the prefix-mode overlay does not blur what
   is behind it. Off macOS the menu bar is GPUI Kit's, drawn in the window (not GTK's), above
   dialogs so that it stays usable while one is open, as GTK's is.
+- The Comments tab's text (paths, code, comments, the generated prompt) is selected as GPUI
+  Kit selects text: a selection over several lines copies a blank line as nothing, and a
+  path cut short by its ellipsis cannot be selected (its tooltip shows it whole). A long
+  code line scrolls sideways with the wheel or trackpad, but without Chromium's scrollbar.
 - View → Actual Size, Zoom In and Zoom Out scale terminal text only (in Chromium's steps and
   25%–500% limits, for every window): GPUI has no page zoom, and the rest of the window is
   laid out in fixed pixels. The level is restored at the next start, as Electron's is, from the

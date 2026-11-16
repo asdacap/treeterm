@@ -3,16 +3,19 @@
 //! Several of its CSS rules use `var(--border)`, which is not defined: those borders are not
 //! drawn in Electron, so they are not drawn here either.
 
+use std::sync::atomic::{AtomicU64, Ordering};
+
+use gpui_kit::base::SelectableText;
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    App, ClipboardItem, Context, Div, ElementId, Entity, FontWeight, Hsla, SharedString, Stateful, Subscription, Window, div, px, rgb,
-    rgba,
+    App, ClipboardItem, Context, Div, ElementId, Entity, FocusHandle, FontWeight, Hsla, SharedString, Stateful, Subscription, Window,
+    div, px, rgb, rgba,
 };
 use treeterm_core::review::{Freshness, Resolution};
 use treeterm_model::session_store::SessionStore;
-use treeterm_model::tool_tabs::comments::{CommentsModel, PushState, created_at};
+use treeterm_model::tool_tabs::comments::{CodeLine, CommentsModel, PushState, created_at};
 
 use crate::theme::colors;
 use crate::ui::{MONO, normal_line};
@@ -22,14 +25,82 @@ pub struct CommentsView {
     /// For the workspace's git controller ("Push to GitHub").
     session: Entity<SessionStore>,
     workspace_id: String,
+    /// Where the [`ReadingOrder`] of the view's text starts.
+    first_order: u64,
+    /// The tab's own focus, taken by a mouse-down in it (Electron: a mousedown on the page
+    /// blurs the terminal), so that Cmd/Ctrl+C after a drag reaches the Kit root's Copy
+    /// rather than a terminal that kept the focus.
+    focus: FocusHandle,
     _observe: Subscription,
 }
 
 impl CommentsView {
     pub fn new(model: Entity<CommentsModel>, session: Entity<SessionStore>, workspace_id: String, cx: &mut Context<Self>) -> Self {
         let observe = cx.observe(&model, |_, _, cx| cx.notify());
-        Self { model, session, workspace_id, _observe: observe }
+        Self { model, session, workspace_id, first_order: document_orders(), focus: cx.focus_handle(), _observe: observe }
     }
+}
+
+/// A range of selection document orders of a view's own. A drag from one run of selectable
+/// text to another selects every run of the window whose order lies between theirs, so two
+/// Comments tabs side by side, or another view's text, must not share orders.
+fn document_orders() -> u64 {
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    NEXT.fetch_add(1, Ordering::Relaxed) << 32
+}
+
+/// Text that can be selected and copied (Cmd/Ctrl+C), as in the browser: the paths, code,
+/// comments and prompt. Each run takes the next document order, so that a drag over several
+/// copies them in reading order, a line each.
+struct ReadingOrder(u64);
+
+impl ReadingOrder {
+    fn text(&mut self, id: impl Into<ElementId>, text: impl Into<SharedString>) -> SelectableText {
+        self.0 += 1;
+        SelectableText::new(id, text).document_order(self.0)
+    }
+}
+
+/// The code around a comment (`.comments-code-context`); the line numbers cannot be selected
+/// (`user-select: none`). `overflow-x: auto`: a long line scrolls sideways, while a vertical
+/// wheel over the block still scrolls the tab.
+fn code_block(id: impl Into<ElementId>, lines: Vec<CodeLine>, text: &mut ReadingOrder, cx: &App) -> Stateful<Div> {
+    let c = colors(cx);
+    let (secondary, background) = (c.text_secondary, c.bg_secondary);
+    // As wide as the longest line (and at least the block), so that the commented line's band
+    // runs under all of it.
+    let mut rows = v_flex().min_w_full();
+    for line in lines {
+        rows = rows.child(
+            h_flex()
+                .px(px(8.))
+                .when(line.target, |d| d.bg(rgba(0xffff001a)))
+                .child(
+                    div()
+                        .min_w(px(40.))
+                        .pr(px(12.))
+                        .flex()
+                        .justify_end()
+                        .flex_shrink_0()
+                        .text_color(secondary)
+                        .child(line.number.to_string()),
+                )
+                .child(div().flex_shrink_0().whitespace_nowrap().child(text.text(("line", line.number), line.text))),
+        );
+    }
+    v_flex()
+        .id(id)
+        .items_start()
+        .overflow_x_scroll()
+        .restrict_scroll_to_axis()
+        .py(px(4.))
+        .mb(px(8.))
+        .rounded(px(4.))
+        .bg(background)
+        .font_family(MONO)
+        .text_size(px(12.))
+        .line_height(px(18.))
+        .child(rows)
 }
 
 /// The tab's borderless text buttons (`.comments-push-btn`, `.comments-reprompt-btn`, …):
@@ -61,9 +132,11 @@ fn lit_on_hover(button: Stateful<Div>, cx: &App) -> Stateful<Div> {
 impl Render for CommentsView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let c = colors(cx);
-        let (error, tertiary, card_code, hover_bg) = (c.error, c.bg_tertiary, c.bg_secondary, c.bg_hover);
+        let (error, tertiary, hover_bg) = (c.error, c.bg_tertiary, c.bg_hover);
         let (secondary, primary, accent, border) = (c.text_secondary, c.text_primary, c.accent, c.border);
-        let root = v_flex().id("comments-tab").size_full().p(px(8.)).overflow_y_scroll();
+        // Restricted to its axis, so that a sideways swipe over a code block scrolls only the block.
+        let root =
+            v_flex().id("comments-tab").track_focus(&self.focus).size_full().p(px(8.)).overflow_y_scroll().restrict_scroll_to_axis();
         let empty = |text: String| {
             div()
                 .p(px(24.))
@@ -89,6 +162,7 @@ impl Render for CommentsView {
         let prompted = comments.len() - unprompted;
         let shown: Vec<_> = comments.iter().filter(|c| c.resolution == filter).cloned().collect();
         let contexts: Vec<_> = shown.iter().map(|comment| model.code_context(comment)).collect();
+        let mut text = ReadingOrder(self.first_order);
 
         let tab = |id: &'static str, label: String, target: Resolution, cx: &mut Context<Self>| {
             let active = filter == target;
@@ -170,7 +244,9 @@ impl Render for CommentsView {
                                 .truncate()
                                 .font_family(MONO)
                                 .text_color(primary)
-                                .child(comment.file_path.clone())
+                                // A path cut short by the ellipsis cannot be selected; the
+                                // tooltip shows it whole.
+                                .child(text.text("path", comment.file_path.clone()))
                                 .tooltip(move |window, cx| Tooltip::new(path.clone()).build(window, cx)),
                         )
                         .child(
@@ -217,36 +293,17 @@ impl Render for CommentsView {
                         }),
                 );
             if let Some(lines) = context {
-                let mut code = v_flex()
-                    .py(px(4.))
-                    .mb(px(8.))
-                    .rounded(px(4.))
-                    .bg(card_code)
-                    .font_family(MONO)
-                    .text_size(px(12.))
-                    .line_height(px(18.));
-                for line in lines {
-                    code = code.child(
-                        h_flex()
-                            .px(px(8.))
-                            .when(line.target, |d| d.bg(rgba(0xffff001a)))
-                            .child(
-                                div()
-                                    .min_w(px(40.))
-                                    .pr(px(12.))
-                                    .flex()
-                                    .justify_end()
-                                    .flex_shrink_0()
-                                    .text_color(secondary)
-                                    .child(line.number.to_string()),
-                            )
-                            .child(div().whitespace_nowrap().child(line.text)),
-                    );
-                }
-                card = card.child(code);
+                card = card.child(code_block(SharedString::from(format!("comment-code-{}", comment.id)), lines, &mut text, cx));
             }
             card = card
-                .child(div().mb(px(8.)).text_size(px(13.)).line_height(px(19.5)).text_color(primary).child(comment.text.clone()))
+                .child(
+                    div()
+                        .mb(px(8.))
+                        .text_size(px(13.))
+                        .line_height(px(19.5))
+                        .text_color(primary)
+                        .child(text.text(SharedString::from(format!("comment-text-{}", comment.id)), comment.text.clone())),
+                )
                 .child(
                     h_flex()
                         .gap(px(8.))
@@ -337,7 +394,7 @@ impl Render for CommentsView {
                             .text_size(px(12.))
                             .line_height(px(18.))
                             .text_color(secondary)
-                            .child(prompt),
+                            .child(text.text("text", prompt)),
                     )
                 })
         });
@@ -355,3 +412,109 @@ impl Render for CommentsView {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use gpui_kit::base::TextSelection;
+    use gpui_kit::{
+        Modifiers, MouseButton, Pixels, Point, ScrollDelta, ScrollEvent, ScrollSource, TestAppContext, TouchPhase, VisualTestContext,
+        WindowOptions, point,
+    };
+    use treeterm_model::tool_tabs::comments::code_context;
+
+    use super::*;
+
+    /// A 300px card: the code around line 2 of `file`, then the comment.
+    struct Card {
+        file: String,
+    }
+
+    impl Render for Card {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            let mut text = ReadingOrder(0);
+            let lines = code_context(&self.file, 2).expect("line 2");
+            v_flex().w(px(300.)).child(code_block("code", lines, &mut text, cx)).child(text.text("comment", "the comment"))
+        }
+    }
+
+    fn card<'a>(file: &str, cx: &'a mut TestAppContext) -> &'a mut VisualTestContext {
+        let file = file.to_owned();
+        let window = cx.update(|cx| {
+            gpui_kit::init(cx);
+            crate::theme::install(cx);
+            gpui_kit::open_window(WindowOptions::default(), cx, |_, cx| cx.new(|_| Card { file })).expect("open a window").0
+        });
+        let cx = VisualTestContext::from_window(window, cx).into_mut();
+        draw(cx);
+        cx
+    }
+
+    fn draw(cx: &mut VisualTestContext) {
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+    }
+
+    /// The middle of code row `row` (from 0), below the block's 4px padding.
+    fn row(row: usize) -> Pixels {
+        px(4. + 18. * row as f32 + 9.)
+    }
+
+    /// Whether `at` is over selectable text (hit testing follows the pointer).
+    fn selectable_at(at: Point<Pixels>, cx: &mut VisualTestContext) -> bool {
+        cx.simulate_mouse_move(at, None, Modifiers::none());
+        cx.update(|window, cx| TextSelection::is_selectable_at(at, window, cx))
+    }
+
+    /// The first point at height `row_y` with selectable text, past the line number.
+    fn line_start(row_y: Pixels, cx: &mut VisualTestContext) -> Point<Pixels> {
+        (0..300).map(|x| point(px(x as f32), row_y)).find(|at| selectable_at(*at, cx)).expect("text on the row")
+    }
+
+    fn wheel(at: Point<Pixels>, delta: Point<Pixels>, cx: &mut VisualTestContext) {
+        let modifiers = Modifiers::none();
+        cx.simulate_event(ScrollEvent {
+            position: at,
+            delta: ScrollDelta::Pixels(delta),
+            modifiers,
+            touch_phase: TouchPhase::Moved,
+            source: ScrollSource::Pointer,
+        });
+        draw(cx);
+    }
+
+    /// Drag from `from` to `to`; the text the Kit root's Copy copies then.
+    fn copy_drag(from: Point<Pixels>, to: Point<Pixels>, cx: &mut VisualTestContext) -> String {
+        cx.simulate_mouse_down(from, MouseButton::Left, Modifiers::none());
+        cx.simulate_mouse_move(to, MouseButton::Left, Modifiers::none());
+        cx.simulate_mouse_up(to, MouseButton::Left, Modifiers::none());
+        draw(cx);
+        cx.update(TextSelection::selected_text)
+    }
+
+    /// `.comments-code-context { overflow-x: auto }`: the end of a long line can be scrolled
+    /// to, and a vertical wheel over the block is not turned into a sideways scroll.
+    #[gpui_kit::test]
+    fn a_long_code_line_scrolls_sideways_and_a_vertical_wheel_leaves_it(cx: &mut TestAppContext) {
+        let long = format!("{}END", "x".repeat(200));
+        let cx = card(&format!("short\n{long}\nthird"), cx);
+        let short = line_start(row(0), cx);
+
+        wheel(short, point(px(0.), px(-100.)), cx);
+        assert!(selectable_at(short, cx), "a vertical wheel leaves the code where it was");
+        assert!(!copy_drag(point(px(150.), row(1)), point(px(299.), row(1)), cx).ends_with("END"), "the end is out of sight");
+
+        wheel(short, point(px(-2000.), px(0.)), cx);
+        assert!(!selectable_at(short, cx), "the code scrolled sideways");
+        assert!(copy_drag(point(px(150.), row(1)), point(px(299.), row(1)), cx).ends_with("xEND"), "the end of the long line");
+    }
+
+    /// The code and the comment can be selected and copied in reading order, a line each,
+    /// without the line numbers (`user-select: none`).
+    #[gpui_kit::test]
+    fn a_drag_over_the_code_copies_its_lines_without_their_numbers(cx: &mut TestAppContext) {
+        let cx = card("one\ntwo\nthree", cx);
+        let from = line_start(row(0), cx);
+        assert_eq!(copy_drag(from, point(px(299.), row(2)), cx), "one\ntwo\nthree");
+        // On to the comment under the block.
+        assert_eq!(copy_drag(from, point(px(299.), row(3) + px(8.)), cx), "one\ntwo\nthree\nthe comment");
+    }
+}
