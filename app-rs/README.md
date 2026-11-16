@@ -252,8 +252,12 @@ are not ours). Its changes are marked `TreeTerm patch` (`grep -rn "TreeTerm patc
   keeping the reader's place: the row at the top of the viewport stays (the same line or file
   header, as far scrolled past), files still listed stay collapsed, and files whose content
   did not change keep their opened folds and highlighting (after `expand_unchanged`, new and
-  changed files show every line too), as Electron's `StackedDiffList` keys its sections by
-  path; `set_files` resets all of that and scrolls to the top. Files it is told to open
+  changed files show every line too), their selected lines and a line-number drag still
+  selecting in them, as Electron's `StackedDiffList` keys its sections by path. Text
+  selected (or still being dragged) in files whose content and place in the list did not
+  change stays selected, as a page's selection stays while another section re-renders (the
+  selection names its files by place); `set_files` resets all of that and scrolls to the
+  top. Files it is told to open
   (whose rows just arrived) open in the same step: `set_file_collapsed` afterwards would put
   the first line of the file at the top in place of its header.
 - `src/diff/state.rs`, `src/diff/mod.rs`: `DiffEvent::TopBandChanged` reports, after each

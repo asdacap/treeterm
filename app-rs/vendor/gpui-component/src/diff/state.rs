@@ -710,7 +710,9 @@ impl DiffState {
     /// sections keyed by path would: the row at the top of the viewport (the same source
     /// line or file header, as far scrolled past) and the horizontal scroll stay; files still
     /// present stay collapsed; files whose content did not change keep their opened folds,
-    /// conflict resolutions, prepared emphasis and selected lines. When the top row's file is
+    /// conflict resolutions, prepared emphasis and selected lines, and a line-number drag
+    /// still selecting in one goes on. Text selected (or being dragged) in files whose
+    /// content and place did not change stays selected. When the top row's file is
     /// gone, the next file still present comes to the top (else the last one before it).
     /// After [`Self::expand_unchanged`], other files show all their lines too. `collapsed`
     /// are more files to show collapsed (say, files listed for the first time that start
@@ -753,6 +755,7 @@ impl DiffState {
         }
         if let Some(window) = self.window
             && self.selection_is_local(cx)
+            && !self.text_selection_stays(&files, &unchanged, cx)
         {
             TextSelection::clear_for_window(window, cx);
         }
@@ -766,8 +769,8 @@ impl DiffState {
             self.selected_lines = None;
             self.selection_anchor = None;
             self.selection_cursor = None;
+            self.selecting = false;
         }
-        self.selecting = false;
         self.files = files;
         self.file_ixs = file_ixs(&self.files);
         self.collapsed
@@ -1682,6 +1685,35 @@ impl DiffState {
                 offset_in_item: px(0.),
             });
         }
+    }
+
+    /// TreeTerm patch: whether the window's text selection keeps its ends in this diff when
+    /// `files` replace the files: each end here is in a file whose content did not change
+    /// (`unchanged`) at the same place in the list, as the ends name files by index.
+    fn text_selection_stays(
+        &self,
+        files: &[DiffFile],
+        unchanged: &HashSet<SharedString>,
+        cx: &App,
+    ) -> bool {
+        let Some(snapshot) = self.selection.snapshot(cx) else {
+            return true;
+        };
+        let entity = Some(self.selection.entity_id());
+        [snapshot.anchor(), snapshot.cursor()]
+            .into_iter()
+            .filter(|end| end.entity_id() == entity)
+            .all(|end| {
+                end.content_key().is_some_and(|key| {
+                    let file = decode_key(key.value()).0;
+                    match (self.files.get(file), files.get(file)) {
+                        (Some(old), Some(new)) => {
+                            old.path() == new.path() && unchanged.contains(new.path())
+                        }
+                        (Some(_), None) | (None, _) => false,
+                    }
+                })
+            })
     }
 
     /// TreeTerm patch: what [`Self::update_files`] keeps at the top of the viewport. A code or

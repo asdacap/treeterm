@@ -1938,6 +1938,122 @@ mod tests {
         assert_eq!(header_top(&state, "a.txt", cx), Some(px(0.)));
     }
 
+    /// `name` with its two lines rewritten to `<new> one` and `<new> two`.
+    fn small(name: &str, new: &str) -> String {
+        format!("diff --git a/{name} b/{name}\n--- a/{name}\n+++ b/{name}\n@@ -1,2 +1,2 @@\n-old one\n-old two\n+{new} one\n+{new} two\n")
+    }
+
+    /// a.txt rewritten to `a`, b.txt to `b` ([`small`]).
+    fn two_small(a: &str, b: &str) -> String {
+        [small("a.txt", a), small("b.txt", b)].concat()
+    }
+
+    /// The middle of the left edge of the character `offset` of `path`'s new line `line`.
+    fn char_at(state: &Entity<DiffState>, path: &str, line: usize, offset: usize, cx: &mut gpui_kit::VisualTestContext) -> gpui_kit::Point<Pixels> {
+        let want = DiffLinePosition::new(path, DiffSide::Modified, line);
+        let over: Vec<(usize, usize)> = cx.update(|_, cx| {
+            let state = state.read(cx);
+            (0..300)
+                .flat_map(|y| (0..400).map(move |x| (x, y)))
+                .filter(|(x, y)| {
+                    let at = gpui_kit::point(px(*x as f32), px(*y as f32));
+                    state.text_at(at).is_some_and(|(position, _, at)| position == want && at == offset)
+                })
+                .collect()
+        });
+        let left = over.iter().map(|(x, _)| *x).min().unwrap_or_else(|| panic!("{path}:{line} has no character {offset} painted"));
+        let ys: Vec<usize> = over.iter().filter(|(x, _)| *x == left).map(|(_, y)| *y).collect();
+        gpui_kit::point(px(left as f32), px(ys[ys.len() / 2] as f32))
+    }
+
+    /// [`shown`] in a window as the app opens one (under GPUI Kit's root), where text can be
+    /// selected.
+    fn selectable<'a>(patch: &str, cx: &'a mut gpui_kit::TestAppContext) -> (Entity<DiffState>, &'a mut gpui_kit::VisualTestContext) {
+        let files = parsed(patch);
+        let (window, host) = cx.update(|cx| {
+            gpui_kit::init(cx);
+            gpui_kit::open_window(gpui_kit::WindowOptions::default(), cx, move |_, cx| {
+                let state = cx.new(|cx| DiffState::new(files, cx));
+                cx.new(|_| Host { state })
+            })
+            .expect("open a window")
+        });
+        let state = host.read_with(cx, |host, _| host.state.clone());
+        let cx = gpui_kit::VisualTestContext::from_window(window, cx).into_mut();
+        cx.update(|window, _| window.activate_window());
+        for _ in 0..3 {
+            draw(cx);
+        }
+        (state, cx)
+    }
+
+    #[gpui_kit::test]
+    fn text_selected_in_a_file_left_as_it_was_stays_selected(cx: &mut gpui_kit::TestAppContext) {
+        let (state, cx) = selectable(&two_small("new", "new"), cx);
+        let selected = |cx: &mut gpui_kit::VisualTestContext| cx.update(|_, cx| state.read(cx).selected_text(cx));
+        let (left, none) = (gpui_kit::MouseButton::Left, gpui_kit::Modifiers::none());
+        // A drag over b.txt's text, still held, while a.txt's diff is read again: it goes on.
+        let (from, to) = (char_at(&state, "b.txt", 1, 4, cx), char_at(&state, "b.txt", 1, 6, cx));
+        cx.simulate_mouse_down(from, left, none);
+        draw(cx);
+        cx.simulate_mouse_move(to, Some(left), none);
+        draw(cx);
+        assert_eq!(selected(cx), "on");
+        state.update(cx, |s, cx| s.update_files(parsed(&two_small("newer", "new")), [], [], cx));
+        draw(cx);
+        assert_eq!(selected(cx), "on");
+        let to = char_at(&state, "b.txt", 2, 3, cx);
+        cx.simulate_mouse_move(to, Some(left), none);
+        cx.simulate_mouse_up(to, left, none);
+        draw(cx);
+        assert_eq!(selected(cx), "one\nnew");
+
+        // It stays as a.txt changes again, and goes when b.txt does.
+        state.update(cx, |s, cx| s.update_files(parsed(&two_small("newest", "new")), [], [], cx));
+        draw(cx);
+        assert_eq!(selected(cx), "one\nnew");
+        state.update(cx, |s, cx| s.update_files(parsed(&two_small("newest", "newer")), [], [], cx));
+        draw(cx);
+        assert_eq!(selected(cx), "");
+
+        // Text selected in b.txt goes too when a file before it goes (its place changes).
+        let (from, to) = (char_at(&state, "b.txt", 1, 6, cx), char_at(&state, "b.txt", 2, 5, cx));
+        cx.simulate_mouse_down(from, left, none);
+        draw(cx);
+        cx.simulate_mouse_move(to, Some(left), none);
+        cx.simulate_mouse_up(to, left, none);
+        draw(cx);
+        assert_eq!(selected(cx), "one\nnewer");
+        state.update(cx, |s, cx| s.update_files(parsed(&small("b.txt", "newer")), [], [], cx));
+        draw(cx);
+        assert_eq!(selected(cx), "");
+    }
+
+    #[gpui_kit::test]
+    fn a_line_number_drag_goes_on_while_another_files_diff_changes(cx: &mut gpui_kit::TestAppContext) {
+        use gpui_kit::test::TestQueryExt as _;
+        let (state, cx) = shown(&two_small("new", "new"), cx);
+        // b.txt's line number `line`: the lower of the two.
+        let number = |line: usize, cx: &mut gpui_kit::VisualTestContext| {
+            cx.update(|window, _| {
+                let found = window.find_all_by_label(&format!("Select Modified line {line}"));
+                found.iter().map(|n| n.bounds().center()).max_by(|a, b| f32::from(a.y).total_cmp(&f32::from(b.y))).expect("drawn")
+            })
+        };
+        let (left, none) = (gpui_kit::MouseButton::Left, gpui_kit::Modifiers::none());
+        let from = number(1, cx);
+        cx.simulate_mouse_down(from, left, none);
+        draw(cx);
+        state.update(cx, |s, cx| s.update_files(parsed(&two_small("newer", "new")), [], [], cx));
+        draw(cx);
+        let to = number(2, cx);
+        cx.simulate_mouse_move(to, Some(left), none);
+        cx.simulate_mouse_up(to, left, none);
+        draw(cx);
+        let selected = cx.update(|_, cx| state.read(cx).selected_lines());
+        assert_eq!(selected, Some(DiffLineRange::new("b.txt", DiffSide::Modified, 1, 2)));
+    }
+
     #[gpui_kit::test]
     fn files_opened_as_their_rows_arrive_keep_the_place(cx: &mut gpui_kit::TestAppContext) {
         let small = |name: &str| format!("diff --git a/{name} b/{name}\n--- a/{name}\n+++ b/{name}\n@@ -1,2 +1,2 @@\n-x\n-y\n+X\n+Y\n");
