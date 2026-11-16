@@ -15,7 +15,7 @@ use std::time::{Duration, SystemTime};
 
 use futures::channel::oneshot;
 use gpui_kit::{Context, EventEmitter, Task};
-use treeterm_core::settings::{self, Settings, SettingsError};
+use treeterm_core::settings::{self, Settings, SettingsError, SshConnectionConfig};
 
 /// How often the file is checked for edits made elsewhere.
 const POLL_INTERVAL: Duration = Duration::from_secs(2);
@@ -212,6 +212,13 @@ impl SettingsStore {
         }
         let dir = dir.to_owned();
         self.update(move |settings| settings.add_recent_directory(&dir), cx);
+    }
+
+    /// `ssh.saveConnection`: save a connection made in the picker's form, without waiting
+    /// (see [`Self::update`]). It replaces, in place, the saved connection for the same
+    /// `user@host:port`, new id and port forwards included, else it is added at the end.
+    pub fn save_ssh_connection(&mut self, config: SshConnectionConfig, cx: &mut Context<Self>) {
+        self.update(move |settings| settings.save_ssh_connection(config), cx);
     }
 
     /// `toggleSound`: flip the attention sound and save it, tracked in [`Self::sound_save`].

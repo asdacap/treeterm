@@ -1,65 +1,16 @@
 //! "SSH Connections": connect to a saved host or a new one (saved for next time). Port of
-//! `ConnectionPicker.tsx`.
+//! `ConnectionPicker.tsx`, which stays mounted while closed: each window keeps one picker,
+//! so what was typed, the port forwards, both options and the error are there on reopening.
 
 use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::prelude::*;
 use gpui_kit::{App, Context, Div, Entity, SharedString, Subscription, Window, div, px, rgb};
-use treeterm_core::connection::OutdatedDaemon;
-use treeterm_core::settings::{ConnectionLabel, IdentityFile, PortForwardSpec, SshConnectionConfig};
+use treeterm_core::settings::SshConnectionConfig;
 use treeterm_model::app_store::AppStore;
+use treeterm_model::ssh_connection_form::{ConnectionFields, ConnectionForm};
 
 use crate::ui;
-
-/// What the form holds, as typed.
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
-struct Fields {
-    host: String,
-    user: String,
-    port: String,
-    identity_file: String,
-    label: String,
-}
-
-/// A connection from the form (`handleConnect`): host and user required, port defaults to
-/// 22, the id is new.
-fn build_config(fields: &Fields, port_forwards: Vec<PortForwardSpec>, now_ms: u128) -> Result<SshConnectionConfig, String> {
-    let (host, user) = (fields.host.trim(), fields.user.trim());
-    if host.is_empty() || user.is_empty() {
-        return Err("Host and user are required".to_owned());
-    }
-    let port = match fields.port.trim() {
-        "" => 22,
-        text => text.parse::<u16>().ok().filter(|p| *p > 0).ok_or_else(|| format!("Invalid port “{text}”"))?,
-    };
-    let identity = fields.identity_file.trim();
-    let label = fields.label.trim();
-    Ok(SshConnectionConfig {
-        id: format!("ssh-{host}-{now_ms}"),
-        host: host.to_owned(),
-        user: user.to_owned(),
-        port,
-        identity_file: if identity.is_empty() { IdentityFile::SshDefault } else { IdentityFile::Path(identity.to_owned()) },
-        label: if label.is_empty() { ConnectionLabel::UserAtHost } else { ConnectionLabel::Custom(label.to_owned()) },
-        port_forwards,
-        extra: Default::default(),
-    })
-}
-
-/// A port forward from the small form; ports 1–65535 and a remote host are required.
-fn build_forward(local: &str, remote_host: &str, remote_port: &str) -> Option<PortForwardSpec> {
-    let port = |text: &str| text.trim().parse::<u16>().ok().filter(|p| *p > 0);
-    let remote_host = remote_host.trim();
-    if remote_host.is_empty() {
-        return None;
-    }
-    Some(PortForwardSpec {
-        local_port: port(local)?,
-        remote_host: remote_host.to_owned(),
-        remote_port: port(remote_port)?,
-        extra: Default::default(),
-    })
-}
 
 pub struct ConnectionPicker {
     store: Entity<AppStore>,
@@ -71,23 +22,22 @@ pub struct ConnectionPicker {
     forward_local: Entity<InputState>,
     forward_host: Entity<InputState>,
     forward_remote: Entity<InputState>,
-    port_forwards: Vec<PortForwardSpec>,
-    refresh_daemon: bool,
-    allow_outdated: bool,
-    error: Option<SharedString>,
+    form: ConnectionForm,
     /// Enter connects (`handleKeyDown`); typing host or user re-renders Connect.
     _subscriptions: Vec<Subscription>,
 }
 
 impl ConnectionPicker {
-    fn new(store: Entity<AppStore>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(store: Entity<AppStore>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let blank = ConnectionFields::default();
         let mut input = |placeholder: &str, value: &str| {
             let placeholder = placeholder.to_owned();
             let value = value.to_owned();
             cx.new(|cx| InputState::new(window, cx).placeholder(placeholder).default_value(value))
         };
-        let (host, user, port) = (input("hostname or IP", ""), input("username", ""), input("22", "22"));
-        let (identity_file, label) = (input("~/.ssh/id_rsa", ""), input("display name", ""));
+        let (host, user, port) =
+            (input("hostname or IP", &blank.host), input("username", &blank.user), input("22", &blank.port));
+        let (identity_file, label) = (input("~/.ssh/id_rsa", &blank.identity_file), input("display name", &blank.label));
         let forward_local = input("local port", "");
         let forward_host = input("remote host", "localhost");
         let forward_remote = input("remote port", "");
@@ -95,11 +45,7 @@ impl ConnectionPicker {
             .into_iter()
             .map(|state| {
                 cx.subscribe_in(state, window, |picker, _, event: &InputEvent, window, cx| match event {
-                    InputEvent::PressEnter { .. } => {
-                        if picker.connect_new(cx) {
-                            window.close_dialog(cx);
-                        }
-                    }
+                    InputEvent::PressEnter { .. } => picker.connect_new(window, cx),
                     InputEvent::Change => cx.notify(),
                     InputEvent::Focus | InputEvent::Blur => {}
                 })
@@ -115,19 +61,8 @@ impl ConnectionPicker {
             forward_host,
             forward_remote,
             store,
-            port_forwards: Vec::new(),
-            refresh_daemon: false,
-            allow_outdated: false,
-            error: None,
+            form: ConnectionForm::default(),
             _subscriptions,
-        }
-    }
-
-    fn outdated(&self) -> OutdatedDaemon {
-        match (self.refresh_daemon, self.allow_outdated) {
-            (true, _) => OutdatedDaemon::Refresh,
-            (false, true) => OutdatedDaemon::Accept,
-            (false, false) => OutdatedDaemon::Report,
         }
     }
 
@@ -135,17 +70,26 @@ impl ConnectionPicker {
         self.store.read(cx).settings().read(cx).settings().ssh.saved_connections.clone()
     }
 
-    /// `connectAndCreateSession`: the window shows the session pane while it connects.
-    fn connect_saved(&mut self, config: SshConnectionConfig, cx: &mut Context<Self>) {
-        let outdated = self.outdated();
+    /// `connectAndCreateSession`: close, and the window shows the session pane while it
+    /// connects.
+    fn connect(&mut self, config: SshConnectionConfig, window: &mut Window, cx: &mut Context<Self>) {
+        let outdated = self.form.outdated();
         self.store.update(cx, |s, cx| s.start_remote_connect(config, outdated, cx));
+        window.close_dialog(cx);
+        cx.notify();
     }
 
-    /// Validate the form, save the connection (`saveConnection`) and connect. Returns
-    /// whether the dialog may close.
-    fn connect_new(&mut self, cx: &mut Context<Self>) -> bool {
+    /// `handleConnectSaved`.
+    fn connect_saved(&mut self, config: SshConnectionConfig, window: &mut Window, cx: &mut Context<Self>) {
+        self.form.connect_saved();
+        self.connect(config, window, cx);
+    }
+
+    /// `handleConnect`: validate the form, connect, save the connection (`saveConnection`)
+    /// and empty the form; or show why not.
+    fn connect_new(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let text = |state: &Entity<InputState>, cx: &App| state.read(cx).value().to_string();
-        let fields = Fields {
+        let fields = ConnectionFields {
             host: text(&self.host, cx),
             user: text(&self.user, cx),
             port: text(&self.port, cx),
@@ -156,27 +100,27 @@ impl ConnectionPicker {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis())
             .unwrap_or_default();
-        let config = match build_config(&fields, self.port_forwards.clone(), now_ms) {
-            Ok(config) => config,
-            Err(message) => {
-                self.error = Some(message.into());
-                cx.notify();
-                return false;
-            }
+        let Some(config) = self.form.submit(&fields, now_ms) else {
+            cx.notify();
+            return;
         };
+        self.connect(config.clone(), window, cx);
         let settings = self.store.read(cx).settings().clone();
-        let saved = config.clone();
-        settings.update(cx, |store, cx| {
-            store.update(
-                move |s| {
-                    s.ssh.saved_connections.retain(|c| c.id != saved.id);
-                    s.ssh.saved_connections.push(saved);
-                },
-                cx,
-            )
-        });
-        self.connect_saved(config, cx);
-        true
+        settings.update(cx, |store, cx| store.save_ssh_connection(config, cx));
+        self.set_fields(&ConnectionFields::default(), window, cx);
+    }
+
+    fn set_fields(&self, fields: &ConnectionFields, window: &mut Window, cx: &mut Context<Self>) {
+        let inputs = [
+            (&self.host, &fields.host),
+            (&self.user, &fields.user),
+            (&self.port, &fields.port),
+            (&self.identity_file, &fields.identity_file),
+            (&self.label, &fields.label),
+        ];
+        for (state, value) in inputs {
+            state.update(cx, |input, cx| input.set_value(value.clone(), window, cx));
+        }
     }
 
     fn remove_saved(&mut self, id: String, cx: &mut Context<Self>) {
@@ -187,37 +131,20 @@ impl ConnectionPicker {
 
     /// "Fill": copy a saved connection into the form.
     fn fill(&mut self, config: &SshConnectionConfig, window: &mut Window, cx: &mut Context<Self>) {
-        let set = |state: &Entity<InputState>, value: String, window: &mut Window, cx: &mut Context<Self>| {
-            state.update(cx, |input, cx| input.set_value(value, window, cx));
-        };
-        set(&self.host, config.host.clone(), window, cx);
-        set(&self.user, config.user.clone(), window, cx);
-        set(&self.port, config.port.to_string(), window, cx);
-        let identity = match &config.identity_file {
-            IdentityFile::SshDefault => String::new(),
-            IdentityFile::Path(path) => path.clone(),
-        };
-        set(&self.identity_file, identity, window, cx);
-        let label = match &config.label {
-            ConnectionLabel::UserAtHost => String::new(),
-            ConnectionLabel::Custom(label) => label.clone(),
-        };
-        set(&self.label, label, window, cx);
-        self.port_forwards = config.port_forwards.clone();
+        let fields = self.form.fill(config);
+        self.set_fields(&fields, window, cx);
         cx.notify();
     }
 
+    /// "Add": the forward inputs go back to empty, `localhost` and empty.
     fn add_forward(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let text = |state: &Entity<InputState>, cx: &App| state.read(cx).value().to_string();
-        let Some(forward) = build_forward(
-            &text(&self.forward_local, cx),
-            &text(&self.forward_host, cx),
-            &text(&self.forward_remote, cx),
-        ) else {
+        let (local, host, remote) = (text(&self.forward_local, cx), text(&self.forward_host, cx), text(&self.forward_remote, cx));
+        if !self.form.add_forward(&local, &host, &remote) {
             return;
-        };
-        self.port_forwards.push(forward);
+        }
         self.forward_local.update(cx, |input, cx| input.set_value("", window, cx));
+        self.forward_host.update(cx, |input, cx| input.set_value("localhost", window, cx));
         self.forward_remote.update(cx, |input, cx| input.set_value("", window, cx));
         cx.notify();
     }
@@ -329,10 +256,7 @@ impl Render for ConnectionPicker {
                                     .on_click(cx.listener(move |picker, _, window, cx| picker.fill(&fill, window, cx))),
                             )
                             .child(small_button(SharedString::from(format!("connect-{i}")), "Connect", look::TEXT).on_click(
-                                cx.listener(move |picker, _, window, cx| {
-                                    picker.connect_saved(connect.clone(), cx);
-                                    window.close_dialog(cx);
-                                }),
+                                cx.listener(move |picker, _, window, cx| picker.connect_saved(connect.clone(), window, cx)),
                             ))
                             .child(
                                 small_button(SharedString::from(format!("remove-{i}")), "Remove", look::DANGER)
@@ -351,7 +275,7 @@ impl Render for ConnectionPicker {
                 .child(text)
         };
         let mut forwards = div();
-        for (i, forward) in self.port_forwards.iter().enumerate() {
+        for (i, forward) in self.form.port_forwards().iter().enumerate() {
             forwards = forwards.child(
                 div()
                     .flex()
@@ -365,14 +289,14 @@ impl Render for ConnectionPicker {
                     )))
                     .child(small_button(SharedString::from(format!("pf-remove-{i}")), "x", look::DANGER).px(px(6.)).py_0().on_click(
                         cx.listener(move |picker, _, _, cx| {
-                            picker.port_forwards.remove(i);
+                            picker.form.remove_forward(i);
                             cx.notify();
                         }),
                     )),
             );
         }
         let sep = |text: &'static str| div().text_size(px(12.)).text_color(rgb(look::SUBTLE)).child(text);
-        let (refresh, allow) = (self.refresh_daemon, self.allow_outdated);
+        let (refresh, allow) = (self.form.refresh_daemon(), self.form.allow_outdated());
         let missing = self.host.read(cx).value().is_empty() || self.user.read(cx).value().is_empty();
         ui::dialog_root(cx)
             .p(px(24.))
@@ -449,18 +373,18 @@ impl Render for ConnectionPicker {
                     ),
             )
             .child(check_row("refresh-daemon", refresh, false, "Refresh remote daemon").on_click(cx.listener(
-                move |picker, _, _, cx| {
-                    picker.refresh_daemon = !refresh;
+                |picker, _, _, cx| {
+                    picker.form.toggle_refresh_daemon();
                     cx.notify();
                 },
             )))
             .child(check_row("allow-outdated", allow, refresh, "Allow outdated daemon").when(!refresh, |d| {
-                d.on_click(cx.listener(move |picker, _, _, cx| {
-                    picker.allow_outdated = !allow;
+                d.on_click(cx.listener(|picker, _, _, cx| {
+                    picker.form.toggle_allow_outdated();
                     cx.notify();
                 }))
             }))
-            .when_some(self.error.clone(), |d, message| {
+            .when_some(self.form.error().map(SharedString::from), |d, message| {
                 d.child(div().mb(px(8.)).text_size(px(13.)).text_color(rgb(look::DANGER)).child(message))
             })
             .child(
@@ -480,20 +404,14 @@ impl Render for ConnectionPicker {
                     .font_weight(gpui_kit::FontWeight::SEMIBOLD)
                     .when(!missing, |d| d.cursor_pointer())
                     .child("Connect")
-                    .when(!missing, |d| {
-                        d.on_click(cx.listener(|picker, _, window, cx| {
-                            if picker.connect_new(cx) {
-                                window.close_dialog(cx);
-                            }
-                        }))
-                    }),
+                    .when(!missing, |d| d.on_click(cx.listener(|picker, _, window, cx| picker.connect_new(window, cx)))),
             )
     }
 }
 
-pub fn open(store: Entity<AppStore>, window: &mut Window, cx: &mut App) {
-    let view = cx.new(|cx| ConnectionPicker::new(store, window, cx));
-    // `autoFocus` on User, once the dialog has taken the focus.
+/// Show the window's picker as it was left, User focused (`autoFocus`, as its inputs mount
+/// again in Electron).
+pub fn open(view: Entity<ConnectionPicker>, window: &mut Window, cx: &mut App) {
     let user = view.read(cx).user.clone();
     window.defer(cx, move |window, cx| user.update(cx, |state, cx| state.focus(window, cx)));
     window.open_dialog(cx, move |dialog, _window, cx| {
@@ -503,38 +421,4 @@ pub fn open(store: Entity<AppStore>, window: &mut Window, cx: &mut App) {
             .border_color(rgb(look::BORDER))
             .child(view.clone())
     });
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn fields(host: &str, user: &str, port: &str) -> Fields {
-        Fields { host: host.into(), user: user.into(), port: port.into(), ..Fields::default() }
-    }
-
-    #[test]
-    fn host_and_user_are_required() {
-        assert_eq!(build_config(&fields("", "me", "22"), vec![], 1).unwrap_err(), "Host and user are required");
-        assert_eq!(build_config(&fields("box", " ", "22"), vec![], 1).unwrap_err(), "Host and user are required");
-    }
-
-    #[test]
-    fn a_new_connection_gets_defaults_and_a_fresh_id() {
-        let config = build_config(&fields(" box.lan ", "me", ""), vec![], 42).unwrap();
-        assert_eq!(config.id, "ssh-box.lan-42");
-        assert_eq!(config.port, 22);
-        assert_eq!(config.identity_file, IdentityFile::SshDefault);
-        assert_eq!(config.label, ConnectionLabel::UserAtHost);
-        assert_eq!(config.display_name(), "me@box.lan");
-        assert!(build_config(&fields("box", "me", "70000"), vec![], 1).is_err());
-    }
-
-    #[test]
-    fn port_forwards_need_valid_ports_and_a_host() {
-        assert_eq!(build_forward("8080", "localhost", "3000").map(|f| (f.local_port, f.remote_port)), Some((8080, 3000)));
-        assert!(build_forward("0", "localhost", "3000").is_none());
-        assert!(build_forward("8080", " ", "3000").is_none());
-        assert!(build_forward("8080", "localhost", "x").is_none());
-    }
 }

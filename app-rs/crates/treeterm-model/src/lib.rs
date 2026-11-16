@@ -34,6 +34,7 @@ pub mod run_actions;
 pub mod session_store;
 pub mod session_tty_list;
 pub mod settings_store;
+pub mod ssh_connection_form;
 pub mod system_monitor;
 pub mod terminal;
 pub mod text_editor;

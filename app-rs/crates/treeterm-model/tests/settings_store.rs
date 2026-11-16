@@ -288,3 +288,35 @@ fn an_in_memory_store_applies_saves_at_once(cx: &mut TestAppContext) {
         assert!(!s.settings().notifications.sound_enabled);
     });
 }
+
+/// `ssh:saveConnection`: connecting again to a saved `user@host:port` from the picker's form
+/// (a new id each time) replaces that entry where it is; another port is a new entry.
+#[gpui_kit::test]
+fn a_saved_ssh_connection_replaces_the_one_for_the_same_destination(cx: &mut TestAppContext) {
+    use treeterm_core::settings::PortForwardSpec;
+    use treeterm_model::ssh_connection_form::{ConnectionFields, build_config};
+
+    let dir = tempfile::tempdir().unwrap();
+    let (store, _) = store_with(cx, dir.path(), &Settings::default());
+    let form = |host: &str, port: &str, forwards: Vec<PortForwardSpec>, now_ms: u128| {
+        let fields =
+            ConnectionFields { host: host.into(), user: "me".into(), port: port.into(), ..ConnectionFields::default() };
+        build_config(&fields, forwards, now_ms).unwrap()
+    };
+    let forward =
+        PortForwardSpec { local_port: 8080, remote_host: "localhost".into(), remote_port: 3000, extra: Default::default() };
+
+    store.update(cx, |s, cx| s.save_ssh_connection(form("box", "22", vec![], 1), cx));
+    store.update(cx, |s, cx| s.save_ssh_connection(form("other", "22", vec![], 2), cx));
+    let again = form("box", "22", vec![forward], 3);
+    store.update(cx, |s, cx| s.save_ssh_connection(again.clone(), cx));
+    store.update(cx, |s, cx| s.save_ssh_connection(form("box", "2222", vec![], 4), cx));
+    cx.run_until_parked();
+
+    let saved = settings::load(dir.path()).unwrap().ssh.saved_connections;
+    let ids: Vec<&str> = saved.iter().map(|c| c.id.as_str()).collect();
+    assert_eq!(ids, ["ssh-box-3", "ssh-other-2", "ssh-box-4"]);
+    assert_eq!(saved[0], again, "the newest config, forwards included");
+    assert_eq!(saved_json(dir.path())["ssh"]["savedConnections"][0]["label"], "me@box");
+    store.read_with(cx, |s, _| assert_eq!(s.settings().ssh.saved_connections, saved));
+}

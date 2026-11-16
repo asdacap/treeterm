@@ -376,3 +376,5 @@ The chrome was matched to Electron's computed styles, measured side by side on o
 - The code editors colour files Electron shows as plain text: Makefile, Dockerfile,
   CMakeLists.txt, `.toml`, `.markdown`, `.mjs`/`.cjs`/`.mts`/`.cts`, `.jsonc`,
   `.cc`/`.cxx`/`.hh`, `.zig`, `.ex`/`.exs`, `.proto` and `.diff`/`.patch`.
+- The SSH picker's Add trims the forward's remote host, so a blank one is ignored like an
+  empty one (Electron added a forward to " ").

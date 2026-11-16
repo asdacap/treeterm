@@ -54,6 +54,9 @@ pub struct AppView {
     /// The Settings dialog while it is open: Settings again does not stack a second one
     /// (Electron's `isSettingsOpen`).
     settings_dialog: WeakEntity<crate::settings_view::SettingsView>,
+    /// "SSH Connections": kept while closed, as Electron's stays mounted, so it reopens as
+    /// it was left.
+    connection_picker: Entity<crate::connection_picker::ConnectionPicker>,
     /// Window > Active Processes (Electron's `isActiveProcessesOpen`).
     processes_dialog: ProcessesDialog,
     /// The unmerged-workspaces confirmation while it is up: Quit or Close again does not
@@ -291,6 +294,7 @@ impl AppView {
             sidebar_width: 250.,
             session_drop_hint: None,
             settings_dialog: WeakEntity::new_invalid(),
+            connection_picker: cx.new(|cx| crate::connection_picker::ConnectionPicker::new(store.clone(), window, cx)),
             processes_dialog: ProcessesDialog::Closed,
             close_confirm: std::rc::Weak::new(),
             menu_bar: if cfg!(target_os = "macos") {
@@ -758,7 +762,7 @@ impl AppView {
                                     .tooltip(tip("Connect to SSH"))
                                     .child(crate::ui::icon(IconName::Monitor, 14., fg))
                                     .on_click(cx.listener(|view, _, window, cx| {
-                                        crate::connection_picker::open(view.store.clone(), window, cx);
+                                        crate::connection_picker::open(view.connection_picker.clone(), window, cx);
                                     })),
                             )
                             .child(
