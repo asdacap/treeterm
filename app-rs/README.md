@@ -113,8 +113,10 @@ Done (tested against a real in-process daemon unless noted):
   marked in the glyph margin); editor tab with go to definition, Change All Occurrences
   (Cmd/Ctrl+F2) and word suggestions while typing (Ctrl+Space asks).
 - **Review (M7):** committed / uncommitted / commits views, stage/unstage/commit, inline
-  comments (Electron's metadata format), viewed files, image diffs (before / after), each
-  file's diff loading, failing and refreshed (its header's refresh button) on its own,
+  comments (Electron's metadata format), viewed files, image diffs (before / after, SVG
+  included), each file's diff loading, failing (also when its part of the patch does not
+  parse) and refreshed (its header's refresh button) on its own, a diff over 20,000 lines or
+  2 MiB drawn only after "Load anyway",
   favourites outside the diff shown in the Files viewer (with its comments) in the diff's place,
   find in the diff (Cmd/Ctrl+F: matches in the file at the top of the diff, then the rest of
   the diff, then the repo; the diff's menu searches or copies the selected text or the word
@@ -319,6 +321,12 @@ The chrome was matched to Electron's computed styles, measured side by side on o
 - Review refreshes whenever its tab is shown, a switch between tabs of the same workspace
   included. Electron keeps every tab of the workspace shown mounted and visible
   (`tabEnableRenderOnDemand: false`), so it reloaded only when the workspace was shown again.
+- Review's find in the diff searches only files whose rows are drawn: a diff too large to draw
+  is searched once "Load anyway" draws it. Electron listed its matches but could not show
+  them (choosing one opened the file on the size notice).
+- Review measures a diff's size from git's whole-file patch (`git diff -U1000000`), so with
+  "Ignore whitespace changes" on, unchanged lines count as the new side has them; Electron
+  read both files.
 - Review's fresh conflict check before a merge shows "Checking for conflicts..." and disables
   the header's actions while it runs (Electron showed nothing and left them clickable).
 - A failed merge's output ends with `Merge failed: <error>` once (Electron doubled the prefix

@@ -69,9 +69,13 @@ pub struct ReviewView {
     query: String,
     /// Directories folded in the file tree (all start open).
     closed_dirs: HashSet<String>,
-    /// Files whose body the view draws (binary, or a diff loading or failed) folded in the
-    /// diff (their `DiffState` entry stays collapsed).
+    /// Files whose body the view draws (`review_patch::Placeholder`: an image, a binary file,
+    /// a diff loading, failed or too large) folded in the diff (their `DiffState` entry stays
+    /// collapsed).
     closed_drawn: HashSet<String>,
+    /// The listed files "Load anyway" was clicked for (`forceRender`): their rows are drawn
+    /// though their diff is large.
+    forced: HashSet<String>,
     /// The diff list's last "Collapse all" / "Expand all" (`collapseAll`).
     collapse_all: CollapseAll,
     /// The commit message box.
@@ -146,6 +150,7 @@ impl ReviewView {
             query: String::new(),
             closed_dirs: HashSet::new(),
             closed_drawn: HashSet::new(),
+            forced: HashSet::new(),
             collapse_all: CollapseAll::Untouched,
             message: None,
             message_text: String::new(),

@@ -1,8 +1,8 @@
 //! The diff beside the file list (`StackedDiffList` / `FileDiffSection` /
 //! `PierreDiffViewer`): "N/M viewed" and "Collapse all" above GPUI Kit's `Diff`, whose file
 //! headers are drawn here (collapse chevron, status, path, stats, Stage, refresh, Viewed),
-//! with image files, binary files and files whose diff is loading or failed shown under their
-//! header, and comments under their lines.
+//! with image files, binary files and files whose diff is loading, failed or too large shown
+//! under their header, and comments under their lines.
 
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
@@ -24,7 +24,7 @@ use treeterm_core::files::image_format;
 use treeterm_core::git::{FileChangeStats, FileChangeStatus, Staging, UncommittedFile};
 use treeterm_core::review::{ReviewComment, Side};
 use treeterm_model::review::{CollapseAll, CommentDraft, DiffList, GitOp, ImageSides, ReviewMode, ReviewModel, StageTarget};
-use treeterm_model::review_patch::{FileDiff, FileDiffs};
+use treeterm_model::review_patch::{DiffSize, FileDiffs, Placeholder, ShownDiff, bare_header, shown_diff};
 
 use super::ReviewView;
 use crate::comment_ui::{CommentActions, Placement, comment_display, comment_input};
@@ -77,27 +77,42 @@ fn list_change(cached: Option<(&DiffList, &str, &[String])>, list: &DiffList, ke
 struct Parsed {
     files: Vec<DiffFile>,
     shown: Vec<String>,
-    /// The files whose body the view draws: binary files, and files whose diff is loading
-    /// or failed (a bare header in `FileDiffs::patch`).
-    drawn: HashSet<String>,
+    /// The files whose body the view draws, and what it draws: a header alone in the
+    /// `DiffState` (`review_patch::Placeholder`).
+    drawn: HashMap<String, Placeholder>,
 }
 
-fn parse_listed(patch: &str, diffs: &FileDiffs, order: &[ListedFile]) -> Result<Parsed, String> {
-    let mut parsed: HashMap<String, DiffFile> = HashMap::new();
-    for file in DiffFile::parse(patch).map_err(|e| e.to_string())? {
-        let path = file.path().to_string();
-        let language = language_for(&path);
-        parsed.entry(path).or_insert_with(|| file.with_language(language));
-    }
-    let mut listed = Parsed { files: Vec::new(), shown: Vec::new(), drawn: HashSet::new() };
+/// The listed files, each section parsed on its own (`FileDiffSection`): one that does not
+/// parse shows why in its own body. `forced`: the files "Load anyway" was clicked for. `Err`:
+/// a header that does not parse (the whole diff cannot be shown).
+fn parse_listed(diffs: &FileDiffs, order: &[ListedFile], forced: &HashSet<String>) -> Result<Parsed, String> {
+    let header = |path: &str| -> Result<DiffFile, String> {
+        let file = DiffFile::parse(&bare_header(path)).map_err(|e| e.to_string())?.into_iter().next();
+        file.ok_or_else(|| format!("no header for {path}"))
+    };
+    let mut listed = Parsed { files: Vec::new(), shown: Vec::new(), drawn: HashMap::new() };
+    let mut seen: HashSet<&str> = HashSet::new();
     for file in order {
-        if let Some(diff) = parsed.remove(&file.path) {
-            let read = matches!(diffs.get(&file.path), Some(FileDiff::Loaded(_)) | None);
-            if diff.is_binary() || !read {
-                listed.drawn.insert(file.path.clone());
-            }
-            listed.files.push(diff);
-            listed.shown.push(file.path.clone());
+        let path = file.path.as_str();
+        let Some(diff) = diffs.get(path).filter(|_| seen.insert(path)) else {
+            continue;
+        };
+        let (parsed, placeholder) = match shown_diff(path, diff, forced.contains(path)) {
+            ShownDiff::Absent => continue,
+            ShownDiff::Placeholder(placeholder) => (header(path)?, Some(placeholder)),
+            ShownDiff::Section(section) => match DiffFile::parse(section) {
+                Ok(files) => match files.into_iter().find(|parsed| parsed.path() == path) {
+                    Some(parsed) if parsed.is_binary() => (parsed, Some(Placeholder::Binary)),
+                    Some(parsed) => (parsed, None),
+                    None => continue,
+                },
+                Err(error) => (header(path)?, Some(Placeholder::Failed(format!("Cannot show this diff: {error}")))),
+            },
+        };
+        listed.files.push(parsed.with_language(language_for(path)));
+        listed.shown.push(path.to_owned());
+        if let Some(placeholder) = placeholder {
+            listed.drawn.insert(path.to_owned(), placeholder);
         }
     }
     Ok(listed)
@@ -118,10 +133,9 @@ pub struct DiffCache {
     key: String,
     pub state: Entity<DiffState>,
     order: Vec<String>,
-    /// Files whose body the view draws (binary, or a diff loading or failed): always
-    /// collapsed in the `DiffState` (no "binary file" notice); the view folds them itself
-    /// (`ReviewView::closed_drawn`).
-    drawn: HashSet<String>,
+    /// Files whose body the view draws (`Placeholder`): always collapsed in the `DiffState`
+    /// (no "binary file" notice); the view folds them itself (`ReviewView::closed_drawn`).
+    drawn: HashMap<String, Placeholder>,
     /// Viewed files already collapsed (a file collapses when it becomes viewed).
     collapsed_viewed: HashSet<String>,
     /// An open file just checked off from its header's "Viewed", and how far below the top
@@ -141,6 +155,11 @@ impl DiffCache {
     /// The view whose list this is.
     pub fn mode(&self) -> ReviewMode {
         self.list.mode()
+    }
+
+    /// `path` shows a header alone, its body drawn by the view (no rows).
+    pub fn has_placeholder(&self, path: &str) -> bool {
+        self.drawn.contains_key(path)
     }
 }
 
@@ -214,10 +233,12 @@ struct Header {
 enum Body {
     /// `.file-diff-loading`.
     Loading,
-    /// `.file-diff-error`: why its diff could not be read.
+    /// `.file-diff-error`: why its diff could not be read or shown.
     Failed(String),
     /// An image's sides, else `.file-diff-placeholder`.
     Binary(Option<ImageSides>),
+    /// `.file-diff-too-large`, with "Load anyway".
+    TooLarge(DiffSize),
 }
 
 impl ReviewView {
@@ -294,12 +315,12 @@ impl ReviewView {
                         if let Some(diff) = &view.diff {
                             let (paths, drawn) = (diff.paths(), diff.drawn.clone());
                             diff.state.update(cx, |s, cx| {
-                                for path in paths.iter().filter(|p| !drawn.contains(*p)) {
+                                for path in paths.iter().filter(|p| !drawn.contains_key(*p)) {
                                     s.set_file_collapsed(path, collapsed, cx);
                                 }
                             });
                             if collapsed {
-                                view.closed_drawn.extend(drawn);
+                                view.closed_drawn.extend(drawn.into_keys());
                             } else {
                                 view.closed_drawn.clear();
                             }
@@ -317,7 +338,8 @@ impl ReviewView {
     /// when the patch (`diffs.patch()`) or the listed files change, the files are replaced in
     /// place, keeping the scroll, each file's collapse and its opened folds (`StackedDiffList`
     /// keys its sections by path); a file whose body moves between the view and the
-    /// `DiffState` (its diff loading, read or failed) keeps its fold. A file listed for the
+    /// `DiffState` (its diff loading, read or failed, or loaded anyway) keeps its fold. A
+    /// file's "Load anyway" lasts while the list shows it. A file listed for the
     /// first time starts collapsed when viewed, then follows the last "Collapse all" /
     /// "Expand all" (`FileDiffSection`). A file clicked or jumped to is scrolled to
     /// (`scrollToFile`), else a new list starts at its first file.
@@ -335,7 +357,18 @@ impl ReviewView {
         let Some(list) = self.model.read(cx).diff_list() else {
             return Err("no list of files to show".to_owned());
         };
-        let key = format!("{patch}\u{0}{}", order.iter().map(|f| f.path.as_str()).collect::<Vec<_>>().join("\u{0}"));
+        // "Load anyway" lasts while its file is listed (`forceRender`, a section's own state).
+        match &self.diff {
+            Some(diff) if diff.list == list => self.forced.retain(|path| order.iter().any(|f| f.path == *path)),
+            Some(_) | None => self.forced.clear(),
+        }
+        let mut forced: Vec<&str> = self.forced.iter().map(String::as_str).collect();
+        forced.sort_unstable();
+        let key = format!(
+            "{patch}\u{0}{}\u{0}\u{0}{}",
+            order.iter().map(|f| f.path.as_str()).collect::<Vec<_>>().join("\u{0}"),
+            forced.join("\u{0}")
+        );
         // Another view's list is dropped as it shows (`ReviewView::body`); another commit's
         // files are a new `DiffState` that keeps "Collapse all" (the list stays mounted).
         let change = list_change(self.diff.as_ref().map(|diff| (&diff.list, diff.key.as_str(), diff.order.as_slice())), &list, &key);
@@ -343,7 +376,7 @@ impl ReviewView {
         let fresh = match change {
             ListChange::Same => Vec::new(),
             ListChange::Files(previous) => {
-                let parsed = parse_listed(patch, diffs, order)?;
+                let parsed = parse_listed(diffs, order, &self.forced)?;
                 let fresh: Vec<String> = parsed.shown.iter().filter(|p| !previous.contains(*p)).cloned().collect();
                 let collapsed = self.start_listed(&fresh, &parsed.drawn, viewed);
                 let Some(diff) = &mut self.diff else {
@@ -353,7 +386,7 @@ impl ReviewView {
                 // the `DiffState` draws again gets it back.
                 let mut undrawn: Vec<(String, bool)> = Vec::new();
                 for path in parsed.shown.iter().filter(|p| previous.contains(*p)) {
-                    match (diff.drawn.contains(path), parsed.drawn.contains(path)) {
+                    match (diff.drawn.contains_key(path), parsed.drawn.contains_key(path)) {
                         (false, true) if diff.state.read(cx).is_file_collapsed(path) => {
                             self.closed_drawn.insert(path.clone());
                         }
@@ -366,7 +399,7 @@ impl ReviewView {
                 }
                 // Drawn files stay collapsed in the `DiffState` (the view folds them).
                 let collapsed: Vec<SharedString> =
-                    collapsed.into_iter().chain(parsed.drawn.iter().cloned()).map(SharedString::from).collect();
+                    collapsed.into_iter().chain(parsed.drawn.keys().cloned()).map(SharedString::from).collect();
                 diff.state.update(cx, |s, cx| {
                     s.update_files(parsed.files, collapsed, cx);
                     for (path, closed) in &undrawn {
@@ -379,7 +412,7 @@ impl ReviewView {
                 fresh
             }
             ListChange::New => {
-                let parsed = parse_listed(patch, diffs, order)?;
+                let parsed = parse_listed(diffs, order, &self.forced)?;
                 let fresh = parsed.shown.clone();
                 let collapsed = self.start_listed(&fresh, &parsed.drawn, viewed);
                 let mode = if self.split { DiffMode::Split } else { DiffMode::Unified };
@@ -389,7 +422,7 @@ impl ReviewView {
                         .with_min_collapsed_lines(MIN_COLLAPSED_LINES));
                 let (top, hide_unchanged) = (parsed.shown.first().cloned(), self.hide_unchanged);
                 state.update(cx, |s, cx| {
-                    for path in collapsed.iter().chain(&parsed.drawn) {
+                    for path in collapsed.iter().chain(parsed.drawn.keys()) {
                         s.set_file_collapsed(path, true, cx);
                     }
                     if !hide_unchanged {
@@ -447,7 +480,7 @@ impl ReviewView {
         let anchor = diff.viewed_anchor.take();
         if !newly.is_empty() {
             diff.collapsed_viewed.extend(newly.iter().cloned());
-            let drawn = diff.drawn.clone();
+            let drawn: HashSet<String> = diff.drawn.keys().cloned().collect();
             diff.state.update(cx, |s, cx| {
                 for path in newly.iter().filter(|p| !drawn.contains(*p)) {
                     s.set_file_collapsed(path, true, cx);
@@ -471,11 +504,11 @@ impl ReviewView {
 
     /// Files listed for the first time: those whose body the view draws fold in the view, and
     /// the others that start collapsed are returned (`CollapseAll::initial_collapsed`).
-    fn start_listed(&mut self, fresh: &[String], drawn: &HashSet<String>, viewed: &HashSet<String>) -> Vec<String> {
+    fn start_listed(&mut self, fresh: &[String], drawn: &HashMap<String, Placeholder>, viewed: &HashSet<String>) -> Vec<String> {
         let mut collapsed = Vec::new();
         for path in fresh {
             let closed = self.collapse_all.initial_collapsed(viewed.contains(path));
-            if drawn.contains(path) {
+            if drawn.contains_key(path) {
                 if closed {
                     self.closed_drawn.insert(path.clone());
                 } else {
@@ -540,11 +573,12 @@ impl ReviewView {
             let file = &order[index];
             let id = ElementId::from(SharedString::from(format!("header-{}", file.path)));
             annotations.push(DiffAnnotation::file(id.clone(), file.path.clone()));
-            let body = drawn.contains(&file.path).then(|| {
-                let body = match diffs.get(&file.path) {
-                    Some(FileDiff::Loading) => Body::Loading,
-                    Some(FileDiff::Failed(error)) => Body::Failed(error.clone()),
-                    Some(FileDiff::Loaded(_)) | None => Body::Binary(model.image(&file.path).cloned()),
+            let body = drawn.get(&file.path).map(|placeholder| {
+                let body = match placeholder {
+                    Placeholder::Loading => Body::Loading,
+                    Placeholder::Failed(error) => Body::Failed(error.clone()),
+                    Placeholder::Image | Placeholder::Binary => Body::Binary(model.image(&file.path).cloned()),
+                    Placeholder::TooLarge(size) => Body::TooLarge(*size),
                 };
                 (body, self.closed_drawn.contains(&file.path))
             });
@@ -563,7 +597,9 @@ impl ReviewView {
         let draft = if with_comments { model.draft().cloned() } else { None };
         let adding = model.adding().clone();
         let comments = if with_comments { model.comments(cx).unwrap_or_default() } else { Vec::new() };
-        let shown: HashSet<&str> = order.iter().map(|f| f.path.as_str()).collect();
+        // A file whose body the view draws has no rows to comment under (Electron's comments
+        // are in the `PierreDiffViewer` it does not mount).
+        let shown: HashSet<&str> = order.iter().map(|f| f.path.as_str()).filter(|path| !drawn.contains_key(*path)).collect();
         // `PierreDiffViewer` groups a line's comments, with the comment box after them.
         let mut groups: Vec<((String, Side, u32), Vec<ReviewComment>)> = Vec::new();
         for comment in comments.into_iter().filter(|c| shown.contains(c.file_path.as_str())) {
@@ -575,7 +611,7 @@ impl ReviewView {
         }
         if let Some(draft) = &draft {
             let key = (draft.file_path.clone(), draft.side, draft.line_number);
-            if !groups.iter().any(|(k, _)| *k == key) {
+            if !groups.iter().any(|(k, _)| *k == key) && !drawn.contains_key(&draft.file_path) {
                 groups.push((key, Vec::new()));
             }
         }
@@ -601,7 +637,7 @@ impl ReviewView {
         let draft_label = draft.map(|d| format!("Comment on line {} ({})", d.line_number, d.side.as_str()));
         // Pierre tints changed rows (`--diffs-deletion/addition-color`) on its near-black body.
         let mut decorations = Vec::new();
-        for (path, lines) in treeterm_model::review_tree::changed_lines(patch) {
+        for (path, lines) in treeterm_model::review_tree::changed_lines(patch).into_iter().filter(|(path, _)| !drawn.contains_key(path)) {
             // The file's body first: the last decoration covering a line wins.
             for (side, last) in [(DiffSide::Original, lines.original_lines), (DiffSide::Modified, lines.modified_lines)] {
                 if last > 0 {
@@ -772,6 +808,7 @@ fn file_header(
         Some((Body::Binary(None), false)) => Some(
             div().px(px(12.)).py(px(16.)).bg(bg_primary).text_size(px(12.)).italic().text_color(secondary).child("Binary file \u{2014} diff not shown").into_any_element(),
         ),
+        Some((Body::TooLarge(size), false)) => Some(too_large(size, &header.file.path, view, cx)),
     };
     v_flex()
         .mx(-pad)
@@ -794,6 +831,55 @@ fn loading_diff(cx: &App) -> AnyElement {
         .text_color(secondary)
         .child(spinner(16., secondary))
         .child("Loading diff...")
+        .into_any_element()
+}
+
+/// `.file-diff-too-large`: how large the diff is, and "Load anyway", which draws its rows.
+fn too_large(size: &DiffSize, path: &str, view: &WeakEntity<ReviewView>, cx: &App) -> AnyElement {
+    let c = colors(cx);
+    let (secondary, primary, bg_secondary, hover, border, bg_primary) =
+        (c.text_secondary, c.text_primary, c.bg_secondary, c.bg_hover, c.border, c.bg_primary);
+    // `.file-diff-load-anyway-btn`.
+    let load = {
+        let (view, path) = (view.clone(), path.to_owned());
+        div()
+            .id(SharedString::from(format!("load-anyway-{path}")))
+            .px(px(10.))
+            .py(px(4.))
+            .text_size(px(12.))
+            // Chromium's `normal` line height for the UI font.
+            .line_height(px(14.))
+            .text_color(primary)
+            .bg(bg_secondary)
+            .border_1()
+            .border_color(border)
+            .rounded(px(4.))
+            .cursor_pointer()
+            .hover(move |d| d.bg(hover))
+            .child("Load anyway")
+            .on_click(move |_, _, cx| {
+                // Not the header's fold.
+                cx.stop_propagation();
+                let path = path.clone();
+                match view.update(cx, |view, cx| {
+                    view.forced.insert(path);
+                    cx.notify();
+                }) {
+                    Ok(()) | Err(_) => {} // Err: the tab closed
+                }
+            })
+    };
+    v_flex()
+        .min_h(px(40.))
+        .items_start()
+        .gap(px(8.))
+        .px(px(12.))
+        .py(px(16.))
+        .bg(bg_primary)
+        .text_size(px(12.))
+        .text_color(secondary)
+        .child(div().w_full().child(size.notice()))
+        .child(load)
         .into_any_element()
 }
 
@@ -1181,6 +1267,7 @@ pub fn locale_date(iso: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use treeterm_model::review_patch::FileDiff;
 
     #[test]
     fn iso_times_with_offsets_become_epoch_milliseconds() {
@@ -1723,35 +1810,94 @@ mod tests {
         assert_eq!(header_top(&state, "b.txt", cx), None);
     }
 
+    /// The diffs of `paths` as one command read them from `patch`.
+    fn read(paths: &[&str], patch: &str) -> FileDiffs {
+        FileDiffs::read(paths.iter().copied(), &Ok(patch.to_owned()))
+    }
+
+    fn drawn(parsed: &Parsed) -> Vec<(&str, &Placeholder)> {
+        let mut drawn: Vec<(&str, &Placeholder)> = parsed.drawn.iter().map(|(path, p)| (path.as_str(), p)).collect();
+        drawn.sort_by_key(|(path, _)| *path);
+        drawn
+    }
+
+    /// Whether each shown file has rows in the `DiffState`.
+    fn rows(parsed: &Parsed) -> Vec<(String, bool)> {
+        parsed.files.iter().map(|f| (f.path().to_string(), f.additions() + f.deletions() > 0)).collect()
+    }
+
     #[test]
     fn the_listed_files_are_parsed_in_list_order_once() {
         let patch: String = [rewritten("a.txt", ""), rewritten("b.txt", ""), rewritten("c.txt", "")].concat();
         let order = [listed("c.txt", None), listed("a.txt", Some(Staging::Staged)), listed("a.txt", Some(Staging::Unstaged))];
-        let read = FileDiffs::default();
-        let got = parse_listed(&patch, &read, &order).expect("a valid patch");
+        let none = HashSet::new();
+        let got = parse_listed(&read(&["a.txt", "b.txt", "c.txt"], &patch), &order, &none).expect("headers");
         // b.txt is not listed (say, filtered out); a.txt is listed twice, shown once.
         assert_eq!(got.shown, ["c.txt", "a.txt"]);
         assert_eq!(got.files.iter().map(|f| f.path().to_string()).collect::<Vec<_>>(), ["c.txt", "a.txt"]);
         assert!(got.drawn.is_empty());
-        let binary = "diff --git a/logo.png b/logo.png\nindex 1..2 100644\nBinary files a/logo.png and b/logo.png differ\n";
-        let got = parse_listed(binary, &read, &[listed("logo.png", None)]).expect("a valid patch");
-        assert_eq!(got.drawn, HashSet::from(["logo.png".to_owned()]));
-        assert!(parse_listed("diff --git a/x\n@@ nonsense", &read, &order).is_err());
+        // A file git printed no section for is not shown.
+        let got = parse_listed(&read(&["a.txt", "gone.txt"], &patch), &[listed("gone.txt", None), listed("a.txt", None)], &none);
+        assert_eq!(got.expect("headers").shown, ["a.txt"]);
 
-        // A file whose diff is loading or failed has a section, its body drawn by the view.
+        // A file whose diff is loading or failed has a header, its body drawn by the view.
         let mut diffs = FileDiffs::loading(["c.txt", "b.txt"]);
         diffs.set("b.txt", FileDiff::Failed("fatal: bad object".to_owned()));
         diffs.add("a.txt", FileDiff::Loaded(rewritten("a.txt", "")));
         let order = [listed("a.txt", None), listed("b.txt", None), listed("c.txt", None)];
-        let got = parse_listed(&diffs.patch(), &diffs, &order).expect("a valid patch");
+        let got = parse_listed(&diffs, &order, &none).expect("headers");
         assert_eq!(got.shown, ["a.txt", "b.txt", "c.txt"]);
-        assert_eq!(got.drawn, HashSet::from(["b.txt".to_owned(), "c.txt".to_owned()]));
+        assert_eq!(
+            drawn(&got),
+            [("b.txt", &Placeholder::Failed("fatal: bad object".to_owned())), ("c.txt", &Placeholder::Loading)]
+        );
+        assert_eq!(rows(&got), [("a.txt".to_owned(), true), ("b.txt".to_owned(), false), ("c.txt".to_owned(), false)]);
 
         let tree: Vec<String> = tree_sorted(&[listed("z.txt", None), listed("dir/b.txt", None), listed("a.txt", None)])
             .into_iter()
             .map(|f| f.path)
             .collect();
         assert_eq!(tree, ["dir/b.txt", "a.txt", "z.txt"], "folders first, as the tree");
+    }
+
+    #[test]
+    fn each_section_shows_its_rows_or_a_body_of_its_own() {
+        let bad = "diff --git a/bad.txt b/bad.txt\n--- a/bad.txt\n+++ b/bad.txt\n@@ nonsense\n";
+        let binary = "diff --git a/data.bin b/data.bin\nindex 1..2 100644\nBinary files a/data.bin and b/data.bin differ\n";
+        let png = binary.replace("data.bin", "logo.png");
+        // An SVG git diffs as text.
+        let svg = rewritten("icon.svg", "");
+        let mut big = "diff --git a/big.txt b/big.txt\n--- a/big.txt\n+++ b/big.txt\n@@ -0,0 +1,20000 @@\n".to_owned();
+        big.extend((0..20_000).map(|line| format!("+line {line}\n")));
+        let patch = [rewritten("a.txt", ""), bad.to_owned(), binary.to_owned(), png, svg, big, rewritten("z.txt", "")].concat();
+        let paths = ["a.txt", "bad.txt", "data.bin", "logo.png", "icon.svg", "big.txt", "z.txt"];
+        let order: Vec<ListedFile> = paths.iter().map(|path| listed(path, None)).collect();
+        let diffs = read(&paths, &patch);
+        let got = parse_listed(&diffs, &order, &HashSet::new()).expect("headers");
+        assert_eq!(got.shown, paths);
+        // The section that does not parse shows why; the others still show.
+        let Some(Placeholder::Failed(error)) = got.drawn.get("bad.txt") else {
+            panic!("bad.txt failed: {:?}", got.drawn.get("bad.txt"));
+        };
+        assert!(error.starts_with("Cannot show this diff: patch line 4: "), "{error}");
+        let bytes = (0..20_000).map(|line| format!("line {line}\n").len()).sum::<usize>();
+        assert_eq!(
+            drawn(&got),
+            [
+                ("bad.txt", &Placeholder::Failed(error.clone())),
+                ("big.txt", &Placeholder::TooLarge(DiffSize { lines: 20_001, bytes, oversized: true })),
+                ("data.bin", &Placeholder::Binary),
+                ("icon.svg", &Placeholder::Image),
+                ("logo.png", &Placeholder::Image),
+            ]
+        );
+        let with_rows: Vec<String> = rows(&got).into_iter().filter(|(_, rows)| *rows).map(|(path, _)| path).collect();
+        assert_eq!(with_rows, ["a.txt", "z.txt"], "files drawn by the view have no rows");
+
+        // "Load anyway": its rows.
+        let got = parse_listed(&diffs, &order, &HashSet::from(["big.txt".to_owned()])).expect("headers");
+        assert!(!got.drawn.contains_key("big.txt"));
+        assert!(rows(&got).contains(&("big.txt".to_owned(), true)));
     }
 
     #[test]

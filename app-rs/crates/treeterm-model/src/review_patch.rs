@@ -4,8 +4,15 @@
 //! Git's patches are split where a file starts (`diff --git`), each section keyed by the path
 //! GPUI Kit's `Diff` shows it under (its new path; the old one for a deleted file), read the
 //! way the Kit's parser reads it, so the model's keys are the view's.
+//!
+//! Each file shows on its own ([`shown_diff`]): its rows, or under its header alone what
+//! stands in for them. An image shows its sides, a file too large to draw at once
+//! (`FileDiffSection`'s size guard) a notice until "Load anyway", and the view parses each
+//! other section by itself, so that a binary file shows a notice and a section that does not
+//! parse its error while the others show their rows.
 
 use indexmap::IndexMap;
+use treeterm_core::files::is_image_path;
 
 /// One listed file's diff (`FileLoadState`).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -129,8 +136,157 @@ impl FileDiffs {
     }
 }
 
+/// `MAX_DIFF_LINES`: a file whose sides have more lines than this together is not drawn until
+/// "Load anyway" (drawing a whole file's diff at once can exhaust the window's memory).
+pub const MAX_DIFF_LINES: usize = 20_000;
+
+/// `MAX_DIFF_BYTES`: nor one whose sides are longer than this together, in UTF-16 code units
+/// (JavaScript's `length`).
+pub const MAX_DIFF_BYTES: usize = 2 * 1024 * 1024;
+
+/// `countLines`: empty text has no lines, any other one more than its newlines.
+pub fn count_lines(text: &str) -> usize {
+    match text {
+        "" => 0,
+        text => 1 + text.matches('\n').count(),
+    }
+}
+
+/// `DiffSize`: both sides of a file's diff, and whether they are past either limit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DiffSize {
+    pub lines: usize,
+    pub bytes: usize,
+    pub oversized: bool,
+}
+
+impl DiffSize {
+    fn new(lines: usize, bytes: usize) -> Self {
+        Self {
+            lines,
+            bytes,
+            oversized: lines > MAX_DIFF_LINES || bytes > MAX_DIFF_BYTES,
+        }
+    }
+
+    /// `.file-diff-too-large`'s text, its numbers grouped as `toLocaleString()` groups them
+    /// in en-US.
+    pub fn notice(&self) -> String {
+        // `Math.round`: halves round up.
+        let kilobytes = (self.bytes as f64 / 1024.).round() as usize;
+        format!(
+            "This diff is large ({} lines, {} KB) and may slow down or crash the app.",
+            grouped(self.lines),
+            grouped(kilobytes)
+        )
+    }
+}
+
+/// `n` with a comma between each group of three digits.
+fn grouped(n: usize) -> String {
+    let digits = n.to_string();
+    let mut out = String::new();
+    for (index, digit) in digits.chars().enumerate() {
+        if index > 0 && (digits.len() - index).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(digit);
+    }
+    out
+}
+
+/// `measureDiff` of a file's section: both of its sides, rebuilt from its hunks (the patches
+/// carry whole files), counted together.
+pub fn measure_diff(section: &str) -> DiffSize {
+    let (mut original, mut modified) = (String::new(), String::new());
+    // The side(s) the last line went to, whose newline a `\ No newline at end of file` drops.
+    let (mut last_original, mut last_modified) = (false, false);
+    // Split at `\n` alone: a `\r` before it is the line's own (CRLF files).
+    for line in section
+        .split('\n')
+        .skip_while(|line| !line.starts_with("@@"))
+    {
+        let (to_original, to_modified) = match line.as_bytes().first() {
+            Some(b' ') => (true, true),
+            Some(b'-') => (true, false),
+            Some(b'+') => (false, true),
+            Some(b'\\') => {
+                if last_original {
+                    original.pop();
+                }
+                if last_modified {
+                    modified.pop();
+                }
+                (last_original, last_modified) = (false, false);
+                continue;
+            }
+            // A hunk's header.
+            Some(_) | None => {
+                (last_original, last_modified) = (false, false);
+                continue;
+            }
+        };
+        for (to, side) in [(to_original, &mut original), (to_modified, &mut modified)] {
+            if to {
+                side.push_str(&line[1..]);
+                side.push('\n');
+            }
+        }
+        (last_original, last_modified) = (to_original, to_modified);
+    }
+    DiffSize::new(
+        count_lines(&original) + count_lines(&modified),
+        original.encode_utf16().count() + modified.encode_utf16().count(),
+    )
+}
+
+/// What a listed file shows under its header in place of rows (`FileDiffSection`'s body).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Placeholder {
+    /// `.file-diff-loading`.
+    Loading,
+    /// `.file-diff-error`: why its diff could not be read, or shown.
+    Failed(String),
+    /// An image (`isImagePath`, SVG included): its sides, before and after.
+    Image,
+    /// "Binary file — diff not shown": git found the section binary (known once parsed).
+    Binary,
+    /// `.file-diff-too-large`, until "Load anyway".
+    TooLarge(DiffSize),
+}
+
+/// How a listed file's diff shows, before its section is parsed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ShownDiff<'a> {
+    /// Git printed no section for it: it is not in the diff.
+    Absent,
+    /// Its header ([`bare_header`]) with this under it: no rows to parse, lay out or highlight.
+    Placeholder(Placeholder),
+    /// Its section, to parse into rows (or a binary file's notice, or why it does not parse).
+    Section(&'a str),
+}
+
+/// How `path`, whose diff is `diff`, shows. `forced`: "Load anyway" was clicked for it.
+pub fn shown_diff<'a>(path: &str, diff: &'a FileDiff, forced: bool) -> ShownDiff<'a> {
+    let section = match diff {
+        FileDiff::Loading => return ShownDiff::Placeholder(Placeholder::Loading),
+        FileDiff::Failed(error) => {
+            return ShownDiff::Placeholder(Placeholder::Failed(error.clone()));
+        }
+        FileDiff::Loaded(section) if section.is_empty() => return ShownDiff::Absent,
+        FileDiff::Loaded(_) if is_image_path(path) => {
+            return ShownDiff::Placeholder(Placeholder::Image);
+        }
+        FileDiff::Loaded(section) => section,
+    };
+    match measure_diff(section) {
+        size if size.oversized && !forced => ShownDiff::Placeholder(Placeholder::TooLarge(size)),
+        _ => ShownDiff::Section(section),
+    }
+}
+
 /// A `diff --git` header naming `path` alone, its paths quoted as git quotes them.
-fn bare_header(path: &str) -> String {
+pub fn bare_header(path: &str) -> String {
     format!("diff --git {} {}\n", quoted("a/", path), quoted("b/", path))
 }
 
@@ -475,6 +631,180 @@ mod tests {
         assert_eq!(
             FileDiff::of("a.txt", &Err("  ".to_owned())),
             FileDiff::Failed("Failed to load diff".to_owned())
+        );
+    }
+
+    #[test]
+    fn empty_text_has_no_lines_and_any_other_one_more_than_its_newlines() {
+        assert_eq!(count_lines(""), 0);
+        assert_eq!(count_lines("a"), 1);
+        assert_eq!(count_lines("a\n"), 2);
+        assert_eq!(count_lines("a\nb"), 2);
+        assert_eq!(count_lines("\n\n"), 3);
+    }
+
+    /// `path`'s section with one hunk of `lines` (each given its newline); the hunk header
+    /// is not counted.
+    fn section(path: &str, header: &str, lines: &[String]) -> String {
+        let mut section =
+            format!("diff --git a/{path} b/{path}\n--- a/{path}\n+++ b/{path}\n{header}\n");
+        for line in lines {
+            section.push_str(line);
+            section.push('\n');
+        }
+        section
+    }
+
+    fn size(lines: usize, bytes: usize) -> DiffSize {
+        DiffSize::new(lines, bytes)
+    }
+
+    #[test]
+    fn a_diff_is_measured_on_both_sides_rebuilt_from_its_hunks() {
+        // `one\n` and `ONE\n`: two lines and four characters each.
+        assert_eq!(measure_diff(MODIFIED), size(4, 8));
+        // An added file has no original side; nor a deleted one a modified side.
+        assert_eq!(measure_diff(ADDED), size(2, 4));
+        assert_eq!(measure_diff(DELETED), size(2, 4));
+        // No hunks: nothing to draw.
+        assert_eq!(measure_diff(BINARY), size(0, 0));
+        assert_eq!(measure_diff(RENAMED), size(0, 0));
+        // Header lines are not counted; context is on both sides, hunk headers on neither.
+        let two_hunks = "diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1,2 +1,2 @@\n same\n-a\n+bb\n@@ -9 +9 @@\n-c\n";
+        assert_eq!(measure_diff(two_hunks), size(4 + 3, 9 + 8));
+        // `\ No newline at end of file` drops the newline of the side(s) of the line before it.
+        let no_newline = "diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n\\ No newline at end of file\n+b\n";
+        assert_eq!(measure_diff(no_newline), size(1 + 2, 1 + 2));
+        let unchanged_end = "diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1,2 +1,2 @@\n-a\n+b\n end\n\\ No newline at end of file\n";
+        assert_eq!(measure_diff(unchanged_end), size(2 + 2, 5 + 5));
+        // A line's `\r` is its own.
+        assert_eq!(
+            measure_diff(&section("x", "@@ -0,0 +1 @@", &["+a\r".to_owned()])),
+            size(2, 3)
+        );
+    }
+
+    #[test]
+    fn a_diff_past_twenty_thousand_lines_or_two_mebibytes_is_oversized() {
+        // 10 000 lines rewritten: 10 001 counted on each side.
+        let rewritten: Vec<String> = (0..10_000)
+            .map(|n| format!("-old {n}"))
+            .chain((0..10_000).map(|n| format!("+new {n}")))
+            .collect();
+        let measured = measure_diff(&section("x", "@@ -1,10000 +1,10000 @@", &rewritten));
+        assert_eq!((measured.lines, measured.oversized), (20_002, true));
+        // 20 000 counted lines are within the limit, 20 001 past it.
+        let added = |count: usize| measure_diff(&section("x", "@@", &vec!["+".to_owned(); count]));
+        assert_eq!(
+            (added(19_999).lines, added(19_999).oversized),
+            (20_000, false)
+        );
+        assert_eq!(
+            (added(20_000).lines, added(20_000).oversized),
+            (20_001, true)
+        );
+        // One long line: counted in UTF-16 code units, as JavaScript's `length`.
+        let long = |text: &str| {
+            measure_diff(&section(
+                "x",
+                "@@",
+                &[format!("+{}", text.repeat(1_100_000))],
+            ))
+        };
+        assert_eq!(long("\u{1F600}"), size(2, 2_200_001), "two units each");
+        assert!(long("\u{1F600}").oversized);
+        assert_eq!(
+            long("\u{e9}"),
+            size(2, 1_100_001),
+            "one unit, though two UTF-8 bytes"
+        );
+        assert!(!long("\u{e9}").oversized);
+    }
+
+    #[test]
+    fn the_notice_gives_lines_and_rounded_kilobytes_grouped_in_threes() {
+        assert_eq!(
+            size(25_001, 1_536_000).notice(),
+            "This diff is large (25,001 lines, 1,500 KB) and may slow down or crash the app."
+        );
+        // Half a kilobyte rounds up.
+        assert_eq!(
+            size(1, 512).notice(),
+            "This diff is large (1 lines, 1 KB) and may slow down or crash the app."
+        );
+        assert_eq!(
+            size(0, 511).notice(),
+            "This diff is large (0 lines, 0 KB) and may slow down or crash the app."
+        );
+        assert_eq!(
+            [0, 999, 1000, 100_000, 1_234_567].map(grouped),
+            ["0", "999", "1,000", "100,000", "1,234,567"].map(String::from)
+        );
+    }
+
+    #[test]
+    fn each_file_shows_its_section_or_what_stands_in_for_it() {
+        let loaded = |section: &str| FileDiff::Loaded(section.to_owned());
+        assert_eq!(
+            shown_diff("a.txt", &loaded(MODIFIED), false),
+            ShownDiff::Section(MODIFIED)
+        );
+        // A binary section is parsed: the view tells it from its section.
+        let data = BINARY.replace("logo.png", "data.bin");
+        assert_eq!(
+            shown_diff("data.bin", &loaded(&data), false),
+            ShownDiff::Section(&data)
+        );
+        // Git printed nothing for it.
+        assert_eq!(shown_diff("a.txt", &loaded(""), false), ShownDiff::Absent);
+        // Loading, or failed to read.
+        assert_eq!(
+            shown_diff("a.txt", &FileDiff::Loading, false),
+            ShownDiff::Placeholder(Placeholder::Loading)
+        );
+        assert_eq!(
+            shown_diff(
+                "a.txt",
+                &FileDiff::Failed("fatal: bad object".to_owned()),
+                false
+            ),
+            ShownDiff::Placeholder(Placeholder::Failed("fatal: bad object".to_owned()))
+        );
+        // Images show as images, an SVG git diffs as text too, oversized or not.
+        assert_eq!(
+            shown_diff("logo.png", &loaded(BINARY), false),
+            ShownDiff::Placeholder(Placeholder::Image)
+        );
+        let svg = MODIFIED.replace("a.txt", "icons/Logo.SVG");
+        assert_eq!(
+            shown_diff("icons/Logo.SVG", &loaded(&svg), false),
+            ShownDiff::Placeholder(Placeholder::Image)
+        );
+        let large = |path: &str| {
+            section(
+                path,
+                "@@ -0,0 +1,20000 @@",
+                &vec!["+line".to_owned(); 20_000],
+            )
+        };
+        assert_eq!(
+            shown_diff("big.svg", &loaded(&large("big.svg")), false),
+            ShownDiff::Placeholder(Placeholder::Image)
+        );
+        // Too large to draw, until "Load anyway".
+        let big = loaded(&large("big.txt"));
+        assert_eq!(
+            shown_diff("big.txt", &big, false),
+            ShownDiff::Placeholder(Placeholder::TooLarge(size(20_001, 100_000)))
+        );
+        assert_eq!(
+            shown_diff("big.txt", &big, true),
+            ShownDiff::Section(&large("big.txt"))
+        );
+        // Within the limits, "Load anyway" changes nothing.
+        assert_eq!(
+            shown_diff("a.txt", &loaded(MODIFIED), true),
+            ShownDiff::Section(MODIFIED)
         );
     }
 }

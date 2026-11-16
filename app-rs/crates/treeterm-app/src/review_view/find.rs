@@ -147,7 +147,9 @@ impl ReviewView {
         }
     }
 
-    /// The find bar under the diff of `patch` (whose files are `paths`, in list order).
+    /// The find bar under the diff of `patch` (whose files are `paths`, in list order). Only
+    /// the rows shown are searched: an image, or a file shown loading, failed or too large,
+    /// has none (`findLinesInDiff` searches text contents alone).
     pub(super) fn find_panel(
         &mut self,
         state: &Entity<DiffState>,
@@ -162,9 +164,13 @@ impl ReviewView {
             return None;
         };
         let layout = self.layout();
+        let searched: Vec<String> = match &self.diff {
+            Some(diff) => paths.iter().filter(|path| !diff.has_placeholder(path)).cloned().collect(),
+            None => paths.to_vec(),
+        };
         let (matches, rows, count) = {
             let model = self.model.read(cx);
-            let matches = model.find_matches(patch, paths, layout);
+            let matches = model.find_matches(patch, &searched, layout);
             let rows = model.find_rows(&matches, paths);
             let count = model.find_count_label(&matches);
             (Rc::new(matches), rows, count)
