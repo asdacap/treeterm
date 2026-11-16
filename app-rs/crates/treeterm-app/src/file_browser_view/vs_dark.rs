@@ -77,8 +77,10 @@ fn syntax() -> SyntaxColors {
         "label": { "color": "#D4D4D4" },
         "link_text": { "color": "#D4D4D4", "font_style": "normal" },
         "link_uri": { "color": "#CE9178", "font_style": "normal" },
+        "namespace.path": { "color": "#D4D4D4" },
         "number": { "color": "#B5CEA8" },
         "operator": { "color": "#D4D4D4" },
+        "primary": { "color": "#D4D4D4" },
         "property": { "color": "#D4D4D4" },
         "punctuation": { "color": "#D4D4D4" },
         "punctuation.bracket": { "color": "#D4D4D4" },
@@ -164,6 +166,17 @@ mod tests {
         let ts = "class A extends B { m() { return this.x + super.y } }\n";
         assert_eq!(token_color("a.ts", ts, "this"), Some(rgb(0x569cd6).into()));
         assert_eq!(token_color("a.ts", ts, "super"), Some(rgb(0x569cd6).into()));
+    }
+
+    /// Monaco's Rust grammar leaves a path's modules, what a `use` brings in, a module's
+    /// name, a macro's name and an attribute plain, where Review colours some of them as
+    /// Dark+ does (`review_view/dark_plus.rs`).
+    #[test]
+    fn rust_paths_uses_modules_and_attributes_are_plain_as_in_monaco() {
+        let rust = "use std::sync::Arc;\nuse std::fs;\nuse crate::foo::{bar, Baz};\nmod tests;\n#[cfg(test)]\nfn run() {\n    crate::util::parse();\n    tracing::error!(\"x\");\n}\n";
+        for token in ["std", "sync", "fs;", "foo", "bar", "Baz", "tests", "#[", "cfg", "test)", "util", "tracing", "error"] {
+            assert_eq!(token_color("a.rs", rust, token), Some(rgb(0xd4d4d4).into()), "{token}");
+        }
     }
 
     /// Every language the viewer maps paints a comment, a keyword and a string as `vs-dark`

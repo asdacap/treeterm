@@ -204,6 +204,9 @@ pub struct SyntaxColors {
     pub link_text: Option<ThemeStyle>,
     #[serde(rename = "link_uri")]
     pub link_uri: Option<ThemeStyle>,
+    /// TreeTerm patch: as in `registry.rs`.
+    #[serde(rename = "namespace.path")]
+    pub namespace_path: Option<ThemeStyle>,
     pub number: Option<ThemeStyle>,
     pub operator: Option<ThemeStyle>,
     pub predictive: Option<ThemeStyle>,
@@ -267,6 +270,7 @@ impl SyntaxColors {
             "label" => self.label,
             "link_text" => self.link_text,
             "link_uri" => self.link_uri,
+            "namespace.path" => self.namespace_path,
             "number" => self.number,
             "operator" => self.operator,
             "predictive" => self.predictive,
@@ -306,7 +310,7 @@ impl SyntaxColors {
     }
 
     pub fn style_for_index(&self, index: usize) -> Option<HighlightStyle> {
-        const HIGHLIGHT_NAMES: [&str; 41] = [
+        const HIGHLIGHT_NAMES: [&str; 42] = [
             "attribute",
             "boolean",
             "comment",
@@ -323,6 +327,7 @@ impl SyntaxColors {
             "label",
             "link_text",
             "link_uri",
+            "namespace.path",
             "number",
             "operator",
             "predictive",

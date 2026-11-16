@@ -15,7 +15,7 @@ use anyhow::Result;
 
 use crate::{ActiveTheme, DEFAULT_THEME_COLORS, ThemeMode, highlighter::languages};
 
-pub(super) const HIGHLIGHT_NAMES: [&str; 41] = [
+pub(super) const HIGHLIGHT_NAMES: [&str; 42] = [
     "attribute",
     "boolean",
     "comment",
@@ -32,6 +32,8 @@ pub(super) const HIGHLIGHT_NAMES: [&str; 41] = [
     "label",
     "link_text",
     "link_uri",
+    // TreeTerm patch: see `SyntaxColors::namespace_path`.
+    "namespace.path",
     "number",
     "operator",
     "predictive",
@@ -135,6 +137,11 @@ pub struct SyntaxColors {
     pub link_text: Option<ThemeStyle>,
     #[serde(rename = "link_uri")]
     pub link_uri: Option<ThemeStyle>,
+    /// TreeTerm patch: the modules of a Rust path (`std` and `sync` in `std::sync::Arc`).
+    /// Not `namespace`, which Go's and Scala's queries capture: it is no highlight name, so
+    /// their captures are dropped (see `is_highlight_name`), and stay so.
+    #[serde(rename = "namespace.path")]
+    pub namespace_path: Option<ThemeStyle>,
     pub number: Option<ThemeStyle>,
     pub operator: Option<ThemeStyle>,
     pub predictive: Option<ThemeStyle>,
@@ -264,6 +271,7 @@ impl SyntaxColors {
             "label" => self.label,
             "link_text" => self.link_text,
             "link_uri" => self.link_uri,
+            "namespace.path" => self.namespace_path,
             "number" => self.number,
             "operator" => self.operator,
             "predictive" => self.predictive,

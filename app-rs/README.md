@@ -266,13 +266,20 @@ are not ours). Its changes are marked `TreeTerm patch` (`grep -rn "TreeTerm patc
   theme's syntax colours and editor foreground, so Review uses VS Code's Dark+ (Electron's
   Pierre diff registers shiki's `dark-plus` as `treeterm-dark`) while the Files viewer and
   the Editor tab keep Monaco's `vs-dark`. The Kit painted every diff in the app theme's.
-- `src/highlighter/languages/{rust,javascript,typescript}/highlights.scm`: Rust numbers are
-  `@number` (they were `@constant.builtin`, `true`'s colour), escapes `@string.escape` (the
-  Kit's `@escape` no theme colours), `self` `@variable.special` and the identifiers no other
-  rule captures `@variable` (they were left plain; the macro rule is split in two, so a
-  macro's name still wins); JavaScript and TypeScript's `this` and `super` are
-  `@variable.special` (they were `@variable.builtin`, a variable's colour). The Files viewer
-  colours them as Monaco does, and Review as Dark+ does.
+- `src/highlighter/languages/{rust,javascript,typescript}/highlights.scm`,
+  `src/highlighter/{registry,wasm_stub}.rs`: Rust numbers are `@number` (they were
+  `@constant.builtin`, `true`'s colour), escapes `@string.escape` (the Kit's `@escape` no
+  theme colours), `self` `@variable.special`, a path's modules (`std` and `sync` in
+  `std::sync::Arc`) `@namespace.path`, a new highlight name (not `@namespace`, which Go's
+  and Scala's queries capture and is not a highlight name, so they stay as they were), a
+  macro named by a path (`tracing::error!`) or defined by `macro_rules!` `@function.macro`,
+  and plain text `@primary`: what a `use` or `extern crate` brings in unless capitalised
+  (`fs` in `use std::fs;`), a module's name, and attributes (they were `@attribute`, an HTML
+  attribute's colour). The identifiers no other rule captures are `@variable` (they were
+  left plain; the macro rule is split in two, so a macro's name still wins). JavaScript and
+  TypeScript's `this` and `super` are `@variable.special` (they were `@variable.builtin`, a
+  variable's colour). The Files viewer colours these as Monaco does, and Review as Dark+
+  does, but for the names listed under Appearance.
 - `src/highlighter/languages.rs`: TSX is highlighted with the Kit's TypeScript query, as
   TypeScript is. The Kit used `tree_sitter_typescript::HIGHLIGHTS_QUERY`, which only adds
   TypeScript's captures to the JavaScript query, so `.tsx` files (in the Files viewer, the
@@ -351,9 +358,11 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   tree-sitter grammars, not shiki's TextMate ones: control keywords (`if`, `return`,
   `import`) are blue like every other keyword, not purple (`#C586C0`), as the grammars
   capture all keywords alike; a few names are classed differently (Rust's all-caps
-  constants are blue, TypeScript's class names in expressions and JSX tags light blue); and
-  code inside Markdown (inline code, links, emphasis, a fenced block's language) is plain,
-  as the diff skips injected grammars.
+  constants and `macro_rules!` are blue, `Self` teal, TypeScript's class names in
+  expressions and JSX tags light blue); and code inside Markdown (inline code, links,
+  emphasis, a fenced block's language) is plain, and every name in a Rust macro's arguments
+  light blue (a call there is not yellow, nor a module teal), as the diff skips injected
+  grammars.
 - The code editors (Files viewer, Editor tab), through GPUI Kit: Tab inserts a whole indent
   step, not spaces up to the next tab stop; 8px of padding stays under the last line; the
   current line's outline is drawn over the text, so it stops at the scrollbar; a scrollbar

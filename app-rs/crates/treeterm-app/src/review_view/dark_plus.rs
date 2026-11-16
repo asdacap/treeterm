@@ -53,8 +53,12 @@ fn syntax() -> SyntaxColors {
         // Markdown: `string.other.link.title`, then `markup.underline.link`.
         "link_text": { "color": "#CE9178", "font_style": "normal" },
         "link_uri": { "color": "#D4D4D4", "font_style": "normal" },
+        // A Rust path's modules (`entity.name.namespace`).
+        "namespace.path": { "color": "#4EC9B0" },
         "number": { "color": "#B5CEA8" },
         "operator": { "color": "#D4D4D4" },
+        // Plain text: a Rust module's name, what a `use` brings in, an attribute.
+        "primary": { "color": "#D4D4D4" },
         "property": { "color": "#9CDCFE" },
         "punctuation": { "color": "#D4D4D4" },
         "punctuation.bracket": { "color": "#D4D4D4" },
@@ -189,6 +193,43 @@ mod tests {
                 ("println", 0xdcdcaa),
                 ("\"{total}", 0xce9178),
                 ("\\n", 0xd7ba7d),
+            ],
+        );
+        // A path's modules are namespaces; what a `use` or `extern crate` brings in, a
+        // module's name and an attribute's words are plain, unless capitalised.
+        let text = "use std::sync::Arc;\nuse std::fs;\nuse crate::foo::{bar, Baz};\nuse std::io::*;\nuse self::inner::thing as other;\nextern crate alloc;\nmod tests;\n#[cfg(test)]\n#[derive(Debug)]\nmacro_rules! my_macro { () => {} }\nfn run() {\n    crate::util::parse();\n    tracing::error!(\"x\");\n    let v: core::cell::Cell<u8> = Vec::new();\n}\n";
+        assert_colors(
+            "a.rs",
+            text,
+            &[
+                ("std", 0x4ec9b0),
+                ("sync", 0x4ec9b0),
+                ("Arc", 0x4ec9b0),
+                ("fs;", 0xd4d4d4),
+                ("crate", 0x569cd6),
+                ("foo", 0x4ec9b0),
+                ("bar", 0xd4d4d4),
+                ("Baz", 0x4ec9b0),
+                ("io", 0x4ec9b0),
+                ("inner", 0x4ec9b0),
+                ("thing", 0xd4d4d4),
+                ("other", 0xd4d4d4),
+                ("alloc", 0xd4d4d4),
+                ("tests", 0xd4d4d4),
+                ("#[cfg", 0xd4d4d4),
+                ("cfg", 0xd4d4d4),
+                ("test)", 0xd4d4d4),
+                ("Debug", 0x4ec9b0),
+                ("my_macro", 0xdcdcaa),
+                ("util", 0x4ec9b0),
+                ("parse", 0xdcdcaa),
+                ("tracing", 0x4ec9b0),
+                ("error", 0xdcdcaa),
+                ("!(", 0xdcdcaa),
+                ("core", 0x4ec9b0),
+                ("cell", 0x4ec9b0),
+                ("Vec", 0x4ec9b0),
+                ("new", 0xdcdcaa),
             ],
         );
     }
