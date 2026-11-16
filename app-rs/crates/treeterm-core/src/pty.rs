@@ -6,6 +6,7 @@
 //! Killing is the separate [`crate::daemon::DaemonConnection::kill_pty`].
 
 use futures::channel::{mpsc, oneshot};
+use futures::future::{FutureExt, Shared};
 use futures::{Stream, StreamExt, TryFutureExt};
 use serde_json::Value;
 use tokio_stream::wrappers::ReceiverStream;
@@ -97,6 +98,8 @@ fn dimension(value: i32) -> Result<u16, ApiError> {
 #[derive(Clone)]
 pub struct PtyInputHandle {
     queue: mpsc::UnboundedSender<Queued>,
+    /// Why the attachment ended, once it has (sent by [`PumpGuarded`]).
+    closed: Shared<oneshot::Receiver<String>>,
 }
 
 struct Queued {
@@ -105,15 +108,33 @@ struct Queued {
     sent: Option<oneshot::Sender<()>>,
 }
 
-/// The attachment's input queue has shut down: the stream ended or was detached.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error("PTY stream closed")]
-pub struct PtyClosed;
+/// The attachment's input has shut down. Carries why, in the words of Electron's
+/// `PtyStream`: the stream's own error, [`STREAM_ENDED`] or [`STREAM_DETACHED`].
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{0}")]
+pub struct PtyClosed(pub String);
+
+/// The daemon closed the stream.
+pub const STREAM_ENDED: &str = "pty stream ended";
+/// The attachment was dropped on this side.
+pub const STREAM_DETACHED: &str = "pty stream detached";
+/// The input is gone and no reason was recorded.
+const STREAM_CLOSED: &str = "pty stream closed";
+
+impl PtyClosed {
+    fn from_reason(reason: Result<String, oneshot::Canceled>) -> Self {
+        match reason {
+            Ok(reason) => Self(reason),
+            Err(oneshot::Canceled) => Self(STREAM_CLOSED.to_owned()),
+        }
+    }
+}
 
 impl PtyInputHandle {
     /// Send `data` to the program. Resolves once the last chunk is handed to the transport;
     /// under PTY backpressure that waits for the daemon to drain earlier writes, as
-    /// Electron's `pty:write` does. Writes are delivered in call order.
+    /// Electron's `pty:write` does. Writes are delivered in call order. A write the
+    /// attachment drops fails with why it ended, as Electron's pending writes do.
     pub fn write(&self, data: &[u8]) -> impl Future<Output = Result<(), PtyClosed>> + use<> {
         let mut last = None;
         let chunks: Vec<&[u8]> = if data.is_empty() {
@@ -122,8 +143,11 @@ impl PtyInputHandle {
             data.chunks(MAX_WRITE_CHUNK).collect()
         };
         let count = chunks.len();
-        let mut queued = Ok(());
+        let mut queued = self.ended().is_none();
         for (index, chunk) in chunks.into_iter().enumerate() {
+            if !queued {
+                break;
+            }
             let sent = if index + 1 == count {
                 let (tx, rx) = oneshot::channel();
                 last = Some(rx);
@@ -136,17 +160,21 @@ impl PtyInputHandle {
                     data: chunk.to_vec(),
                 })),
             };
-            if self.queue.unbounded_send(Queued { message, sent }).is_err() {
-                queued = Err(PtyClosed);
-                break;
-            }
+            queued = self.queue.unbounded_send(Queued { message, sent }).is_ok();
         }
+        let closed = self.closed();
         async move {
-            queued?;
-            match last {
-                Some(rx) => rx.await.map_err(|_canceled| PtyClosed),
-                None => Ok(()),
-            }
+            let sent = match (queued, last) {
+                (false, _) => false,
+                (true, Some(rx)) => match rx.await {
+                    Ok(()) => true,
+                    Err(oneshot::Canceled) => false,
+                },
+                (true, None) => true,
+            };
+            // The reason is awaited: the input side can shut down before the event side
+            // has recorded why.
+            if sent { Ok(()) } else { Err(closed.await) }
         }
     }
 
@@ -154,16 +182,9 @@ impl PtyInputHandle {
     /// ordering is kept, and a closed stream is reported by the event stream anyway.
     pub fn send(&self, data: &[u8]) -> Result<(), PtyClosed> {
         for chunk in data.chunks(MAX_WRITE_CHUNK) {
-            self.queue
-                .unbounded_send(Queued {
-                    message: PtyInput {
-                        input: Some(pty_input::Input::Write(PtyWriteData {
-                            data: chunk.to_vec(),
-                        })),
-                    },
-                    sent: None,
-                })
-                .map_err(|_| PtyClosed)?;
+            self.enqueue(pty_input::Input::Write(PtyWriteData {
+                data: chunk.to_vec(),
+            }))?;
         }
         Ok(())
     }
@@ -171,7 +192,7 @@ impl PtyInputHandle {
     /// Ask the daemon for a new size. It answers with [`PtyEvent::Resize`] carrying the
     /// size it applied, which may differ when another attachment shares the PTY.
     pub fn resize(&self, cols: u16, rows: u16) -> Result<(), PtyClosed> {
-        self.control(pty_input::Input::Resize(PtyResizeData {
+        self.enqueue(pty_input::Input::Resize(PtyResizeData {
             cols: i32::from(cols),
             rows: i32::from(rows),
         }))
@@ -180,16 +201,34 @@ impl PtyInputHandle {
     /// The user is now at this attachment's terminal: of the terminal attachments, only
     /// the most recently focused may write.
     pub fn focus(&self) -> Result<(), PtyClosed> {
-        self.control(pty_input::Input::Focus(Empty {}))
+        self.enqueue(pty_input::Input::Focus(Empty {}))
     }
 
-    fn control(&self, input: pty_input::Input) -> Result<(), PtyClosed> {
+    /// Resolves once the attachment has ended, with why.
+    pub fn closed(&self) -> impl Future<Output = PtyClosed> + use<> {
+        self.closed.clone().map(PtyClosed::from_reason)
+    }
+
+    /// Why the attachment ended, if it has. Nothing is queued after that, as Electron's
+    /// `PtyStream` refuses writes once closed.
+    fn ended(&self) -> Option<PtyClosed> {
+        self.closed().now_or_never()
+    }
+
+    fn enqueue(&self, input: pty_input::Input) -> Result<(), PtyClosed> {
+        if let Some(ended) = self.ended() {
+            return Err(ended);
+        }
         self.queue
             .unbounded_send(Queued {
                 message: PtyInput { input: Some(input) },
                 sent: None,
             })
-            .map_err(|_| PtyClosed)
+            // The input shut down before the event side recorded why.
+            .map_err(|_| {
+                self.ended()
+                    .unwrap_or_else(|| PtyClosed(STREAM_CLOSED.to_owned()))
+            })
     }
 }
 
@@ -245,6 +284,7 @@ pub(crate) fn attach(
             .await
     };
     let session_id = session_id.to_owned();
+    let (closed_tx, closed_rx) = oneshot::channel();
     let events = rt.subscribe(PumpGuarded {
         stream: call
             .map_ok(tonic::Response::into_inner)
@@ -260,29 +300,64 @@ pub(crate) fn attach(
                 futures::future::ready(decoded)
             })
             .boxed(),
+        closed: Some(closed_tx),
         _pump: pump,
     });
 
     PtyAttachment {
-        input: PtyInputHandle { queue: queue_tx },
+        input: PtyInputHandle {
+            queue: queue_tx,
+            closed: closed_rx.shared(),
+        },
         events,
     }
 }
 
 /// Keeps the input pump alive exactly as long as the event stream: detaching aborts both.
+///
+/// Also tells the input handles why the attachment ended, as Electron's `PtyStream` rejects
+/// its writes: with the stream's error, [`STREAM_ENDED`], or [`STREAM_DETACHED`] when it is
+/// dropped first. An error ends the stream, as a stream `error` closes Electron's.
 struct PumpGuarded<S> {
     stream: S,
+    /// Taken when the reason is sent.
+    closed: Option<oneshot::Sender<String>>,
     _pump: crate::rt::Fut<()>,
 }
 
-impl<S: Stream + Unpin> Stream for PumpGuarded<S> {
+impl<S> PumpGuarded<S> {
+    fn close(&mut self, reason: String) {
+        if let Some(closed) = self.closed.take() {
+            match closed.send(reason) {
+                Ok(()) | Err(_) => {} // Err: every input handle is gone; no one is left to tell.
+            }
+        }
+    }
+}
+
+impl<S: Stream<Item = Result<PtyEvent, ApiError>> + Unpin> Stream for PumpGuarded<S> {
     type Item = S::Item;
 
     fn poll_next(
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<S::Item>> {
-        self.stream.poll_next_unpin(cx)
+        if self.closed.is_none() {
+            return std::task::Poll::Ready(None);
+        }
+        let item = std::task::ready!(self.stream.poll_next_unpin(cx));
+        match &item {
+            Some(Ok(_)) => {}
+            Some(Err(error)) => self.close(error.to_string()),
+            None => self.close(STREAM_ENDED.to_owned()),
+        }
+        std::task::Poll::Ready(item)
+    }
+}
+
+impl<S> Drop for PumpGuarded<S> {
+    fn drop(&mut self) {
+        self.close(STREAM_DETACHED.to_owned());
     }
 }
 
@@ -345,6 +420,55 @@ mod tests {
         }
     }
 
+    /// An input handle on a bare queue, with the queue and the sender of its close reason.
+    fn input() -> (
+        PtyInputHandle,
+        mpsc::UnboundedReceiver<Queued>,
+        oneshot::Sender<String>,
+    ) {
+        let (queue, rx) = mpsc::unbounded();
+        let (closed_tx, closed_rx) = oneshot::channel();
+        let handle = PtyInputHandle {
+            queue,
+            closed: closed_rx.shared(),
+        };
+        (handle, rx, closed_tx)
+    }
+
+    fn runtime() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .unwrap()
+    }
+
+    type Events = futures::stream::BoxStream<'static, Result<PtyEvent, ApiError>>;
+
+    /// A pump guard over `items`, with the receiver of its close reason and one that is
+    /// cancelled once its pump has stopped.
+    fn guarded(
+        rt: &Rt,
+        items: Vec<Result<PtyEvent, ApiError>>,
+    ) -> (
+        PumpGuarded<Events>,
+        oneshot::Receiver<String>,
+        oneshot::Receiver<()>,
+    ) {
+        let (closed_tx, closed_rx) = oneshot::channel();
+        let (alive_tx, alive_rx) = oneshot::channel::<()>();
+        let pump = rt.run(async move {
+            let _alive = alive_tx;
+            std::future::pending::<()>().await;
+        });
+        let guarded = PumpGuarded {
+            stream: futures::stream::iter(items).boxed(),
+            closed: Some(closed_tx),
+            _pump: pump,
+        };
+        (guarded, closed_rx, alive_rx)
+    }
+
     #[test]
     fn converts_every_output_kind() {
         use pty_output::Output;
@@ -401,8 +525,7 @@ mod tests {
 
     #[test]
     fn writes_split_into_ordered_chunks_and_ack_after_the_last() {
-        let (queue, mut rx) = mpsc::unbounded();
-        let handle = PtyInputHandle { queue };
+        let (handle, mut rx, _closed) = input();
         let data = vec![b'x'; MAX_WRITE_CHUNK * 2 + 5];
         let done = handle.write(&data);
 
@@ -424,16 +547,88 @@ mod tests {
 
     #[test]
     fn writes_fail_once_the_queue_is_gone() {
-        let (queue, rx) = mpsc::unbounded();
-        let handle = PtyInputHandle { queue };
+        let (handle, rx, closed) = input();
         drop(rx);
+        drop(closed);
+        let gone = Err(PtyClosed(STREAM_CLOSED.to_owned()));
+        assert_eq!(futures::executor::block_on(handle.write(b"x")), gone);
+        assert_eq!(handle.resize(10, 10), gone);
+        assert_eq!(handle.send(b"x"), gone);
+        assert_eq!(handle.focus(), gone);
+    }
+
+    #[test]
+    fn once_ended_nothing_is_queued_and_writes_fail_with_the_reason() {
+        let (handle, mut rx, closed) = input();
+        closed.send(STREAM_ENDED.to_owned()).unwrap();
+        let ended = Err(PtyClosed(STREAM_ENDED.to_owned()));
+        assert_eq!(futures::executor::block_on(handle.write(b"x")), ended);
+        assert_eq!(handle.resize(10, 10), ended);
+        assert_eq!(handle.send(b"x"), ended);
+        assert_eq!(handle.focus(), ended);
+        assert!(rx.try_recv().is_err(), "nothing was queued");
+    }
+
+    #[test]
+    fn a_write_the_attachment_dropped_waits_for_why() {
+        let (handle, mut rx, closed) = input();
+        let mut write = Box::pin(handle.write(b"x"));
+        // The pump drops what it still holds as the attachment goes away.
+        drop(rx.try_recv().unwrap());
+        assert!((&mut write).now_or_never().is_none(), "waits for the reason");
+        let reason = "14 UNAVAILABLE: Connection reset by peer";
+        closed.send(reason.to_owned()).unwrap();
         assert_eq!(
-            futures::executor::block_on(handle.write(b"x")),
-            Err(PtyClosed)
+            futures::executor::block_on(write),
+            Err(PtyClosed(reason.to_owned()))
         );
-        assert_eq!(handle.resize(10, 10), Err(PtyClosed));
-        assert_eq!(handle.send(b"x"), Err(PtyClosed));
-        assert_eq!(handle.focus(), Err(PtyClosed));
+    }
+
+    #[test]
+    fn the_stream_ending_is_why_the_attachment_closed() {
+        let tokio = runtime();
+        let rt = Rt::new(tokio.handle().clone());
+        let (guarded, closed, pump) = guarded(&rt, vec![Ok(PtyEvent::ReplayStart)]);
+        let items: Vec<_> = futures::executor::block_on(guarded.collect());
+        assert!(matches!(items.as_slice(), [Ok(PtyEvent::ReplayStart)]));
+        assert_eq!(futures::executor::block_on(closed), Ok(STREAM_ENDED.to_owned()));
+        assert!(futures::executor::block_on(pump).is_err(), "the pump stops");
+    }
+
+    #[test]
+    fn an_error_ends_the_stream_and_is_why_the_attachment_closed() {
+        let tokio = runtime();
+        let rt = Rt::new(tokio.handle().clone());
+        let items = vec![
+            Ok(PtyEvent::ReplayStart),
+            Err(ApiError::Protocol("PTY size out of range")),
+            Ok(PtyEvent::ReplayEnd),
+        ];
+        let (guarded, closed, _pump) = guarded(&rt, items);
+        let items: Vec<_> = futures::executor::block_on(guarded.collect());
+        assert!(matches!(
+            items.as_slice(),
+            [Ok(PtyEvent::ReplayStart), Err(ApiError::Protocol(_))]
+        ));
+        assert_eq!(
+            futures::executor::block_on(closed),
+            Ok("daemon protocol violation: PTY size out of range".to_owned())
+        );
+    }
+
+    #[test]
+    fn dropping_the_stream_first_is_a_detach() {
+        let tokio = runtime();
+        let rt = Rt::new(tokio.handle().clone());
+        let items = vec![Ok(PtyEvent::ReplayStart), Ok(PtyEvent::ReplayEnd)];
+        let (mut guarded, closed, pump) = guarded(&rt, items);
+        assert!(matches!(
+            futures::executor::block_on(guarded.next()),
+            Some(Ok(PtyEvent::ReplayStart))
+        ));
+        drop(guarded);
+        assert_eq!(futures::executor::block_on(closed), Ok(STREAM_DETACHED.to_owned()));
+        assert!(futures::executor::block_on(pump).is_err(), "the pump stops");
     }
 
     #[test]

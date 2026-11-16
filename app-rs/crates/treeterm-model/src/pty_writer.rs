@@ -69,17 +69,18 @@ impl PtyWriter {
 
     /// Send `data` to the program. Writes are queued in call order; each resolves once
     /// handed to the transport after the daemon accepted the attach. Fails, and spends the
-    /// writer, when the attachment is gone or never came up.
+    /// writer, when the attachment is gone or never came up, with why it ended.
     pub fn write(&self, data: &[u8]) -> impl Future<Output = Result<(), PtyClosed>> + use<> {
         let closed = self.closed.clone();
         let sent = (!closed.load(Ordering::SeqCst)).then(|| self.input.write(data));
         let attached = self.attached.clone();
+        let ended = self.input.closed();
         async move {
             let result = match sent {
-                None => Err(PtyClosed),
+                None => Err(ended.await),
                 Some(sent) => match attached.await {
                     Ok(()) => sent.await,
-                    Err(_canceled) => Err(PtyClosed),
+                    Err(_canceled) => Err(ended.await),
                 },
             };
             if result.is_err() {

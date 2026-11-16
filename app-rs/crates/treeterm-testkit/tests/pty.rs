@@ -5,7 +5,9 @@ use std::time::Duration;
 
 use futures::StreamExt;
 use treeterm_core::daemon::DaemonConnection;
-use treeterm_core::pty::{AttachKind, CreatePty, PtyAttachment, PtyEvent};
+use treeterm_core::pty::{
+    AttachKind, CreatePty, PtyAttachment, PtyClosed, PtyEvent, STREAM_DETACHED, STREAM_ENDED,
+};
 use treeterm_core::rt::Rt;
 use treeterm_testkit::TestDaemon;
 
@@ -126,4 +128,29 @@ async fn attaching_to_an_unknown_pty_ends_the_stream() {
         .await
         .expect("stream should end promptly");
     assert!(next.is_none(), "expected the stream to end, got {next:?}");
+
+    // Writes then fail with why, as Electron's pending writes do.
+    let ended = Err(PtyClosed(STREAM_ENDED.to_owned()));
+    assert_eq!(attachment.input.write(b"x").await, ended);
+    assert_eq!(attachment.input.send(b"x"), ended);
+    assert_eq!(attachment.input.resize(100, 30), ended);
+    assert_eq!(attachment.input.focus(), ended);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn writes_after_a_detach_fail_with_pty_stream_detached() {
+    let daemon = TestDaemon::start();
+    let conn = DaemonConnection::open(&rt(), daemon.socket_path()).await.unwrap().unwrap();
+    let pty = spawn_shell(&conn, &daemon).await;
+    let mut attachment = conn.attach_pty(&pty, AttachKind::Terminal);
+    read_until(&mut attachment, |seen| seen.contains(&PtyEvent::ReplayEnd)).await;
+
+    let PtyAttachment { input, events } = attachment;
+    drop(events);
+    let closed = tokio::time::timeout(Duration::from_secs(5), input.closed())
+        .await
+        .expect("the detach should be recorded promptly");
+    assert_eq!(closed, PtyClosed(STREAM_DETACHED.to_owned()));
+    assert_eq!(input.write(b"x").await, Err(closed));
+    conn.kill_pty(&pty).await.unwrap().unwrap();
 }

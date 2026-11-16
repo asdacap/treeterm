@@ -6,6 +6,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use gpui_kit::{AppContext as _, Entity, Subscription, TestAppContext};
+use treeterm_core::daemon::DaemonConnection;
 use treeterm_core::pty::CreatePty;
 use treeterm_core::settings::TerminalSettings;
 use treeterm_model::terminal::{
@@ -21,7 +22,7 @@ use treeterm_term::palette::DEFAULT_BACKGROUND;
 use treeterm_term::view::ScrollPosition;
 
 mod common;
-use common::{Harness, harness, wait_until};
+use common::{Harness, Proxy, harness, wait_until};
 
 /// A login shell with an empty config dir, so the user's dotfiles stay out of the test.
 fn spawn_shell(h: &Harness) -> String {
@@ -349,6 +350,64 @@ fn an_unknown_pty_shows_disconnected(cx: &mut TestAppContext) {
     let conn = h.conn.clone();
     let model = cx.new(|cx| TerminalModel::new(conn, options("no-such-pty".into()), cx));
     wait_until(cx, &model, |m| *m.overlay() == Overlay::Disconnected);
+}
+
+#[gpui_kit::test]
+fn typing_or_pasting_after_the_stream_ended_shows_why(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    let conn = h.conn.clone();
+    let model = cx.new(|cx| TerminalModel::new(conn, options("no-such-pty".into()), cx));
+    wait_until(cx, &model, |m| *m.overlay() == Overlay::Disconnected);
+    let ended = Overlay::Error("pty stream ended".to_owned());
+
+    // Unfocused, the keystroke is not written, so nothing fails.
+    model.update(cx, |m, cx| m.write_input(b"x", cx));
+    assert_eq!(model.read_with(cx, |m, _| m.overlay().clone()), Overlay::Disconnected);
+
+    model.update(cx, |m, cx| {
+        m.set_focused(true, cx);
+        m.write_input(b"x", cx);
+    });
+    assert_eq!(model.read_with(cx, |m, _| m.overlay().clone()), ended);
+
+    model.update(cx, |m, cx| m.dismiss_overlay(cx));
+    model.update(cx, |m, cx| m.paste("y", cx));
+    wait_until(cx, &model, |m| *m.overlay() == ended);
+}
+
+#[gpui_kit::test]
+fn writes_after_a_stream_error_show_that_error(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    let pty = spawn_shell(&h);
+    let dir = tempfile::Builder::new()
+        .prefix("tt")
+        .tempdir_in("/tmp")
+        .unwrap();
+    let socket = dir.path().join("p.sock");
+    let proxy = Proxy::start(&socket, h.daemon.socket_path());
+    let conn = futures::executor::block_on(DaemonConnection::open(&h.rt, &socket))
+        .unwrap()
+        .unwrap();
+    let model = cx.new(|cx| TerminalModel::new(conn, options(pty), cx));
+    wait_until(cx, &model, |m| *m.overlay() == Overlay::Hidden && !m.screen_text().trim().is_empty());
+
+    // The connection drops mid-stream.
+    drop(proxy);
+    wait_until(cx, &model, |m| matches!(m.overlay(), Overlay::Error(_)));
+    let failed = model.read_with(cx, |m, _| m.overlay().clone());
+
+    model.update(cx, |m, cx| {
+        m.dismiss_overlay(cx);
+        m.set_focused(true, cx);
+        m.write_input(b"x", cx);
+    });
+    assert_eq!(model.read_with(cx, |m, _| m.overlay().clone()), failed);
+
+    model.update(cx, |m, cx| m.dismiss_overlay(cx));
+    model.update(cx, |m, cx| m.paste("y", cx));
+    wait_until(cx, &model, |m| *m.overlay() == failed);
 }
 
 #[gpui_kit::test]

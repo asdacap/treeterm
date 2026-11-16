@@ -447,14 +447,17 @@ impl TerminalModel {
 
     /// Typed input or encoded keys. Dropped while replaying or unfocused: keystrokes can only
     /// come from the focused terminal, and anything else would be the emulator answering a
-    /// query that was answered when it first ran.
+    /// query that was answered when it first ran. A write that fails shows why, as Electron
+    /// does.
     pub fn write_input(&mut self, bytes: &[u8], cx: &mut Context<Self>) {
         let gate = &self.attachment.gate;
         if gate.is_replaying() || !gate.is_focused() {
             return;
         }
-        if self.attachment.input.send(bytes).is_err() {
-            tracing::debug!(pty = %self.options.pty_id, "input dropped: pty stream closed");
+        if let Err(error) = self.attachment.input.send(bytes) {
+            tracing::error!(pty = %self.options.pty_id, %error, "pty write failed");
+            self.overlay = Overlay::Error(error.to_string());
+            cx.notify();
         }
         cx.emit(TerminalEvent::Input(String::from_utf8_lossy(bytes).into_owned()));
         // Typing returns to the newest output, as xterm.js does.
@@ -532,17 +535,21 @@ impl TerminalModel {
     /// Paste text, bracketed when the program asked for it. Not gated on focus: the context
     /// menu pastes into a terminal that may not hold keyboard focus. Claims the PTY's input
     /// first, as the key press or right-click that pastes does in Electron. The paste is
-    /// input like typing (a pasted line ending starts the analyzer's title capture).
+    /// input like typing (a pasted line ending starts the analyzer's title capture). A paste
+    /// that fails shows why, as Electron does, even over a newer attachment: one pending
+    /// across a refresh fails with "pty stream detached".
     pub fn paste(&mut self, text: &str, cx: &mut Context<Self>) {
         self.claim_input();
         let mode = *self.attachment.term.lock().mode();
         let bytes = paste_bytes(text, mode);
         let write = self.attachment.input.write(&bytes);
         cx.emit(TerminalEvent::Input(String::from_utf8_lossy(&bytes).into_owned()));
+        let pty = self.options.pty_id.clone();
         cx.spawn(async move |this, cx| {
-            if write.await.is_err() {
+            if let Err(error) = write.await {
+                tracing::error!(%pty, %error, "paste write failed");
                 match this.update(cx, |model, cx| {
-                    model.overlay = Overlay::Error("pty stream closed".to_owned());
+                    model.overlay = Overlay::Error(error.to_string());
                     cx.notify();
                 }) {
                     Ok(()) | Err(_) => {} // Err: model dropped
