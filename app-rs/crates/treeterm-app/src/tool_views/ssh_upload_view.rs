@@ -4,27 +4,36 @@ use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::{Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::*;
-use gpui_kit::{Context, Entity, FontWeight, Subscription, Window, div, px, rgb};
+use gpui_kit::{App, Context, Entity, FontWeight, Subscription, Window, div, px, rgb};
 use treeterm_model::session_store::SessionStore;
 use treeterm_model::tool_tabs::ssh_upload::{LinkStatus, SshUpload, UploadState, UploadTarget};
 
 use crate::remote_dir_browser::{Inline, RemoteDirBrowserEvent};
 use crate::theme::colors;
-use crate::ui::{DialogButton, FieldStyle, MONO, pane_dialog_button, field, normal_line};
+use crate::ui::{DialogButton, FieldStyle, MONO, field, pane_dialog_button};
 
 pub struct SshUploadView {
     model: Entity<SshUpload>,
     /// Browses the host's directories.
     session: Entity<SessionStore>,
+    /// The chosen file, read-only: it can be selected and scrolled, not typed into.
+    local_path: Entity<InputState>,
     remote_dir: Entity<InputState>,
     /// The directory browser under the remote directory, shown by "Browse...".
     browser: Inline,
     _subscriptions: Vec<Subscription>,
 }
 
+/// The local field's text (`localPath ?? ''`).
+fn chosen_file(model: &Entity<SshUpload>, cx: &App) -> String {
+    model.read(cx).local_path().map(|path| path.to_string_lossy().into_owned()).unwrap_or_default()
+}
+
 impl SshUploadView {
     pub fn new(model: Entity<SshUpload>, session: Entity<SessionStore>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let start = model.read(cx).remote_dir(cx);
+        let chosen = chosen_file(&model, cx);
+        let local_path = cx.new(|cx| InputState::new(window, cx).placeholder("No file selected").default_value(chosen));
         let remote_dir = cx.new(|cx| InputState::new(window, cx).placeholder("/path/on/remote").default_value(start));
         let typed = cx.subscribe(&remote_dir, |view, input, event: &InputEvent, cx| {
             if let InputEvent::Change = event {
@@ -32,8 +41,14 @@ impl SshUploadView {
                 view.model.update(cx, |m, cx| m.set_remote_dir(&text, cx));
             }
         });
-        let observe = cx.observe(&model, |_, _, cx| cx.notify());
-        Self { model, session, remote_dir, browser: Inline::Hidden, _subscriptions: vec![typed, observe] }
+        let observe = cx.observe_in(&model, window, |view, model, window, cx| {
+            let chosen = chosen_file(&model, cx);
+            if view.local_path.read(cx).value() != chosen {
+                view.local_path.update(cx, |input, cx| input.set_value(chosen, window, cx));
+            }
+            cx.notify();
+        });
+        Self { model, session, local_path, remote_dir, browser: Inline::Hidden, _subscriptions: vec![typed, observe] }
     }
 
     /// "Choose file…": the native picker (local files), with its default "Open" button.
@@ -86,12 +101,7 @@ impl Render for SshUploadView {
         let c = colors(cx);
         let (secondary, primary, border, field_bg) = (c.text_secondary, c.text_primary, c.border, c.bg_secondary);
         let model = self.model.read(cx);
-        let (target, local, upload, can_upload) = (
-            model.target(cx),
-            model.local_path().map(|p| p.to_string_lossy().into_owned()),
-            model.upload_state().clone(),
-            model.can_upload(cx),
-        );
+        let (target, upload, can_upload) = (model.target(cx), model.upload_state().clone(), model.can_upload(cx));
         // `.ssh-pane-output`: padded 8px, monospace 12px, line-height 1.5.
         let root = v_flex()
             .id("ssh-upload")
@@ -139,22 +149,8 @@ impl Render for SshUploadView {
             mono: true,
             height: 24.,
         };
-        let local_field = div()
-            .flex_1()
-            .min_w_0()
-            .h(px(24.))
-            .px(px(8.))
-            .flex()
-            .items_center()
-            .rounded(px(4.))
-            .border_1()
-            .border_color(border)
-            .bg(field_bg)
-            .line_height(normal_line(12.))
-            .child(match local {
-                Some(path) => div().truncate().child(path),
-                None => div().text_color(rgb(0x757575)).child("No file selected"),
-            });
+        // `<input readOnly>`: the whole path can be selected, copied and scrolled to its end.
+        let local_field = div().flex_1().min_w_0().child(field(&self.local_path, style, window, cx).readonly(true));
         root.gap(px(12.))
             .child(div().font_weight(FontWeight::SEMIBOLD).child(format!("Upload to {name}")))
             .when_some(
