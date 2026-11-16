@@ -1009,7 +1009,9 @@ impl SessionStore {
         let llm = self.llm.clone();
         let remote = self.remote.clone();
         let traffic = self.traffic.update(cx, |traffic, cx| traffic.workspace(&id, cx));
-        let store = cx.new(|cx| WorkspaceStore::new(workspace, conn, registry, settings, llm, remote, traffic, cx));
+        let connection = self.connection;
+        let store =
+            cx.new(|cx| WorkspaceStore::new(workspace, conn, registry, settings, llm, remote, traffic, connection, cx));
         let owned = id.clone();
         let subscription = cx.subscribe(&store, move |session, store, event: &WorkspaceEvent, cx| match event {
             WorkspaceEvent::Changed => session.enqueue_content_sync(&owned, cx),
@@ -2530,6 +2532,11 @@ impl SessionStore {
             for id in self.dirty_workspaces() {
                 self.enqueue_content_sync(&id, cx);
             }
+        }
+        // Attention pauses while the connection is down (`workspaceAttentionCoordinator`).
+        let stores: Vec<Entity<WorkspaceStore>> = self.entries.values().filter_map(|e| e.store().cloned()).collect();
+        for store in stores {
+            store.update(cx, |w, cx| w.set_connection_status(status, cx));
         }
         cx.notify();
     }

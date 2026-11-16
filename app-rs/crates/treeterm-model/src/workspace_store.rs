@@ -29,6 +29,7 @@ use crate::analyzer::{AnalyzerEvent, AnalyzerModel, LlmService};
 use crate::code_intel::links::Opening;
 use crate::apps::{AI_HARNESS_PREFIX, AppKind, AppRegistry};
 use crate::pty_writer::PtyWriter;
+use crate::session_store::ConnectionStatus;
 use crate::terminal::{ScrollbarVisibility, SelectionCopy, TerminalEvent, TerminalModel, TerminalOptions};
 
 /// A workspace as the app uses it: the file body joined with its ref.
@@ -266,6 +267,9 @@ pub struct WorkspaceStore {
     flash: AttentionFlash,
     /// The window shows this workspace.
     viewed: bool,
+    /// The session's connection. Attention is paused while it is down: a session that is
+    /// not connected is unavailable to the coordinator, which tracks nothing until it is.
+    connection: ConnectionStatus,
     /// Web App tabs' servers and pages (their PTYs are ordinary terminal tabs).
     web_apps: HashMap<String, WebAppTab>,
     /// The ssh host this workspace lives on (web apps forward their port from it).
@@ -340,6 +344,7 @@ impl WorkspaceStore {
         llm: Option<LlmService>,
         remote: Option<crate::web_app::RemoteHost>,
         traffic: Entity<crate::traffic::TrafficMeter>,
+        connection: ConnectionStatus,
         cx: &mut Context<Self>,
     ) -> Self {
         let traffic_counter = traffic.read(cx).counter().clone();
@@ -357,6 +362,7 @@ impl WorkspaceStore {
             attention_tracker: AttentionTracker::default(),
             flash: AttentionFlash::default(),
             viewed: false,
+            connection,
             web_apps: HashMap::new(),
             remote,
             llm,
@@ -675,6 +681,15 @@ impl WorkspaceStore {
         }
     }
 
+    /// The session's connection went down or came back. Down, attention forgets what each
+    /// tab was doing and records nothing; back, it starts again from the current state.
+    pub(crate) fn set_connection_status(&mut self, status: ConnectionStatus, cx: &mut Context<Self>) {
+        if self.connection != status {
+            self.connection = status;
+            self.observe_attention(false, cx);
+        }
+    }
+
     /// Run the attention tracker over the current state and apply what it decides.
     fn observe_attention(&mut self, activity_changed: bool, cx: &mut Context<Self>) {
         // Before the tracker: the flash compares the unread marker from before this change,
@@ -691,7 +706,11 @@ impl WorkspaceStore {
         } else {
             AttentionView::Other
         };
-        let session = ObservedSession { session_id: "", status: SessionStatus::Ready(&observed) };
+        let status = match self.connection {
+            ConnectionStatus::Connected => SessionStatus::Ready(&observed),
+            ConnectionStatus::Disconnected => SessionStatus::Unavailable,
+        };
+        let session = ObservedSession { session_id: "", status };
         let actions = match self.attention_tracker.observe(session, &self.activity, view, activity_changed) {
             Ok(actions) => actions,
             Err(error) => return tracing::warn!(%error, workspace = %self.workspace.id, "attention"),

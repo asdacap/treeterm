@@ -2278,6 +2278,104 @@ fn finished_work_in_an_unviewed_workspace_is_marked_unread_until_viewed(cx: &mut
     });
 }
 
+/// A terminal tab added to `workspace`, attached, its shell prompt settled (that first burst
+/// is not reported as work).
+fn settled_terminal(
+    cx: &mut TestAppContext,
+    workspace: &Entity<WorkspaceStore>,
+) -> (String, Entity<treeterm_model::terminal::TerminalModel>) {
+    let tab = workspace.update(cx, |w, cx| w.add_tab("terminal", cx)).unwrap();
+    wait_until_app(cx, workspace, |w, _| terminal_of(w, &tab).is_some());
+    let terminal = workspace.read_with(cx, |w, _| terminal_of(w, &tab)).unwrap();
+    wait_until_app(cx, &terminal, |t, _| !t.screen_text().trim().is_empty());
+    for _ in 0..50 {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        cx.executor().advance_clock(std::time::Duration::from_millis(100));
+        cx.run_until_parked();
+    }
+    (tab, terminal)
+}
+
+/// Run `command` in `tab`'s `terminal` and pump until its output went Working and settled
+/// back to Idle.
+fn run_until_settled(
+    cx: &mut TestAppContext,
+    workspace: &Entity<WorkspaceStore>,
+    tab: &str,
+    terminal: &Entity<treeterm_model::terminal::TerminalModel>,
+    command: &str,
+) {
+    use treeterm_model::workspace_store::ActivityState;
+    let before = workspace.read_with(cx, |w, _| w.activity_states().transitions(tab).len());
+    terminal.update(cx, |t, cx| {
+        t.set_focused(true, cx);
+        t.write_input(format!("{command}\r").as_bytes(), cx);
+    });
+    for _ in 0..300 {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        cx.executor().advance_clock(std::time::Duration::from_millis(100));
+        cx.run_until_parked();
+        let settled = workspace.read_with(cx, |w, _| {
+            let since = &w.activity_states().transitions(tab)[before..];
+            since.iter().any(|t| t.to == ActivityState::Working) && w.activity(tab) == ActivityState::Idle
+        });
+        if settled {
+            return;
+        }
+    }
+    panic!("`{command}` never went Working and back to Idle");
+}
+
+#[gpui_kit::test]
+fn finished_work_is_not_marked_unread_while_the_connection_is_down(cx: &mut TestAppContext) {
+    use treeterm_model::session_store::ConnectionStatus;
+    cx.executor().allow_parking();
+    let h = harness();
+    std::fs::write(h.daemon.workspaces_dir().join("a.json"), body("a", None)).unwrap();
+    publish(&h, &["a"]);
+    let mut settings = treeterm_core::settings::Settings::default();
+    settings.terminal_analyzer.idle_debounce = std::time::Duration::from_millis(300);
+    let conn = h.conn.clone();
+    let settings_store = cx.new(|_| SettingsStore::in_memory(settings));
+    let store = cx.new(|cx| SessionStore::new(conn, "client-a".into(), settings_store, None, cx.new(ConnectionTraffic::new), cx));
+    let recorded = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let sink = recorded.clone();
+    cx.update(|cx| {
+        cx.subscribe(&store, move |_, event: &SessionEvent, _| {
+            if let SessionEvent::AttentionRecorded(id) = event {
+                sink.borrow_mut().push(id.clone());
+            }
+        })
+        .detach()
+    });
+    // The window shows no session: no workspace is viewed.
+    wait_until(cx, &store, |s| loaded(s, "a"));
+    let a = store.read_with(cx, |s, _| ws(s, "a"));
+    let (tab_a, terminal_a) = settled_terminal(cx, &a);
+
+    // The connection goes down: work that finishes meanwhile is neither marked nor rung.
+    store.update(cx, |s, cx| s.set_connection_status(ConnectionStatus::Disconnected, cx));
+    run_until_settled(cx, &a, &tab_a, &terminal_a, "echo while-down");
+    assert!(recorded.borrow().is_empty());
+    assert!(!a.read_with(cx, |w, _| w.has_unread_attention()));
+
+    // Nor in a workspace added while it is down.
+    let path = h.daemon.root().to_string_lossy().into_owned();
+    let file = treeterm_core::wire::workspace_file::parse_workspace_file(body("b", None).as_bytes()).unwrap();
+    store.update(cx, |s, cx| drop(s.add_workspace(Workspace { id: "b".into(), path, file }, cx)));
+    let b = store.read_with(cx, |s, _| ws(s, "b"));
+    let (tab_b, terminal_b) = settled_terminal(cx, &b);
+    run_until_settled(cx, &b, &tab_b, &terminal_b, "echo added-while-down");
+    assert!(recorded.borrow().is_empty());
+    assert!(!b.read_with(cx, |w, _| w.has_unread_attention()));
+
+    // Back up, attention resumes.
+    store.update(cx, |s, cx| s.set_connection_status(ConnectionStatus::Connected, cx));
+    run_until_settled(cx, &b, &tab_b, &terminal_b, "echo back-up");
+    assert_eq!(*recorded.borrow(), vec!["b".to_owned()]);
+    assert!(b.read_with(cx, |w, _| w.has_unread_attention()));
+}
+
 fn attention(revision: &str, acknowledged_revision: &str) -> WorkspaceAttention {
     WorkspaceAttention { revision: revision.to_owned(), acknowledged_revision: acknowledged_revision.to_owned() }
 }
