@@ -12,6 +12,7 @@ use gpui_kit::component::diff::{
     DiffLineRange, DiffMode, DiffSide, DiffState,
 };
 use gpui_kit::component::input::{InputEvent, TextareaState};
+use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{
@@ -24,7 +25,7 @@ use treeterm_model::review::{CommentDraft, GitOp, ImageSides, ReviewModel, Stage
 
 use super::ReviewView;
 use crate::comment_ui::{CommentActions, Placement, comment_display, comment_input};
-use super::parts::{change_stats, checkbox, outline_button, plain_icon, spinner, status_badge};
+use super::parts::{change_stats, checkbox, disabled_checkbox, outline_button, plain_icon, spinner, status_badge};
 use crate::file_browser_view::language_for;
 use crate::theme::colors;
 use treeterm_model::review_find::{DIFF_CONTEXT, MIN_COLLAPSED_LINES};
@@ -127,7 +128,7 @@ impl ReviewView {
         let all_viewed = !order.is_empty() && shown_viewed == order.len();
         let paths: Vec<String> = order.iter().map(|f| f.path.clone()).collect();
         let listed = paths.clone();
-        // With no file listed (a commit's diff loading), both are disabled.
+        // With no file listed (a commit's diff loading, or a filter leaving none), both are disabled.
         let enabled = !order.is_empty();
         // `.stacked-diff-list-header`; its bottom border is the first file's top border
         // (GPUI Kit borders every file header).
@@ -141,12 +142,14 @@ impl ReviewView {
             .line_height(px(14.))
             .text_color(secondary)
             .child(
+                // The `<label>` keeps its pointer cursor and title over a disabled box.
                 h_flex()
                     .id("check-all-viewed")
                     .gap(px(6.))
                     .items_center()
                     .cursor_pointer()
-                    .child(checkbox(all_viewed, cx).when(!enabled, |d| d.opacity(0.5)))
+                    .tooltip(|window, cx| Tooltip::new("Mark every listed file as viewed").build(window, cx))
+                    .child(if enabled { checkbox(all_viewed, cx) } else { disabled_checkbox() })
                     .child(format!("{shown_viewed}/{} viewed", order.len()))
                     .when(enabled, |d| {
                         d.on_click(cx.listener(move |view, _: &ClickEvent, _, cx| {

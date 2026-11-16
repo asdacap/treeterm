@@ -160,6 +160,11 @@ pub fn checkbox(checked: bool, cx: &App) -> Div {
         .when(!checked, |d| d.bg(gpui_kit::white()).border_1().border_color(rgb(0x767676)))
 }
 
+/// A disabled, unchecked Chromium checkbox: its white fill at 60%, its grey border at 30%.
+pub fn disabled_checkbox() -> Div {
+    div().size(px(13.)).flex_shrink_0().rounded(px(2.)).bg(rgba(0xffffff99)).border_1().border_color(rgba(0x7676764d))
+}
+
 /// A text `<input>`: a `height`-tall bordered box (`pad` left and right) on the primary
 /// background, the GPUI Kit input inside it bare and centred.
 pub fn framed_input(
