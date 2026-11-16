@@ -324,9 +324,15 @@ The chrome was matched to Electron's computed styles, measured side by side on o
 - Review's find in the diff searches only files whose rows are drawn: a diff too large to draw
   is searched once "Load anyway" draws it. Electron listed its matches but could not show
   them (choosing one opened the file on the size notice).
-- Review measures a diff's size from git's whole-file patch (`git diff -U1000000`), so with
-  "Ignore whitespace changes" on, unchanged lines count as the new side has them; Electron
-  read both files.
+- Review measures a diff's size from git's whole-file patch (`git diff -U1000000`); Electron
+  read both files. With "Ignore whitespace changes" on, unchanged lines count as the new side
+  has them. A file whose patch has no hunks is never too large: a pure rename, a mode-only
+  change, or, with "Ignore whitespace changes" on, a renamed file or mode change whose only
+  edits are whitespace (`git diff -w` prints its header alone). Electron measured both files,
+  so a large file in any of these cases showed "This diff is large (...)" and "Load anyway".
+- Review's "This diff is large (N lines, K KB)" groups digits the en-US way (`25,003`) whatever
+  Electron's locale; Electron's `toLocaleString` grouped them as its locale does (`25.003` in
+  German, Persian digits in Farsi).
 - Review's fresh conflict check before a merge shows "Checking for conflicts..." and disables
   the header's actions while it runs (Electron showed nothing and left them clickable).
 - A failed merge's output ends with `Merge failed: <error>` once (Electron doubled the prefix
