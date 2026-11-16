@@ -2342,16 +2342,7 @@ fn tabset_strip(
 /// mounted while it shows an operation's failure: the other Review tabs' file trees start
 /// afresh when shown again.
 fn unmount_hidden_reviews(connected: &Connected, session_shown: bool, cx: &mut Context<AppView>) {
-    let mounted = {
-        let session = connected.session.read(cx);
-        match session.active_workspace().and_then(|id| session.entry(id)) {
-            Some(WorkspaceEntry::Loaded(store) | WorkspaceEntry::OperationError { store, .. }) if session_shown => {
-                Some(store.entity_id())
-            }
-            Some(WorkspaceEntry::Loaded(_) | WorkspaceEntry::OperationError { .. } | WorkspaceEntry::Loading { .. } | WorkspaceEntry::Error { .. })
-            | None => None,
-        }
-    };
+    let mounted = connected.session.read(cx).mounted_workspace().filter(|_| session_shown).map(Entity::entity_id);
     let reviews: Vec<Entity<crate::review_view::ReviewView>> = connected.review_views.values().cloned().collect();
     for view in reviews {
         if mounted != Some(view.read(cx).workspace_id()) {
