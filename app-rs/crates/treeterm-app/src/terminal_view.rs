@@ -25,7 +25,7 @@ use treeterm_model::zoom::ZoomStore;
 use treeterm_term::alacritty_terminal::vte::ansi::Rgb;
 use treeterm_term::fit::WidthLimit;
 use treeterm_term::keys::{KeyInput, KeyOptions, Modifiers, encode_key};
-use treeterm_term::mouse::{self, MouseAction, MouseInput};
+use treeterm_term::mouse::{self, MouseAction, MouseInput, WheelTarget};
 use treeterm_term::palette::Palette;
 use treeterm_term::view::ScrollPosition;
 
@@ -483,6 +483,9 @@ impl TerminalView {
             ScrollDelta::Lines(delta) => delta.y,
             ScrollDelta::Pixels(delta) => f32::from(delta.y) / f32::from(geometry.cell.height),
         };
+        let mode = *self.model.read(cx).term().lock().mode();
+        let target = WheelTarget::of(mode, event.modifiers.shift);
+        let delta = target.lines(delta, event.modifiers.alt);
         // Positive is toward older output.
         if delta > 0. {
             self.model.update(cx, |model, cx| model.wheel_up(cx));
@@ -494,21 +497,22 @@ impl TerminalView {
         if whole == 0 {
             return;
         }
-        let mode = *self.model.read(cx).term().lock().mode();
-        if mouse::mouse_mode_active(mode) && !event.modifiers.shift {
-            let action = if whole > 0 { MouseAction::WheelUp } else { MouseAction::WheelDown };
-            for _ in 0..whole.unsigned_abs().min(10) {
-                if !self.report_mouse(action, event.position, event.modifiers, cx) {
-                    break;
+        match target {
+            WheelTarget::Report => {
+                let action = if whole > 0 { MouseAction::WheelUp } else { MouseAction::WheelDown };
+                for _ in 0..whole.unsigned_abs().min(10) {
+                    if !self.report_mouse(action, event.position, event.modifiers, cx) {
+                        break;
+                    }
                 }
             }
-            return;
+            WheelTarget::Arrows => {
+                if let Some(bytes) = mouse::alternate_scroll(whole, mode) {
+                    self.model.update(cx, |model, cx| model.write_input(&bytes, cx));
+                }
+            }
+            WheelTarget::Scrollback => self.model.update(cx, |model, cx| model.scroll_lines(whole, cx)),
         }
-        if let Some(bytes) = mouse::alternate_scroll(whole, mode) {
-            self.model.update(cx, |model, cx| model.write_input(&bytes, cx));
-            return;
-        }
-        self.model.update(cx, |model, cx| model.scroll_lines(whole, cx));
     }
 
     // ---- actions -----------------------------------------------------------------------

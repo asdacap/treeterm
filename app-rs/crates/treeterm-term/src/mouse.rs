@@ -100,6 +100,42 @@ pub fn encode_mouse(input: MouseInput, mode: TermMode) -> Option<Vec<u8>> {
     Some(out)
 }
 
+/// xterm.js's `fastScrollSensitivity`, with its `fastScrollModifier` Alt: Alt/Option+wheel
+/// scrolls the scrollback this many times faster.
+pub const FAST_SCROLL_SENSITIVITY: f32 = 5.;
+
+/// Where a wheel turn goes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WheelTarget {
+    /// To a program tracking the mouse; Shift keeps the wheel for the terminal.
+    Report,
+    /// Arrow keys, on the alternate screen with alternate scroll on ([`alternate_scroll`]).
+    Arrows,
+    Scrollback,
+}
+
+impl WheelTarget {
+    pub fn of(mode: TermMode, shift: bool) -> Self {
+        if mouse_mode_active(mode) && !shift {
+            WheelTarget::Report
+        } else if mode.contains(TermMode::ALT_SCREEN | TermMode::ALTERNATE_SCROLL) && !mouse_mode_active(mode) {
+            WheelTarget::Arrows
+        } else {
+            WheelTarget::Scrollback
+        }
+    }
+
+    /// The wheel's motion in lines as this target takes it: with Alt held the scrollback
+    /// scrolls [`FAST_SCROLL_SENSITIVITY`] times faster, as in xterm.js; reports and arrow
+    /// keys are unchanged.
+    pub fn lines(self, lines: f32, alt: bool) -> f32 {
+        match self {
+            WheelTarget::Scrollback if alt => lines * FAST_SCROLL_SENSITIVITY,
+            WheelTarget::Scrollback | WheelTarget::Report | WheelTarget::Arrows => lines,
+        }
+    }
+}
+
 /// How far past the grid, in pixels, a selection drag scrolls at full speed (xterm.js's
 /// `DRAG_SCROLL_MAX_THRESHOLD`).
 const DRAG_SCROLL_MAX_THRESHOLD: f32 = 50.;
@@ -239,6 +275,27 @@ mod tests {
             alternate_scroll(1, mode | TermMode::MOUSE_REPORT_CLICK),
             None
         );
+    }
+
+    #[test]
+    fn the_wheel_goes_to_a_tracking_program_then_arrow_keys_then_the_scrollback() {
+        let tracking = TermMode::MOUSE_REPORT_CLICK;
+        let alternate = TermMode::ALT_SCREEN | TermMode::ALTERNATE_SCROLL;
+        assert_eq!(WheelTarget::of(tracking, false), WheelTarget::Report);
+        assert_eq!(WheelTarget::of(tracking | alternate, false), WheelTarget::Report);
+        assert_eq!(WheelTarget::of(tracking | alternate, true), WheelTarget::Scrollback, "Shift keeps it");
+        assert_eq!(WheelTarget::of(alternate, false), WheelTarget::Arrows);
+        assert_eq!(WheelTarget::of(alternate, true), WheelTarget::Arrows);
+        assert_eq!(WheelTarget::of(TermMode::ALT_SCREEN, false), WheelTarget::Scrollback);
+        assert_eq!(WheelTarget::of(TermMode::empty(), false), WheelTarget::Scrollback);
+    }
+
+    #[test]
+    fn alt_scrolls_only_the_scrollback_five_times_faster() {
+        assert_eq!(WheelTarget::Scrollback.lines(1.5, true), 7.5);
+        assert_eq!(WheelTarget::Scrollback.lines(-2., false), -2.);
+        assert_eq!(WheelTarget::Report.lines(1.5, true), 1.5);
+        assert_eq!(WheelTarget::Arrows.lines(1.5, true), 1.5);
     }
 
     #[test]

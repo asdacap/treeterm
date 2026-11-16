@@ -16,7 +16,8 @@
 //! - `drag <x1> <y1> <x2> <y2> [modifiers] [hold]` — press, move with the button held,
 //!   release (with `hold`, the button stays held, for a screenshot mid-drag); `release <x>
 //!   <y>` — the held button comes up there
-//! - `scroll <x> <y> <dy>` — a wheel scroll of `dy` points over (x, y), in window points
+//! - `scroll <x> <y> <dy> [modifiers]` — a wheel scroll of `dy` points over (x, y), in window
+//!   points
 //! - `screenshot <path.png>` — render the last frame offscreen (no screen-capture permission)
 
 use std::path::PathBuf;
@@ -299,14 +300,15 @@ fn handle(line: &str, window: AnyWindowHandle, view: &Entity<AppView>, cx: &mut 
                 Ok(json!({ "ok": true }))
             }
             "scroll" => {
-                // `scroll <x> <y> <dy>`: a wheel scroll of `dy` points over (x, y); a negative
-                // `dy` scrolls the content up (reveals what is below).
+                // `scroll <x> <y> <dy> [modifiers]`: a wheel scroll of `dy` points over (x, y);
+                // a negative `dy` scrolls the content up (reveals what is below).
+                let (rest, keys) = trailing_modifiers(rest);
                 let coords: Vec<f32> = rest.split_whitespace().filter_map(|v| v.parse().ok()).collect();
                 let [x, y, dy] = coords[..] else {
-                    return Err("usage: scroll <x> <y> <dy>".to_owned());
+                    return Err("usage: scroll <x> <y> <dy> [modifiers]".to_owned());
                 };
                 let position = gpui_kit::point(gpui_kit::px(x), gpui_kit::px(y));
-                let modifiers = gpui_kit::Modifiers::default();
+                let modifiers = modifiers(keys)?;
                 window.dispatch_event(
                     gpui_kit::PlatformInput::MouseMove(gpui_kit::MouseMoveEvent { position, pressed_button: None, modifiers }),
                     cx,

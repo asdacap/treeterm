@@ -75,7 +75,7 @@ Done (tested against a real in-process daemon unless noted):
   preedit, width-limit strip, scrollbar), xterm.js-compatible keys/mouse/paste, xterm.js's
   selection gestures (its word separators for a double-click, Shift+click extends, Alt+drag
   selects columns, Alt+click moves the cursor, a drag past the top or bottom scrolls, a
-  right-click on macOS selects the word first), links (an OSC 8
+  right-click on macOS selects the word first, Alt+wheel scrolls 5x), links (an OSC 8
   `http(s)` hyperlink opens in the browser on a click, a URL in the text on Cmd/Ctrl+click;
   underlined, with a pointer cursor, under the pointer), scroll badge/pin, ALT SCREEN, size
   mismatch, overlays, refresh, status bar (activity, idle detector, col limit). 200k lines
