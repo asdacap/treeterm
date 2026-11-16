@@ -137,8 +137,50 @@ struct Connected {
     /// The terminal model the last render showed: a terminal coming into view fits again and
     /// takes focus.
     shown_terminal: Option<EntityId>,
+    /// The shown loading workspace's git output (`AutoScrollPre`).
+    loading_output: LoadingOutput,
     _selection: Subscription,
     _session_events: Subscription,
+}
+
+/// A loading workspace's output box, kept scrolled to its newest line (`AutoScrollPre`).
+#[derive(Default)]
+struct LoadingOutput {
+    scroll: gpui_kit::ScrollHandle,
+    /// The workspace and the number of lines the box last scrolled to the bottom of.
+    seen: Option<(String, usize)>,
+}
+
+impl LoadingOutput {
+    /// `workspace`'s box shows `lines` lines: when it newly shows or a line arrived, scroll to
+    /// the bottom on this frame. A box scrolled up stays put until the next line.
+    fn follow(&mut self, workspace: &str, lines: usize) {
+        if self.seen.as_ref().is_some_and(|(shown, count)| shown == workspace && *count == lines) {
+            return;
+        }
+        self.scroll.scroll_to_bottom();
+        self.seen = Some((workspace.to_owned(), lines));
+    }
+}
+
+/// `.workspace-loading-output`: the lines in a scrolling monospace box.
+fn loading_output(lines: Vec<String>, scroll: &gpui_kit::ScrollHandle, cx: &App) -> AnyElement {
+    let c = colors(cx);
+    v_flex()
+        .id("workspace-loading-output")
+        .flex_1()
+        .overflow_y_scroll()
+        .track_scroll(scroll)
+        .p(px(12.))
+        .rounded(px(4.))
+        .border_1()
+        .border_color(c.border)
+        .bg(c.bg_secondary)
+        .font_family("Menlo")
+        .text_size(px(12.))
+        .text_color(c.text_secondary)
+        .children(lines.into_iter().map(|line| div().child(line)))
+        .into_any_element()
 }
 
 /// Why a session view is built.
@@ -400,6 +442,7 @@ impl AppView {
             tool_views: crate::tool_views::ToolViews::new(self.settings.clone()),
             focus_pending: false,
             shown_terminal: None,
+            loading_output: LoadingOutput::default(),
             _selection: selection,
             _session_events: session_events,
         }
@@ -2069,8 +2112,8 @@ fn workspace_pane(
         None => return centered(div().text_color(secondary).child("Workspace was removed")),
         Some(WorkspaceEntry::Loading { message, output, .. }) => {
             // `.workspace-loading`: git's output while a worktree is being created.
+            connected.loading_output.follow(&id, output.len());
             let tail: Vec<String> = output.iter().rev().take(200).rev().cloned().collect();
-            let c = colors(cx);
             return v_flex()
                 .flex_1()
                 .h_full()
@@ -2091,21 +2134,7 @@ fn workspace_pane(
                         )
                         .child(message.clone()),
                 )
-                .child(
-                    v_flex()
-                        .id("workspace-loading-output")
-                        .flex_1()
-                        .overflow_y_scroll()
-                        .p(px(12.))
-                        .rounded(px(4.))
-                        .border_1()
-                        .border_color(c.border)
-                        .bg(c.bg_secondary)
-                        .font_family("Menlo")
-                        .text_size(px(12.))
-                        .text_color(secondary)
-                        .children(tail.into_iter().map(|line| div().child(line))),
-                )
+                .child(loading_output(tail, &connected.loading_output.scroll, cx))
                 .into_any_element();
         }
         Some(WorkspaceEntry::Error { error: reason, .. }) => {
@@ -3059,6 +3088,78 @@ mod tests {
         assert_eq!(writes.get(), 1, "written once");
         assert_eq!(cx.update(|window, cx| window.active_dialog_count(cx)), 1, "Settings closed once");
         assert_eq!(below.strong_count(), 1, "the confirmation stays");
+    }
+
+    /// A 200px-tall loading box of `lines` lines, as a loading workspace shows it.
+    struct LoadingBox {
+        workspace: &'static str,
+        lines: usize,
+        output: LoadingOutput,
+    }
+
+    impl Render for LoadingBox {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            self.output.follow(self.workspace, self.lines);
+            let lines = (0..self.lines).map(|ix| format!("line {ix}")).collect();
+            v_flex().h(px(200.)).child(loading_output(lines, &self.output.scroll, cx))
+        }
+    }
+
+    fn draw(cx: &mut VisualTestContext) {
+        for _ in 0..3 {
+            cx.run_until_parked();
+            cx.update(|window, cx| {
+                window.draw(cx).clear(cx);
+                window.simulate_next_frame(cx);
+            });
+        }
+    }
+
+    /// How far the box is scrolled, and how far it can be.
+    fn scrolled(view: &Entity<LoadingBox>, cx: &mut VisualTestContext) -> (gpui_kit::Pixels, gpui_kit::Pixels) {
+        cx.update(|_, cx| {
+            let scroll = &view.read(cx).output.scroll;
+            (-scroll.offset().y, scroll.max_offset().y)
+        })
+    }
+
+    #[gpui_kit::test]
+    fn the_loading_output_follows_its_newest_line(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        cx.update(crate::theme::install);
+        let (view, cx) =
+            cx.add_window_view(|_, _| LoadingBox { workspace: "a", lines: 100, output: LoadingOutput::default() });
+        draw(cx);
+        let (offset, max) = scrolled(&view, cx);
+        assert!(max > px(0.), "100 lines overflow the box");
+        assert_eq!(offset, max, "shown at its newest line");
+
+        // Scrolled up, it stays while no line arrives.
+        view.update(cx, |view, cx| {
+            view.output.scroll.set_offset(gpui_kit::point(px(0.), px(0.)));
+            cx.notify();
+        });
+        draw(cx);
+        assert_eq!(scrolled(&view, cx).0, px(0.));
+
+        // A new line brings the bottom back.
+        view.update(cx, |view, cx| {
+            view.lines += 1;
+            cx.notify();
+        });
+        draw(cx);
+        let (offset, max) = scrolled(&view, cx);
+        assert_eq!(offset, max);
+
+        // So does another workspace's box, scrolled up as this one was.
+        view.update(cx, |view, cx| {
+            view.output.scroll.set_offset(gpui_kit::point(px(0.), px(0.)));
+            view.workspace = "b";
+            cx.notify();
+        });
+        draw(cx);
+        let (offset, max) = scrolled(&view, cx);
+        assert_eq!(offset, max);
     }
 
     #[gpui_kit::test]
