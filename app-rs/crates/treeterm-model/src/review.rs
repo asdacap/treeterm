@@ -1462,7 +1462,9 @@ impl ReviewModel {
         }));
     }
 
-    /// Re-read `HEAD` and mark comments outdated whose line moved since.
+    /// Re-read `HEAD` and mark comments outdated whose line moved since (`loadReviews`). A
+    /// failed update is the tab's notice; an unreadable `HEAD` (no commit yet) is not, as
+    /// Electron's `getHeadCommitHash` answers it without throwing (commenting says why).
     fn refresh_head(&mut self, cx: &mut Context<Self>) {
         let (git, workspace, blame) = (self.git.clone(), self.workspace.clone(), self.blame());
         let path = self.path.clone();
@@ -1472,7 +1474,7 @@ impl ReviewModel {
                 Ok(hash) => ReviewCommentStore::new(Later::new(workspace, cx.clone(), blame))
                     .update_outdated_review_comments(hash)
                     .await
-                    .map_err(|error| format!("Failed to update review comments: {error}")),
+                    .map_err(|error| format!("Failed to load review state: {error}")),
                 Err(_) => Ok(()),
             };
             match this.update(cx, |model, cx| {

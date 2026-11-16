@@ -1342,6 +1342,36 @@ fn the_parents_branch_changing_keeps_the_review_and_moves_its_default_base(cx: &
 }
 
 #[gpui_kit::test]
+fn review_state_that_cannot_load_shows_as_the_tabs_notice(cx: &mut TestAppContext) {
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let repo = TempRepo::new(&h);
+    repo.write("a.txt", "a\n");
+    let store = open_store(cx, &h);
+    let workspace = open_repo_workspace(cx, &h, &store, &repo);
+    let review = open_review(cx, &workspace);
+    wait_review(cx, &review, "loaded", |r, _| !r.is_loading() && matches!(r.head(), Head::Known(_)));
+    assert_eq!(review.read_with(cx, |r, _| r.notice().clone()), Notice::Clear);
+
+    // The comments cannot be brought up to date (`loadReviews` throws).
+    workspace.update(cx, |w, cx| w.update_metadata("reviewComments", "not json", cx));
+    review.update(cx, |r, cx| r.refresh(cx));
+    wait_review(cx, &review, "refreshed", |r, _| !r.is_refreshing());
+    let notice = review.read_with(cx, |r, _| r.notice().clone());
+    assert!(matches!(&notice, Notice::Error(e) if e.starts_with("Failed to load review state: ")), "{notice:?}");
+    review.update(cx, |r, cx| r.dismiss_notice(cx));
+
+    // No commit to read `HEAD` from: no notice (Electron's `success: false`).
+    workspace.update(cx, |w, cx| w.update_metadata("reviewComments", "[]", cx));
+    repo.git(&["update-ref", "-d", "HEAD"]);
+    review.update(cx, |r, cx| r.refresh(cx));
+    wait_review(cx, &review, "refreshed", |r, _| !r.is_refreshing());
+    assert!(matches!(review.read_with(cx, |r, _| r.head().clone()), Head::Failed(_)));
+    assert_eq!(review.read_with(cx, |r, _| r.notice().clone()), Notice::Clear);
+}
+
+#[gpui_kit::test]
 fn the_review_header_takes_the_child_actions_from_the_tabs_parent_id(cx: &mut TestAppContext) {
     let _serial = serial();
     cx.executor().allow_parking();
