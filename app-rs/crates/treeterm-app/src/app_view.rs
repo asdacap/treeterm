@@ -1971,23 +1971,43 @@ fn workspace_header(
         let (copy, path, rename_ws) = (branch.clone(), workspace.read(cx).workspace().path.clone(), workspace.clone());
         let can_rename = file.is_worktree && !root;
         use gpui_kit::component::menu::ContextMenuExt as _;
+        use treeterm_core::analyzer::Refresh;
+        // `BranchBadge`'s `renaming`: a branch rename through the LLM is under way.
+        let renaming = move |workspace: &Entity<WorkspaceStore>, cx: &App| {
+            can_rename && workspace.read(cx).is_refreshing(Refresh::BranchName, cx)
+        };
+        let label = if renaming(workspace, cx) {
+            h_flex()
+                .gap(px(3.))
+                .child(
+                    Spinner::new()
+                        .icon(gpui_kit::component::Icon::new(IconName::LoaderCircle))
+                        .with_size(px(10.))
+                        .color(fg),
+                )
+                .child("Renaming...")
+                .into_any_element()
+        } else if copied {
+            "Copied!".into_any_element()
+        } else {
+            branch.into_any_element()
+        };
         actions = actions.child(
-            crate::ui::pill(if copied { "Copied!".to_owned() } else { branch }, fg, badge_bg)
+            crate::ui::pill(label, fg, badge_bg)
                 .id("branch-badge")
                 .cursor_pointer()
                 .tooltip(tip("Copy branch name"))
                 .on_click(cx.listener(move |view, _, _, cx| view.copy_branch(copy.clone(), cx)))
-                .context_menu(move |menu, _, _| {
+                .context_menu(move |menu, _, cx| {
                     let path = path.clone();
                     let menu = menu.item(crate::ui::menu_item("Copy worktree path").on_click(move |_, _, cx| {
                         cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(path.clone()));
                     }));
-                    if can_rename {
+                    // Offered while no rename runs, as the menu opens.
+                    if can_rename && !renaming(&rename_ws, cx) {
                         let ws = rename_ws.clone();
-                        menu.item(crate::ui::menu_item("Auto-rename branch").on_click(move |_, window, cx| {
-                            let outcome = ws.update(cx, |w, cx| {
-                                w.refresh_labels(treeterm_core::analyzer::Refresh::BranchName, cx)
-                            });
+                        menu.item(crate::ui::menu_item("Auto rename branch").on_click(move |_, window, cx| {
+                            let outcome = ws.update(cx, |w, cx| w.refresh_labels(Refresh::BranchName, cx));
                             crate::ui::alert_failure(outcome, window, cx);
                         }))
                     } else {

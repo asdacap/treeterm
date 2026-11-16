@@ -86,9 +86,8 @@ pub fn caps_title(text: impl Into<gpui_kit::SharedString>, cx: &App) -> Div {
         .child(gpui_kit::SharedString::from(text.to_uppercase()))
 }
 
-/// A rounded pill (`.workspace-branch`, `.activity-state-badge`, …).
-pub fn pill(text: impl Into<gpui_kit::SharedString>, fg: impl Into<Hsla>, bg: impl Into<Hsla>) -> Div {
-    let text: gpui_kit::SharedString = text.into();
+/// A rounded pill (`.workspace-branch`, `.activity-state-badge`, …) around `content`.
+pub fn pill(content: impl IntoElement, fg: impl Into<Hsla>, bg: impl Into<Hsla>) -> Div {
     div()
         .flex_shrink_0()
         .px(px(6.))
@@ -97,7 +96,7 @@ pub fn pill(text: impl Into<gpui_kit::SharedString>, fg: impl Into<Hsla>, bg: im
         .text_size(px(SMALL))
         .text_color(fg.into())
         .bg(bg.into())
-        .child(text)
+        .child(content)
 }
 
 /// `.terminal-toggle`: a 28×14 slider (green when on) and an 11px label.

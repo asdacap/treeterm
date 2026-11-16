@@ -4,6 +4,7 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
@@ -93,6 +94,14 @@ fn open_store(
     })
 }
 
+/// A new directory under the daemon's root for a workspace: its id and path.
+fn workspace_dir(h: &Harness) -> (String, PathBuf) {
+    let id = format!("ws-{}", uuid::Uuid::new_v4().simple());
+    let dir = h.daemon.root().join(&id);
+    std::fs::create_dir_all(&dir).unwrap();
+    (id, dir)
+}
+
 /// A directory under the daemon's root as a loaded workspace with these tabs.
 fn open_workspace(
     cx: &mut TestAppContext,
@@ -100,20 +109,61 @@ fn open_workspace(
     store: &Entity<SessionStore>,
     app_states: Value,
 ) -> Entity<WorkspaceStore> {
-    let id = format!("ws-{}", uuid::Uuid::new_v4().simple());
-    let dir = h.daemon.root().join(&id);
-    std::fs::create_dir_all(&dir).unwrap();
+    let (id, dir) = workspace_dir(h);
     let body = json!({
         "name": "labels", "status": "active", "isGitRepo": false, "isWorktree": false,
         "appStates": app_states, "metadata": {}, "createdAt": 1, "lastActivity": 1, "parentHash": ""
     });
+    load_workspace(cx, h, store, &id, &dir, body)
+}
+
+/// A child worktree without tabs, on branch `old-branch` of its own repository (its parent
+/// is not in the session), loaded: its store and path.
+fn open_child_worktree(
+    cx: &mut TestAppContext,
+    h: &Harness,
+    store: &Entity<SessionStore>,
+) -> (Entity<WorkspaceStore>, PathBuf) {
+    let (id, dir) = workspace_dir(h);
+    git(&dir, &["init", "-q", "-b", "old-branch"]);
+    git(
+        &dir,
+        &[
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "user.name=t",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "init",
+        ],
+    );
+    let body = json!({
+        "name": "labels", "status": "active", "isGitRepo": true, "isWorktree": true,
+        "parentId": "ws-parent", "gitBranch": "old-branch", "gitRootPath": dir,
+        "appStates": {}, "metadata": {}, "createdAt": 1, "lastActivity": 1, "parentHash": ""
+    });
+    (load_workspace(cx, h, store, &id, &dir, body), dir)
+}
+
+/// Add workspace `id` at `dir`, as `body` describes it, to the session; wait until it loaded.
+fn load_workspace(
+    cx: &mut TestAppContext,
+    h: &Harness,
+    store: &Entity<SessionStore>,
+    id: &str,
+    dir: &Path,
+    body: Value,
+) -> Entity<WorkspaceStore> {
     std::fs::write(
         h.daemon.workspaces_dir().join(format!("{id}.json")),
         body.to_string(),
     )
     .unwrap();
     let refs = vec![WorkspaceRef {
-        id: id.clone(),
+        id: id.to_owned(),
         path: dir.to_string_lossy().into_owned(),
     }];
     futures::executor::block_on(h.conn.update_session(refs, None, "test-writer"))
@@ -121,9 +171,23 @@ fn open_workspace(
         .unwrap();
     wait_until(cx, store, |s| {
         matches!(s.state(), SessionState::Live)
-            && matches!(s.entry(&id), Some(WorkspaceEntry::Loaded(_)))
+            && matches!(s.entry(id), Some(WorkspaceEntry::Loaded(_)))
     });
-    store.read_with(cx, |s, _| s.workspace_store(&id).unwrap().clone())
+    store.read_with(cx, |s, _| s.workspace_store(id).unwrap().clone())
+}
+
+fn git(dir: &Path, args: &[&str]) -> String {
+    let out = std::process::Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8_lossy(&out.stdout).into_owned()
 }
 
 /// A login shell with an empty config dir, so the user's dotfiles stay out of the test.
@@ -465,6 +529,64 @@ fn a_branch_refresh_reports_an_invalid_suggestion(cx: &mut TestAppContext) {
     );
     assert!(!is_refreshing(cx, &workspace, Refresh::BranchName));
     assert_eq!(metadata(cx, &workspace, "branchIsUserDefined"), None);
+}
+
+#[gpui_kit::test]
+fn a_branch_refresh_is_under_way_until_the_branch_is_renamed(cx: &mut TestAppContext) {
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let (fake, llm) = titling(&h, suggestion("new-branch"));
+    let settings = bot_settings(r#"sh -c 'echo ready-$((40+2)); exec cat'"#, TITLE_MODEL);
+    let store = open_store(cx, &h, settings, llm);
+    let (workspace, dir) = open_child_worktree(cx, &h, &store);
+    let (tab, _) = add_harness(cx, &workspace, "ready-42");
+    let analyzer = workspace.read_with(cx, |w, _| w.analyzer(&tab).unwrap());
+    // What the branch badge reads (Renaming..., else the branch) whenever the workspace or
+    // its analyzer changes.
+    let seen = Rc::new(RefCell::new(Vec::new()));
+    let record = {
+        let (seen, workspace) = (seen.clone(), workspace.clone());
+        move |cx: &mut gpui_kit::App| {
+            let w = workspace.read(cx);
+            let badge = (
+                w.is_refreshing(Refresh::BranchName, cx),
+                w.file().git_branch.clone(),
+            );
+            seen.borrow_mut().push(badge);
+        }
+    };
+    let _observers = cx.update(|cx| {
+        let on_analyzer = record.clone();
+        [
+            cx.observe(&workspace, move |_, cx| record(cx)),
+            cx.observe(&analyzer, move |_, cx| on_analyzer(cx)),
+        ]
+    });
+    seen.borrow_mut().clear();
+
+    let task = workspace.update(cx, |w, cx| w.refresh_labels(Refresh::BranchName, cx));
+    assert!(is_refreshing(cx, &workspace, Refresh::BranchName));
+    assert!(!is_refreshing(cx, &workspace, Refresh::TitleAndDescription));
+    assert_eq!(finish(cx, task), Ok(()));
+    assert!(!is_refreshing(cx, &workspace, Refresh::BranchName));
+
+    let old = Some("old-branch".to_owned());
+    let new = Some("new-branch".to_owned());
+    let seen = seen.borrow();
+    assert_eq!(seen.first(), Some(&(true, old.clone())));
+    // Under way through the LLM call and the git rename: it ends with the new branch.
+    assert!(!seen.contains(&(false, old)), "{seen:?}");
+    assert_eq!(seen.last(), Some(&(false, new)));
+    assert_eq!(
+        git(&dir, &["branch", "--show-current"]).trim(),
+        "new-branch"
+    );
+    assert_eq!(
+        metadata(cx, &workspace, "branchIsUserDefined").as_deref(),
+        Some("true")
+    );
+    assert_eq!(screens_read(&fake).len(), 1);
 }
 
 #[gpui_kit::test]

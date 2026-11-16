@@ -454,12 +454,13 @@ The chrome was matched to Electron's computed styles, measured side by side on o
 - A Prompt Description that sends nothing (no harness running yet, or the write failed)
   shows why in a notification; Electron failed silently. In both, the description is no
   longer offered.
-- A workspace's title re-label is under way for the whole workspace: one started from the
-  tree's Refresh Title & Description also spins and disables the header's refresh button
-  until it finishes (Electron's button knew only its own clicks). A re-label whose AI Harness
-  tab closes (or whose terminal is replaced) before the LLM answers applies nothing and
-  alerts "The AI Harness terminal went away before the labeller finished" (Electron applied
-  the late answer).
+- A workspace's title or branch re-label is under way for the whole workspace: one started
+  from the tree's Refresh Title & Description also spins and disables the header's refresh
+  button, and one from its Refresh Branch Name also shows "Renaming..." on the branch badge
+  and leaves Auto rename branch out of its menu, until it finishes (Electron's button and
+  badge knew only their own clicks). A re-label whose AI Harness tab closes (or whose
+  terminal is replaced) before the LLM answers applies nothing and alerts "The AI Harness
+  terminal went away before the labeller finished" (Electron applied the late answer).
 - Go to definition moves within the Files viewer or the Editor tab when the definition is in
   the file it shows; Electron opened that file again in a new Editor tab.
 - An Editor tab keeps what was typed in it when another window, saving something else at the
