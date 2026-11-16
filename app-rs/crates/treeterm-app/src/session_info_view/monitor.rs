@@ -10,7 +10,7 @@ use gpui_kit::{
     canvas, div, point, px, relative, rgb, rgba,
 };
 use treeterm_core::connection::ConnectionId;
-use treeterm_core::system_monitor::utilization_color;
+use treeterm_core::system_monitor::{DiskInfo, disk_label, disk_tooltip, utilization_color};
 use treeterm_core::traffic::format_bytes;
 use treeterm_model::app_store::AppStore;
 use treeterm_model::system_monitor::{Metrics, SystemMonitor};
@@ -146,13 +146,16 @@ fn usage_graph(label: &'static str, samples: Vec<f64>, detail: String, cx: &gpui
         )
 }
 
-/// `Gauge`: a disk's mount point and usage bar.
-fn gauge(label: String, percent: f64, c: &crate::theme::Colors) -> impl IntoElement {
+/// `Gauge`: a disk's mount point and usage bar, with its bytes in the tooltip.
+fn gauge(i: usize, disk: &DiskInfo, c: &crate::theme::Colors) -> impl IntoElement {
+    let percent = disk.usage_percent;
     let fill = (percent.clamp(0., 100.) / 100.) as f32;
     h_flex()
+        .id(("monitor-disk", i))
         .gap(px(8.))
         .font_family(MONO)
-        .child(gauge_label(label, c.text_secondary))
+        .tooltip(crate::ui::title_tooltip(disk_tooltip(disk)))
+        .child(gauge_label(disk_label(&disk.mount_point), c.text_secondary))
         .child(
             div()
                 .relative()
@@ -233,14 +236,8 @@ impl Render for MonitorView {
                 format!("{} / {}", format_bytes(m.memory.used_bytes), format_bytes(m.memory.total_bytes)),
                 cx,
             ));
-        for disk in &m.disks {
-            let chars: Vec<char> = disk.mount_point.chars().collect();
-            let label = if chars.len() > 4 {
-                format!("...{}", chars[chars.len() - 4..].iter().collect::<String>())
-            } else {
-                disk.mount_point.clone()
-            };
-            resources = resources.child(gauge(label, disk.usage_percent, c));
+        for (i, disk) in m.disks.iter().enumerate() {
+            resources = resources.child(gauge(i, disk, c));
         }
         let stat = |label: &'static str, value: String| {
             v_flex()
@@ -329,6 +326,7 @@ impl Render for MonitorView {
                     .text_color(secondary)
                     .cursor_pointer()
                     .hover(move |d| d.text_color(primary).border_color(secondary))
+                    .tooltip(crate::ui::title_tooltip("Refresh now"))
                     .child(gpui_kit::component::Icon::new(IconName::RefreshCw).size(px(12.)))
                     .on_click(cx.listener(|view, _, _, cx| view.refresh(cx))),
             );
@@ -339,7 +337,7 @@ impl Render for MonitorView {
 impl MonitorView {
     /// Stop (SIGTERM) and Kill (SIGKILL), shown while the row is hovered.
     fn process_actions(&self, i: usize, pid: u32, group: &SharedString, secondary: Hsla) -> AnyElement {
-        let button = |name: &'static str, glyph: IconName, hover: u32, signal: &'static str| {
+        let button = |name: &'static str, title: &'static str, glyph: IconName, hover: u32, signal: &'static str| {
             let monitor = self.monitor.clone();
             div()
                 .id(SharedString::from(format!("process-{name}-{i}")))
@@ -354,6 +352,7 @@ impl MonitorView {
                 .text_color(secondary)
                 .cursor_pointer()
                 .hover(move |d| d.text_color(rgb(hover)).border_color(rgb(hover)))
+                .tooltip(crate::ui::title_tooltip(title))
                 .child(gpui_kit::component::Icon::new(glyph).size(px(10.)))
                 .on_click(move |_, _, cx| monitor.update(cx, |m, cx| m.signal(pid, signal, cx)))
         };
@@ -361,8 +360,8 @@ impl MonitorView {
             .gap(px(2.))
             .opacity(0.)
             .group_hover(group.clone(), |d| d.opacity(1.))
-            .child(button("stop", IconName::Square, 0xff9800, "TERM"))
-            .child(button("kill", IconName::X, 0xf44336, "9"))
+            .child(button("stop", "Stop (SIGTERM)", IconName::Square, 0xff9800, "TERM"))
+            .child(button("kill", "Kill (SIGKILL)", IconName::X, 0xf44336, "9"))
             .into_any_element()
     }
 }

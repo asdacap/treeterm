@@ -4,6 +4,8 @@
 
 use std::collections::{HashMap, VecDeque};
 
+use crate::traffic::format_bytes;
+
 /// Run with `sh -c` on the daemon's host (Linux or macOS). One fix over Electron's script:
 /// macOS separates load averages with spaces, which Electron's `tr -d ' '` glued into one
 /// unparseable number; separators are normalised to commas here.
@@ -131,6 +133,26 @@ pub fn utilization_color(percent: f64) -> u32 {
     }
 }
 
+/// A disk gauge's label: the mount point, or `...` and its last 4 characters when longer.
+pub fn disk_label(mount_point: &str) -> String {
+    let chars: Vec<char> = mount_point.chars().collect();
+    match chars.len() {
+        len if len > 4 => format!("...{}", chars[len - 4..].iter().collect::<String>()),
+        _ => mount_point.to_owned(),
+    }
+}
+
+/// A disk gauge's `title`: `<label> — <percent>% used (<used> / <total>)`.
+pub fn disk_tooltip(disk: &DiskInfo) -> String {
+    format!(
+        "{} — {:.1}% used ({} / {})",
+        disk_label(&disk.mount_point),
+        disk.usage_percent,
+        format_bytes(disk.used_bytes),
+        format_bytes(disk.total_bytes)
+    )
+}
+
 fn number(value: Option<&str>, fallback: f64) -> f64 {
     value.and_then(|v| v.trim().parse::<f64>().ok()).filter(|n| n.is_finite()).unwrap_or(fallback)
 }
@@ -250,6 +272,22 @@ mod tests {
         assert_eq!(utilization_color(84.), 0xff9800);
         assert_eq!(utilization_color(85.), 0xf44336);
         assert_eq!(utilization_color(100.), 0xf44336);
+    }
+
+    #[test]
+    fn disk_labels_keep_the_last_4_characters_of_a_longer_mount_point() {
+        assert_eq!(disk_label("/"), "/");
+        assert_eq!(disk_label("/srv"), "/srv");
+        assert_eq!(disk_label("/home"), "...home");
+        assert_eq!(disk_label("/Volumes/Données"), "...nées");
+    }
+
+    #[test]
+    fn disk_tooltips_read_the_label_percent_and_bytes() {
+        let disk = parse_metrics(LINUX_OUTPUT).disks.remove(1);
+        assert_eq!(disk_tooltip(&disk), "...home — 50.0% used (500.0 MB / 1000.0 MB)");
+        let root = DiskInfo { mount_point: "/".to_owned(), total_bytes: 2048, used_bytes: 512, usage_percent: 25. };
+        assert_eq!(disk_tooltip(&root), "/ — 25.0% used (512 B / 2.0 KB)");
     }
 
     #[test]
