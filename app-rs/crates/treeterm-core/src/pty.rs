@@ -7,6 +7,7 @@
 
 use futures::channel::{mpsc, oneshot};
 use futures::{Stream, StreamExt, TryFutureExt};
+use serde_json::Value;
 use tokio_stream::wrappers::ReceiverStream;
 use treeterm_proto::treeterm::{
     Empty, PtyInput, PtyOutput, PtyResizeData, PtyStartData, PtyWriteData, pty_input,
@@ -286,6 +287,43 @@ pub struct CreatePty {
     /// Client-minted idempotency key (the tab's persisted `ptyHandle`): a live PTY already
     /// created for it is returned instead of a new one.
     pub handle: Option<String>,
+    /// How to sandbox the program (an AI-harness tab's `sandbox`). The proto's
+    /// `SandboxConfig`.
+    pub sandbox: Option<Sandbox>,
+}
+
+/// `SandboxConfig` (`src/shared/types.ts`): what an AI-harness tab's PTY may reach.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Sandbox {
+    pub enabled: bool,
+    pub allow_network: bool,
+    pub allowed_paths: Vec<String>,
+}
+
+impl Sandbox {
+    /// The `sandbox` object of a tab's state, as Electron sends it to `createPty`: a field
+    /// it lacks is sent as the proto default (false, no paths). `None` when the state has no
+    /// such object.
+    pub fn from_tab_state(state: &Value) -> Option<Self> {
+        let sandbox = state.get("sandbox")?.as_object()?;
+        let flag = |key: &str| sandbox.get(key).and_then(Value::as_bool).unwrap_or(false);
+        let allowed_paths = sandbox
+            .get("allowedPaths")
+            .and_then(Value::as_array)
+            .map(|paths| {
+                paths
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_owned)
+                    .collect()
+            })
+            .unwrap_or_default();
+        Some(Self {
+            enabled: flag("enabled"),
+            allow_network: flag("allowNetwork"),
+            allowed_paths,
+        })
+    }
 }
 
 #[cfg(test)]
@@ -388,5 +426,41 @@ mod tests {
         assert_eq!(handle.resize(10, 10), Err(PtyClosed));
         assert_eq!(handle.send(b"x"), Err(PtyClosed));
         assert_eq!(handle.focus(), Err(PtyClosed));
+    }
+
+    #[test]
+    fn a_tab_states_sandbox_object_is_its_sandbox_config() {
+        let state = serde_json::json!({
+            "ptyId": null,
+            "sandbox": { "enabled": true, "allowNetwork": true, "allowedPaths": ["/a", "/b"] },
+        });
+        assert_eq!(
+            Sandbox::from_tab_state(&state),
+            Some(Sandbox {
+                enabled: true,
+                allow_network: true,
+                allowed_paths: vec!["/a".to_owned(), "/b".to_owned()],
+            })
+        );
+    }
+
+    #[test]
+    fn a_sandbox_field_the_state_lacks_is_the_proto_default() {
+        let state = serde_json::json!({ "sandbox": { "enabled": true } });
+        assert_eq!(
+            Sandbox::from_tab_state(&state),
+            Some(Sandbox {
+                enabled: true,
+                allow_network: false,
+                allowed_paths: Vec::new(),
+            })
+        );
+    }
+
+    #[test]
+    fn a_state_without_a_sandbox_object_has_no_sandbox() {
+        assert_eq!(Sandbox::from_tab_state(&serde_json::json!({ "ptyId": "p1" })), None);
+        assert_eq!(Sandbox::from_tab_state(&serde_json::json!({ "sandbox": null })), None);
+        assert_eq!(Sandbox::from_tab_state(&serde_json::json!(null)), None);
     }
 }

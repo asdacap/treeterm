@@ -8,8 +8,9 @@ use futures::{Stream, StreamExt, TryFutureExt};
 use tokio::sync::watch;
 use treeterm_proto::treeterm::{
     CreatePtyRequest, Empty, FileWatchEvent, ForceUnlockSessionRequest, KillPtyRequest,
-    LockSessionRequest, PtySessionInfo, Session, SessionWatchEvent, SessionWatchRequest,
-    UnlockSessionRequest, UpdateSessionRequest, WatchFileRequest, WorkspaceRef,
+    LockSessionRequest, PtySessionInfo, SandboxConfig, Session, SessionWatchEvent,
+    SessionWatchRequest, UnlockSessionRequest, UpdateSessionRequest, WatchFileRequest,
+    WorkspaceRef,
 };
 
 use crate::connection::ConnectionId;
@@ -196,15 +197,7 @@ impl DaemonConnection {
     /// Start a PTY (or, for a known `handle`, find the live one) and return its id.
     pub fn create_pty(&self, params: CreatePty) -> Fut<Result<String, ApiError>> {
         let mut client = self.main.clone();
-        let request = CreatePtyRequest {
-            cwd: params.cwd,
-            env: params.env,
-            cols: params.size.map(|(cols, _)| i32::from(cols)),
-            rows: params.size.map(|(_, rows)| i32::from(rows)),
-            sandbox: None,
-            startup_command: params.startup_command,
-            handle: params.handle,
-        };
+        let request = create_pty_request(params);
         self.rt.run(async move {
             unary(client.create_pty(request))
                 .await
@@ -326,6 +319,23 @@ impl DaemonConnection {
     }
 }
 
+/// The `CreatePty` call Electron's `createPtySession` makes for `params`.
+fn create_pty_request(params: CreatePty) -> CreatePtyRequest {
+    CreatePtyRequest {
+        cwd: params.cwd,
+        env: params.env,
+        cols: params.size.map(|(cols, _)| i32::from(cols)),
+        rows: params.size.map(|(_, rows)| i32::from(rows)),
+        sandbox: params.sandbox.map(|sandbox| SandboxConfig {
+            enabled: sandbox.enabled,
+            allow_network: sandbox.allow_network,
+            allowed_paths: sandbox.allowed_paths,
+        }),
+        startup_command: params.startup_command,
+        handle: params.handle,
+    }
+}
+
 /// Flatten "start a server-streaming call" + "its messages" into one stream of results.
 fn server_stream<T: Send + 'static>(
     call: impl Future<Output = Result<tonic::Response<tonic::Streaming<T>>, tonic::Status>>
@@ -378,6 +388,40 @@ mod tests {
                 "16 UNAUTHENTICATED: x",
             ]
         );
+    }
+
+    #[test]
+    fn create_pty_sends_the_sandbox_only_when_given() {
+        let sandboxed = create_pty_request(CreatePty {
+            cwd: "/w".to_owned(),
+            startup_command: Some("claude".to_owned()),
+            handle: Some("h1".to_owned()),
+            sandbox: Some(crate::pty::Sandbox {
+                enabled: true,
+                allow_network: false,
+                allowed_paths: vec!["/extra".to_owned()],
+            }),
+            ..CreatePty::default()
+        });
+        assert_eq!(
+            sandboxed.sandbox,
+            Some(SandboxConfig {
+                enabled: true,
+                allow_network: false,
+                allowed_paths: vec!["/extra".to_owned()],
+            })
+        );
+        assert_eq!(sandboxed.cwd, "/w");
+        assert_eq!(sandboxed.startup_command.as_deref(), Some("claude"));
+        assert_eq!(sandboxed.handle.as_deref(), Some("h1"));
+
+        let plain = create_pty_request(CreatePty {
+            cwd: "/w".to_owned(),
+            size: Some((80, 24)),
+            ..CreatePty::default()
+        });
+        assert_eq!(plain.sandbox, None);
+        assert_eq!((plain.cols, plain.rows), (Some(80), Some(24)));
     }
 
     #[test]

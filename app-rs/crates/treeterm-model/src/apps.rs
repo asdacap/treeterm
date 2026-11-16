@@ -5,6 +5,7 @@
 //! are absent from the registry: their tabs are kept untouched (never closed or rewritten).
 
 use serde_json::{Value, json};
+use treeterm_core::pty::Sandbox;
 use treeterm_core::settings::Settings;
 
 /// What every AI-harness application id starts with (`aiharness-<instance>`).
@@ -183,6 +184,22 @@ impl AppDef {
             // Needs its port first: see `web_app::resolve_command`.
             AppKind::WebApp { .. } => None,
             AppKind::Files | AppKind::Editor | AppKind::Review | AppKind::Browser { .. } | AppKind::Tool(_) => None,
+        }
+    }
+
+    /// The sandbox a new PTY of this application's tab with `state` starts in: an AI
+    /// harness's `sandbox` (`ensureTty`). Other applications start theirs unsandboxed.
+    pub fn sandbox(&self, state: &Value) -> Option<Sandbox> {
+        match &self.kind {
+            AppKind::AiHarness { .. } => Sandbox::from_tab_state(state),
+            AppKind::Terminal { .. }
+            | AppKind::CustomRunner { .. }
+            | AppKind::WebApp { .. }
+            | AppKind::Files
+            | AppKind::Editor
+            | AppKind::Review
+            | AppKind::Browser { .. }
+            | AppKind::Tool(_) => None,
         }
     }
 
@@ -708,6 +725,28 @@ mod tests {
             "customrunner-build"
         );
         assert_eq!(registry.default_for_workspace([], "aiharness-claude").unwrap().id, "aiharness-claude");
+    }
+
+    #[test]
+    fn only_an_ai_harness_starts_its_pty_in_its_tabs_sandbox() {
+        let settings = treeterm_core::settings::from_value(json!({
+            "aiHarness": { "instances": [{
+                "id": "bot", "name": "Bot", "icon": "✦", "command": "claude",
+                "isDefault": false, "enableSandbox": true, "allowNetwork": false,
+                "backgroundColor": "#1a1a24", "disableScrollbar": false, "keepOnExit": false
+            }]}
+        }))
+        .unwrap();
+        let registry = AppRegistry::from_settings(&settings);
+        let (bot, terminal) = (registry.get("aiharness-bot").unwrap(), registry.get("terminal").unwrap());
+        // A new harness tab's PTY starts in the sandbox its state was created with.
+        let state = bot.initial_state();
+        assert_eq!(
+            bot.sandbox(&state),
+            Some(Sandbox { enabled: true, allow_network: false, allowed_paths: Vec::new() })
+        );
+        // Terminals send none, whatever their state holds.
+        assert_eq!(terminal.sandbox(&state), None);
     }
 
     #[test]

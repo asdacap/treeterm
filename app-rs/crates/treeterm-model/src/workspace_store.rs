@@ -18,7 +18,7 @@ use treeterm_core::attention::{
 };
 use treeterm_core::daemon::DaemonConnection;
 use treeterm_core::layout::{Layout, LayoutTab, Side};
-use treeterm_core::pty::CreatePty;
+use treeterm_core::pty::{CreatePty, Sandbox};
 use treeterm_core::settings::Settings;
 use treeterm_core::wire::workspace_file::{AppState, WorkspaceFile};
 use treeterm_term::fit::WidthLimit;
@@ -854,7 +854,8 @@ impl WorkspaceStore {
                 let terminal = match (pty, port) {
                     (Some(pty_id), _) => Some(self.attach_terminal(tab_id, pty_id, cx)),
                     (None, Some(port)) => {
-                        Some(self.create_pty(tab_id, handle, Some(crate::web_app::resolve_command(&command, port)), cx))
+                        let command = crate::web_app::resolve_command(&command, port);
+                        Some(self.create_pty(tab_id, handle, None, Some(command), cx))
                     }
                     (None, None) => None,
                 };
@@ -956,7 +957,8 @@ impl WorkspaceStore {
                             Some(Value::String(handle)) => handle.clone(),
                             Some(_) | None => uuid::Uuid::new_v4().to_string(),
                         };
-                        self.create_pty(tab_id, handle, startup_command, cx)
+                        let sandbox = app.sandbox(&tab.state);
+                        self.create_pty(tab_id, handle, sandbox, startup_command, cx)
                     }
                 };
                 self.tabs.insert(tab_id.to_owned(), TabRef::Terminal(terminal));
@@ -1023,11 +1025,7 @@ impl WorkspaceStore {
         let state = &self.workspace.file.app_states[tab_id].state;
         let settings = &self.settings;
         let flag = |key: &str| state.get(key).and_then(Value::as_bool).unwrap_or(false);
-        let sandboxed = state
-            .get("sandbox")
-            .and_then(|s| s.get("enabled"))
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
+        let sandboxed = Sandbox::from_tab_state(state).is_some_and(|sandbox| sandbox.enabled);
         let app_background = self
             .registry
             .get(&self.workspace.file.app_states[tab_id].application_id)
@@ -1124,12 +1122,13 @@ impl WorkspaceStore {
 
     /// `ensureTty`: create the tab's PTY, keyed by its persisted handle so the daemon
     /// returns the same PTY however often this runs (reconciliation can dispose and
-    /// re-init a tab mid-creation). On success the id lands in the tab's state (and so on
-    /// disk) and the terminal attaches.
+    /// re-init a tab mid-creation), in `sandbox` if given. On success the id lands in the
+    /// tab's state (and so on disk) and the terminal attaches.
     fn create_pty(
         &mut self,
         tab_id: &str,
         handle: String,
+        sandbox: Option<Sandbox>,
         startup_command: Option<String>,
         cx: &mut Context<Self>,
     ) -> TerminalTab {
@@ -1137,6 +1136,7 @@ impl WorkspaceStore {
             cwd: self.workspace.path.clone(),
             handle: Some(handle.clone()),
             startup_command,
+            sandbox,
             ..CreatePty::default()
         });
         let tab_id = tab_id.to_owned();
@@ -1235,7 +1235,8 @@ impl WorkspaceStore {
             Some(Value::String(handle)) => handle.clone(),
             Some(_) | None => uuid::Uuid::new_v4().to_string(),
         };
-        let terminal = self.create_pty(tab_id, handle, Some(crate::web_app::resolve_command(&command, port)), cx);
+        let command = crate::web_app::resolve_command(&command, port);
+        let terminal = self.create_pty(tab_id, handle, None, Some(command), cx);
         self.tabs.insert(tab_id.to_owned(), TabRef::Terminal(terminal));
         cx.notify();
     }
