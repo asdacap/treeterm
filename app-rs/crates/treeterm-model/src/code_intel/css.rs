@@ -83,14 +83,16 @@ struct Reader<'a> {
 }
 
 impl Reader<'_> {
-    /// Past a comment starting at `pos`, if one does.
+    /// Past a comment starting at `pos`, if one does. Read as bytes: the statements are
+    /// scanned a byte at a time, so `pos` may be inside a character.
     fn skip_comment(&self, pos: usize) -> Option<usize> {
-        let rest = &self.text[pos..];
-        if let Some(comment) = rest.strip_prefix("/*") {
-            return Some(comment.find("*/").map_or(self.text.len(), |end| pos + 2 + end + 2));
+        let rest = self.bytes.get(pos..)?;
+        if let Some(comment) = rest.strip_prefix(b"/*") {
+            let end = comment.windows(2).position(|pair| pair == b"*/");
+            return Some(end.map_or(self.bytes.len(), |end| pos + 2 + end + 2));
         }
-        if self.dialect.has_line_comments() && rest.starts_with("//") {
-            return Some(rest.find('\n').map_or(self.text.len(), |end| pos + end));
+        if self.dialect.has_line_comments() && rest.starts_with(b"//") {
+            return Some(rest.iter().position(|&byte| byte == b'\n').map_or(self.bytes.len(), |end| pos + end));
         }
         None
     }
@@ -875,5 +877,31 @@ mod tests {
         assert_eq!(offered("css", "a { color: red;| }", Trigger::Invoked), None);
         assert_eq!(offered("css", "a { | }", Trigger::Typing), None);
         assert_eq!(offered("html", "a { co| }", Trigger::Typing), None);
+    }
+
+    /// Non-ASCII selectors, values and escapes, and a `//` line (not a comment in CSS), as
+    /// Monaco's CSS worker reads them (checked against vscode-css-languageservice).
+    #[test]
+    fn non_ascii_text_is_read_like_any_other() {
+        let cjk = "a { font-family: 微软雅黑, sans-serif; colr: red; color: #fff }";
+        assert_eq!(warned(cjk), [warning("colr", "Unknown property: 'colr'")]);
+        assert_eq!(found("css", cjk), [color("red", [1000, 0, 0, 1000]), color("#fff", [1000, 1000, 1000, 1000])]);
+        assert_eq!(warned(".café {}"), [warning(".café", "Do not use empty rulesets")]);
+        assert_eq!(warned("a { color: red } /* 注 */ .ü {}"), [warning(".ü", "Do not use empty rulesets")]);
+        let line = "// 注释\na { color: red; }";
+        assert_eq!(warned(line), []);
+        assert_eq!(found("css", line), [color("red", [1000, 0, 0, 1000])]);
+        assert_eq!(found("scss", "// 注释 {\n.café { color: red; }"), [color("red", [1000, 0, 0, 1000])]);
+        // An escape before a character of several bytes.
+        let escapes = "a { content: \"\\é\"; b\\é: red; }";
+        assert_eq!(warned(escapes), [warning("b\\é", "Unknown property: 'b\\é'")]);
+        assert_eq!(found("css", escapes), [color("red", [1000, 0, 0, 1000])]);
+        assert_eq!(found("less", ".a\\é { color: blue }"), [color("blue", [0, 0, 1000, 1000])]);
+        // Completed after them.
+        let (replace, labels, _) = offered("css", "a { font-family: 微软雅黑 }\n.café { colo| }", Trigger::Typing).expect("properties");
+        assert_eq!((replace.as_str(), labels[0].as_str()), ("colo", "color"));
+        let (replace, labels, _) = offered("scss", "// 注释\n.a\\é { b: \"é\"; colo| }", Trigger::Typing).expect("properties");
+        assert_eq!((replace.as_str(), labels[0].as_str()), ("colo", "color"));
+        assert_eq!(offered("css", "a { font-family: 微软|雅黑 }", Trigger::Invoked), None);
     }
 }
