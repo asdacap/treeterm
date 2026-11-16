@@ -127,6 +127,7 @@ mod tests {
         const COMMENT: u32 = 0x6a9955;
         const KEYWORD: u32 = 0x569cd6;
         const STRING: u32 = 0xce9178;
+        const ATTRIBUTE: u32 = 0x9cdcfe;
         /// A file's path and text, and tokens in it with the colour each is painted in.
         type Case<'a> = (&'a str, &'a str, &'a [(&'a str, u32)]);
         let cases: &[Case] = &[
@@ -161,6 +162,11 @@ mod tests {
             ("a.svelte", "<!-- c1 -->\n<script>let s = \"x1\"</script>\n", &[("<!-- c1 -->", COMMENT), ("let", KEYWORD), ("\"x1\"", STRING)]),
             ("Makefile", "# c1\nall:\n", &[("# c1", COMMENT)]),
             ("CMakeLists.txt", "# c1\nif(A)\n  set(x \"x1\")\nendif()\n", &[("# c1", COMMENT), ("if", KEYWORD), ("\"x1\"", STRING)]),
+            // Monaco's languages GPUI Kit has no grammar for, through the nearest one.
+            ("a.vue", "<!-- c1 -->\n<template><p class=\"x1\"></p></template>\n<script>let s = \"x2\"</script>\n", &[("<!-- c1 -->", COMMENT), ("template", KEYWORD), ("class", ATTRIBUTE), ("x1", STRING), ("let", KEYWORD), ("\"x2\"", STRING)]),
+            ("a.xml", "<?xml version=\"1.0\"?>\n<!-- c1 -->\n<note id=\"x1\"></note>\n", &[("<!-- c1 -->", COMMENT), ("note", KEYWORD), ("id", ATTRIBUTE), ("x1", STRING)]),
+            ("a.less", "/* c1 */\n.a { .b { content: \"x1\"; } }\n", &[("/* c1 */", COMMENT), ("\"x1\"", STRING)]),
+            ("a.dockerfile", "# c1\nRUN echo \"x1\"\n", &[("# c1", COMMENT), ("\"x1\"", STRING)]),
         ];
         for (path, text, tokens) in cases {
             for (token, hex) in *tokens {

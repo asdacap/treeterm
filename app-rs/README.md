@@ -210,6 +210,9 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   Monaco's view zones; selects open a Kit menu, not the native popup; textareas have no
   resize grip. Off macOS the menu bar is GPUI Kit's, drawn in the window (not GTK's), above
   dialogs so that it stays usable while one is open, as GTK's is.
+- The code editors (Files viewer, Editor tab): GPUI Kit has no R, XML, Less or Dockerfile
+  grammar: `.r` files are plain, and `.xml`, `.less` and `.dockerfile` files are coloured
+  with the HTML, CSS and shell grammars.
 - With the sidebar collapsed the header keeps clear of the macOS window buttons (Electron's
   title runs under them).
 - GPUI cannot decode AVIF, so the Files viewer shows `.avif` images in a webview (WebKit
@@ -261,3 +264,6 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   commands' pipes open (a git command started at the same time never finished).
 - The attention ding is the system bell (Electron synthesised an 880 Hz tone).
 - The analyzer reads the tab's own terminal; Electron attached a second, headless one.
+- The code editors colour files Electron shows as plain text: Makefile, Dockerfile,
+  CMakeLists.txt, `.toml`, `.markdown`, `.mjs`/`.cjs`/`.mts`/`.cts`, `.jsonc`,
+  `.cc`/`.cxx`/`.hh`, `.zig`, `.ex`/`.exs`, `.proto` and `.diff`/`.patch`.

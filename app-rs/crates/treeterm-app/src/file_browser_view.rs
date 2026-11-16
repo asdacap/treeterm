@@ -273,7 +273,8 @@ pub fn language_for(path: &str) -> &'static str {
     match (name, ext.as_str()) {
         ("Makefile" | "makefile" | "GNUmakefile", _) => "make",
         ("CMakeLists.txt", _) => "cmake",
-        ("Dockerfile", _) => "bash",
+        // No Dockerfile grammar: its comments, strings and variables read as shell's.
+        ("Dockerfile", _) | (_, "dockerfile") => "bash",
         (_, "rs") => "rust",
         (_, "ts" | "mts" | "cts") => "typescript",
         (_, "tsx") => "tsx",
@@ -285,8 +286,11 @@ pub fn language_for(path: &str) -> &'static str {
         (_, "py") => "python",
         (_, "go") => "go",
         (_, "sh" | "bash" | "zsh") => "bash",
-        (_, "css" | "scss") => "css",
-        (_, "html" | "htm") => "html",
+        // No Less grammar: CSS's covers its rules and comments.
+        (_, "css" | "scss" | "less") => "css",
+        // `.vue` is HTML to Monaco; no XML grammar, but HTML's colours tags, attributes and
+        // values as Monaco's XML does.
+        (_, "html" | "htm" | "vue" | "xml") => "html",
         (_, "c" | "h") => "c",
         (_, "cc" | "cpp" | "cxx" | "hpp" | "hh") => "cpp",
         (_, "cs") => "csharp",
@@ -1723,6 +1727,13 @@ mod tests {
         assert_eq!(language_for("/w/App.tsx"), "tsx");
         assert_eq!(language_for("/w/Makefile"), "make");
         assert_eq!(language_for("/w/README"), "text");
+        // Monaco's languages with no grammar of their own in GPUI Kit take the nearest one.
+        assert_eq!(language_for("/w/App.vue"), "html");
+        assert_eq!(language_for("/w/pom.xml"), "html");
+        assert_eq!(language_for("/w/theme.less"), "css");
+        assert_eq!(language_for("/w/build.Dockerfile"), "bash");
+        assert_eq!(language_for("/w/Dockerfile"), "bash");
+        assert_eq!(language_for("/w/plot.r"), "text");
     }
 
     #[test]
