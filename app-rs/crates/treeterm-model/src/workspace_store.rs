@@ -17,6 +17,7 @@ use treeterm_core::attention::{
     ObservedSession, ObservedWorkspace, SessionStatus, apply_attention_mutations, has_unread_workspace_attention,
 };
 use treeterm_core::daemon::DaemonConnection;
+use treeterm_core::layout::{Layout, LayoutTab};
 use treeterm_core::pty::CreatePty;
 use treeterm_core::settings::Settings;
 use treeterm_core::wire::workspace_file::{AppState, WorkspaceFile};
@@ -267,6 +268,9 @@ pub struct WorkspaceStore {
     removing: bool,
     _git_refresh: Option<Task<()>>,
 }
+
+/// The metadata key the tab layout is saved under (a flex-layout model as JSON).
+const LAYOUT_MODEL: &str = "layoutModel";
 
 /// `#rrggbb` → colour; anything else is ignored (the default background is used).
 fn parse_hex_color(text: &str) -> Option<treeterm_term::alacritty_terminal::vte::ansi::Rgb> {
@@ -1273,6 +1277,7 @@ impl WorkspaceStore {
             },
         );
         self.workspace.file.active_tab_id = Some(tab_id.clone());
+        self.save_layout();
         self.tabs_changed(cx);
         self.changed(cx);
         self.init_tab(&tab_id, cx);
@@ -1362,6 +1367,7 @@ impl WorkspaceStore {
             },
         );
         self.workspace.file.active_tab_id = Some(tab_id.clone());
+        self.save_layout();
         self.tabs_changed(cx);
         self.changed(cx);
         self.init_tab(&tab_id, cx);
@@ -1516,6 +1522,7 @@ impl WorkspaceStore {
                 .map(|(id, _)| id.clone());
             file.active_tab_id = next;
         }
+        self.save_layout();
         self.tabs_changed(cx);
         self.changed(cx);
     }
@@ -1527,7 +1534,50 @@ impl WorkspaceStore {
             return;
         }
         self.workspace.file.active_tab_id = Some(tab_id.to_owned());
+        self.save_layout();
         self.changed(cx);
+    }
+
+    /// The tab layout (`FlexLayoutPane`'s model): the saved `metadata.layoutModel`, else
+    /// Electron's default for the tabs, with tabs added or closed since it was saved
+    /// reconciled in. Built afresh on each call, so it follows bodies other windows write.
+    pub fn layout(&self) -> Layout {
+        let file = &self.workspace.file;
+        let tabs: Vec<LayoutTab<'_>> = file
+            .app_states
+            .iter()
+            .map(|(id, tab)| LayoutTab {
+                id,
+                title: &tab.title,
+                application_id: &tab.application_id,
+                can_close: self.registry.get(&tab.application_id).is_some_and(|app| app.can_close),
+            })
+            .collect();
+        let saved = file.metadata.get(LAYOUT_MODEL).and_then(|json| Layout::parse(json));
+        let mut layout = saved.unwrap_or_else(|| Layout::default_for(&tabs, file.active_tab_id.as_deref()));
+        layout.reconcile(&tabs);
+        layout
+    }
+
+    /// The tab the workspace shows: the active tab, else (an `activeTabId` naming no tab) the
+    /// tab the layout selects, as Electron's layout keeps showing its own selection.
+    pub fn shown_tab(&self) -> Option<String> {
+        let file = &self.workspace.file;
+        match file.active_tab_id.as_ref().filter(|tab| file.app_states.contains_key(*tab)) {
+            Some(active) => Some(active.clone()),
+            None => self.layout().selected_tab(),
+        }
+    }
+
+    /// Put the layout, reconciled with the tabs and selecting the active tab, in the body
+    /// (Electron saves its model after tabs come and go and after each selection); the
+    /// caller reports the change.
+    fn save_layout(&mut self) {
+        let mut layout = self.layout();
+        if let Some(active) = &self.workspace.file.active_tab_id {
+            layout.select(active);
+        }
+        self.workspace.file.metadata.insert(LAYOUT_MODEL.to_owned(), layout.to_json());
     }
 
     pub fn update_tab_title(&mut self, tab_id: &str, title: &str, cx: &mut Context<Self>) {

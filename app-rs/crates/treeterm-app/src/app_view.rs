@@ -1902,8 +1902,9 @@ fn workspace_tab_strip(
     let registry = connected.session.read(cx).registry().clone();
     let store = workspace.read(cx);
     let file = &store.workspace().file;
-    let order = treeterm_core::layout::order_tabs(file.app_states.keys(), file.metadata.get("layoutModel").map(String::as_str));
-    let tabs: Vec<StripTab> = order
+    let tabs: Vec<StripTab> = store
+        .layout()
+        .tab_order()
         .iter()
         .filter_map(|id| file.app_states.get_key_value(id))
         .map(|(tab_id, tab)| {
@@ -2038,8 +2039,7 @@ fn workspace_pane(
         Some(WorkspaceEntry::OperationError { error, .. }) => Some(error.clone()),
         Some(_) | None => None,
     };
-    let file = workspace.read(cx).workspace().file.clone();
-    let active = file.active_tab_id.clone().filter(|tab| file.app_states.contains_key(tab));
+    let active = workspace.read(cx).shown_tab();
 
     let tabs = workspace_tab_strip(connected, &workspace, &id, active.clone(), cx);
 
@@ -2830,7 +2830,7 @@ impl AppView {
         let Some(store) = self.active_store(cx) else {
             return false;
         };
-        let Some(active) = store.read(cx).file().active_tab_id.clone() else {
+        let Some(active) = store.read(cx).shown_tab() else {
             return false;
         };
         let Some(TabContent::Files(model)) = store.read(cx).tab_content(&active) else {

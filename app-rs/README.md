@@ -78,8 +78,9 @@ Done (tested against a real in-process daemon unless noted):
 - **Session/workspace sync (M2):** full write side of `createSessionStore` (ref CAS with
   retry, body CAS with parentHash chain, echo suppression, conflict rewrite, watch reopen,
   lock ops), tabs (add/close/activate/state, PTY creation keyed by `ptyHandle`, close-on-exit,
-  kill-on-close), app registry from settings, layout-ordered tab strip (scrolls when full,
-  Hidden tabs menu, "+" kept at its end), new-tab menu.
+  kill-on-close), app registry from settings, tab strip in the order of Electron's
+  flex-layout model (`metadata.layoutModel`, saved back as tabs are added, closed and
+  selected; scrolls when full, Hidden tabs menu, "+" kept at its end), new-tab menu.
 - **Git and worktrees (M2):** exec/fs/git clients, open a directory as a workspace, child
   workspaces (new branch, existing branch, remote branch, existing worktree, quick fork; live
   git output), merge/squash-merge (keep or remove), remove with or without git cleanup.
