@@ -319,8 +319,16 @@ fn loading_output(lines: Vec<String>, scroll: &gpui_kit::ScrollHandle, cx: &App)
         .into_any_element()
 }
 
+/// The workspace header's in-place edit of `workspace`'s name or description. It ends,
+/// unsaved, once another workspace is active (`WorkspacePane` leaves edit mode when
+/// `activeWorkspaceId` changes).
+struct HeaderEdit {
+    workspace: String,
+    editor: HeaderEditor,
+}
+
 /// What the workspace header is editing in place (`workspace-edit-input` / `-textarea`).
-enum HeaderEdit {
+enum HeaderEditor {
     Name { input: Entity<gpui_kit::component::input::InputState>, _save: Subscription },
     Description { input: Entity<gpui_kit::component::input::TextareaState>, _save: Subscription },
 }
@@ -568,16 +576,15 @@ impl AppView {
     fn connect(&mut self, id: ConnectionId, session: Entity<SessionStore>, cx: &mut Context<Self>) -> Connected {
         cx.observe(&session, |_, _, cx| cx.notify()).detach();
         let events_id = id.clone();
-        let session_events = cx.subscribe(&session, move |view, session, event: &SessionEvent, cx| match event {
+        let session_events = cx.subscribe(&session, move |view, _, event: &SessionEvent, cx| match event {
             SessionEvent::WorkspaceRemoved(workspace) => {
                 let Some(connected) = view.sessions.get_mut(&events_id) else {
                     return;
                 };
                 // Its badge holds its meter, gone from the connection's (`removeWorkspace`).
                 connected.traffic_badges.remove(workspace);
-                // The workspace shown was dismissed or removed (its session has none
-                // active): an edit of its header goes with it.
-                if session.read(cx).active_workspace().is_none() {
+                // An edit of its header goes with it, also while its session is not shown.
+                if connected.header_edit.as_ref().is_some_and(|edit| edit.workspace == *workspace) {
                     connected.header_edit = None;
                     cx.notify();
                 }
@@ -1301,7 +1308,8 @@ impl AppView {
     fn edit_header(&mut self, field: HeaderField, window: &mut Window, cx: &mut Context<Self>) {
         use gpui_kit::component::input::{InputEvent, InputState, TextareaState};
         let Some(store) = self.active_store(cx) else { return };
-        let edit = match field {
+        let workspace = store.read(cx).workspace().id.clone();
+        let editor = match field {
             HeaderField::Name => {
                 let text = store.read(cx).file().display_name().to_owned();
                 let input = cx.new(|cx| InputState::new(window, cx).default_value(text));
@@ -1321,7 +1329,7 @@ impl AppView {
                     }
                     InputEvent::Change | InputEvent::Focus => {}
                 });
-                HeaderEdit::Name { input, _save: save }
+                HeaderEditor::Name { input, _save: save }
             }
             HeaderField::Description => {
                 let text = store.read(cx).file().metadata.get("description").cloned().unwrap_or_default();
@@ -1346,11 +1354,11 @@ impl AppView {
                     // Shift+Enter put a newline in the text, and saves nothing.
                     InputEvent::PressEnter { shift: true, .. } | InputEvent::Change | InputEvent::Focus => {}
                 });
-                HeaderEdit::Description { input, _save: save }
+                HeaderEditor::Description { input, _save: save }
             }
         };
         if let Some(connected) = self.current_mut() {
-            connected.header_edit = Some(edit);
+            connected.header_edit = Some(HeaderEdit { workspace, editor });
         }
         cx.notify();
     }
@@ -1975,9 +1983,9 @@ fn workspace_header(
             cx.notify();
         }
     });
-    let (name_edit, description_edit) = match &connected.header_edit {
-        Some(HeaderEdit::Name { input, .. }) => (Some(input.clone()), None),
-        Some(HeaderEdit::Description { input, .. }) => (None, Some(input.clone())),
+    let (name_edit, description_edit) = match connected.header_edit.as_ref().map(|edit| &edit.editor) {
+        Some(HeaderEditor::Name { input, .. }) => (Some(input.clone()), None),
+        Some(HeaderEditor::Description { input, .. }) => (None, Some(input.clone())),
         None => (None, None),
     };
 
@@ -2438,7 +2446,13 @@ fn workspace_pane(
     connected.tool_views.prune(connected.session.read(cx), cx);
     // Set again below for each terminal this render shows.
     let previous_terminals = std::mem::take(&mut connected.shown_terminals);
-    let Some(id) = connected.session.read(cx).active_workspace().map(str::to_owned) else {
+    let active = connected.session.read(cx).active_workspace().map(str::to_owned);
+    // `WorkspacePane` leaves name/description editing, unsaved, when `activeWorkspaceId`
+    // changes: the editor never shows over another workspace's header.
+    if connected.header_edit.as_ref().is_some_and(|edit| active.as_deref() != Some(edit.workspace.as_str())) {
+        connected.header_edit = None;
+    }
+    let Some(id) = active else {
         hide_tab_views(connected, cx);
         return workspace_empty(cx);
     };
