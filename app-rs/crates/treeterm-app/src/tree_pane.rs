@@ -788,7 +788,8 @@ impl TreePane {
             .when(unread, |row| {
                 let marker = ui::unread_marker(SharedString::from(format!("ws-unread-{id}")), c.accent);
                 row.child(marker.when(live, |marker| marker.tooltip(ui::unread_hint)))
-            })            // "Saving workspace attention" while an unread-marker edit is not yet saved.
+            })
+            // "Saving workspace attention" while an unread-marker edit is not yet saved.
             .when(attention_pending, |row| row.child(ui::attention_saving(primary)))
             // `.tree-item-favourite`: a filled star when marked.
             .child(

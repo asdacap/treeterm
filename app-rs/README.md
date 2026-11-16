@@ -369,7 +369,7 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   re-expanded every parent whenever any workspace changed).
 - The Settings item of a workspace row's or a favourite's menu opens or focuses that
   workspace's single Settings tab and shows the workspace (Electron added another Settings
-  tab each time, without switching to it).
+  tab each time, without showing the workspace).
 - A replayed OSC 52 copy or bell is ignored (it already happened when it first ran).
 - Corrupt `settings.json` is an error (logged; defaults used) instead of being overwritten.
 - A corrupt `ui-state.json` (session names and order, Recent Directories) is logged and kept as
