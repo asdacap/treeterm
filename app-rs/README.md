@@ -194,7 +194,10 @@ Done (tested against a real in-process daemon unless noted):
   `ui-state.json` by connection target); the Open Workspace dialog's Recent Directories (kept
   in `ui-state.json` by connection target; Electron's, from its localStorage, are added once
   after the ones already listed); session pane with info, logs, port forwards, a system
-  monitor, the session as JSON and its TTYs. Each session has an active workspace (its first
+  monitor, the session as JSON and its TTYs (listed when the tab is shown, on Refresh and
+  after a Kill, through the connection's daemon of the moment; the last list and an open
+  viewer stay while the connection is down and once it is back, until Refresh). Each
+  session has an active workspace (its first
   one once loaded, a new or forked one at once): the window opens on it at start-up and
   after a remote connect, and disconnecting the shown session shows the next one's (or its
   session pane when it has none). Until a workspace is shown (a local session without any

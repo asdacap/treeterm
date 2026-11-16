@@ -1,6 +1,6 @@
 //! The TTYs tab (`SessionTtyList.tsx`): every PTY of the session grouped by workspace, with
-//! Open (a live viewer dialog) and Kill. [`SessionTtyList`] follows the connection's session
-//! across reconnects and its workspaces as they change.
+//! Open (a live viewer dialog) and Kill. [`SessionTtyList`] acts through the connection's
+//! daemon of the moment and groups by its session's workspaces as they change.
 
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::*;
@@ -11,10 +11,10 @@ use gpui_kit::{
 use treeterm_core::connection::ConnectionId;
 use treeterm_model::active_processes::{PtyGroup, ViewerStatus, relative_time, viewer_status};
 use treeterm_model::app_store::AppStore;
-use treeterm_model::session_tty_list::{SessionTtyList, TtyListBody};
+use treeterm_model::session_tty_list::{SessionTtyList, TtyListBody, TtyViewer};
 use treeterm_model::terminal::TerminalModel;
 
-use crate::active_processes_view::pty_viewer;
+use crate::active_processes_view::{attach_failed, pty_viewer};
 use crate::terminal_view::TerminalView;
 use crate::theme::colors;
 use crate::ui::{MONO, dialog_close, dialog_shadow, modal, normal_line, text_button};
@@ -48,11 +48,20 @@ impl SessionTtys {
         text_button(id, "Kill", 12., (4., 10.), gpui_kit::white(), rgb(DANGER), gpui_kit::transparent_black(), 4.)
     }
 
-    /// The viewer of the selected PTY, made when the selection changes, and what it shows.
-    fn viewer(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<(String, ViewerStatus, Entity<TerminalView>)> {
+    /// The PTY open in the viewer and what the viewer shows: its terminal's view, made when
+    /// another terminal is opened (and dropped with it), or why it could not attach.
+    fn viewer(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<(String, ViewerBody)> {
         let (id, terminal) = {
-            let (id, terminal) = self.list.read(cx).selected(cx)?;
-            (id.to_owned(), terminal.clone())
+            let (id, viewer) = self.list.read(cx).viewer()?;
+            match viewer {
+                TtyViewer::Terminal(terminal) => (id.to_owned(), terminal.clone()),
+                TtyViewer::NoDaemon(down) => {
+                    let failed = ViewerBody::Failed(down.clone());
+                    let id = id.to_owned();
+                    self.viewer = None;
+                    return Some((id, failed));
+                }
+            }
         };
         let status = viewer_status(terminal.read(cx));
         let view = match &self.viewer {
@@ -63,7 +72,7 @@ impl SessionTtys {
                 view
             }
         };
-        Some((id, status, view))
+        Some((id, ViewerBody::Terminal(status, view)))
     }
 
     fn body(&self, body: TtyListBody, cx: &mut Context<Self>) -> AnyElement {
@@ -154,6 +163,14 @@ impl SessionTtys {
     }
 }
 
+/// What the viewer dialog shows under its header (`PtyViewer`).
+enum ViewerBody {
+    /// The live terminal, attaching or attached.
+    Terminal(ViewerStatus, Entity<TerminalView>),
+    /// "Failed to attach to process", and why.
+    Failed(String),
+}
+
 /// `.tty-list-group-header`'s text: `Name (count)`, uppercased.
 fn header_label(group: &PtyGroup) -> SharedString {
     format!("{} ({})", group.label, group.sessions.len()).to_uppercase().into()
@@ -229,7 +246,7 @@ impl Render for SessionTtys {
         }
         let c = colors(cx);
         let (bg, secondary, primary, border) = (c.bg_primary, c.text_secondary, c.text_primary, c.border);
-        let dialog = viewer.map(|(id, status, terminal)| {
+        let dialog = viewer.map(|(id, body)| {
             let size = window.viewport_size();
             let width = (f32::from(size.width) * 0.8).min(1000.);
             let short: String = id.chars().take(8).collect();
@@ -263,7 +280,10 @@ impl Render for SessionTtys {
                         ),
                 )
                 // `.pty-viewer-dialog-body`.
-                .child(div().flex_1().min_h_0().child(pty_viewer(status, terminal)));
+                .child(div().flex_1().min_h_0().child(match body {
+                    ViewerBody::Terminal(status, terminal) => pty_viewer(status, terminal),
+                    ViewerBody::Failed(down) => attach_failed(down),
+                }));
             modal(window, content, move |_, cx| list.update(cx, |l, cx| l.deselect(cx)))
         });
         v_flex()

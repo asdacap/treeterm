@@ -79,30 +79,12 @@ impl ActiveProcesses {
         }));
     }
 
-    /// Attach a live terminal to `id` (it takes over the PTY's size while shown, like
-    /// Electron's `PtyViewer`).
+    /// Attach a live terminal to `id` ([`attach_viewer`]).
     pub fn select(&mut self, id: &str, cx: &mut Context<Self>) {
         if self.selected.as_ref().is_some_and(|(shown, _)| shown == id) {
             return;
         }
-        // `PtyViewer` is no `BaseTerminal`: it logs no `[RAW]` lines and draws no DEBUG badge.
-        let options = TerminalOptions {
-            pty_id: id.to_owned(),
-            background: DEFAULT_BACKGROUND,
-            settings: TerminalSettings { show_raw_chars: false, ..self.settings.clone() },
-            role: TerminalRole::Viewer,
-            width_limit: WidthLimit::Off,
-            scrollbar: ScrollbarVisibility::Shown,
-            selection_copy: SelectionCopy::OnCopy,
-            idle_timeout: None,
-            // A viewer, not a workspace: nobody meters it.
-            traffic: treeterm_core::traffic::ByteCounter::default(),
-            show_debug_badge: false,
-            // Shown while selected.
-            shown: true,
-        };
-        let conn = self.conn.clone();
-        let terminal = cx.new(|cx| TerminalModel::new(conn, options, cx));
+        let terminal = attach_viewer(self.conn.clone(), id, &self.settings, cx);
         self.selected = Some((id.to_owned(), terminal));
         self.stop_error = None;
         cx.notify();
@@ -128,31 +110,6 @@ impl ActiveProcesses {
         self.kill_then_refresh(id, cx);
     }
 
-    /// Kill any PTY (the session pane's per-row Kill), closing its viewer if it is shown,
-    /// then re-list.
-    pub fn kill(&mut self, id: &str, cx: &mut Context<Self>) {
-        if self.selected.as_ref().is_some_and(|(shown, _)| shown == id) {
-            self.selected = None;
-        }
-        self.list = ProcessList::Loading;
-        self.kill_then_refresh(id.to_owned(), cx);
-    }
-
-    /// Close the viewer; the PTY keeps running.
-    pub fn deselect(&mut self, cx: &mut Context<Self>) {
-        if self.selected.take().is_some() {
-            cx.notify();
-        }
-    }
-
-    /// List again from scratch: "Loading…" until the daemon answers (`SessionTtyList`'s
-    /// Refresh).
-    pub fn reload(&mut self, cx: &mut Context<Self>) {
-        self.list = ProcessList::Loading;
-        cx.notify();
-        self.refresh(cx);
-    }
-
     fn kill_then_refresh(&mut self, id: String, cx: &mut Context<Self>) {
         let kill = self.conn.kill_pty(&id);
         self._stop = Some(cx.spawn(async move |this, cx| {
@@ -170,6 +127,28 @@ impl ActiveProcesses {
         }));
         cx.notify();
     }
+}
+
+/// A live terminal attached to PTY `id` through `conn`, as Electron's `PtyViewer`: it takes
+/// over the PTY's size while shown.
+pub fn attach_viewer(conn: DaemonConnection, id: &str, settings: &TerminalSettings, cx: &mut App) -> Entity<TerminalModel> {
+    // `PtyViewer` is no `BaseTerminal`: it logs no `[RAW]` lines and draws no DEBUG badge.
+    let options = TerminalOptions {
+        pty_id: id.to_owned(),
+        background: DEFAULT_BACKGROUND,
+        settings: TerminalSettings { show_raw_chars: false, ..settings.clone() },
+        role: TerminalRole::Viewer,
+        width_limit: WidthLimit::Off,
+        scrollbar: ScrollbarVisibility::Shown,
+        selection_copy: SelectionCopy::OnCopy,
+        idle_timeout: None,
+        // A viewer, not a workspace: nobody meters it.
+        traffic: treeterm_core::traffic::ByteCounter::default(),
+        show_debug_badge: false,
+        // Shown while open.
+        shown: true,
+    };
+    cx.new(|cx| TerminalModel::new(conn, options, cx))
 }
 
 /// What the viewer of a process shows (`PtyViewerStatus`), from its terminal.

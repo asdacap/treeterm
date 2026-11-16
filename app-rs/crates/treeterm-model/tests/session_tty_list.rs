@@ -1,5 +1,6 @@
 //! The session pane's TTYs tab (`SessionTtyList.tsx`): it groups by the session's
-//! workspaces as they load, and follows the connection across a reconnect.
+//! workspaces as they load, lists only when shown, on Refresh and after a Kill, and acts
+//! through the connection's daemon of the moment across a reconnect.
 
 use gpui_kit::{AppContext as _, Entity, TestAppContext};
 use treeterm_core::connection::ConnectionId;
@@ -7,8 +8,9 @@ use treeterm_core::local_daemon::LocalDaemonSpec;
 use treeterm_core::pty::CreatePty;
 use treeterm_model::active_processes::PtyGroup;
 use treeterm_model::app_store::AppStore;
-use treeterm_model::session_tty_list::{SessionTtyList, TtyListBody};
+use treeterm_model::session_tty_list::{SessionTtyList, TtyListBody, TtyViewer};
 use treeterm_model::settings_store::SettingsStore;
+use treeterm_model::terminal::TerminalModel;
 use treeterm_proto::treeterm::WorkspaceRef;
 
 mod common;
@@ -53,6 +55,16 @@ fn spawn_pty(h: &Harness) -> String {
         .unwrap()
 }
 
+/// The ids of the PTYs the daemon runs.
+fn daemon_ptys(h: &Harness) -> Vec<String> {
+    futures::executor::block_on(h.conn.list_pty_sessions())
+        .unwrap()
+        .unwrap()
+        .into_iter()
+        .map(|s| s.id)
+        .collect()
+}
+
 /// The app on the local daemon at `socket` (never spawned: it is already running).
 fn app_on(
     cx: &mut TestAppContext,
@@ -81,6 +93,11 @@ fn local_id(cx: &mut TestAppContext, app: &Entity<AppStore>) -> ConnectionId {
     })
 }
 
+/// Wait until connection `id` has a daemon (`up`) or has none.
+fn wait_connection(cx: &mut TestAppContext, app: &Entity<AppStore>, id: &ConnectionId, up: bool) {
+    wait_until_app(cx, app, |a, _| a.manager().client(id).is_ok() == up);
+}
+
 fn group(label: &str, ptys: &[&str]) -> (String, Vec<String>) {
     (
         label.to_owned(),
@@ -102,6 +119,17 @@ fn groups(list: &SessionTtyList, cx: &gpui_kit::App) -> Option<Vec<(String, Vec<
     Some(groups.iter().map(shape).collect())
 }
 
+/// The viewer's PTY and its live terminal, if one is attached.
+fn viewer_terminal(
+    list: &Entity<SessionTtyList>,
+    cx: &mut TestAppContext,
+) -> Option<(String, Entity<TerminalModel>)> {
+    list.read_with(cx, |l, _| match l.viewer()? {
+        (id, TtyViewer::Terminal(terminal)) => Some((id.to_owned(), terminal.clone())),
+        (_, TtyViewer::NoDaemon(_)) => None,
+    })
+}
+
 #[gpui_kit::test]
 fn ptys_move_under_their_workspace_once_it_loads(cx: &mut TestAppContext) {
     cx.executor().allow_parking();
@@ -115,15 +143,20 @@ fn ptys_move_under_their_workspace_once_it_loads(cx: &mut TestAppContext) {
     let app = app_on(cx, &h, h.daemon.socket_path(), dir.path());
     let id = local_id(cx, &app);
 
-    // Shown before the connection is up: it fails with why, as Electron's `getClient` does,
-    // or, connected with the session still loading, waits for it.
+    // Shown before the connection is up, it fails with why, as Electron's `getClient` does,
+    // and lists again only on Refresh; shown once connected, it lists at once.
     let list = cx.new(|cx| SessionTtyList::new(&app, id.clone(), cx));
     let body = list.read_with(cx, |l, cx| l.body(cx));
+    let connecting = TtyListBody::Failed(format!("Connection {id} is connecting"));
     assert!(
-        body == TtyListBody::Failed(format!("Connection {id} is connecting"))
-            || body == TtyListBody::Loading,
+        body == connecting || body == TtyListBody::Loading,
         "{body:?}"
     );
+    if body == connecting {
+        wait_connection(cx, &app, &id, true);
+        assert_eq!(list.read_with(cx, |l, cx| l.body(cx)), connecting);
+        list.update(cx, |l, cx| l.reload(cx));
+    }
 
     // Connected, with no workspace yet: the shell is under "Unknown".
     wait_until_app(cx, &list, |l, cx| {
@@ -138,7 +171,7 @@ fn ptys_move_under_their_workspace_once_it_loads(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
-fn after_a_reconnect_the_list_refreshes_and_kills_on_the_new_connection(cx: &mut TestAppContext) {
+fn a_dropped_connection_keeps_the_list_and_viewer_until_refresh(cx: &mut TestAppContext) {
     cx.executor().allow_parking();
     let _serial = serial();
     let h = harness();
@@ -153,47 +186,65 @@ fn after_a_reconnect_the_list_refreshes_and_kills_on_the_new_connection(cx: &mut
     let proxy = Proxy::start(&socket, h.daemon.socket_path());
     let app = app_on(cx, &h, &socket, dir.path());
     let id = local_id(cx, &app);
+    wait_connection(cx, &app, &id, true);
     let list = cx.new(|cx| SessionTtyList::new(&app, id.clone(), cx));
-    wait_until_app(cx, &list, |l, cx| {
+    let listed = |l: &SessionTtyList, cx: &gpui_kit::App| {
         groups(l, cx) == Some(vec![group("Alpha", &[&pty])])
-    });
+    };
+    wait_until_app(cx, &list, listed);
     list.update(cx, |l, cx| l.select(&pty, cx));
-    assert!(list.read_with(cx, |l, cx| {
-        l.selected(cx).is_some_and(|(shown, _)| shown == pty)
-    }));
+    let (shown, viewer) = viewer_terminal(&list, cx).expect("a viewer attached");
+    assert_eq!(shown, pty);
 
-    // The connection drops: listing fails with Electron's `getClient` error, and the viewer
-    // closes.
+    // The connection drops: the list, grouped by the kept session's workspaces, and the
+    // viewer stay.
     drop(proxy);
-    let reconnecting = format!("Connection {id} is reconnecting: ");
-    let down = |l: &SessionTtyList, cx: &gpui_kit::App| matches!(l.body(cx), TtyListBody::Failed(why) if why.starts_with(&reconnecting));
-    wait_until_app(cx, &list, down);
-    assert!(list.read_with(cx, |l, cx| l.selected(cx).is_none()));
-    // Acting on it meanwhile does nothing.
-    list.update(cx, |l, cx| l.kill(&pty, cx));
-    list.update(cx, |l, cx| l.reload(cx));
-    assert!(list.read_with(cx, down));
+    wait_connection(cx, &app, &id, false);
+    assert!(list.read_with(cx, listed));
+    assert!(
+        viewer_terminal(&list, cx) == Some((pty.clone(), viewer)),
+        "the viewer stays"
+    );
 
-    // The next generation lists by itself; Refresh, Kill and Open use its connection.
+    // Meanwhile Open, Refresh and Kill fail with Electron's `getClient` error.
+    let reconnecting = format!("Connection {id} is reconnecting: ");
+    list.update(cx, |l, cx| l.deselect(cx));
+    assert!(list.read_with(cx, |l, _| l.viewer().is_none()));
+    list.update(cx, |l, cx| l.select(&pty, cx));
+    assert!(list.read_with(cx, |l, _| matches!(
+        l.viewer(),
+        Some((shown, TtyViewer::NoDaemon(why))) if shown == pty && why.starts_with(&reconnecting)
+    )));
+    let failed = |l: &SessionTtyList, cx: &gpui_kit::App| matches!(l.body(cx), TtyListBody::Failed(why) if why.starts_with(&reconnecting));
+    list.update(cx, |l, cx| l.reload(cx));
+    assert!(list.read_with(cx, failed));
+    list.update(cx, |l, cx| l.deselect(cx));
+    list.update(cx, |l, cx| l.select(&pty, cx));
+    list.update(cx, |l, cx| l.kill(&pty, cx));
+    assert!(
+        list.read_with(cx, |l, _| l.viewer().is_none()),
+        "Kill closes its viewer"
+    );
+    assert!(list.read_with(cx, failed));
+    assert!(daemon_ptys(&h).contains(&pty), "nothing was killed");
+
+    // Connected again, it does not list by itself; Refresh, Open and Kill use the new
+    // connection.
     let _proxy = Proxy::start(&socket, h.daemon.socket_path());
-    wait_until_app(cx, &list, |l, cx| {
-        groups(l, cx) == Some(vec![group("Alpha", &[&pty])])
-    });
+    wait_connection(cx, &app, &id, true);
+    cx.run_until_parked();
+    assert!(list.read_with(cx, failed));
     list.update(cx, |l, cx| l.reload(cx));
     assert_eq!(list.read_with(cx, |l, cx| l.body(cx)), TtyListBody::Loading);
-    wait_until_app(cx, &list, |l, cx| {
-        groups(l, cx) == Some(vec![group("Alpha", &[&pty])])
-    });
+    wait_until_app(cx, &list, listed);
     list.update(cx, |l, cx| l.select(&pty, cx));
-    assert!(list.read_with(cx, |l, cx| {
-        l.selected(cx).is_some_and(|(shown, _)| shown == pty)
-    }));
-    list.update(cx, |l, cx| l.deselect(cx));
-    assert!(list.read_with(cx, |l, cx| l.selected(cx).is_none()));
+    assert!(viewer_terminal(&list, cx).is_some_and(|(shown, _)| shown == pty));
     list.update(cx, |l, cx| l.kill(&pty, cx));
+    assert!(
+        list.read_with(cx, |l, _| l.viewer().is_none()),
+        "Kill closes its viewer"
+    );
+    assert_eq!(list.read_with(cx, |l, cx| l.body(cx)), TtyListBody::Loading);
     wait_until_app(cx, &list, |l, cx| groups(l, cx) == Some(Vec::new()));
-    let left = futures::executor::block_on(h.conn.list_pty_sessions())
-        .unwrap()
-        .unwrap();
-    assert!(left.iter().all(|s| s.id != pty), "the PTY was killed");
+    assert!(!daemon_ptys(&h).contains(&pty), "the PTY was killed");
 }

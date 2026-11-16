@@ -126,36 +126,7 @@ impl ActiveProcessesView {
 /// Processes) but sits at the top of a block (the TTY list's viewer), as in Electron.
 pub(crate) fn pty_viewer(status: ViewerStatus, terminal: Entity<TerminalView>) -> AnyElement {
     let attaching = match status {
-        ViewerStatus::Failed(message) => {
-            return div()
-                .flex()
-                .flex_1()
-                .min_h_0()
-                .items_center()
-                .justify_center()
-                .p(px(24.))
-                .text_center()
-                .text_color(rgb(0xf44336))
-                .child(
-                    div()
-                        .child(
-                            div()
-                                .mb(px(8.))
-                                .text_size(px(16.))
-                                .line_height(ui::normal_line(16.))
-                                .font_weight(FontWeight::BOLD)
-                                .child("Failed to attach to process"),
-                        )
-                        .child(
-                            div()
-                                .text_size(px(13.))
-                                .line_height(ui::normal_line(13.))
-                                .opacity(0.8)
-                                .child(message),
-                        ),
-                )
-                .into_any_element();
-        }
+        ViewerStatus::Failed(message) => return attach_failed(message),
         ViewerStatus::Attaching => true,
         ViewerStatus::Ready => false,
     };
@@ -181,6 +152,32 @@ pub(crate) fn pty_viewer(status: ViewerStatus, terminal: Entity<TerminalView>) -
                     .child("Attaching to process..."),
             )
         })
+        .into_any_element()
+}
+
+/// [`pty_viewer`]'s "Failed to attach to process" and why, in place of the terminal.
+pub(crate) fn attach_failed(message: String) -> AnyElement {
+    div()
+        .flex()
+        .flex_1()
+        .min_h_0()
+        .items_center()
+        .justify_center()
+        .p(px(24.))
+        .text_center()
+        .text_color(rgb(0xf44336))
+        .child(
+            div()
+                .child(
+                    div()
+                        .mb(px(8.))
+                        .text_size(px(16.))
+                        .line_height(ui::normal_line(16.))
+                        .font_weight(FontWeight::BOLD)
+                        .child("Failed to attach to process"),
+                )
+                .child(div().text_size(px(13.)).line_height(ui::normal_line(13.)).opacity(0.8).child(message)),
+        )
         .into_any_element()
 }
 
