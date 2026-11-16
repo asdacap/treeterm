@@ -29,6 +29,10 @@ lsp-types = "0.97.0"
 # The Markdown preview parses as react-markdown does before GPUI Kit's parser sees the text
 # (`file_browser_view/markdown.rs`); GPUI Kit's version.
 markdown = "1.0.0"
+# AVIF, which GPUI cannot decode, for Review's image diffs (`avif.rs`): rav1d, in pure Rust.
+avif-decode = { version = "3.0.0", default-features = false }
+# `image::Frame`, the pixels of a GPUI `RenderImage`; GPUI's version.
+image = { version = "0.25", default-features = false }
 futures = { workspace = true, optional = true }
 
 # The AppKit calls GPUI does not wrap (`macos.rs`). GPUI's `gpui-base` already builds these
@@ -58,6 +62,9 @@ workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+# avif-decode's image types, to build decoded images of every kind in `avif.rs`'s tests.
+imgref = "1.12"
+rgb = { version = "0.8.53", default-features = false }
 # A scripted `ExecApi` for the editor hooks' tests.
 futures.workspace = true
 # `TestAppContext`, to lay out views in tests.

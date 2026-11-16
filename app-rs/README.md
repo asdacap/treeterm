@@ -149,7 +149,7 @@ Done (tested against a real in-process daemon unless noted):
   at is moved to once.
 - **Review (M7):** committed / uncommitted / commits views, stage/unstage/commit, inline
   comments (Electron's metadata format), viewed files, image diffs (before / after, SVG
-  included), each file's diff read once its section comes within 1500px of the viewport
+  and AVIF included), each file's diff read once its section comes within 1500px of the viewport
   ("Scroll to load diff" until then; find reads every file, four at a time), loading,
   failing (also when its part of the patch does not parse) and refreshed (its header's
   refresh button) on its own, a diff over 20,000 lines or 2 MiB drawn only after "Load anyway",
@@ -346,6 +346,12 @@ are not ours). Its changes are marked `TreeTerm patch` (`grep -rn "TreeTerm patc
 When `gpui-kit` is upgraded, copy the new `gpui-component` over this directory and re-apply
 the marked changes (or drop the patch if the Kit gained the option).
 
+`vendor/avif-decode` is avif-decode 3.0.0 as published on crates.io (Review's AVIF image
+diffs), swapped in and excluded the same way. Its one change, marked `TreeTerm patch` in
+`Cargo.toml`, builds rav1d without its assembly on every target, as upstream already does
+off x86: rav1d's x86 assembly needs NASM, which the app's builds (`xtask check-linux`
+included) would otherwise need. Drop the patch when avif-decode lets its users choose.
+
 ## Appearance
 
 The chrome was matched to Electron's computed styles, measured side by side on one session
@@ -440,8 +446,10 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   title runs under them).
 - GPUI cannot decode AVIF, so the Files viewer shows `.avif` images in a webview (WebKit
   draws them, centred and scaled down as Electron's `<img>`). Review's image diffs, which
-  scroll in a list, show the sides of an `.avif` change as broken images with their alt text
-  (`Before: <path>`), as Electron shows an image it cannot decode.
+  scroll in a list, decode an `.avif` change's sides with rav1d (`vendor/avif-decode`) in a
+  child process, the app run with `--decode-avif`: rav1d 1.1.0 aborts the process on some
+  corrupt frames, so such a side shows as a broken image with its alt text
+  (`Before: <path>`), as Chromium shows an image it cannot decode, and the app carries on.
 - The Markdown preview shows raw HTML as its text, as react-markdown does, but each HTML
   block (`<p align="center">…</p>` and the like) on lines of its own with the paragraph gap
   between them: Electron's browser runs consecutive HTML blocks together into one paragraph

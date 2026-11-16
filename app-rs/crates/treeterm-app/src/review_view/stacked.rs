@@ -1214,21 +1214,19 @@ fn image_diff(path: &str, sides: ImageSides, cx: &App) -> AnyElement {
             .child(div().self_start().text_size(px(11.)).text_color(secondary).child(label.to_uppercase()))
             .child(match bytes {
                 Some(bytes) => {
-                    let image = match drawing {
+                    let source = match drawing {
                         ImageDrawing::Gpui(format) => {
-                            let image = std::sync::Arc::new(gpui_kit::Image::from_bytes(format, (*bytes).clone()));
-                            gpui_kit::img(image)
-                                .max_w_full()
-                                .max_h(px(480.))
-                                .object_fit(gpui_kit::ObjectFit::Contain)
-                                .with_fallback(broken)
-                                .into_any_element()
+                            gpui_kit::ImageSource::from(std::sync::Arc::new(gpui_kit::Image::from_bytes(format, (*bytes).clone())))
                         }
-                        // GPUI has no AVIF decoder (that needs an AV1 decoder dependency). The
-                        // Files viewer has WebKit draw one, which does not fit a diff scrolled in
-                        // a list, so the side shows the broken image and its alt text.
-                        ImageDrawing::Webview => broken(),
+                        // GPUI has no AVIF decoder. The Files viewer has WebKit draw one, which
+                        // does not fit a diff scrolled in a list, so the app decodes it.
+                        ImageDrawing::Webview => crate::avif::image_source(bytes),
                     };
+                    let image = gpui_kit::img(source)
+                        .max_w_full()
+                        .max_h(px(480.))
+                        .object_fit(gpui_kit::ObjectFit::Contain)
+                        .with_fallback(broken);
                     div().relative().max_w_full().bg(rgb(CHECKER_DARK)).child(checkerboard()).child(image).into_any_element()
                 }
                 None => div().p(px(24.)).text_size(px(12.)).italic().text_color(secondary).child("No file").into_any_element(),

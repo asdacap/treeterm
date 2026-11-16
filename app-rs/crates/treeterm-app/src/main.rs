@@ -4,6 +4,7 @@ mod active_processes_view;
 mod app_view;
 mod assets;
 mod auto_open_dialog;
+mod avif;
 mod connection_picker;
 mod open_panel;
 mod open_workspace_dialog;
@@ -191,6 +192,11 @@ fn start_logging() {
 }
 
 fn main() {
+    // Review's AVIF decoder (`avif::ARG`): before logging and its panic hook, so a panic there
+    // never opens the crash screen, and without the GUI.
+    if std::env::args_os().nth(1).is_some_and(|arg| arg == avif::ARG) {
+        std::process::exit(avif::serve());
+    }
     start_logging();
 
     let args: Vec<String> = std::env::args().skip(1).collect();

@@ -532,7 +532,8 @@ pub fn language_for(path: &str) -> &'static str {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ImageDrawing {
     Gpui(gpui_kit::ImageFormat),
-    /// GPUI has no AVIF decoder: WebKit draws it ([`crate::browser_view::AssetPageView::image`]).
+    /// GPUI has no AVIF decoder: WebKit draws it ([`crate::browser_view::AssetPageView::image`]),
+    /// and Review's image diffs, which scroll in a list, decode it ([`crate::avif`]).
     Webview,
 }
 
