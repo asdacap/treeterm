@@ -113,6 +113,17 @@ fn push_subtree(
     }
 }
 
+/// The rows of `id`'s subtree as shown (`.tree-subtree`): its own row and the visible rows
+/// under it. Empty when `id` has no row.
+pub fn subtree(rows: &[TreeRow], id: &str) -> std::ops::Range<usize> {
+    let Some(start) = rows.iter().position(|row| row.id == id) else {
+        return 0..0;
+    };
+    let depth = rows[start].depth;
+    let end = rows[start + 1..].iter().position(|row| row.depth <= depth).map_or(rows.len(), |n| start + 1 + n);
+    start..end
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -181,6 +192,18 @@ mod tests {
         let rows = flatten(&nodes, &collapsed);
         assert_eq!(ids(&rows), vec![("p", 0)]);
         assert!(rows[0].has_children);
+    }
+
+    #[test]
+    fn a_subtree_is_the_row_and_the_visible_rows_under_it() {
+        let row = |id: &str, depth| TreeRow { id: id.to_owned(), depth, has_children: false };
+        let rows = [row("a", 0), row("a1", 1), row("a1x", 2), row("a2", 1), row("b", 0), row("b1", 1)];
+        assert_eq!(subtree(&rows, "a"), 0..4, "a root: up to the next root");
+        assert_eq!(subtree(&rows, "a1"), 1..3, "a child: up to its next sibling");
+        assert_eq!(subtree(&rows, "a1x"), 2..3, "a leaf: its own row");
+        assert_eq!(subtree(&rows, "a2"), 3..4, "the last child: up to its parent's sibling");
+        assert_eq!(subtree(&rows, "b"), 4..6, "the last root: to the end");
+        assert_eq!(subtree(&rows, "gone"), 0..0, "no row");
     }
 
     #[test]

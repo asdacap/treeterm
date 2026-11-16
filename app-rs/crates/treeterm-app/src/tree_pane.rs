@@ -44,6 +44,8 @@ pub struct TreePane {
     folded: bool,
     /// Where a workspace being dragged would land.
     drop_hint: Option<(String, DropPosition)>,
+    /// The row under the pointer: it and the rows under it are tinted (`.tree-subtree`).
+    hovered: Option<String>,
     /// Per-window view state: which workspaces have their children hidden.
     view: TreeViewState,
 }
@@ -126,6 +128,7 @@ impl TreePane {
             remote,
             folded: false,
             drop_hint: None,
+            hovered: None,
             view: TreeViewState::new(Default::default()),
         }
     }
@@ -407,34 +410,45 @@ impl TreePane {
         let rows: Result<Vec<RowData>, AnyElement> = match session.state() {
             SessionState::Waiting => Err(status_line("Loading session…", text_secondary)),
             SessionState::Failed(reason) => Err(status_line(reason.clone(), error)),
-            SessionState::Live => Ok(session
-                .tree_rows(self.view.collapsed(), cx)
-                .into_iter()
-                .filter_map(|row| Some(RowData {
-                    activity: session
-                        .workspace_store(&row.id)
-                        .map(|w| w.read(cx).overall_activity())
-                        .unwrap_or_default(),
-                    is_worktree: session
-                        .workspace_store(&row.id)
-                        .is_some_and(|w| w.read(cx).file().is_worktree),
-                    unread: session
-                        .workspace_store(&row.id)
-                        .is_some_and(|w| w.read(cx).has_unread_attention()),
-                    attention_pending: session.workspace_store(&row.id).is_some_and(|w| w.read(cx).attention_pending()),
-                    flash: session.workspace_store(&row.id).and_then(|w| w.read(cx).attention_flash(now)),
-                    favourite: session.workspace_store(&row.id).is_some_and(|w| w.read(cx).is_favourite()),
-                    has_parent: session
-                        .workspace_store(&row.id)
-                        .is_some_and(|w| w.read(cx).file().parent_id.as_deref().is_some_and(|p| !p.is_empty())),
-                    pr: session.git_controller(&row.id).map_or_else(Vec::new, |git| pr_indicators(git.read(cx).status())),
-                    git_repo: session.workspace_store(&row.id).is_some_and(|w| w.read(cx).file().is_git_repo),
-                    label: Label::of(session.entry(&row.id)?, cx),
-                    id: row.id,
-                    depth: row.depth,
-                    has_children: row.has_children,
-                }))
-                .collect()),
+            SessionState::Live => {
+                let rows = session.tree_rows(self.view.collapsed(), cx);
+                let hovered = self.hovered.as_deref().map_or(0..0, |id| treeterm_core::tree::subtree(&rows, id));
+                Ok(rows
+                    .into_iter()
+                    .enumerate()
+                    .filter_map(|(index, row)| Some(RowData {
+                        hover: if !hovered.contains(&index) {
+                            RowHover::Outside
+                        } else if index == hovered.start {
+                            RowHover::Hovered
+                        } else {
+                            RowHover::Under
+                        },
+                        activity: session
+                            .workspace_store(&row.id)
+                            .map(|w| w.read(cx).overall_activity())
+                            .unwrap_or_default(),
+                        is_worktree: session
+                            .workspace_store(&row.id)
+                            .is_some_and(|w| w.read(cx).file().is_worktree),
+                        unread: session
+                            .workspace_store(&row.id)
+                            .is_some_and(|w| w.read(cx).has_unread_attention()),
+                        attention_pending: session.workspace_store(&row.id).is_some_and(|w| w.read(cx).attention_pending()),
+                        flash: session.workspace_store(&row.id).and_then(|w| w.read(cx).attention_flash(now)),
+                        favourite: session.workspace_store(&row.id).is_some_and(|w| w.read(cx).is_favourite()),
+                        has_parent: session
+                            .workspace_store(&row.id)
+                            .is_some_and(|w| w.read(cx).file().parent_id.as_deref().is_some_and(|p| !p.is_empty())),
+                        pr: session.git_controller(&row.id).map_or_else(Vec::new, |git| pr_indicators(git.read(cx).status())),
+                        git_repo: session.workspace_store(&row.id).is_some_and(|w| w.read(cx).file().is_git_repo),
+                        label: Label::of(session.entry(&row.id)?, cx),
+                        id: row.id,
+                        depth: row.depth,
+                        has_children: row.has_children,
+                    }))
+                    .collect())
+            }
         };
         match rows {
             Err(status) => status,
@@ -613,6 +627,7 @@ impl TreePane {
             pr,
             git_repo,
             activity,
+            hover,
         } = row;
         let busy = activity != treeterm_model::workspace_store::ActivityState::Idle;
         let c = colors(cx);
@@ -641,12 +656,23 @@ impl TreePane {
         let selected = session.read(cx).viewed_workspace() == Some(id.as_str());
         // Workspace focus mode (prefix + w) moves this cursor with the arrow keys.
         let focus_cursor = self.keybindings.read(cx).machine().focused_workspace() == Some(id.as_str());
+        // `.tree-item:hover`, and `.tree-subtree:has(> .tree-item:hover) .tree-item:not(.active):not(.focused)`
+        // (which outranks it): the row under the pointer and the rows under it at half the
+        // hover colour. The active row keeps its own; the focus cursor's row is tinted, in
+        // full, only while under the pointer itself.
+        let background = match (selected, focus_cursor, hover) {
+            (true, _, _) => Some(c.bg_active),
+            (false, false, RowHover::Hovered | RowHover::Under) => Some(c.bg_hover.opacity(0.5)),
+            (false, true, RowHover::Hovered) => Some(c.bg_hover),
+            (false, true, RowHover::Under) | (false, _, RowHover::Outside) => None,
+        };
         let expand = match (has_children, self.view.is_collapsed(&id)) {
             (false, _) => None,
             (true, false) => Some(IconName::ChevronDown),
             (true, true) => Some(IconName::ChevronRight),
         };
         let toggle_id = id.clone();
+        let hover_id = id.clone();
         let select_id = id.clone();
         let fork_id = id.clone();
         let (drag_value, move_id, drop_id) = (
@@ -672,8 +698,19 @@ impl TreePane {
             .pr(px(4.))
             .items_center()
             .cursor_pointer()
-            .when(selected, |row| row.bg(c.bg_active))
-            .when(!selected, |row| row.hover(|row| row.bg(c.bg_hover)))
+            .when_some(background, |row, background| row.bg(background))
+            .on_hover(cx.listener(move |pane, hovered: &bool, _, cx| {
+                let next = match (*hovered, &pane.hovered) {
+                    (true, _) => Some(hover_id.clone()),
+                    // Left for another row, which may have said so first.
+                    (false, Some(current)) if *current == hover_id => None,
+                    (false, Some(_) | None) => return,
+                };
+                if pane.hovered != next {
+                    pane.hovered = next;
+                    cx.notify();
+                }
+            }))
             // Wrapped, as the system draws a long `title`.
             .when_some(tooltip, |row, tooltip| {
                 row.tooltip(move |window, cx| {
@@ -682,9 +719,8 @@ impl TreePane {
                         .build(window, cx)
                 })
             })
-            .when(focus_cursor, |row| row.border_2().border_color(c.accent))
-            // `.workspace-unread`: a 2px accent rule on the left.
-            .when(unread && !focus_cursor, |row| row.border_l(px(2.)).border_color(c.accent))
+            // `.workspace-unread`: a 2px accent rule on the left, also under the focus outline.
+            .when(unread, |row| row.border_l(px(2.)).border_color(c.accent))
             .on_drag(drag_value, |dragged, _, _, cx| cx.new(|_| dragged.clone()))
             .on_drag_move(cx.listener(move |pane, event: &gpui_kit::DragMoveEvent<DraggedWorkspace>, _, cx| {
                 let position = event.event.position;
@@ -803,6 +839,22 @@ impl TreePane {
             })
             // `WorkspaceAttentionFlash`, over the row's content.
             .children(flash.map(|flash| ui::attention_flash(flash, 0.)))
+            // `.focused`: the focus cursor is a 2px accent outline just inside the row's edge
+            // (`outline-offset: -2px`), drawn over the row without moving its content, and
+            // over the unread rule too.
+            .when(focus_cursor, |row| {
+                row.child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .right_0()
+                        .bottom_0()
+                        // An absolute child sits inside the row's borders: reach over the rule.
+                        .left(px(if unread { -2. } else { 0. }))
+                        .border_2()
+                        .border_color(c.accent),
+                )
+            })
             // `SessionPanel`'s row menu: the same items, conditions and order.
             .context_menu(move |menu, _window, cx| {
                 let store = session.read(cx).workspace_store(&menu_id).cloned();
@@ -909,6 +961,17 @@ struct RowData {
     depth: usize,
     has_children: bool,
     label: Label,
+    hover: RowHover,
+}
+
+/// Where a row is relative to the row under the pointer (`.tree-subtree`).
+#[derive(Clone, Copy)]
+enum RowHover {
+    Outside,
+    /// The row under the pointer.
+    Hovered,
+    /// Shown under the row under the pointer.
+    Under,
 }
 
 /// A row's name and what its icon shows (`WorkspaceTreeItem`): a placeholder or failed
