@@ -389,7 +389,7 @@ impl ReviewView {
         let has_uncommitted = overview.uncommitted > 0;
         let white = gpui_kit::white();
         let mut actions = h_flex().gap(px(8.)).items_center().flex_shrink_0();
-        if conflicts == ConflictCheck::Checking {
+        if conflicts.check == ConflictCheck::Checking {
             actions = actions.child(div().text_size(px(12.)).italic().text_color(secondary).child("Checking for conflicts..."));
         }
         actions = actions.child(
@@ -436,10 +436,8 @@ impl ReviewView {
                     .child(cancel("Cancel", cx));
             }
             (Some(parent), false) => {
-                let (has_conflicts, parent_moved) = match &conflicts {
-                    ConflictCheck::Checked { conflicts, parent_has_new_commits } => (conflicts.has_conflicts, *parent_has_new_commits),
-                    ConflictCheck::Idle | ConflictCheck::Checking | ConflictCheck::Failed(_) => (false, false),
-                };
+                // The last answers, also while a check runs and after one failed.
+                let (has_conflicts, parent_moved) = (conflicts.has_conflicts(), conflicts.parent_has_new_commits);
                 let violet = (rgb(0x8b5cf6).into(), rgb(0xa78bfa).into());
                 actions = actions
                     .children(prompt_commit)
@@ -619,53 +617,54 @@ impl ReviewView {
                     .into_any_element(),
             );
         }
-        match self.model.read(cx).conflicts().clone() {
-            ConflictCheck::Failed(error) => banners.push(
+        let conflicts = self.model.read(cx).conflicts().clone();
+        if let ConflictCheck::Failed(error) = &conflicts.check {
+            banners.push(
                 div().text_size(px(13.)).text_color(primary).child(format!("Could not check for conflicts: {error}")).into_any_element(),
-            ),
-            ConflictCheck::Checked { conflicts, .. } if conflicts.has_conflicts => {
-                let files = &conflicts.conflicted_files;
-                let mut listed = files.iter().take(3).cloned().collect::<Vec<_>>().join(", ");
-                if files.len() > 3 {
-                    listed.push_str(&format!(" and {} more", files.len() - 3));
-                }
-                banners.push(
-                    h_flex()
-                        .items_start()
-                        .gap(px(12.))
-                        .px(px(20.))
-                        .py(px(12.))
-                        .bg(rgba(0xf0a0001a))
-                        .border_b_1()
-                        .border_color(rgba(0xf0a0004d))
-                        // Chromium draws "⚠️" in its outline text form, 19×24.
-                        .child(
-                            div()
-                                .w(px(19.))
-                                .h(px(24.))
-                                .flex_shrink_0()
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .child(crate::ui::icon(IconName::TriangleAlert, 16., primary)),
-                        )
-                        .child(
-                            v_flex()
-                                .flex_1()
-                                .text_size(px(13.))
-                                .child(
-                                    div()
-                                        .mb(px(4.))
-                                        .font_weight(FontWeight::BOLD)
-                                        .text_color(rgb(0xf0a000))
-                                        .child(format!("{} conflict(s) detected", files.len())),
-                                )
-                                .child(div().text_size(px(12.)).font_family(MONO).text_color(secondary).child(listed)),
-                        )
-                        .into_any_element(),
-                );
+            );
+        }
+        // The last conflicts found, also while a check runs and after one failed.
+        if conflicts.has_conflicts() {
+            let files = &conflicts.last.conflicted_files;
+            let mut listed = files.iter().take(3).cloned().collect::<Vec<_>>().join(", ");
+            if files.len() > 3 {
+                listed.push_str(&format!(" and {} more", files.len() - 3));
             }
-            ConflictCheck::Idle | ConflictCheck::Checking | ConflictCheck::Checked { .. } => {}
+            banners.push(
+                h_flex()
+                    .items_start()
+                    .gap(px(12.))
+                    .px(px(20.))
+                    .py(px(12.))
+                    .bg(rgba(0xf0a0001a))
+                    .border_b_1()
+                    .border_color(rgba(0xf0a0004d))
+                    // Chromium draws "⚠️" in its outline text form, 19×24.
+                    .child(
+                        div()
+                            .w(px(19.))
+                            .h(px(24.))
+                            .flex_shrink_0()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(crate::ui::icon(IconName::TriangleAlert, 16., primary)),
+                    )
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .text_size(px(13.))
+                            .child(
+                                div()
+                                    .mb(px(4.))
+                                    .font_weight(FontWeight::BOLD)
+                                    .text_color(rgb(0xf0a000))
+                                    .child(format!("{} conflict(s) detected", files.len())),
+                            )
+                            .child(div().text_size(px(12.)).font_family(MONO).text_color(secondary).child(listed)),
+                    )
+                    .into_any_element(),
+            );
         }
         banners
     }

@@ -610,6 +610,72 @@ fn merge_and_keep_reloads_the_review(cx: &mut TestAppContext) {
     assert!(store.read_with(cx, |s, _| loaded(s, &child)), "the workspace is kept");
 }
 
+fn git_in(dir: &std::path::Path, args: &[&str]) -> String {
+    let out = std::process::Command::new("git").args(args).current_dir(dir).output().unwrap();
+    assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+/// Write `text` to `file` in `dir` and commit it.
+fn commit_file(dir: &std::path::Path, file: &str, text: &str) {
+    std::fs::write(dir.join(file), text).unwrap();
+    git_in(dir, &["add", file]);
+    git_in(dir, &["commit", "-q", "-m", file]);
+}
+
+/// A child of `repo`'s workspace whose branch and the parent's both changed `a.txt`'s line
+/// since it was made, with a Review tab open on it: `(child id, child, its review)`.
+fn conflicting_child(
+    cx: &mut TestAppContext,
+    store: &Entity<SessionStore>,
+    repo: &TempRepo,
+    name: &str,
+) -> (String, Entity<WorkspaceStore>, Entity<treeterm_model::review::ReviewModel>) {
+    commit_file(&repo.path, "a.txt", "base\n");
+    let root = open_repo_workspace(cx, store, repo);
+    let child = store.update(cx, |s, cx| s.add_child_workspace(&root, name.into(), false, None, cx)).unwrap();
+    wait_child(cx, store, &child);
+    let child_ws = store.read_with(cx, |s, _| ws(s, &child));
+    let child_dir = std::path::PathBuf::from(child_ws.read_with(cx, |w, _| w.workspace().path.clone()));
+    commit_file(&child_dir, "a.txt", "child\n");
+    commit_file(&repo.path, "a.txt", "root\n");
+    let tab = child_ws.update(cx, |w, cx| w.add_tab("review", cx)).unwrap();
+    let Some(TabContent::Review(review)) = child_ws.read_with(cx, |w, _| w.tab_content(&tab)) else {
+        panic!("not a review tab");
+    };
+    (child, child_ws, review)
+}
+
+#[gpui_kit::test]
+fn the_last_conflicts_stay_while_rechecking(cx: &mut TestAppContext) {
+    use treeterm_model::review::{ConflictCheck, Conflicts};
+    cx.executor().allow_parking();
+    let h = harness();
+    publish(&h, &[]);
+    let repo = TempRepo::new(&h);
+    let store = open_store(cx, &h, "client-a");
+    let (_, _, review) = conflicting_child(cx, &store, &repo, "feat-stale");
+    wait_until(cx, &review, |r| r.conflicts().has_conflicts() && r.conflicts().check == ConflictCheck::Idle);
+    let conflicts = review.read_with(cx, |r, _| r.conflicts().clone());
+    assert_eq!(conflicts.last.conflicted_files, vec!["a.txt".to_owned()]);
+    assert!(conflicts.parent_has_new_commits);
+
+    // Every state shown during a re-check still has the conflicts and the parent's commits
+    // (the banner, "(has conflicts)" and the prompt buttons stay).
+    let seen = std::rc::Rc::new(std::cell::RefCell::new(Vec::<Conflicts>::new()));
+    let record = seen.clone();
+    let _observe = cx.update(|cx| cx.observe(&review, move |review, cx| record.borrow_mut().push(review.read(cx).conflicts().clone())));
+    review.update(cx, |r, cx| r.refresh(cx));
+    wait_until(cx, &review, |_| {
+        let seen = seen.borrow();
+        let checking = seen.iter().position(|c| c.check == ConflictCheck::Checking);
+        checking.is_some_and(|at| seen[at..].iter().any(|c| c.check == ConflictCheck::Idle))
+    });
+    for state in seen.borrow().iter() {
+        assert!(state.has_conflicts() && state.parent_has_new_commits, "{state:?}");
+    }
+}
+
 /// A temp git repo with one commit, plus cleanup of what tests create for it under the
 /// real `~/.treeterm/worktrees/<repo name>/`.
 struct TempRepo {

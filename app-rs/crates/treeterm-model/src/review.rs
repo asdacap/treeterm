@@ -221,18 +221,60 @@ pub enum Loaded<T> {
     Failed(String),
 }
 
-/// `checkConflicts`: a child's branch merged into its parent's, dry-run.
+/// `checkConflicts`'s answers for a child: its branch merged into its parent's, dry-run, and
+/// whether the parent moved on. The last answers stay while a check runs and after one
+/// fails (`conflictInfo`, `parentHasNewCommits`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Conflicts {
+    /// The last dry-run that ran (none yet: no conflicts).
+    pub last: ConflictInfo,
+    /// The parent has commits this branch does not contain yet.
+    pub parent_has_new_commits: bool,
+    pub check: ConflictCheck,
+}
+
+/// A conflict check running, or why the last one failed (`conflictError`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConflictCheck {
-    /// Not a child workspace, or not checked yet.
+    /// Not a child workspace, not checked yet, or the last check ran.
     Idle,
     Checking,
-    Checked {
-        conflicts: ConflictInfo,
-        /// The parent has commits this branch does not contain yet.
-        parent_has_new_commits: bool,
-    },
     Failed(String),
+}
+
+impl Default for Conflicts {
+    fn default() -> Self {
+        Self {
+            last: ConflictInfo { has_conflicts: false, conflicted_files: Vec::new(), messages: Vec::new() },
+            parent_has_new_commits: false,
+            check: ConflictCheck::Idle,
+        }
+    }
+}
+
+impl Conflicts {
+    /// `hasConflicts`.
+    pub fn has_conflicts(&self) -> bool {
+        self.last.has_conflicts
+    }
+
+    /// A check's outcome. Whether the parent moved on is known whenever
+    /// `merge-base --is-ancestor` ran, even when the dry-run failed; when it could not run,
+    /// nothing is learnt (Electron's `Promise.all` rejects).
+    fn apply(&mut self, conflicts: Result<ConflictInfo, String>, merged: Result<bool, String>) {
+        match (conflicts, merged) {
+            (_, Err(error)) => self.check = ConflictCheck::Failed(error),
+            (Ok(conflicts), Ok(merged)) => {
+                self.parent_has_new_commits = !merged;
+                self.last = conflicts;
+                self.check = ConflictCheck::Idle;
+            }
+            (Err(error), Ok(merged)) => {
+                self.parent_has_new_commits = !merged;
+                self.check = ConflictCheck::Failed(error);
+            }
+        }
+    }
 }
 
 /// A commit picked in the Commits view, and its changes.
@@ -314,7 +356,7 @@ pub struct ReviewModel {
     images: HashMap<String, ImageSides>,
     _images: Vec<Task<()>>,
     overview: Overview,
-    conflicts: ConflictCheck,
+    conflicts: Conflicts,
     /// Local and remote branches for the base picker, loaded when it opens.
     branches: Loaded<Vec<String>>,
     selected_commit: Option<SelectedCommit>,
@@ -440,7 +482,7 @@ impl ReviewModel {
             images: HashMap::new(),
             _images: Vec::new(),
             overview: Overview::default(),
-            conflicts: ConflictCheck::Idle,
+            conflicts: Conflicts::default(),
             branches: Loaded::Loading,
             selected_commit: None,
             ignore_whitespace: false,
@@ -505,7 +547,7 @@ impl ReviewModel {
         self.overview
     }
 
-    pub fn conflicts(&self) -> &ConflictCheck {
+    pub fn conflicts(&self) -> &Conflicts {
         &self.conflicts
     }
 
@@ -1099,7 +1141,7 @@ impl ReviewModel {
     }
 
     /// `checkConflicts` for a child workspace: a dry-run merge into the parent's branch and
-    /// whether the parent moved on.
+    /// whether the parent moved on. The last answers stay on screen while it runs.
     fn check_conflicts(&mut self, cx: &mut Context<Self>) {
         let (git, path) = (self.git.clone(), self.path.clone());
         // The workspace is read once this update is over: the first load runs while the
@@ -1109,8 +1151,9 @@ impl ReviewModel {
                 return; // the tab closed
             };
             let (Some(parent), false) = (header.parent_branch, header.branch.is_empty()) else {
+                // A check this one replaced may have been running.
                 match this.update(cx, |model, cx| {
-                    model.conflicts = ConflictCheck::Idle;
+                    model.conflicts.check = ConflictCheck::Idle;
                     cx.notify();
                 }) {
                     Ok(()) | Err(_) => {} // Err: tab closed
@@ -1119,7 +1162,7 @@ impl ReviewModel {
             };
             let branch = header.branch;
             match this.update(cx, |model, cx| {
-                model.conflicts = ConflictCheck::Checking;
+                model.conflicts.check = ConflictCheck::Checking;
                 cx.notify();
             }) {
                 Ok(()) | Err(_) => {} // Err: tab closed
@@ -1128,12 +1171,8 @@ impl ReviewModel {
                 git.check_merge_conflicts(&path, &branch, &parent),
                 git.is_ancestor(&path, &parent, &branch)
             );
-            let check = match (conflicts, merged) {
-                (Ok(conflicts), Ok(merged)) => ConflictCheck::Checked { conflicts, parent_has_new_commits: !merged },
-                (Err(error), _) | (_, Err(error)) => ConflictCheck::Failed(error.to_string()),
-            };
             match this.update(cx, |model, cx| {
-                model.conflicts = check;
+                model.conflicts.apply(conflicts.map_err(|e| e.to_string()), merged.map_err(|e| e.to_string()));
                 cx.notify();
             }) {
                 Ok(()) | Err(_) => {} // Err: tab closed
@@ -1862,5 +1901,37 @@ mod tests {
         assert_eq!(previous(None), Some("c"));
         assert_eq!(previous(Some("c")), Some("a"));
         assert_eq!(previous(Some("a")), None);
+    }
+
+    fn conflicted(files: &[&str]) -> ConflictInfo {
+        ConflictInfo {
+            has_conflicts: !files.is_empty(),
+            conflicted_files: files.iter().map(|f| (*f).to_owned()).collect(),
+            messages: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_conflict_check_keeps_what_it_could_not_learn() {
+        let mut conflicts = Conflicts::default();
+        assert!(!conflicts.has_conflicts());
+        conflicts.apply(Ok(conflicted(&["a.txt"])), Ok(false));
+        assert_eq!((conflicts.has_conflicts(), conflicts.parent_has_new_commits), (true, true));
+        assert_eq!(conflicts.check, ConflictCheck::Idle);
+
+        // The dry-run failed but the ancestry ran: the parent's state is new, the conflicts
+        // are the last known ones.
+        conflicts.apply(Err("merge-tree failed".into()), Ok(true));
+        assert_eq!((conflicts.has_conflicts(), conflicts.parent_has_new_commits), (true, false));
+        assert_eq!(conflicts.check, ConflictCheck::Failed("merge-tree failed".into()));
+
+        // The ancestry could not run: nothing changes but the error.
+        conflicts.apply(Ok(conflicted(&[])), Err("exec lost".into()));
+        assert_eq!((conflicts.has_conflicts(), conflicts.parent_has_new_commits), (true, false));
+        assert_eq!(conflicts.check, ConflictCheck::Failed("exec lost".into()));
+
+        conflicts.apply(Ok(conflicted(&[])), Ok(true));
+        assert_eq!((conflicts.has_conflicts(), conflicts.parent_has_new_commits), (false, false));
+        assert_eq!(conflicts.check, ConflictCheck::Idle);
     }
 }
