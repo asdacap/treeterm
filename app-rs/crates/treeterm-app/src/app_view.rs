@@ -1335,7 +1335,7 @@ impl AppView {
                 });
                 input.update(cx, |input, cx| input.focus(window, cx));
                 let save = cx.subscribe(&input, move |view, input, event: &InputEvent, cx| match event {
-                    InputEvent::PressEnter { .. } | InputEvent::Blur => {
+                    InputEvent::PressEnter { shift: false, .. } | InputEvent::Blur => {
                         let text = input.read(cx).value().to_string();
                         if let Some(connected) = view.current_mut() {
                             connected.header_edit = None;
@@ -1343,7 +1343,8 @@ impl AppView {
                         store.update(cx, |w, cx| w.set_description(&text, cx));
                         cx.notify();
                     }
-                    InputEvent::Change | InputEvent::Focus => {}
+                    // Shift+Enter put a newline in the text, and saves nothing.
+                    InputEvent::PressEnter { shift: true, .. } | InputEvent::Change | InputEvent::Focus => {}
                 });
                 HeaderEdit::Description { input, _save: save }
             }
