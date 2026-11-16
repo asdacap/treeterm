@@ -1341,6 +1341,97 @@ fn the_parents_branch_changing_keeps_the_review_and_moves_its_default_base(cx: &
     assert_eq!(pinned.read_with(cx, |r, _| r.overview().committed), 1);
 }
 
+/// A parent workspace on `main` and its child on `feature` (with `tabs` as its `appStates`),
+/// both on the repo, and their refs. Only the child joins the session: its Review tabs are
+/// made while its parent's branch is unknown, as when the child's body loads first at
+/// start-up. The parent joins with [`add_parent`].
+fn child_before_parent(
+    cx: &mut TestAppContext,
+    h: &Harness,
+    repo: &TempRepo,
+    tabs: serde_json::Value,
+) -> (Entity<SessionStore>, Entity<WorkspaceStore>, Vec<WorkspaceRef>) {
+    let store = open_store(cx, h);
+    let (parent_id, child_id) = (format!("ws-{}", uuid::Uuid::new_v4().simple()), format!("ws-{}", uuid::Uuid::new_v4().simple()));
+    let body = |branch: &str, tabs: serde_json::Value| {
+        serde_json::json!({
+            "name": branch, "status": "active", "isGitRepo": true, "isWorktree": false, "gitBranch": branch,
+            "appStates": tabs, "metadata": {}, "createdAt": 1, "lastActivity": 1, "parentHash": ""
+        })
+    };
+    let mut child_body = body("feature", tabs);
+    child_body["parentId"] = serde_json::json!(parent_id);
+    let parent_body = body("main", serde_json::json!({}));
+    std::fs::write(h.daemon.workspaces_dir().join(format!("{parent_id}.json")), parent_body.to_string()).unwrap();
+    std::fs::write(h.daemon.workspaces_dir().join(format!("{child_id}.json")), child_body.to_string()).unwrap();
+    let child_ref = WorkspaceRef { id: child_id.clone(), path: repo.root() };
+    futures::executor::block_on(h.conn.update_session(vec![child_ref.clone()], None, "test-writer")).unwrap().unwrap();
+    let loaded = |s: &SessionStore| matches!(s.entry(&child_id), Some(WorkspaceEntry::Loaded(_)));
+    wait_until(cx, &store, |s| matches!(s.state(), SessionState::Live) && loaded(s));
+    let child = store.read_with(cx, |s, _| s.workspace_store(&child_id).unwrap().clone());
+    assert_eq!(child.read_with(cx, |w, _| w.parent_branch().map(str::to_owned)), None);
+    (store, child, vec![child_ref, WorkspaceRef { id: parent_id, path: repo.root() }])
+}
+
+/// The parent from [`child_before_parent`] joins the session, and the child learns its branch.
+fn add_parent(cx: &mut TestAppContext, h: &Harness, store: &Entity<SessionStore>, child: &Entity<WorkspaceStore>, refs: Vec<WorkspaceRef>) {
+    let parent_id = refs[1].id.clone();
+    futures::executor::block_on(h.conn.update_session(refs, None, "test-writer")).unwrap().unwrap();
+    wait_until(cx, store, |s| matches!(s.entry(&parent_id), Some(WorkspaceEntry::Loaded(_))));
+    let parent = store.read_with(cx, |s, _| s.workspace_store(&parent_id).unwrap().clone());
+    // The session tells children their parent's branch whenever a workspace changes.
+    parent.update(cx, |_, cx| cx.notify());
+    wait_until_app(cx, child, |w, _| w.parent_branch() == Some("main"));
+}
+
+/// A child's Review tab on the tab state's id.
+fn review_tab(cx: &mut TestAppContext, workspace: &Entity<WorkspaceStore>, tab: &str) -> Entity<ReviewModel> {
+    match workspace.read_with(cx, |w, _| w.tab_content(tab)) {
+        Some(TabContent::Review(review)) => review,
+        _ => panic!("{tab} is not a review tab"),
+    }
+}
+
+#[gpui_kit::test]
+fn a_childs_review_made_before_its_parents_branch_is_known_shows_committed_once_it_is(cx: &mut TestAppContext) {
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let repo = TempRepo::new(&h);
+    repo.write("a.txt", "one\n");
+    repo.commit_all("base");
+    repo.git(&["checkout", "-q", "-b", "feature"]);
+    repo.write("a.txt", "ONE\n");
+    repo.commit_all("on feature");
+    // Restored with the child: one on the default view, one with Committed saved.
+    let tab = |state: serde_json::Value| serde_json::json!({ "applicationId": "review", "title": "Review", "state": state });
+    let tabs = serde_json::json!({ "default": tab(serde_json::json!({})), "saved": tab(serde_json::json!({ "viewMode": "committed" })) });
+    let (store, child, refs) = child_before_parent(cx, &h, &repo, tabs);
+    let (default, saved) = (review_tab(cx, &child, "default"), review_tab(cx, &child, "saved"));
+    // Opened as well, and the Uncommitted standing in for Committed picked.
+    let (picked_tab, picked) = open_review_with(cx, &child, serde_json::json!({ "viewMode": "committed" }));
+    for review in [&default, &saved, &picked] {
+        wait_review(cx, review, "loaded", |r, _| !r.is_loading());
+        assert_eq!(review.read_with(cx, |r, _| r.mode()), ReviewMode::Uncommitted);
+    }
+    picked.update(cx, |r, cx| r.set_mode(ReviewMode::Uncommitted, cx));
+    assert_eq!(tab_state(cx, &child, &picked_tab)["viewMode"], "uncommitted");
+
+    // The parent's branch arrives: Committed comes back, on the same models (so the views
+    // keep their layout), without rewriting the saved view.
+    add_parent(cx, &h, &store, &child, refs);
+    for (tab, review) in [("default", &default), ("saved", &saved)] {
+        assert_eq!(review.read_with(cx, |r, _| r.mode()), ReviewMode::Committed);
+        wait_review(cx, review, "compared", |r, _| !r.is_loading() && matches!(r.content(), ReviewContent::Committed(_)));
+        assert_eq!(review_tab(cx, &child, tab).entity_id(), review.entity_id());
+    }
+    assert_eq!(tab_state(cx, &child, "default").get("viewMode"), None);
+    assert_eq!(tab_state(cx, &child, "saved")["viewMode"], "committed");
+    // The view picked stays.
+    assert_eq!(picked.read_with(cx, |r, _| r.mode()), ReviewMode::Uncommitted);
+    assert_eq!(review_tab(cx, &child, &picked_tab).entity_id(), picked.entity_id());
+}
+
 #[gpui_kit::test]
 fn review_state_that_cannot_load_shows_as_the_tabs_notice(cx: &mut TestAppContext) {
     let _serial = serial();

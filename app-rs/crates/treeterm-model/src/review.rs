@@ -151,6 +151,16 @@ enum Visibility {
     Shown,
 }
 
+/// Whether the view shown is the one asked for, or Uncommitted standing in for Committed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ModeFallback {
+    Asked,
+    /// Committed was asked for (the saved `viewMode`, the default, or shown when the base
+    /// went away) while there is no base to compare against: it comes back with one (a
+    /// child's Review tabs are made before the session knows its parent's branch).
+    NoBaseForCommitted,
+}
+
 /// A stage/unstage or commit in progress, or why the last one failed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GitOp {
@@ -412,6 +422,7 @@ pub struct ReviewModel {
     /// The tab state's `parentWorkspaceId` is set (Electron's `hasParent`).
     has_parent: bool,
     mode: ReviewMode,
+    fallback: ModeFallback,
     /// Each view's data: the branch against its base, the working tree, the commits. The
     /// first two load together whatever is shown; the commits when first shown.
     committed: Slot<Committed>,
@@ -533,10 +544,11 @@ impl ReviewModel {
     ) -> Self {
         let requested = ReviewMode::parse(state.get("viewMode").and_then(Value::as_str).unwrap_or(""));
         let has_parent = state.get("parentWorkspaceId").and_then(Value::as_str).is_some_and(|id| !id.is_empty());
-        // No base: nothing to diff the branch against; Commits lists the whole history.
-        let mode = match (&base, requested) {
-            (ReviewBase::None, ReviewMode::Committed) => ReviewMode::Uncommitted,
-            (_, mode) => mode,
+        // No base: nothing to diff the branch against (Uncommitted shows until there is one);
+        // Commits lists the whole history.
+        let (mode, fallback) = match (&base, requested) {
+            (ReviewBase::None, ReviewMode::Committed) => (ReviewMode::Uncommitted, ModeFallback::NoBaseForCommitted),
+            (_, mode) => (mode, ModeFallback::Asked),
         };
         // Comments and viewed marks are read from the metadata whenever shown; favourites
         // are resolved again when the workspace's favourite paths change.
@@ -556,6 +568,7 @@ impl ReviewModel {
             base,
             has_parent,
             mode,
+            fallback,
             committed: Slot::NotLoaded,
             uncommitted: Slot::NotLoaded,
             commits: Slot::NotLoaded,
@@ -735,14 +748,24 @@ impl ReviewModel {
 
     /// Compare against `base` from now on (the picker's choice, or the parent's new branch
     /// for a tab without an override), keeping the view. Without a base, Committed has
-    /// nothing to show: Uncommitted is shown.
+    /// nothing to show: Uncommitted is shown, until a base brings Committed back (the saved
+    /// `viewMode` still says committed).
     pub(crate) fn compare_against(&mut self, base: ReviewBase, cx: &mut Context<Self>) {
         if base == self.base {
             return;
         }
         self.base = base;
-        if self.base == ReviewBase::None && self.mode == ReviewMode::Committed {
-            self.mode = ReviewMode::Uncommitted;
+        match (&self.base, self.mode, self.fallback) {
+            (ReviewBase::None, ReviewMode::Committed, _) => {
+                self.mode = ReviewMode::Uncommitted;
+                self.fallback = ModeFallback::NoBaseForCommitted;
+            }
+            (ReviewBase::Branch(_), _, ModeFallback::NoBaseForCommitted) => {
+                self.mode = ReviewMode::Committed;
+                self.fallback = ModeFallback::Asked;
+            }
+            (ReviewBase::None, ReviewMode::Uncommitted | ReviewMode::Commits, _)
+            | (ReviewBase::Branch(_), _, ModeFallback::Asked) => {}
         }
         self.reload_all(cx);
     }
@@ -1107,7 +1130,13 @@ impl ReviewModel {
     }
 
     pub fn set_mode(&mut self, mode: ReviewMode, cx: &mut Context<Self>) {
+        // A view picked stays once a base arrives; picking the Uncommitted shown in
+        // Committed's place saves it (Electron persists every click).
+        let stood_in = std::mem::replace(&mut self.fallback, ModeFallback::Asked) == ModeFallback::NoBaseForCommitted;
         if self.mode == mode {
+            if stood_in {
+                cx.emit(ReviewEvent::StateChanged(json!({ "viewMode": mode.as_str() })));
+            }
             return;
         }
         self.mode = mode;
