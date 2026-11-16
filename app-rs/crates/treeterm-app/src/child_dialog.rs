@@ -340,25 +340,15 @@ impl ChildDialog {
             let inherited = model.inherited_app(cx).unwrap_or_else(|| "Global Default".to_owned());
             let apps = model.available_apps(cx);
             let processing = model.processing().is_some();
-            // `.settings-checkbox-label`: a 16px checkbox, 8px gap, 13px label. Space toggles
-            // it; Enter is the dialog's (`enter`).
+            // `.settings-checkbox-label`: Space toggles it; Enter is the dialog's (`enter`).
             let custom = {
                 let (model, inherited) = (self.model.clone(), choice == AppChoice::Inherited);
-                ui::key_checkbox("child-custom-app", !inherited, processing, 16., window, cx)
-                    .flex()
-                    .items_center()
-                    .gap(px(8.))
-                    .text_size(px(ui::BODY))
-                    .line_height(px(16.))
-                    .when(!processing, |d| d.cursor_pointer())
-                    .child("Use custom default application")
-                    .on_change(move |_, event: &ClickEvent, _, cx| {
-                        if ui::pressed_enter(event) {
-                            return;
-                        }
-                        let choice = if inherited { AppChoice::Custom(None) } else { AppChoice::Inherited };
-                        model.update(cx, |m, cx| m.set_app_choice(choice, cx));
-                    })
+                let label = "Use custom default application";
+                let toggle = move |custom: bool, _: &mut Window, cx: &mut App| {
+                    let choice = if custom { AppChoice::Custom(None) } else { AppChoice::Inherited };
+                    model.update(cx, |m, cx| m.set_app_choice(choice, cx));
+                };
+                ui::key_checkbox_label("child-custom-app", !inherited, processing, label, toggle, window, cx)
             };
             let picker = match choice {
                 AppChoice::Inherited => None,

@@ -575,31 +575,10 @@ pub fn checkbox_box(checked: bool, disabled: bool, size: f32) -> Div {
     checkbox
 }
 
-/// `.settings-checkbox-label`: a 16px checkbox, 8px gap, 13px label; the whole row toggles.
-pub fn checkbox_label(
-    id: impl Into<ElementId>,
-    checked: bool,
-    disabled: bool,
-    label: impl Into<SharedString>,
-    on_click: impl Fn(bool, &mut Window, &mut App) + 'static,
-) -> Stateful<Div> {
-    let label: SharedString = label.into();
-    div()
-        .id(id)
-        .flex()
-        .items_center()
-        .gap(px(8.))
-        .text_size(px(BODY))
-        .line_height(px(16.))
-        .when(!disabled, |d| d.cursor_pointer())
-        .child(checkbox_box(checked, disabled, 16.))
-        .child(label)
-        .when(!disabled, |d| d.on_click(move |_: &ClickEvent, window, cx| on_click(!checked, window, cx)))
-}
-
-/// [`checkbox_label`] as a native checkbox in its `<label>` ([`key_checkbox`]): Tab reaches it
-/// unless `disabled`, and Space toggles it, but Enter does not. The row keeps the pointer
-/// cursor while disabled (`.settings-checkbox-label`), though a click on it does nothing.
+/// `.settings-checkbox-label`: a 16px checkbox, 8px gap, 13px label, as a native checkbox in
+/// its `<label>` ([`key_checkbox`]); the whole row toggles. Tab reaches it unless `disabled`,
+/// and Space toggles it, but Enter does not. The row keeps the pointer cursor while disabled,
+/// though a click on it does nothing.
 pub fn key_checkbox_label(
     id: impl Into<ElementId>,
     checked: bool,
