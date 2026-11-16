@@ -116,6 +116,18 @@ pub enum AppChoice {
     Custom(Option<String>),
 }
 
+/// What a submit did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Submitted {
+    /// Nothing: a worktree is being opened already, or Enter found nothing to submit.
+    Ignored,
+    /// Refused: its error shows, and the dialog stays as it was.
+    Refused,
+    /// The child was added or its creation started (`Created` follows), or the picked
+    /// worktree is being opened ([`ChildDialogModel::processing`]).
+    Started,
+}
+
 /// What the dialog tells its view.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ChildDialogEvent {
@@ -559,12 +571,34 @@ impl ChildDialogModel {
         }
     }
 
+    /// Whether Enter submits (`handleKeyDown`): never while processing; on Create always, its
+    /// checks showing their errors; on a picker tab only once a row is picked (Electron's
+    /// `&& selectedX` guards: no "Please select ..." then).
+    pub fn enter_submits(&self) -> bool {
+        self.processing().is_none()
+            && match self.tab {
+                ChildTab::Create => true,
+                ChildTab::Existing | ChildTab::Recent | ChildTab::Branch | ChildTab::Remote | ChildTab::Pr => {
+                    self.selected_key().is_some()
+                }
+            }
+    }
+
+    /// Enter anywhere in the dialog: the tab's submit when [`Self::enter_submits`], else
+    /// nothing.
+    pub fn press_enter(&mut self, name: &str, description: &str, cx: &mut Context<Self>) -> Submitted {
+        if !self.enter_submits() {
+            return Submitted::Ignored;
+        }
+        self.submit(name, description, cx)
+    }
+
     /// The tab's submit handler. A new child reports `Created` once its creation has started;
     /// an existing or recent worktree once it is open, while [`Self::processing`] shows.
-    /// Otherwise the error shows. Ignored while processing (Enter does nothing then).
-    pub fn submit(&mut self, name: &str, description: &str, cx: &mut Context<Self>) {
+    /// Otherwise the error shows. Ignored while processing.
+    pub fn submit(&mut self, name: &str, description: &str, cx: &mut Context<Self>) -> Submitted {
         if self.processing().is_some() {
-            return;
+            return Submitted::Ignored;
         }
         let name = name.trim().to_owned();
         let description = Some(description.trim().to_owned()).filter(|d| !d.is_empty());
@@ -602,7 +636,10 @@ impl ChildDialogModel {
             },
         };
         match self.session.update(cx, |s, cx| s.create_child(&parent, source, options, cx)) {
-            Ok(id) => cx.emit(ChildDialogEvent::Created(id)),
+            Ok(id) => {
+                cx.emit(ChildDialogEvent::Created(id));
+                Submitted::Started
+            }
             Err(error) => self.fail(error, cx),
         }
     }
@@ -618,7 +655,7 @@ impl ChildDialogModel {
         options: ChildOptions,
         texts: AdoptTexts,
         cx: &mut Context<Self>,
-    ) {
+    ) -> Submitted {
         let Some(info) = picked else {
             return self.fail(texts.unpicked, cx);
         };
@@ -648,11 +685,13 @@ impl ChildDialogModel {
         self.error = None;
         self.adopting = Adopting::Waiting { message: texts.processing, _wait: wait };
         cx.notify();
+        Submitted::Started
     }
 
-    fn fail(&mut self, message: impl Into<String>, cx: &mut Context<Self>) {
+    fn fail(&mut self, message: impl Into<String>, cx: &mut Context<Self>) -> Submitted {
         self.error = Some(message.into());
         cx.notify();
+        Submitted::Refused
     }
 
     /// `getInheritedDefaultApplicationIds`: the parent's own default application, else its

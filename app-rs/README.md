@@ -553,6 +553,9 @@ The chrome was matched to Electron's computed styles, measured side by side on o
 - The SSH picker's Add trims the forward's remote host, so a blank one is ignored like an
   empty one (Electron added a forward to " "). Enter on a focused button there presses only
   that button; Electron's dialog then also ran Connect with the form as it was.
+- In Add Child Workspace, Enter on a focused tab or on Settings that starts opening the picked
+  existing or recent worktree does only that; in Electron the button then also pressed itself
+  (switching the tab or toggling Settings).
 - `treeterm ssh` rejects a target whose host contains `@` or whose port is outside 1–65535
   (`me@a@box`, `me@box:0`, `me@box:70000`); Electron passed them on to ssh, which cannot
   use such a port and splits `me@a@box` on its last `@`, connecting to `box` as user `me@a`.

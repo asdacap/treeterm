@@ -20,7 +20,7 @@ use treeterm_core::wire::workspace_file::{WorkspaceFile, WorktreeSettings};
 use treeterm_core::worktree_registry::WorktreeRegistry;
 use treeterm_model::child_dialog::{
     AppChoice, ChildDialogEvent, ChildDialogModel, ChildRow, ChildTab, FORK_TOOLTIP, IN_WORKTREE_TOOLTIP, Listing,
-    RowState,
+    RowState, Submitted,
 };
 use treeterm_model::session_store::{AdoptOptions, RemoveMode, SessionState, SessionStore, WorkspaceEntry};
 use treeterm_model::settings_store::SettingsStore;
@@ -143,6 +143,14 @@ fn git(dir: &Path, args: &[&str]) -> String {
     let out = std::process::Command::new("git").args(args).current_dir(dir).output().unwrap();
     assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
     String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+/// New children's worktrees go under `<repo>/.worktrees` (ignored there), not under the real
+/// `~/.treeterm/worktrees`; returns that directory as git names it.
+fn keep_new_worktrees_inside(repo: &Path) -> PathBuf {
+    std::fs::write(repo.join(".git/info/exclude"), ".worktrees\n").unwrap();
+    let root = git(repo, &["rev-parse", "--show-toplevel"]);
+    Path::new(root.trim()).join(".worktrees")
 }
 
 /// Check out a new `branch` in a worktree next to the repo; returns its path as git lists it.
@@ -330,6 +338,63 @@ fn clicking_the_shown_tab_only_drops_its_error_and_pick(cx: &mut TestAppContext)
     });
 }
 
+/// `handleKeyDown`: Enter on a picker tab with nothing picked does nothing (no "Please select
+/// a branch"), and submits once a row is picked.
+#[gpui_kit::test]
+fn enter_on_a_picker_tab_waits_for_a_pick(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let f = Fixture::new(cx);
+    let (repo, parent) = f.open_repo(cx);
+    git(&repo, &["branch", "free"]);
+    let inside = keep_new_worktrees_inside(&repo);
+    let model = f.dialog(cx, &parent, ChildTab::Branch);
+    loaded(cx, &model);
+    let events = events(cx, &model);
+
+    assert!(!model.read_with(cx, |m, _| m.enter_submits()));
+    assert_eq!(model.update(cx, |m, cx| m.press_enter("", "", cx)), Submitted::Ignored);
+    // A row that cannot be picked is no pick either.
+    model.update(cx, |m, cx| m.pick("main", "", "", cx));
+    assert_eq!(model.update(cx, |m, cx| m.press_enter("", "", cx)), Submitted::Ignored);
+    cx.run_until_parked();
+    assert_eq!(model.read_with(cx, |m, _| m.error().map(str::to_owned)), None);
+    assert!(events.seen.borrow().is_empty());
+
+    model.update(cx, |m, cx| m.pick("free", "", "", cx));
+    assert!(model.read_with(cx, |m, _| m.enter_submits()));
+    assert_eq!(model.update(cx, |m, cx| m.press_enter("", "", cx)), Submitted::Started);
+    let child = events.created(cx);
+    wait_until_app(cx, &f.store, |s, cx| {
+        s.workspace_store(&child).is_some_and(|w| w.read(cx).workspace().path == inside.join("free").to_string_lossy())
+    });
+}
+
+/// Enter on Create always runs its submit, whose checks refuse a missing or invalid name.
+#[gpui_kit::test]
+fn enter_on_create_shows_its_checks_and_creates(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let f = Fixture::new(cx);
+    let (repo, parent) = f.open_repo(cx);
+    let inside = keep_new_worktrees_inside(&repo);
+    let model = f.dialog(cx, &parent, ChildTab::Create);
+    let events = events(cx, &model);
+    let error = |cx: &mut TestAppContext| model.read_with(cx, |m, _| m.error().map(str::to_owned));
+
+    assert!(model.read_with(cx, |m, _| m.enter_submits()), "even with no name");
+    assert_eq!(model.update(cx, |m, cx| m.press_enter("  ", "", cx)), Submitted::Refused);
+    assert_eq!(error(cx).as_deref(), Some("Please enter a workspace name"));
+    assert_eq!(model.update(cx, |m, cx| m.press_enter("a/b", "", cx)), Submitted::Refused);
+    assert_eq!(error(cx).as_deref(), Some("Name cannot contain \"/\" - use simple names only"));
+    cx.run_until_parked();
+    assert!(events.seen.borrow().is_empty());
+
+    assert_eq!(model.update(cx, |m, cx| m.press_enter("kid", "", cx)), Submitted::Started);
+    let child = events.created(cx);
+    wait_until_app(cx, &f.store, |s, cx| {
+        s.workspace_store(&child).is_some_and(|w| w.read(cx).workspace().path == inside.join("kid").to_string_lossy())
+    });
+}
+
 #[gpui_kit::test]
 fn an_existing_pick_outlives_a_reread_and_opens_the_worktree(cx: &mut TestAppContext) {
     cx.executor().allow_parking();
@@ -411,16 +476,20 @@ fn open_existing_waits_in_the_dialog_and_uses_the_chosen_application(cx: &mut Te
     let events = events(cx, &model);
     let before = f.store.read_with(cx, |s, _| s.workspace_ids().count());
 
-    model.update(cx, |m, cx| m.submit("", "  notes ", cx));
+    assert!(model.read_with(cx, |m, _| m.enter_submits()), "picked");
+    assert_eq!(model.update(cx, |m, cx| m.press_enter("", "  notes ", cx)), Submitted::Started);
     model.read_with(cx, |m, _| {
         assert_eq!(m.processing(), Some("Opening existing worktree..."));
         assert_eq!(m.submit_label(), "Opening... Please wait");
         assert!(m.submit_disabled(""), "Open is disabled");
+        assert!(!m.enter_submits());
     });
-    // Another submit (Enter) does nothing; switching tabs keeps the wait.
-    model.update(cx, |m, cx| m.submit("", "", cx));
+    // Another submit or Enter does nothing; switching tabs keeps the wait, and Enter on
+    // Create does nothing either.
+    assert_eq!(model.update(cx, |m, cx| m.submit("", "", cx)), Submitted::Ignored);
     model.update(cx, |m, cx| m.switch(ChildTab::Create, cx));
     assert_eq!(model.read_with(cx, |m, _| m.submit_label()), "Creating... Please wait");
+    assert_eq!(model.update(cx, |m, cx| m.press_enter("kid", "", cx)), Submitted::Ignored);
     model.update(cx, |m, cx| m.switch(ChildTab::Existing, cx));
 
     let file = adopted_file(cx, &f, &events);

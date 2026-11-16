@@ -10,9 +10,11 @@ use gpui_kit::component::input::{InputEvent, InputState, TextareaState};
 use gpui_kit::component::menu::DropdownMenu as _;
 use gpui_kit::component::{WindowExt as _, v_flex};
 use gpui_kit::prelude::*;
-use gpui_kit::{AnyElement, App, Context, Entity, FontWeight, SharedString, Subscription, Window, div, px, rgb, rgba};
+use gpui_kit::{
+    AnyElement, App, ClickEvent, Context, Entity, FontWeight, SharedString, Subscription, Window, div, px, rgb, rgba,
+};
 use treeterm_model::child_dialog::{
-    AppChoice, ChildDialogEvent, ChildDialogModel, ChildTab, Listing, RowState, name_problem,
+    AppChoice, ChildDialogEvent, ChildDialogModel, ChildTab, Listing, RowState, Submitted, name_problem,
 };
 use treeterm_model::session_store::SessionStore;
 
@@ -47,11 +49,10 @@ impl ChildDialog {
         let search = cx.new(|cx| InputState::new(window, cx).placeholder("Search branches..."));
         let description =
             cx.new(|cx| TextareaState::new(window, cx).auto_grow(2, 12).placeholder("Optional description..."));
-        let on_input = |dialog: &mut Self, event: &InputEvent, cx: &mut Context<Self>| match event {
-            // `handleKeyDown`: Enter submits (the model ignores it while processing).
-            InputEvent::PressEnter { .. } => dialog.submit(cx),
+        // Enter goes to the whole dialog: `enter`.
+        let on_input = |_: &mut Self, event: &InputEvent, cx: &mut Context<Self>| match event {
             InputEvent::Change => cx.notify(),
-            InputEvent::Focus | InputEvent::Blur => {}
+            InputEvent::PressEnter { .. } | InputEvent::Focus | InputEvent::Blur => {}
         };
         let subscriptions = vec![
             cx.observe(&model, |_, _, cx| cx.notify()),
@@ -139,9 +140,22 @@ impl ChildDialog {
         self.model.update(cx, |m, cx| m.submit(&name, &description, cx));
     }
 
+    /// `handleKeyDown`: Enter in any field or on any focused control runs the tab's submit,
+    /// unless the tab has nothing to submit (no pick) or a worktree is being opened. Once the
+    /// child is added or being opened the key goes no further; otherwise the focused control
+    /// goes on with it, as after Electron's handler: the description breaks the line, a
+    /// focused tab, Settings or Cancel presses itself.
+    fn enter(&mut self, _: &mut Window, cx: &mut Context<Self>) -> ui::Entered {
+        let (name, description) = (self.name_text(cx), self.description_text(cx));
+        match self.model.update(cx, |m, cx| m.press_enter(&name, &description, cx)) {
+            Submitted::Started => ui::Entered::Taken,
+            Submitted::Ignored | Submitted::Refused => ui::Entered::PassedOn,
+        }
+    }
+
     /// `.create-child-tabs`: 0 20px padding, a bottom border; tabs 12px 16px, the active
-    /// one primary with a 2px accent underline.
-    fn tabs(&self, cx: &mut Context<Self>) -> AnyElement {
+    /// one primary with a 2px accent underline. Each is a `<button>` ([`ui::key_button`]).
+    fn tabs(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let c = colors(cx);
         let (primary, secondary, accent) = (c.text_primary, c.text_secondary, c.accent);
         let shown = self.model.read(cx).tab();
@@ -149,11 +163,10 @@ impl ChildDialog {
         for tab in ChildTab::ALL {
             let active = shown == tab;
             let [first, second] = tab.label();
+            let id = SharedString::from(format!("child-tab-{}", first.to_owned() + second));
             row = row.child(
-                div()
-                    .id(SharedString::from(format!("child-tab-{}", first.to_owned() + second)))
+                ui::key_button(id, 0., window, cx)
                     .flex_shrink_0()
-                    .flex()
                     .flex_col()
                     .items_center()
                     .px(px(16.))
@@ -300,13 +313,14 @@ impl ChildDialog {
     }
 
     /// The collapsible "Settings" section: the inherited default application and a custom one.
-    fn settings_section(&self, cx: &mut Context<Self>) -> AnyElement {
+    /// The toggle is a full-width `<button>`, the custom application a checkbox and a
+    /// `<select>`: Tab reaches each (not while disabled).
+    fn settings_section(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let c = colors(cx);
-        let (primary, secondary) = (c.text_primary, c.text_secondary);
-        let toggle = div()
-            .id("child-settings-toggle")
-            .flex()
-            .items_center()
+        let (primary, secondary, border) = (c.text_primary, c.text_secondary, c.border);
+        let toggle = ui::key_button("child-settings-toggle", 0., window, cx)
+            .w_full()
+            .justify_start()
             .gap(px(8.))
             .py(px(4.))
             .text_size(px(ui::BODY))
@@ -326,18 +340,25 @@ impl ChildDialog {
             let inherited = model.inherited_app(cx).unwrap_or_else(|| "Global Default".to_owned());
             let apps = model.available_apps(cx);
             let processing = model.processing().is_some();
+            // `.settings-checkbox-label`: a 16px checkbox, 8px gap, 13px label. Space toggles
+            // it; Enter is the dialog's (`enter`).
             let custom = {
-                let model = self.model.clone();
-                ui::checkbox_label(
-                    "child-custom-app",
-                    choice != AppChoice::Inherited,
-                    processing,
-                    "Use custom default application",
-                    move |on, _, cx| {
-                        let choice = if on { AppChoice::Custom(None) } else { AppChoice::Inherited };
+                let (model, inherited) = (self.model.clone(), choice == AppChoice::Inherited);
+                ui::key_checkbox("child-custom-app", !inherited, processing, 16., window, cx)
+                    .flex()
+                    .items_center()
+                    .gap(px(8.))
+                    .text_size(px(ui::BODY))
+                    .line_height(px(16.))
+                    .when(!processing, |d| d.cursor_pointer())
+                    .child("Use custom default application")
+                    .on_change(move |_, event: &ClickEvent, _, cx| {
+                        if ui::pressed_enter(event) {
+                            return;
+                        }
+                        let choice = if inherited { AppChoice::Custom(None) } else { AppChoice::Inherited };
                         model.update(cx, |m, cx| m.set_app_choice(choice, cx));
-                    },
-                )
+                    })
             };
             let picker = match choice {
                 AppChoice::Inherited => None,
@@ -347,11 +368,17 @@ impl ChildDialog {
                         .and_then(|id| apps.iter().find(|(app, _)| app == id).map(|(_, name)| name.clone()))
                         .unwrap_or_else(|| "Select an application...".to_owned());
                     let model = self.model.clone();
-                    let boxed = ui::select_box("child-app", current, cx).h(px(31.)).pl(px(10.));
-                    // A disabled `<select>`: dimmed, and it opens no menu.
+                    // A disabled `<select>`: dimmed, no tab stop, and it opens no menu.
                     let select = if processing {
-                        boxed.opacity(0.5).cursor_default().into_any_element()
+                        ui::select_box("child-app", current, cx)
+                            .h(px(31.))
+                            .pl(px(10.))
+                            .opacity(0.5)
+                            .cursor_default()
+                            .into_any_element()
                     } else {
+                        let focus = ui::keyed_focus("child-app", window, cx);
+                        let boxed = ui::key_select_box("child-app", current, &focus, cx).h(px(31.)).pl(px(10.));
                         ui::Trigger::new(boxed)
                             .dropdown_menu(move |mut menu, _, _| {
                                 let none = model.clone();
@@ -407,7 +434,7 @@ impl ChildDialog {
             .mt(px(16.))
             .pt(px(16.))
             .border_t_1()
-            .border_color(c.border)
+            .border_color(border)
             .child(toggle)
             .children(content)
             .into_any_element()
@@ -415,7 +442,7 @@ impl ChildDialog {
 }
 
 impl Render for ChildDialog {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let (primary, secondary, tertiary, bg_primary) = {
             let c = colors(cx);
             (c.text_primary, c.text_secondary, c.bg_tertiary, c.bg_primary)
@@ -470,10 +497,15 @@ impl Render for ChildDialog {
             )
         });
         // `.create-child-detached-checkbox`: a 14px checkbox, secondary label; its 12px top
-        // margin collapses into the 16px above it.
+        // margin collapses into the 16px above it. Space toggles it; Enter is the dialog's
+        // (`enter`), as a native checkbox ignores Enter.
         let detached = (!matches!(tab, ChildTab::Existing | ChildTab::Recent)).then(|| {
-            div()
-                .id("child-detached")
+            let toggle = cx.listener(move |dialog, event: &ClickEvent, _, cx| {
+                if !ui::pressed_enter(event) {
+                    dialog.model.update(cx, |m, cx| m.set_detached(!detached, cx));
+                }
+            });
+            ui::key_checkbox("child-detached", detached, busy, 14., window, cx)
                 .mt(px(if description.is_some() { 0. } else { 12. }))
                 .mb(px(4.))
                 .flex()
@@ -482,13 +514,8 @@ impl Render for ChildDialog {
                 .text_size(px(ui::BODY))
                 .text_color(secondary)
                 .cursor_pointer()
-                .child(ui::checkbox_box(detached, busy, 14.))
                 .child("Detached worktree (no merge, only close and clean)")
-                .when(!busy, |d| {
-                    d.on_click(cx.listener(move |dialog, _, _, cx| {
-                        dialog.model.update(cx, |m, cx| m.set_detached(!detached, cx));
-                    }))
-                })
+                .on_change(move |_, event, window, cx| toggle(event, window, cx))
         });
         let error = error.map(|error| {
             div()
@@ -507,11 +534,19 @@ impl Render for ChildDialog {
             let model = self.model.read(cx);
             (model.submit_label(), model.submit_disabled(&name))
         };
-        let submit = ui::dialog_button("child-submit", action, ui::ButtonKind::Primary, disabled, cx)
-            .when(!disabled, |b| b.on_click(cx.listener(|dialog, _, _, cx| dialog.submit(cx))));
-        ui::dialog_root(cx)
+        // `<button>`s: Tab reaches them unless disabled, Enter or Space presses them.
+        let submit = ui::dialog_key_button("child-submit", action, ui::ButtonKind::Primary, disabled, window, cx)
+            .on_click(cx.listener(|dialog, _, _, cx| dialog.submit(cx)));
+        // The × and Escape still close while processing; the adopt goes on.
+        let cancel = ui::dialog_key_button("child-cancel", "Cancel", ui::ButtonKind::Secondary, busy, window, cx)
+            .on_click(cx.listener(|dialog, _, window, cx| {
+                dialog.close(window, cx);
+            }));
+        let tabs = self.tabs(window, cx);
+        let settings = self.settings_section(window, cx);
+        ui::dialog_enter(ui::dialog_root(cx), cx, Self::enter)
             .child(ui::dialog_header("Add Child Workspace", "x", primary, cx))
-            .child(self.tabs(cx))
+            .child(tabs)
             .child(
                 v_flex()
                     .p(px(20.))
@@ -519,21 +554,11 @@ impl Render for ChildDialog {
                     .children(body)
                     .children(description)
                     .children(detached)
-                    .child(self.settings_section(cx))
+                    .child(settings)
                     .children(error)
                     .children(processing),
             )
-            .child(
-                ui::dialog_actions(cx)
-                    .child(
-                        // The × and Escape still close while processing; the adopt goes on.
-                        ui::dialog_button("child-cancel", "Cancel", ui::ButtonKind::Secondary, busy, cx)
-                            .when(!busy, |b| b.on_click(cx.listener(|dialog, _, window, cx| {
-                                dialog.close(window, cx);
-                            }))),
-                    )
-                    .child(submit),
-            )
+            .child(ui::dialog_actions(cx).child(cancel).child(submit))
     }
 }
 

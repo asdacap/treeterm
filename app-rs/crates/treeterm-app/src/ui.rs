@@ -1244,6 +1244,54 @@ pub fn keyed_focus(id: impl Into<ElementId>, window: &mut Window, cx: &mut App) 
     window.use_keyed_state(id.into(), cx, |_, cx| cx.focus_handle()).read(cx).clone()
 }
 
+/// Whether the focus is on a [`key_button`], [`key_checkbox`] or [`key_select`]: a control
+/// whose Enter no binding takes, so it reaches the raw key listeners.
+fn key_control_focused(window: &Window) -> bool {
+    window.context_stack().last().is_some_and(|context| context.contains(KEY_CONTROL) || context.contains(KEY_SELECT))
+}
+
+/// What a dialog did with an Enter ([`dialog_enter`]).
+pub enum Entered {
+    /// The dialog acted on it (it closes, or its controls are disabled): the key goes no
+    /// further.
+    Taken,
+    /// The focused control goes on with it: a textarea breaks the line, a button presses
+    /// itself.
+    PassedOn,
+}
+
+/// Electron's `onKeyDown` on a dialog's root, for Enter: `enter` runs on Enter, with any
+/// modifiers, in a text field or textarea within `root` or on a focused [`key_button`],
+/// [`key_checkbox`] or [`key_select_box`], before the control takes the key. A checkbox
+/// takes a passed-on Enter as a click that callers ignore ([`pressed_enter`]), as a native
+/// checkbox ignores it. Elsewhere in a GPUI Kit dialog (no control focused) Enter is the
+/// dialog's own `Confirm` (`on_ok`).
+pub fn dialog_enter<V: 'static>(
+    root: Div,
+    cx: &mut Context<V>,
+    enter: impl Fn(&mut V, &mut Window, &mut Context<V>) -> Entered + 'static,
+) -> Div {
+    let enter = std::rc::Rc::new(enter);
+    let in_field = {
+        let enter = enter.clone();
+        // The fields' own `Enter` (any modifiers), caught on its way down to the field.
+        cx.listener(move |view, _: &gpui_kit::component::input::Enter, window, cx| {
+            if let Entered::Taken = enter(view, window, cx) {
+                cx.stop_propagation();
+            }
+        })
+    };
+    let on_control = cx.listener(move |view, event: &gpui_kit::KeyDownEvent, window, cx| {
+        if event.keystroke.key == "enter"
+            && key_control_focused(window)
+            && let Entered::Taken = enter(view, window, cx)
+        {
+            cx.stop_propagation();
+        }
+    });
+    root.capture_action(in_field).capture_key_down(on_control)
+}
+
 /// A focus handle kept for the element `id`, and whether it shows Chromium's focus ring
 /// (`:focus-visible`: focused from the keyboard).
 fn key_focus(id: &ElementId, window: &mut Window, cx: &mut App) -> (FocusHandle, bool) {
@@ -1471,6 +1519,7 @@ mod tests {
     use std::cell::Cell;
     use std::rc::Rc;
 
+    use gpui_kit::component::menu::DropdownMenu as _;
     use gpui_kit::{Context, KeyDownEvent, KeyUpEvent, Keystroke, Render, TestAppContext, VisualTestContext};
 
     use super::*;
@@ -1554,6 +1603,170 @@ mod tests {
         focus_next(cx);
         press("space", cx);
         assert_eq!(presses.get(), 3);
+    }
+
+    /// A dialog body ([`dialog_enter`]) with a text field, a textarea, a key button, a key
+    /// checkbox and a key select, counting what each did.
+    struct EnterHost {
+        field: Entity<gpui_kit::component::input::InputState>,
+        area: Entity<gpui_kit::component::input::TextareaState>,
+        /// Whether the dialog takes Enter.
+        take: bool,
+        enters: usize,
+        presses: usize,
+        toggles: usize,
+        /// How many times the select's menu was built (opened).
+        menus: Rc<Cell<usize>>,
+    }
+
+    impl Render for EnterHost {
+        fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            let menus = self.menus.clone();
+            let select = key_select_box("select", "Pick", &keyed_focus("select", window, cx), cx);
+            let toggle = cx.listener(|host, event: &ClickEvent, _, _| {
+                if !pressed_enter(event) {
+                    host.toggles += 1;
+                }
+            });
+            let enter = |host: &mut Self, _: &mut Window, _: &mut Context<Self>| {
+                host.enters += 1;
+                if host.take { Entered::Taken } else { Entered::PassedOn }
+            };
+            dialog_enter(div(), cx, enter)
+                .child(text_input(&self.field, cx))
+                .child(text_area(&self.area, cx))
+                .child(key_button("press", 0., window, cx).child("Press").on_click(cx.listener(|host, _, _, _| {
+                    host.presses += 1;
+                })))
+                .child(
+                    key_checkbox("check", false, false, 13., window, cx)
+                        .child("Check")
+                        .on_change(move |_, event, window, cx| toggle(event, window, cx)),
+                )
+                .child(Trigger::new(select).dropdown_menu(move |menu, _, _| {
+                    menus.set(menus.get() + 1);
+                    menu.item(menu_item("One"))
+                }))
+        }
+    }
+
+    /// Enter in a field or on a focused control reaches the dialog first, with any modifiers;
+    /// when it takes the key the control does nothing more, otherwise the textarea breaks the
+    /// line and the button presses itself. The checkbox ignores Enter and Space toggles it;
+    /// Space, Up or Down open the select's menu, Enter does not.
+    #[gpui_kit::test]
+    fn enter_reaches_the_dialog_before_the_focused_control(cx: &mut TestAppContext) {
+        let menus = Rc::new(Cell::new(0));
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            crate::theme::install(cx);
+            bind_keys(cx);
+        });
+        let (host, cx) = cx.add_window_view({
+            let menus = menus.clone();
+            move |window, cx| EnterHost {
+                field: cx.new(|cx| gpui_kit::component::input::InputState::new(window, cx)),
+                area: cx.new(|cx| gpui_kit::component::input::TextareaState::new(window, cx)),
+                take: false,
+                enters: 0,
+                presses: 0,
+                toggles: 0,
+                menus,
+            }
+        });
+        cx.update(|window, cx| {
+            window.activate_window();
+            window.draw(cx).clear(cx);
+        });
+        let take = |take: bool, cx: &mut VisualTestContext| host.update(cx, |host, _| host.take = take);
+        let counts = |cx: &mut VisualTestContext| {
+            host.read_with(cx, |host, _| (host.enters, host.presses, host.toggles))
+        };
+        let area = |cx: &mut VisualTestContext| host.read_with(cx, |host, cx| host.area.read(cx).value().to_string());
+
+        // The text field.
+        focus_next(cx);
+        press("enter", cx);
+        press("shift-enter", cx);
+        assert_eq!(counts(cx), (2, 0, 0));
+
+        // The textarea: a line break unless the dialog takes the key.
+        focus_next(cx);
+        press("enter", cx);
+        press("shift-enter", cx);
+        assert_eq!((counts(cx), area(cx)), ((4, 0, 0), "\n\n".to_owned()));
+        take(true, cx);
+        press("enter", cx);
+        press("shift-enter", cx);
+        assert_eq!((counts(cx), area(cx)), ((6, 0, 0), "\n\n".to_owned()));
+
+        // The button presses itself unless the dialog takes the key.
+        focus_next(cx);
+        press("enter", cx);
+        take(false, cx);
+        press("enter", cx);
+        press("shift-enter", cx);
+        press("space", cx);
+        assert_eq!(counts(cx), (9, 2, 0));
+
+        // The checkbox.
+        focus_next(cx);
+        press("enter", cx);
+        press("space", cx);
+        assert_eq!(counts(cx), (10, 2, 1));
+
+        // The select.
+        focus_next(cx);
+        press("enter", cx);
+        draw(cx);
+        assert_eq!((counts(cx), menus.get()), ((11, 2, 1), 0));
+        press("space", cx);
+        draw(cx);
+        assert_eq!(menus.get(), 1, "Space opens the menu");
+        assert_eq!(counts(cx), (11, 2, 1));
+    }
+
+    #[gpui_kit::test]
+    fn up_or_down_opens_a_focused_select(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            crate::theme::install(cx);
+            bind_keys(cx);
+        });
+        for key in ["up", "down"] {
+            let menus = Rc::new(Cell::new(0));
+            let (_, cx) = cx.add_window_view({
+                let menus = menus.clone();
+                move |_, _| SelectHost { menus }
+            });
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            focus_next(cx);
+            press(key, cx);
+            draw(cx);
+            assert_eq!(menus.get(), 1, "{key}");
+        }
+    }
+
+    /// A lone [`key_select_box`] counting its menu's openings.
+    struct SelectHost {
+        menus: Rc<Cell<usize>>,
+    }
+
+    impl Render for SelectHost {
+        fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            let menus = self.menus.clone();
+            let select = key_select_box("select", "Pick", &keyed_focus("select", window, cx), cx);
+            div().child(Trigger::new(select).dropdown_menu(move |menu, _, _| {
+                menus.set(menus.get() + 1);
+                menu.item(menu_item("One"))
+            }))
+        }
+    }
+
+    fn draw(cx: &mut VisualTestContext) {
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.run_until_parked();
     }
 
     struct Model;
