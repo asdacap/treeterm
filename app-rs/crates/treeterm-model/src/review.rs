@@ -1346,7 +1346,12 @@ impl ReviewModel {
     /// `loadCommits`: the first `count` commits since the base. A picked commit stays while
     /// it is still listed.
     fn load_commits(&mut self, count: usize, cx: &mut Context<Self>) {
-        self.commits.start();
+        // "Loading commits..." shows while none are listed (`commitsLoading && commits.length
+        // === 0`); a list keeps showing until the new one arrives.
+        match &self.commits {
+            Slot::Ready(list) if list.commits.is_empty() => self.commits = Slot::Loading,
+            Slot::NotLoaded | Slot::Loading | Slot::Ready(_) | Slot::Failed(_) => self.commits.start(),
+        }
         self._more = None;
         let (git, path, scope) = (self.git.clone(), self.path.clone(), log_scope(&self.base));
         self.commits_load = Some(cx.spawn(async move |this, cx| {

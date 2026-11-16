@@ -1126,6 +1126,30 @@ fn the_commits_list_loads_once_and_keeps_its_pages_and_selection(cx: &mut TestAp
 }
 
 #[gpui_kit::test]
+fn an_empty_commits_list_shows_loading_while_it_reloads(cx: &mut TestAppContext) {
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let repo = TempRepo::new(&h);
+    let store = open_store(cx, &h);
+    let workspace = open_repo_workspace(cx, &h, &store, &repo);
+    // On `main` against `main`: no commits on the branch.
+    let (_, review) =
+        open_review_with(cx, &workspace, serde_json::json!({ "viewMode": "commits", "baseBranchOverride": "main" }));
+    let empty = |r: &ReviewModel| matches!(r.content(), ReviewContent::Commits(c) if c.is_empty());
+    wait_review(cx, &review, "no commits", |r, _| !r.is_loading() && empty(r));
+
+    // Shown again while none are listed: "Loading commits..." until they are read again.
+    review.update(cx, |r, cx| r.set_mode(ReviewMode::Uncommitted, cx));
+    review.update(cx, |r, cx| r.set_mode(ReviewMode::Commits, cx));
+    assert!(matches!(review.read_with(cx, |r, _| r.content()), ReviewContent::Loading));
+    wait_review(cx, &review, "no commits again", |r, _| !r.is_loading() && empty(r));
+    review.update(cx, |r, cx| r.refresh(cx));
+    assert!(matches!(review.read_with(cx, |r, _| r.content()), ReviewContent::Loading));
+    wait_review(cx, &review, "refreshed", |r, _| !r.is_refreshing() && empty(r));
+}
+
+#[gpui_kit::test]
 fn viewed_marks_follow_both_views_whatever_is_shown(cx: &mut TestAppContext) {
     let _serial = serial();
     cx.executor().allow_parking();
