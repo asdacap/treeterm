@@ -43,7 +43,8 @@ impl GitHubView {
     }
 
     /// `.workspace-action-btn` with the refresh icon (a spinner while refreshing), and the
-    /// "Refresh" label in the empty state.
+    /// "Refresh" label in the empty state; the header's has the "Refresh" tooltip instead.
+    /// `disabled={gitRefreshing}`: half opacity and a not-allowed cursor, no click.
     fn refresh_button(&self, refreshing: bool, label: bool, cx: &mut Context<Self>) -> AnyElement {
         let controller = self.controller.clone();
         let primary = colors(cx).text_primary;
@@ -57,9 +58,12 @@ impl GitHubView {
             icon(IconName::RefreshCw, 14., primary).into_any_element()
         };
         action_button("github-refresh", cx)
-            .when(refreshing, |d| d.opacity(0.5))
+            .when(refreshing, |d| d.opacity(0.5).cursor_not_allowed())
             .child(glyph)
             .when(label, |d| d.child(div().ml(px(4.)).child("Refresh")))
+            .when(!label, |d| {
+                d.tooltip(|window, cx| gpui_kit::component::tooltip::Tooltip::new("Refresh").build(window, cx))
+            })
             .when(!refreshing, |d| {
                 d.on_click(move |_, _, cx| {
                     if let Some(controller) = &controller {
