@@ -843,10 +843,18 @@ fn the_ai_going_idle_records_the_git_info(cx: &mut TestAppContext) {
     ws.update(cx, |w, cx| w.refresh_git_info(cx));
     wait_until(cx, &ws, |w| git_fields(w) == fields);
     std::fs::remove_dir_all(&folder).unwrap();
-    ws.update(cx, |w, cx| w.refresh_git_info(cx));
-    for _ in 0..30 {
-        cx.run_until_parked();
-        std::thread::sleep(Duration::from_millis(10));
-    }
+    // The whole idle step: the read, then the status refresh, whose own read of the info
+    // starts after this one and fails the same way. Once it has, this one is in too.
+    ws.update(cx, |w, cx| w.refresh_git(cx));
+    cool_down(cx);
+    wait_until_app(cx, &store, |s, cx| {
+        s.git_controller(&id).is_some_and(|c| {
+            c.read(cx)
+                .failures()
+                .iter()
+                .any(|f| f.starts_with("refreshing the workspace's branch failed: "))
+        })
+    });
+    cx.run_until_parked();
     assert_eq!(ws.read_with(cx, |w, _| git_fields(w)), fields);
 }

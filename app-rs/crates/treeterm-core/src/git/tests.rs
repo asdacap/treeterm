@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use super::fake::{Completion, FakeExec, FakeFile, FakeFs, err, out, out_code, reject};
 use super::*;
-use crate::exec::{DEFAULT_EXEC_TIMEOUT, ExecTimeout};
+use crate::exec::{DEFAULT_EXEC_TIMEOUT, ExecTimeout, KILLED_EXIT_CODE};
 
 fn api(exec: &Arc<FakeExec>, fs: Arc<FakeFs>) -> GitApi {
     GitApi::new(exec.clone(), fs)
@@ -635,6 +635,68 @@ mod read_info {
             error_of(run(git.read_info("/repo"))).contains("daemon crash"),
             "an error"
         );
+    }
+
+    #[test]
+    fn a_check_killed_by_the_timeout_is_an_error_not_a_non_repo() {
+        // The daemon's timeout SIGTERMs git, and reports exit -1.
+        let exec = FakeExec::always(err("", KILLED_EXIT_CODE));
+        let git = api(&exec, FakeFs::missing());
+        assert_eq!(
+            error_of(run(git.read_info("/slow"))),
+            "git rev-parse --is-inside-work-tree was killed before it finished (timed out or \
+             signalled)"
+        );
+        // get_info still reads it as a non-repo, as in TS.
+        assert_eq!(run(git.get_info("/slow")), GitInfo::NotRepo);
+    }
+
+    #[test]
+    fn a_killed_branch_or_root_read_is_an_error_not_a_made_up_one() {
+        let killed = || err("", KILLED_EXIT_CODE);
+        // Each of the reads after the check, killed in turn, with what TS made of it.
+        let cases = [
+            (
+                [killed(), out("worktree /repo\n"), out("/repo/wt")],
+                "git rev-parse --abbrev-ref HEAD",
+                GitInfo::Repo {
+                    branch: "HEAD".to_owned(),
+                    root_path: "/repo".to_owned(),
+                },
+            ),
+            (
+                [out("feature"), killed(), out("/repo/wt")],
+                "git worktree list --porcelain",
+                GitInfo::Repo {
+                    branch: "feature".to_owned(),
+                    root_path: "/repo/wt".to_owned(),
+                },
+            ),
+            (
+                [out("feature"), out("worktree /repo\n"), killed()],
+                "git rev-parse --show-toplevel",
+                GitInfo::Repo {
+                    branch: "feature".to_owned(),
+                    root_path: "/repo".to_owned(),
+                },
+            ),
+        ];
+        for (reads, command, ts_info) in cases {
+            let script = |reads: &[Completion; 3]| {
+                let mut script = vec![out("true")];
+                script.extend(reads.iter().cloned());
+                script
+            };
+            let exec = FakeExec::new(script(&reads));
+            let git = api(&exec, FakeFs::missing());
+            assert_eq!(
+                error_of(run(git.read_info("/repo/wt"))),
+                format!("{command} was killed before it finished (timed out or signalled)"),
+            );
+            let exec = FakeExec::new(script(&reads));
+            let git = api(&exec, FakeFs::missing());
+            assert_eq!(run(git.get_info("/repo/wt")), ts_info, "{command}");
+        }
     }
 }
 

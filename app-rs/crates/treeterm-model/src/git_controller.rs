@@ -45,9 +45,9 @@ impl Deps {
     }
 
     /// `refreshGitInfo(id)`: re-read whether the workspace's directory is a repo, its branch
-    /// and its root, and record them in the workspace body. When git cannot be run the
-    /// recorded info stays and the error is the step's failure (Electron recorded a
-    /// non-repo).
+    /// and its root, and record them in the workspace body. When git cannot answer (it
+    /// cannot be run, or the daemon's timeout kills it) the recorded info stays and the
+    /// error is the step's failure (Electron recorded a non-repo).
     fn refresh_info(&self, id: &str) -> LocalBoxFuture<'static, Result<(), DepError>> {
         let Some(workspace) = self.read(id) else {
             return async { Ok(()) }.boxed_local();

@@ -437,9 +437,10 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   a hand-edited one with no `branch` or a fractional `lastUsedAt`, is left out of Auto Open
   and the recent workspaces (logged) and kept in the file as it is. Electron listed it with
   whatever fields it had.
-- A git info refresh that cannot run git (the daemon unreachable, a timeout, the workspace's
-  directory gone) leaves the workspace's git repo, branch and root as they were, and the git
-  status button's tooltip says why. Electron recorded the workspace as no git repo then.
+- A git info refresh that git cannot answer (the daemon unreachable, git killed by the
+  daemon's 30s timeout, the workspace's directory gone) leaves the workspace's git repo,
+  branch and root as they were, and the git status button's tooltip says why. Electron
+  recorded the workspace as no git repo then.
 - Merge-and-remove stages untracked files before its WIP commit (Electron's `commit -am`
   skips them, failing the merge or losing new files with the deleted worktree).
 - Review's Refresh also reloads the Commits list once it was shown, keeping as many commits

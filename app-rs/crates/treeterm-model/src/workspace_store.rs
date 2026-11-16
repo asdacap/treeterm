@@ -890,7 +890,8 @@ impl WorkspaceStore {
 
     /// `refreshGitInfo`: re-read whether the directory is a repo, its branch and its root
     /// (the analyzer saw the program change things: a `git init`, a checkout). When git
-    /// cannot be run the recorded info stays; the status refresh that follows reports why.
+    /// cannot answer (it cannot be run, or the daemon's timeout kills it) the recorded info
+    /// stays; the status refresh that follows reports why.
     pub fn refresh_git_info(&mut self, cx: &mut Context<Self>) {
         let git = self.conn.git();
         let path = self.workspace.path.clone();

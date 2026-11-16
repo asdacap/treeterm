@@ -36,7 +36,9 @@ pub use types::{
 };
 
 use crate::concurrency::{CoalesceByKey, SharedRun, map_with_concurrency};
-use crate::exec::{DEFAULT_EXEC_TIMEOUT, ExecApi, ExecError, ExecEvent, ExecRequest, ExecTimeout};
+use crate::exec::{
+    DEFAULT_EXEC_TIMEOUT, ExecApi, ExecError, ExecEvent, ExecRequest, ExecTimeout, KILLED_EXIT_CODE,
+};
 use crate::fs::{FilesystemApi, MAX_READ_FILE_BYTES, ReadOutcome};
 use parse::{
     ExecResult, ParsedNumstat, detect_language, interpret_error, is_binary_content, is_image_path,
@@ -341,16 +343,7 @@ impl Runner {
         let result = self
             .git(dir_path, owned!["worktree", "list", "--porcelain"])
             .await?;
-        if result.exit_code != 0 {
-            return Ok(None);
-        }
-        Ok(result
-            .stdout
-            .split('\n')
-            .find_map(|line| line.strip_prefix("worktree "))
-            .map(str::trim)
-            .filter(|path| !path.is_empty())
-            .map(str::to_owned))
+        Ok(main_worktree_root(&result))
     }
 
     async fn resolve_worktree_path(
@@ -647,6 +640,42 @@ fn leading_count(text: &str) -> u64 {
     text[..end].parse().unwrap_or(0)
 }
 
+/// `resolveRepoRoot` from `git worktree list --porcelain`: the first (main) worktree's
+/// path, or `None` when the command failed or listed none.
+fn main_worktree_root(result: &ExecResult) -> Option<String> {
+    if result.exit_code != 0 {
+        return None;
+    }
+    result
+        .stdout
+        .split('\n')
+        .find_map(|line| line.strip_prefix("worktree "))
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .map(str::to_owned)
+}
+
+/// What a git command killed by a signal ([`KILLED_EXIT_CODE`]: the daemon's timeout, say)
+/// means to [`GitApi::get_info`] and [`GitApi::read_info`].
+#[derive(Clone, Copy)]
+enum WhenKilled {
+    /// A failed exit like any other, as in TS.
+    Failed,
+    /// [`GitError::Killed`]: git said nothing about the directory.
+    Error,
+}
+
+impl WhenKilled {
+    fn check(self, result: ExecResult) -> Result<ExecResult, GitError> {
+        match self {
+            Self::Error if result.exit_code == KILLED_EXIT_CODE => Err(GitError::Killed {
+                command: format!("git {}", result.args.join(" ")),
+            }),
+            Self::Error | Self::Failed => Ok(result),
+        }
+    }
+}
+
 impl GitApi {
     pub fn new(exec: Arc<dyn ExecApi>, filesystem: Arc<dyn FilesystemApi>) -> Self {
         Self {
@@ -658,7 +687,7 @@ impl GitApi {
     /// Whether `dir_path` is in a git work tree, and its branch and main root. Any failure
     /// (including the daemon being unreachable) reads as [`GitInfo::NotRepo`], as in TS.
     pub async fn get_info(&self, dir_path: &str) -> GitInfo {
-        match self.read_info(dir_path).await {
+        match self.info(dir_path, WhenKilled::Failed).await {
             Ok(info) => info,
             Err(error) => {
                 tracing::warn!(%error, "[git] getGitInfo failed, treating as non-repo");
@@ -667,23 +696,32 @@ impl GitApi {
         }
     }
 
-    /// [`Self::get_info`], but failing to run git (the daemon unreachable, a timeout, a
-    /// directory that is gone) is an error instead of [`GitInfo::NotRepo`]: only git saying
-    /// `dir_path` is not in a work tree reads as one.
+    /// [`Self::get_info`], but git not answering (the daemon unreachable, git killed by the
+    /// daemon's timeout, a directory that is gone) is an error instead of
+    /// [`GitInfo::NotRepo`], or of a branch and root made up from a killed command's empty
+    /// output: only git saying `dir_path` is not in a work tree reads as one.
     pub async fn read_info(&self, dir_path: &str) -> Result<GitInfo, GitError> {
+        self.info(dir_path, WhenKilled::Error).await
+    }
+
+    async fn info(&self, dir_path: &str, when_killed: WhenKilled) -> Result<GitInfo, GitError> {
         let r = &self.runner;
-        let result = r
-            .git(dir_path, owned!["rev-parse", "--is-inside-work-tree"])
-            .await?;
+        let result = when_killed.check(
+            r.git(dir_path, owned!["rev-parse", "--is-inside-work-tree"])
+                .await?,
+        )?;
         if result.exit_code != 0 {
             return Ok(GitInfo::NotRepo);
         }
-        let (branch_result, repo_root, top_level_result) = futures::future::try_join3(
+        let (branch_result, worktree_list, top_level_result) = futures::future::try_join3(
             r.git(dir_path, owned!["rev-parse", "--abbrev-ref", "HEAD"]),
-            r.resolve_repo_root(dir_path),
+            r.git(dir_path, owned!["worktree", "list", "--porcelain"]), // resolveRepoRoot
             r.git(dir_path, owned!["rev-parse", "--show-toplevel"]),
         )
         .await?;
+        let branch_result = when_killed.check(branch_result)?;
+        let repo_root = main_worktree_root(&when_killed.check(worktree_list)?);
+        let top_level_result = when_killed.check(top_level_result)?;
         let branch = match branch_result.stdout.trim() {
             "" => "HEAD".to_owned(),
             branch => branch.to_owned(),

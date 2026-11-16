@@ -142,9 +142,11 @@ pub trait GitControllerDeps {
     /// The workspace this controller is for.
     fn workspace(&self) -> GitWorkspace;
     fn lookup_workspace(&self, id: &str) -> Option<GitWorkspace>;
-    /// Re-read this workspace's branch: an agent (or the user) may have switched or renamed
-    /// it from a terminal.
+    /// Re-read and record whether this workspace's directory is a git repo, its branch and
+    /// its root: an agent (or the user) may have switched or renamed the branch, or run
+    /// `git init`, from a terminal. Fails when git could not answer.
     fn refresh_git_info(&self) -> LocalBoxFuture<'static, Result<(), DepError>>;
+    /// [`Self::refresh_git_info`] for workspace `id` (this one's parent).
     fn refresh_workspace_git_info(&self, id: &str)
     -> LocalBoxFuture<'static, Result<(), DepError>>;
 }

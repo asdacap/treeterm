@@ -86,12 +86,16 @@ impl ExecRequest {
 pub enum ExecEvent {
     Stdout(Vec<u8>),
     Stderr(Vec<u8>),
-    /// The command exited. `code` is -1 when it was killed by a signal (including the
-    /// timeout's SIGTERM): the daemon reports no signal number.
+    /// The command exited. `code` is [`KILLED_EXIT_CODE`] when it was killed by a signal
+    /// (including the timeout's SIGTERM): the daemon reports no signal number.
     Exit {
         code: i32,
     },
 }
+
+/// [`ExecEvent::Exit`]'s code for a command killed by a signal, such as the daemon's
+/// timeout, rather than one that exited by itself.
+pub const KILLED_EXIT_CODE: i32 = -1;
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum ExecError {

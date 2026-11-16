@@ -10,6 +10,14 @@ pub enum GitError {
     /// The command ran and failed (`interpretError`).
     #[error(transparent)]
     Command(#[from] CommandError),
+    /// The command was killed before it exited (the daemon's timeout, or another signal), so
+    /// it answered nothing. Only [`super::GitApi::read_info`] reports this; elsewhere a killed
+    /// command fails like any other, as in TS.
+    #[error("{command} was killed before it finished (timed out or signalled)")]
+    Killed {
+        /// `git <args>`.
+        command: String,
+    },
     #[error("Failed to resolve repository root")]
     RepoRootUnresolved,
     #[error("Failed to resolve remote home directory")]
