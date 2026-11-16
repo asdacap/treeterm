@@ -107,7 +107,8 @@ Done (tested against a real in-process daemon unless noted):
   by `assets/model-viewer/build.sh`), download, search panel (in file / in repo), find, go to
   definition (F12, Cmd/Ctrl+click, the context menu; a word with a definition is underlined
   while Cmd/Ctrl is held over it), review comments (click a line number; commented lines
-  marked in the glyph margin); editor tab with go to definition.
+  marked in the glyph margin); editor tab with go to definition and Change All Occurrences
+  (Cmd/Ctrl+F2).
 - **Review (M7):** committed / uncommitted / commits views, stage/unstage/commit, inline
   comments (Electron's metadata format), viewed files, image diffs (before / after), each
   file's diff loading, failing and refreshed (its header's refresh button) on its own,
@@ -246,6 +247,8 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   grammar: `.r` files are plain, and `.xml`, `.less` and `.dockerfile` files are coloured
   with the HTML, CSS and shell grammars. The word underlined under Cmd/Ctrl keeps the
   text's colour (Monaco's link is `#4E94CE`).
+- The Editor tab has no language services: its right-click menu has no Go to References,
+  Peek, Format Document or Command Palette.
 - With the sidebar collapsed the header keeps clear of the macOS window buttons (Electron's
   title runs under them).
 - GPUI cannot decode AVIF, so the Files viewer shows `.avif` images in a webview (WebKit

@@ -40,4 +40,5 @@ pub mod tool_tabs;
 pub mod traffic;
 pub mod tree_view_state;
 pub mod web_app;
+pub mod words;
 pub mod workspace_store;

@@ -4,7 +4,8 @@
 //! and the language, over the editor or the markdown preview.
 //!
 //! As in Monaco: F12, Cmd/Ctrl+click and the context menu go to the definition of the word
-//! under the cursor (holding Cmd/Ctrl over a word with one underlines it).
+//! under the cursor (holding Cmd/Ctrl over a word with one underlines it); Cmd/Ctrl+F2
+//! puts a cursor on every occurrence of the word or selection (Change All Occurrences).
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -23,21 +24,26 @@ use crate::file_browser_view::{GoToDefinition, PointerOver, language_for};
 use crate::theme::colors;
 use crate::ui;
 
-actions!(text_editor, [Save]);
+actions!(text_editor, [Save, ChangeAllOccurrences]);
 
 const CONTEXT: &str = "TextEditor";
 
 /// Cmd/Ctrl+S saves. Monaco's replace is Cmd+Alt+F on macOS (GPUI Kit's Cmd+Shift+F
-/// stays); elsewhere it is Ctrl+H, as in the Kit. F12 goes to the definition, as in Monaco.
+/// stays); elsewhere it is Ctrl+H, as in the Kit. F12 goes to the definition and
+/// Cmd/Ctrl+F2 changes all occurrences, as in Monaco.
 pub fn bind_keys(cx: &mut gpui_kit::App) {
     cx.bind_keys([KeyBinding::new("f12", GoToDefinition, Some(CONTEXT))]);
     if cfg!(target_os = "macos") {
         cx.bind_keys([
             KeyBinding::new("cmd-s", Save, Some(CONTEXT)),
             KeyBinding::new("cmd-alt-f", Replace, Some(CONTEXT)),
+            KeyBinding::new("cmd-f2", ChangeAllOccurrences, Some(CONTEXT)),
         ]);
     } else {
-        cx.bind_keys([KeyBinding::new("ctrl-s", Save, Some(CONTEXT))]);
+        cx.bind_keys([
+            KeyBinding::new("ctrl-s", Save, Some(CONTEXT)),
+            KeyBinding::new("ctrl-f2", ChangeAllOccurrences, Some(CONTEXT)),
+        ]);
     }
 }
 
@@ -150,6 +156,28 @@ impl TextEditorView {
         self.model.update(cx, |m, cx| m.go_to_definition(offset, cx));
     }
 
+    /// Change All Occurrences: a cursor on each occurrence, the one at the selection
+    /// staying the primary one, and the view where it was.
+    fn on_change_all(&mut self, _: &ChangeAllOccurrences, _: &mut Window, cx: &mut Context<Self>) {
+        let Some(editor) = &self.editor else {
+            return;
+        };
+        let (occurrences, scroll) = {
+            let editor = editor.read(cx);
+            (treeterm_model::words::all_occurrences(&editor.value(), editor.selected_range()), editor.scroll_offset())
+        };
+        let Some((primary, others)) = occurrences.split_first() else {
+            return;
+        };
+        editor.update(cx, |editor, cx| {
+            editor.set_selected_range(primary.clone(), cx);
+            for range in others {
+                editor.add_selection(range.clone(), cx);
+            }
+            editor.set_scroll_offset(scroll, cx);
+        });
+    }
+
     /// A failed save is an alert, as in Electron.
     fn alert_failed_save(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let SaveState::Failed(message) = self.model.read(cx).save_state().clone() else {
@@ -201,7 +229,7 @@ impl Render for TextEditorView {
                         cx,
                     );
                     // Monaco's menu for an editable file: Go to Definition where the language
-                    // has it, then the clipboard.
+                    // has it, Change All Occurrences, then the clipboard.
                     let editor_element = Editor::new(&editor)
                         .bordered(false)
                         .h_full()
@@ -213,7 +241,9 @@ impl Render for TextEditorView {
                             } else {
                                 menu
                             };
-                            menu.menu("Cut", Box::new(Cut))
+                            menu.menu("Change All Occurrences", Box::new(ChangeAllOccurrences))
+                                .separator()
+                                .menu("Cut", Box::new(Cut))
                                 .menu("Copy", Box::new(CopyText))
                                 .menu("Paste", Box::new(Paste))
                         });
@@ -255,6 +285,7 @@ impl Render for TextEditorView {
             .key_context(CONTEXT)
             .on_action(cx.listener(Self::save))
             .on_action(cx.listener(Self::on_go_to_definition))
+            .on_action(cx.listener(Self::on_change_all))
             .child(
                 h_flex()
                     .flex_shrink_0()
