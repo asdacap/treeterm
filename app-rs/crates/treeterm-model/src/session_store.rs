@@ -593,6 +593,10 @@ impl SessionStore {
         if session.version < self.version {
             return; // overtaken by a newer snapshot
         }
+        // A snapshot at the version this window already has (its own lock or unlock coming
+        // back, a heartbeat) holds no newer refs, and may hold older ones than a ref sync in
+        // flight: applying those would bring back what that sync removes.
+        let newer = session.version > self.version || !matches!(self.state, SessionState::Live);
         self.version = session.version;
         self.session_id = session.id;
         self.lock = session.lock;
@@ -611,12 +615,28 @@ impl SessionStore {
             self.enqueue_sync("retry after lock released", None, cx);
         }
 
-        let incoming = refs_json(&session.workspace_refs);
-        if incoming != self.last_synced_refs {
-            self.last_synced_refs = incoming;
-            self.reconcile_refs(&session.workspace_refs, cx);
+        if newer {
+            self.apply_refs(&session.workspace_refs, cx);
         }
         cx.notify();
+    }
+
+    /// The refs of the session in the reply to this window's lock or unlock, unless a newer
+    /// snapshot came first: the call's own broadcast, at the same version, will not apply
+    /// them.
+    fn apply_reply_refs(&mut self, session: &Session, cx: &mut Context<Self>) {
+        if session.version >= self.version {
+            self.apply_refs(&session.workspace_refs, cx);
+        }
+    }
+
+    /// Take the refs of a session snapshot at the version this window now has.
+    fn apply_refs(&mut self, refs: &[WorkspaceRef], cx: &mut Context<Self>) {
+        let incoming = refs_json(refs);
+        if incoming != self.last_synced_refs {
+            self.last_synced_refs = incoming;
+            self.reconcile_refs(refs, cx);
+        }
     }
 
     /// Open watches and placeholders for new refs; remove loaded workspaces that are gone.
@@ -1295,6 +1315,7 @@ impl SessionStore {
         use treeterm_core::daemon::SessionLockResult;
         let outcome = match result {
             Ok(Ok(SessionLockResult::Acquired(session))) => {
+                self.apply_reply_refs(&session, cx);
                 self.version = session.version;
                 self.lock = session.lock;
                 Ok(())
@@ -1314,6 +1335,7 @@ impl SessionStore {
         match result {
             // The version comes from the daemon's answer, never an optimistic increment.
             Ok(Ok(session)) => {
+                self.apply_reply_refs(&session, cx);
                 self.version = session.version;
                 self.lock = session.lock;
             }
