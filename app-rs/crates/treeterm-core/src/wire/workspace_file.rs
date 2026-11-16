@@ -91,8 +91,10 @@ where
     T::deserialize(deserializer).map(Some)
 }
 
+/// Reads as the parser's own message: the caller says what it was reading (Electron shows
+/// "Invalid workspace file: <message>").
 #[derive(Debug, thiserror::Error)]
-#[error("invalid workspace file: {0}")]
+#[error(transparent)]
 pub struct WorkspaceFileError(#[from] serde_json::Error);
 
 /// Parse a stored body, dropping the `parentHash` bookkeeping.
@@ -210,6 +212,13 @@ mod tests {
         // null where Zod expects an optional value.
         let null_parent = STORED.replace("\"ws-root\"", "null");
         assert!(parse_workspace_file(null_parent.as_bytes()).is_err());
+    }
+
+    #[test]
+    fn a_parse_error_reads_as_the_parsers_message() {
+        let error = parse_workspace_file(b"{").unwrap_err();
+        let serde = serde_json::from_slice::<StoredWorkspaceFile>(b"{").unwrap_err();
+        assert_eq!(error.to_string(), serde.to_string());
     }
 
     #[test]

@@ -27,6 +27,7 @@ use futures::channel::oneshot;
 use gpui_kit::{App, AppContext as _, Context, Entity, EventEmitter, Subscription, Task};
 use indexmap::IndexMap;
 use serde::Serialize;
+use treeterm_core::attention::workspace_attention;
 use treeterm_core::daemon::{ApiError, DaemonConnection};
 use crate::settings_store::{SettingsEvent, SettingsStore};
 use treeterm_core::tree::{self, TreeNode, TreeRow};
@@ -755,7 +756,9 @@ impl SessionStore {
             Ok(Some(FileState::Present(file))) => {
                 self.sync_state(id).watch_retries = 0;
                 let sha = file.sha256;
-                let body = match parse_workspace_file(&file.content) {
+                // Rejected before the CAS guard moves: the next write still guards on the
+                // last good body.
+                let body = match parse_watched_workspace(&file.content) {
                     Ok(body) => body,
                     Err(error) => {
                         return self.set_workspace_file_error(id, format!("Invalid workspace file: {error}"), cx);
@@ -2626,6 +2629,14 @@ async fn merge_locked(
     }
     .await;
     merged.map_err(MergeFailure::Failed)
+}
+
+/// `parseWatchedWorkspace`: a watched body must parse and carry a readable attention
+/// marker, else it is rejected whole (the error reads as the parser's message).
+fn parse_watched_workspace(content: &[u8]) -> Result<WorkspaceFile, String> {
+    let body = parse_workspace_file(content).map_err(|error| error.to_string())?;
+    workspace_attention(&body.metadata).map_err(|error| error.to_string())?;
+    Ok(body)
 }
 
 fn remember_hash(sync: &mut WorkspaceSync, sha: String) {

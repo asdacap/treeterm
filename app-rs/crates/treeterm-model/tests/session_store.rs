@@ -1541,6 +1541,53 @@ fn finished_work_in_an_unviewed_workspace_is_marked_unread_until_viewed(cx: &mut
 }
 
 #[gpui_kit::test]
+fn a_body_with_unreadable_attention_is_rejected(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    let path = h.daemon.workspaces_dir().join("a.json");
+    std::fs::write(&path, body("a", None)).unwrap();
+    publish(&h, &["a"]);
+    let store = open_store(cx, &h, "client-a");
+    wait_until(cx, &store, |s| loaded(s, "a"));
+
+    let mut bad: serde_json::Value = serde_json::from_str(&body("renamed", None)).unwrap();
+    bad["metadata"]["workspaceAttention"] = "nope".into();
+    std::fs::write(&path, bad.to_string()).unwrap();
+    wait_until(cx, &store, |s| matches!(s.entry("a"), Some(WorkspaceEntry::OperationError { .. })));
+    let (workspace, error) = store.read_with(cx, |s, _| match s.entry("a") {
+        Some(WorkspaceEntry::OperationError { store, error }) => (store.clone(), error.clone()),
+        _ => unreachable!(),
+    });
+    assert!(error.starts_with("Invalid workspace file: invalid workspace attention metadata:"), "{error}");
+    // Nothing of it was applied.
+    workspace.read_with(cx, |w, _| {
+        assert_eq!(w.file().name, "a");
+        assert!(!w.file().metadata.contains_key("workspaceAttention"));
+        assert!(!w.has_unread_attention());
+    });
+}
+
+#[gpui_kit::test]
+fn an_unparsable_body_is_rejected_with_the_parsers_message_once(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    let path = h.daemon.workspaces_dir().join("a.json");
+    std::fs::write(&path, body("a", None)).unwrap();
+    publish(&h, &["a"]);
+    let store = open_store(cx, &h, "client-a");
+    wait_until(cx, &store, |s| loaded(s, "a"));
+
+    std::fs::write(&path, "{").unwrap();
+    wait_until(cx, &store, |s| matches!(s.entry("a"), Some(WorkspaceEntry::OperationError { .. })));
+    let error = store.read_with(cx, |s, _| match s.entry("a") {
+        Some(WorkspaceEntry::OperationError { error, .. }) => error.clone(),
+        _ => unreachable!(),
+    });
+    assert!(error.starts_with("Invalid workspace file: "), "{error}");
+    assert_eq!(error.to_lowercase().matches("invalid workspace file").count(), 1, "{error}");
+}
+
+#[gpui_kit::test]
 fn a_web_app_gets_a_free_port_starts_its_server_and_is_ready(cx: &mut TestAppContext) {
     use treeterm_model::web_app::WebAppPhase;
     cx.executor().allow_parking();
