@@ -859,8 +859,8 @@ fn review_follows_the_diff_scroll_and_comes_back_to_the_file_last_clicked(cx: &m
     assert_eq!(review.update(cx, |r, _| r.take_scroll_request()), Some("b.txt".into()));
     assert_eq!(review.update(cx, |r, _| r.take_scroll_request()), None);
 
-    // A file entering the diff's top band is the active one: scrolling down the one below,
-    // scrolling up the one above. One leaving it changes nothing.
+    // The last file in the diff's top band is the active one, whichever way the diff
+    // scrolls: down, the file entering from below; up, still the lower one.
     assert_eq!(active(cx), None);
     review.update(cx, |r, cx| r.follow_scroll(&band(&["a.txt"]), cx));
     assert_eq!(active(cx), Some("a.txt".into()));
@@ -869,17 +869,20 @@ fn review_follows_the_diff_scroll_and_comes_back_to_the_file_last_clicked(cx: &m
     review.update(cx, |r, cx| r.follow_scroll(&band(&["b.txt"]), cx));
     assert_eq!(active(cx), Some("b.txt".into()));
     review.update(cx, |r, cx| r.follow_scroll(&band(&["a.txt", "b.txt"]), cx));
+    assert_eq!(active(cx), Some("b.txt".into()));
+    review.update(cx, |r, cx| r.follow_scroll(&band(&["a.txt"]), cx));
     assert_eq!(active(cx), Some("a.txt".into()));
     // Next unviewed starts from it.
     let order = band(&["a.txt", "b.txt", "c.txt"]);
     assert_eq!(review.update(cx, |r, cx| r.jump_unviewed(&order, Direction::Next, cx)), Some("b.txt".into()));
-    review.update(cx, |r, cx| r.follow_scroll(&band(&["b.txt"]), cx));
+    review.update(cx, |r, cx| r.follow_scroll(&band(&["a.txt", "b.txt"]), cx));
     assert_eq!(review.update(cx, |r, cx| r.jump_unviewed(&order, Direction::Next, cx)), Some("c.txt".into()));
     assert_eq!(review.update(cx, |r, _| r.take_scroll_request()), Some("c.txt".into()));
 
-    // Other files listed: the band is watched afresh, and its last file is the active one.
+    // The same band reported again changes nothing; once other files are listed, the band
+    // is watched afresh, and its last file is the active one.
     review.update(cx, |r, cx| r.follow_scroll(&band(&["a.txt", "b.txt"]), cx));
-    assert_eq!(active(cx), Some("a.txt".into()));
+    assert_eq!(active(cx), Some("c.txt".into()));
     review.update(cx, |r, _| r.reobserve_scroll());
     review.update(cx, |r, cx| r.follow_scroll(&band(&["a.txt", "b.txt"]), cx));
     assert_eq!(active(cx), Some("b.txt".into()));

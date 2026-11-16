@@ -529,11 +529,17 @@ pub fn unviewed_from<'a>(
     .map(String::as_str)
 }
 
-/// The file Electron's `IntersectionObserver` makes active when the diff's top band goes
-/// from `previous` to `band` (both in list order): of the files that entered it, the last
-/// one reported.
-pub fn newly_entered<'a>(previous: &[String], band: &'a [String]) -> Option<&'a str> {
-    band.iter().rev().find(|path| !previous.contains(path)).map(String::as_str)
+/// The file Electron ends up making active when the diff's top band goes from `previous`
+/// to `band` (both in list order): the band's last file. A file entering the band is
+/// reported by `StackedDiffList`'s `IntersectionObserver`, but making it active renders
+/// `ReviewBrowser` again with a new `files` array, which makes a new observer; a new
+/// observer reports every section in the band, and the last one wins. An unchanged or empty
+/// band changes nothing.
+pub fn band_active<'a>(previous: &[String], band: &'a [String]) -> Option<&'a str> {
+    if band == previous {
+        return None;
+    }
+    band.last().map(String::as_str)
 }
 
 /// Which list of files the diff shows (`StackedDiffList`): each view mounts its own, and in
@@ -1772,12 +1778,12 @@ impl ReviewModel {
 
     /// The files with a row in the top tenth of the diff, in list order, after a layout
     /// (`IntersectionObserver` with `rootMargin: '0px 0px -90% 0px'` over the file sections):
-    /// a file that enters the band becomes the active one.
+    /// when the band changes, its last file becomes the active one ([`band_active`]).
     pub fn follow_scroll(&mut self, band: &[String], cx: &mut Context<Self>) {
-        if let Some(entered) = newly_entered(&self.scroll_band, band)
-            && self.active_file.as_deref() != Some(entered)
+        if let Some(last) = band_active(&self.scroll_band, band)
+            && self.active_file.as_deref() != Some(last)
         {
-            self.active_file = Some(entered.to_owned());
+            self.active_file = Some(last.to_owned());
             cx.notify();
         }
         self.scroll_band = band.to_vec();
@@ -2336,18 +2342,22 @@ mod tests {
     }
 
     #[test]
-    fn a_file_entering_the_top_band_becomes_active() {
+    fn the_last_file_of_a_changed_top_band_becomes_active() {
         let band = |paths: &[&str]| paths.iter().map(|p| (*p).to_owned()).collect::<Vec<_>>();
         // A list shown (or listing other files): the last file in the band.
-        assert_eq!(newly_entered(&[], &band(&["a"])), Some("a"));
-        assert_eq!(newly_entered(&[], &band(&["a", "b"])), Some("b"));
-        // Scrolling down, the next file enters from below; scrolling up, the one above.
-        assert_eq!(newly_entered(&band(&["a"]), &band(&["a", "b"])), Some("b"));
-        assert_eq!(newly_entered(&band(&["b", "c"]), &band(&["a", "b", "c"])), Some("a"));
-        // A file leaving changes nothing, and neither does the same band.
-        assert_eq!(newly_entered(&band(&["a", "b"]), &band(&["b"])), None);
-        assert_eq!(newly_entered(&band(&["b"]), &band(&["b"])), None);
-        assert_eq!(newly_entered(&band(&["b"]), &[]), None);
+        assert_eq!(band_active(&[], &band(&["a"])), Some("a"));
+        assert_eq!(band_active(&[], &band(&["a", "b"])), Some("b"));
+        // Scrolling down, the file entering from below; scrolling up, still the lower file
+        // (Electron's observer, made again once the upper one is active, settles there).
+        assert_eq!(band_active(&band(&["a"]), &band(&["a", "b"])), Some("b"));
+        assert_eq!(band_active(&band(&["b"]), &band(&["a", "b"])), Some("b"));
+        assert_eq!(band_active(&band(&["b", "c"]), &band(&["a", "b", "c"])), Some("c"));
+        // A file leaving: the last one left.
+        assert_eq!(band_active(&band(&["a", "b"]), &band(&["b"])), Some("b"));
+        assert_eq!(band_active(&band(&["b", "c"]), &band(&["b"])), Some("b"));
+        // The same band, or none, changes nothing.
+        assert_eq!(band_active(&band(&["a", "b"]), &band(&["a", "b"])), None);
+        assert_eq!(band_active(&band(&["b"]), &[]), None);
     }
 
     #[test]
