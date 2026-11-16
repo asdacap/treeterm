@@ -489,11 +489,19 @@ fn two_terminals_b_owning(cx: &mut TestAppContext, h: &Harness) -> (Entity<Termi
 }
 
 /// Resize through `model`'s input queue and wait for the daemon to apply it: everything
-/// queued before it has been handled by then.
+/// queued before it has been handled by then. `fit` asks for nothing until the daemon has
+/// reported the attachment's size (after a refresh, too), so it is asked again until it does.
 fn drain_input(cx: &mut TestAppContext, model: &Entity<TerminalModel>) {
     let target = GridSize { cols: 100, rows: 30 };
-    model.update(cx, |m, _| m.request_size(target));
-    wait_until(cx, model, |m| m.grid_size() == target);
+    for _ in 0..1000 {
+        model.update(cx, |m, _| m.fit(target));
+        cx.run_until_parked();
+        if model.read_with(cx, |m, _| m.grid_size() == target) {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    panic!("the resize was not applied");
 }
 
 #[gpui_kit::test]
