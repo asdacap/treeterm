@@ -7,9 +7,9 @@
 //! `scrollToLine` another app wrote (Electron's "open in file browser") is honoured on load,
 //! then removed once the viewer has moved there. The viewer's scroll offset is saved as
 //! `scrollTop` when the tab is hidden (Electron unmounts the viewer then) and shown again in
-//! the file once when the tab is built; selecting another file drops it. The tab follows its
-//! state as other windows and Electron change it ([`FileBrowser::follow_state`]), as
-//! Electron's components read it live.
+//! the file once when the tab is built; selecting another file drops it. A tab without a state
+//! is an "Invalid tab". The tab follows its state as other windows and Electron change it
+//! ([`FileBrowser::follow_state`]), as Electron's components read it live.
 //!
 //! The search panel searches the open file ([`search::find_in_text`]) and the whole
 //! worktree ([`search::repo_search`]); go to definition greps for a definition of the word
@@ -263,6 +263,14 @@ pub enum FileBrowserEvent {
 
 impl EventEmitter<FileBrowserEvent> for FileBrowser {}
 
+/// Whether the tab has a state to show: `FilesystemBrowser` shows only "Invalid tab" for one
+/// without.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Validity {
+    Valid,
+    Invalid,
+}
+
 /// The tab state's `scrollTop`, still to be shown in `path` (`FileViewer` applies
 /// `initialScrollTop` once per file, after it has loaded).
 #[derive(Debug, Clone, PartialEq)]
@@ -278,6 +286,7 @@ pub struct FileBrowser {
     /// `HEAD` and `git blame`, for review comments.
     git: GitApi,
     host: Host,
+    validity: Validity,
     root: String,
     listings: HashMap<String, Listing>,
     expanded: Vec<String>,
@@ -448,6 +457,8 @@ impl FileBrowser {
             exec,
             git,
             host: Host::FilesTab,
+            // `FilesystemBrowser` checks only that there is a state (`!state`).
+            validity: if state.is_object() { Validity::Valid } else { Validity::Invalid },
             root: root.clone(),
             listings: HashMap::new(),
             expanded: Vec::new(),
@@ -478,6 +489,10 @@ impl FileBrowser {
             _name_search: None,
             comments: comments::Comments::new(in_repo),
         };
+        // An invalid tab shows nothing, so it reads nothing.
+        if browser.validity == Validity::Invalid {
+            return browser;
+        }
         browser.refresh_anchor(cx);
         browser.resolve_favourites(cx);
         browser.load(root, cx);
@@ -491,6 +506,11 @@ impl FileBrowser {
             }
         }
         browser
+    }
+
+    /// Whether the tab has no state, so it shows only "Invalid tab".
+    pub fn is_invalid(&self) -> bool {
+        self.validity == Validity::Invalid
     }
 
     /// Show the state's `scrollTop` in `path` once its text is shown, unless the state asks

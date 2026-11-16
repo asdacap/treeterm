@@ -692,6 +692,33 @@ fn a_files_tab_opened_at_a_line_moves_there_once(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn a_files_tab_without_a_state_is_an_invalid_tab(cx: &mut TestAppContext) {
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let repo = TempRepo::new(&h);
+    repo.write("a.txt", "one\n");
+    repo.commit_all("files");
+    let store = open_store(cx, &h);
+    let app_states = serde_json::json!({ "t1": { "applicationId": "filesystem", "title": "Files", "state": null } });
+    let workspace = open_repo_workspace_with(cx, &h, &store, &repo, app_states);
+    let Some(TabContent::Files(browser)) = workspace.read_with(cx, |w, _| w.tab_content("t1")) else {
+        panic!("not a files tab");
+    };
+    cx.run_until_parked();
+    browser.read_with(cx, |m, _| {
+        assert!(m.is_invalid());
+        assert!(m.root_listing().is_none() && m.rows().is_empty());
+        assert!(matches!(m.view(), FileView::Nothing));
+    });
+    assert_eq!(tab_state(cx, &workspace, "t1"), serde_json::Value::Null);
+
+    // A state with a selection is valid.
+    let (_, valid) = files_tab(cx, &workspace, serde_json::json!({ "selectedPath": format!("{}/a.txt", repo.root()) }));
+    assert!(!valid.read_with(cx, |m, _| m.is_invalid()));
+}
+
+#[gpui_kit::test]
 fn an_editor_tab_keeps_its_scroll_offset_and_moves_to_its_line_once(cx: &mut TestAppContext) {
     let _serial = serial();
     cx.executor().allow_parking();
@@ -1153,10 +1180,21 @@ fn open_store(cx: &mut TestAppContext, h: &Harness) -> Entity<SessionStore> {
 /// The repo as a workspace with no tabs (no terminal whose shell could start while a test's
 /// git commands run; see [`serial`]).
 fn open_repo_workspace(cx: &mut TestAppContext, h: &Harness, store: &Entity<SessionStore>, repo: &TempRepo) -> Entity<WorkspaceStore> {
+    open_repo_workspace_with(cx, h, store, repo, serde_json::json!({}))
+}
+
+/// The repo as a workspace with these `appStates`.
+fn open_repo_workspace_with(
+    cx: &mut TestAppContext,
+    h: &Harness,
+    store: &Entity<SessionStore>,
+    repo: &TempRepo,
+    app_states: serde_json::Value,
+) -> Entity<WorkspaceStore> {
     let id = format!("ws-{}", uuid::Uuid::new_v4().simple());
     let body = serde_json::json!({
         "name": "repo", "status": "active", "isGitRepo": true, "isWorktree": false, "gitBranch": "main",
-        "appStates": {}, "metadata": {}, "createdAt": 1, "lastActivity": 1, "parentHash": ""
+        "appStates": app_states, "metadata": {}, "createdAt": 1, "lastActivity": 1, "parentHash": ""
     });
     std::fs::write(h.daemon.workspaces_dir().join(format!("{id}.json")), body.to_string()).unwrap();
     let refs = vec![WorkspaceRef { id: id.clone(), path: repo.root() }];

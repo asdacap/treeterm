@@ -1852,6 +1852,10 @@ pub(crate) fn markdown_preview_linked(
 impl Render for FileBrowserView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let c = colors(cx);
+        // `.filesystem-browser-error`.
+        if self.model.read(cx).is_invalid() {
+            return div().p(px(20.)).text_color(rgb(ui::FILE_ERROR)).child("Invalid tab").into_any_element();
+        }
         let (border, accent, secondary, primary, hover) = (c.border, c.accent, c.text_secondary, c.text_primary, c.bg_hover);
         if self.resizing && !cx.has_active_drag() {
             self.resizing = false;
@@ -1912,6 +1916,7 @@ impl Render for FileBrowserView {
             }))
             .children(tree)
             .child(v_flex().flex_1().min_w_0().h_full().overflow_hidden().child(viewer).children(search))
+            .into_any_element()
     }
 }
 
