@@ -416,6 +416,10 @@ The chrome was matched to Electron's computed styles, measured side by side on o
 - SSH Upload's "Browse..." is disabled while the connection is down; the form keeps its file
   and directory under "Connection is … — uploads are disabled until connected.", as in
   Electron. Electron opened the browser, which could only show its failed listing.
+- SSH Monitor shows the latest run's result: a run that finishes after a later one is
+  dropped (Electron showed whichever finished last). A run whose result the daemon never
+  sends reads "No result from the daemon after 40s" when the client gives up on it, unless a
+  later run's result is already shown; Electron left it pending.
 - Placeholders for refs another window removed are dropped with the ref.
 - A collapsed workspace stays collapsed until it gains a child or is expanded (Electron
   re-expanded every parent whenever any workspace changed).
