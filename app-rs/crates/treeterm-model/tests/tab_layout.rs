@@ -1,10 +1,10 @@
 //! The tab layout (`metadata.layoutModel`, Electron's flex-layout model) against a real
-//! in-process daemon: what the workspace shows, and what it saves when tabs come and go or
-//! are selected.
+//! in-process daemon: what the workspace shows, and what it saves when tabs come and go, are
+//! selected or are dragged.
 
 use gpui_kit::{AppContext as _, Entity, TestAppContext};
 use serde_json::{Value, json};
-use treeterm_core::layout::Layout;
+use treeterm_core::layout::{Layout, Side};
 use treeterm_model::session_store::{SessionState, SessionStore, WorkspaceEntry};
 use treeterm_model::settings_store::SettingsStore;
 use treeterm_model::workspace_store::WorkspaceStore;
@@ -187,6 +187,32 @@ fn selecting_a_tab_saves_it_as_the_layouts_selection(cx: &mut TestAppContext) {
     let saved = layout_on_disk(&h, &id).unwrap();
     assert_eq!(saved.selected_tab().as_deref(), Some("a"));
     assert_eq!(saved.tab_order(), ["c", "b", "a"]);
+}
+
+#[gpui_kit::test]
+fn a_dragged_tab_is_saved_in_its_new_place_and_shown(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    let store = open_store(cx, &h);
+    let (id, workspace) = open_workspace(cx, &h, &store, tabs(&["a", "b", "c"]), Some("a"), json!({}));
+
+    workspace.update(cx, |w, cx| w.move_tab("c", "a", Side::Before, cx));
+    wait_for_disk(cx, || layout_on_disk(&h, &id).is_some());
+    assert_eq!(layout_on_disk(&h, &id).unwrap().tab_order(), ["c", "a", "b"]);
+    assert_eq!(file_on_disk(&h, &id)["activeTabId"], "c");
+    workspace.read_with(cx, |w, _| {
+        assert_eq!(w.layout().tab_order(), ["c", "a", "b"]);
+        assert_eq!(w.shown_tab().as_deref(), Some("c"));
+    });
+
+    workspace.update(cx, |w, cx| w.move_tab("a", "b", Side::After, cx));
+    wait_for_disk(cx, || layout_on_disk(&h, &id).is_some_and(|saved| saved.tab_order() == ["c", "b", "a"]));
+    assert_eq!(file_on_disk(&h, &id)["activeTabId"], "a");
+
+    // Onto a tab that is gone: nothing moves.
+    let before = workspace.read_with(cx, |w, _| w.file().clone());
+    workspace.update(cx, |w, cx| w.move_tab("a", "gone", Side::Before, cx));
+    workspace.read_with(cx, |w, _| assert_eq!(*w.file(), before));
 }
 
 #[gpui_kit::test]

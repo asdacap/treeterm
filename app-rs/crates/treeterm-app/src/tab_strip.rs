@@ -2,14 +2,19 @@
 //! (`flexlayout-new-tab-btn`). Tabs that do not fit scroll sideways under the wheel, the
 //! selected tab is scrolled into view, and a "Hidden tabs" button lists the tabs out of view
 //! (flex-layout's `useTabOverflow`); "+" is a sticky button that stays at the right end.
+//! A tab dragged onto another lands before or after it, by the half it is dropped on.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::{ElementExt as _, h_flex};
 use gpui_kit::prelude::*;
-use gpui_kit::{AnyElement, Anchor, App, Bounds, EntityId, Pixels, ScrollHandle, SharedString, Window, div, px};
+use gpui_kit::{
+    AnyElement, Anchor, App, Bounds, Context, DragMoveEvent, EntityId, Pixels, ScrollHandle, SharedString, Window, div,
+    px,
+};
+use treeterm_core::layout::Side;
 use treeterm_model::workspace_store::ActivityState;
 
 use crate::theme::colors;
@@ -36,6 +41,9 @@ pub struct NewTabApp {
 /// application's id.
 pub type OnId = Rc<dyn Fn(&str, &mut Window, &mut App)>;
 
+/// What dropping a dragged tab (the first id) on a side of another tab (the second) does.
+pub type OnMove = Rc<dyn Fn(&str, &str, Side, &mut Window, &mut App)>;
+
 /// One strip's tabs and handlers, drawn with the [`TabStripState`] its view keeps.
 pub struct TabStrip {
     pub tabs: Vec<StripTab>,
@@ -44,7 +52,41 @@ pub struct TabStrip {
     pub apps: Vec<NewTabApp>,
     pub on_select: OnId,
     pub on_close: OnId,
+    pub on_move: OnMove,
     pub on_new_tab: OnId,
+}
+
+/// A tab being dragged, and its drag image: the tab's icon and title (flex-layout drags the
+/// tab's stamp, `flexlayout__tab_button_stamp`), where the tab's own were.
+#[derive(Clone)]
+pub struct DraggedTab {
+    id: String,
+    icon: String,
+    title: String,
+}
+
+impl Render for DraggedTab {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Chromium draws a drag image translucent.
+        h_flex()
+            .h(px(31.))
+            .px(px(12.))
+            .gap(px(3.6))
+            .items_center()
+            .text_size(px(12.))
+            .text_color(colors(cx).text_primary)
+            .opacity(0.75)
+            .child(div().flex_shrink_0().mr(px(6.)).child(self.icon.clone()))
+            .child(div().whitespace_nowrap().child(self.title.clone()))
+    }
+}
+
+/// Where a dragged tab would land: beside this tab, on this side.
+type DropHint = Option<(String, Side)>;
+
+/// The side of a tab `bounds` the pointer at `x` is on: its left half is before it.
+pub fn drop_side(bounds: Bounds<Pixels>, x: Pixels) -> Side {
+    if x < bounds.left() + bounds.size.width / 2. { Side::Before } else { Side::After }
 }
 
 /// A strip's scroll position and what its last frame measured, kept across renders.
@@ -60,6 +102,8 @@ pub struct TabStripState {
     reveal_requested: Rc<Cell<bool>>,
     /// Measured while painting, for the next render.
     painted: Rc<Cell<Painted>>,
+    /// Where the tab being dragged would land, while it is over a tab.
+    drop_hint: Rc<RefCell<DropHint>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -99,6 +143,50 @@ pub fn new_tab_menu_anchor(plus_right: Pixels) -> Anchor {
     if plus_right >= px(140.) { Anchor::TopRight } else { Anchor::TopLeft }
 }
 
+/// While a tab is dragged, tab `id` shows where it would land as the pointer moves over it:
+/// before it over its left half, after it over its right half.
+fn drag_over(
+    id: &str,
+    state: &TabStripState,
+    view: EntityId,
+) -> impl Fn(&DragMoveEvent<DraggedTab>, &mut Window, &mut App) + 'static {
+    let (id, hint, viewport) = (id.to_owned(), state.drop_hint.clone(), state.scroll.clone());
+    move |event, _, cx| {
+        let position = event.event.position;
+        // A tab scrolled out of the strip is not under the pointer, wherever its bounds are.
+        let over = event.bounds.contains(&position) && viewport.bounds().contains(&position);
+        let next = over.then(|| (id.clone(), drop_side(event.bounds, position.x)));
+        let changed = match (&*hint.borrow(), &next) {
+            (Some((old, _)), None) => *old == id,
+            (old, Some(_)) => old.as_ref() != next.as_ref(),
+            (None, None) => false,
+        };
+        if changed {
+            *hint.borrow_mut() = next;
+            cx.notify(view);
+        }
+    }
+}
+
+/// A tab dropped on tab `id` lands on the side its hint shows.
+fn drop_on(
+    id: &str,
+    state: &TabStripState,
+    on_move: OnMove,
+    view: EntityId,
+) -> impl Fn(&DraggedTab, &mut Window, &mut App) + 'static {
+    let (id, hint) = (id.to_owned(), state.drop_hint.clone());
+    move |dragged, window, cx| {
+        let landing = hint.borrow_mut().take();
+        cx.notify(view);
+        match landing {
+            Some((over, side)) if over == id => on_move(&dragged.id, &id, side, window, cx),
+            // The pointer was not over this tab where the strip shows it.
+            Some(_) | None => {}
+        }
+    }
+}
+
 /// Each tab's bounds as last laid out, unscrolled.
 fn tab_bounds(scroll: &ScrollHandle, count: usize) -> Vec<Bounds<Pixels>> {
     (0..count).map_while(|ix| scroll.bounds_for_item(ix)).collect()
@@ -116,6 +204,7 @@ impl TabStrip {
     pub fn render(self, id: &str, state: &mut TabStripState, view: EntityId, cx: &App) -> AnyElement {
         let c = colors(cx);
         let (secondary, primary, active_bg, hover) = (c.text_secondary, c.text_primary, c.bg_primary, c.bg_hover);
+        let accent = c.accent;
         let painted = state.painted.get();
         let active_ix = self.active.as_ref().and_then(|active| self.tabs.iter().position(|tab| &tab.id == active));
         let wanted = self.active.clone().map(|tab| Reveal { tab, width: painted.width, overflowing: painted.overflowing });
@@ -129,6 +218,7 @@ impl TabStrip {
         }
         let hidden = state.hidden(self.tabs.len());
         let anchor = new_tab_menu_anchor(painted.plus_right);
+        let hint = state.drop_hint.borrow().clone();
 
         let mut tabs = Vec::with_capacity(self.tabs.len());
         for tab in &self.tabs {
@@ -137,6 +227,7 @@ impl TabStrip {
             let text = if is_active { primary } else { secondary };
             let (on_select, on_close) = (self.on_select.clone(), self.on_close.clone());
             let (select_id, close_id) = (tab.id.clone(), tab.id.clone());
+            let side = hint.as_ref().filter(|(over, _)| *over == tab.id).map(|(_, side)| *side);
             // flex-layout's tab strip (`flexlayout-overrides.css`): tabs 31px high from a 2px
             // inset, rounded on top, 4px apart. Every closable tab, active or not, shows its
             // close button while hovered (`.flexlayout__tab_button_trailing` at `opacity: 0`
@@ -179,7 +270,23 @@ impl TabStrip {
                                 }),
                         )
                     })
-                    .on_click(move |_, window, cx| on_select(&select_id, window, cx)),
+                    .on_click(move |_, window, cx| on_select(&select_id, window, cx))
+                    .relative()
+                    .on_drag(
+                        DraggedTab { id: tab.id.clone(), icon: tab.icon.clone(), title: tab.title.clone() },
+                        |dragged, _, _, cx| cx.new(|_| dragged.clone()),
+                    )
+                    .on_drag_move(drag_over(&tab.id, state, view))
+                    .on_drop(drop_on(&tab.id, state, self.on_move.clone(), view))
+                    // flex-layout's drop outline in a tab strip: a 3px accent bar on the edge
+                    // the tab would land against.
+                    .when_some(side, |d, side| {
+                        let bar = div().absolute().top_0().bottom_0().w(px(3.)).rounded(px(1.5)).bg(accent);
+                        d.child(match side {
+                            Side::Before => bar.left(px(-2.)),
+                            Side::After => bar.right(px(-2.)),
+                        })
+                    }),
             );
         }
         // The tabs scroll inside their own box (`flexlayout__tabset_tabbar_inner`), as wide as
@@ -331,7 +438,7 @@ impl TabStrip {
 
 #[cfg(test)]
 mod tests {
-    use gpui_kit::{Context, Modifiers, MouseMoveEvent, Render, ScrollDelta, ScrollEvent, ScrollSource, TestAppContext, TouchPhase, VisualTestContext, bounds, point, size};
+    use gpui_kit::{Modifiers, MouseButton, MouseMoveEvent, Render, ScrollDelta, ScrollEvent, ScrollSource, TestAppContext, TouchPhase, VisualTestContext, bounds, point, size};
 
     use super::*;
 
@@ -369,6 +476,8 @@ mod tests {
         state: TabStripState,
         count: usize,
         active: Option<String>,
+        /// What the strip asked for: `select <tab>`, `move <dragged> <target> <side>`.
+        log: Rc<RefCell<Vec<String>>>,
     }
 
     impl Render for Host {
@@ -383,12 +492,16 @@ mod tests {
                 })
                 .collect();
             let none: OnId = Rc::new(|_, _, _| {});
+            let (selects, moves) = (self.log.clone(), self.log.clone());
             let strip = TabStrip {
                 tabs,
                 active: self.active.clone(),
                 apps: vec![NewTabApp { id: "terminal".to_owned(), name: "Terminal".to_owned(), icon: ">_".to_owned() }],
-                on_select: none.clone(),
+                on_select: Rc::new(move |tab, _, _| selects.borrow_mut().push(format!("select {tab}"))),
                 on_close: none.clone(),
+                on_move: Rc::new(move |dragged, target, side, _, _| {
+                    moves.borrow_mut().push(format!("move {dragged} {target} {side:?}"));
+                }),
                 on_new_tab: none,
             };
             let view = cx.entity_id();
@@ -411,7 +524,8 @@ mod tests {
         cx.update(gpui_kit::init);
         cx.update(crate::theme::install);
         let active = Some(active.to_owned());
-        let (host, cx) = cx.add_window_view(move |_, _| Host { state: TabStripState::default(), count, active });
+        let (host, cx) =
+            cx.add_window_view(move |_, _| Host { state: TabStripState::default(), count, active, log: Rc::default() });
         settle(cx);
         (host, cx)
     }
@@ -481,5 +595,85 @@ mod tests {
         });
         settle(cx);
         assert!(shown(&host, 0, cx));
+    }
+
+    #[test]
+    fn a_drop_lands_before_a_tab_over_its_left_half() {
+        let tab = span(100., 200.);
+        assert_eq!(drop_side(tab, px(100.)), Side::Before);
+        assert_eq!(drop_side(tab, px(149.)), Side::Before);
+        assert_eq!(drop_side(tab, px(150.)), Side::After);
+        assert_eq!(drop_side(tab, px(199.)), Side::After);
+    }
+
+    fn tab_at(host: &gpui_kit::Entity<Host>, ix: usize, cx: &mut VisualTestContext) -> Bounds<Pixels> {
+        cx.update(|_, cx| host.read(cx).state.scroll.bounds_for_item(ix).expect("laid out"))
+    }
+
+    fn hint(host: &gpui_kit::Entity<Host>, cx: &mut VisualTestContext) -> DropHint {
+        cx.update(|_, cx| host.read(cx).state.drop_hint.borrow().clone())
+    }
+
+    fn log(host: &gpui_kit::Entity<Host>, cx: &mut VisualTestContext) -> Vec<String> {
+        cx.update(|_, cx| host.read(cx).log.borrow().clone())
+    }
+
+    /// Press on `from` and move to `to` with the button held: past the first move the tab is
+    /// being dragged, and the next one is over `to`.
+    fn drag(from: gpui_kit::Point<Pixels>, to: gpui_kit::Point<Pixels>, cx: &mut VisualTestContext) {
+        cx.simulate_mouse_move(from, None, Modifiers::default());
+        cx.simulate_mouse_down(from, MouseButton::Left, Modifiers::default());
+        cx.simulate_mouse_move(to, MouseButton::Left, Modifiers::default());
+        assert!(cx.update(|_, cx| cx.has_active_drag()), "a tab is being dragged");
+        cx.simulate_mouse_move(to, MouseButton::Left, Modifiers::default());
+    }
+
+    #[gpui_kit::test]
+    fn a_tab_dropped_on_another_lands_on_the_half_it_is_over(cx: &mut TestAppContext) {
+        // Two tabs fit the strip.
+        let (host, cx) = strip(2, "t0", cx);
+        let (first, second) = (tab_at(&host, 0, cx), tab_at(&host, 1, cx));
+        let left_of_first = point(first.left() + px(4.), first.center().y);
+        drag(second.center(), left_of_first, cx);
+        assert_eq!(hint(&host, cx), Some(("t0".to_owned(), Side::Before)));
+        settle(cx);
+
+        let right_of_first = point(first.right() - px(4.), first.center().y);
+        cx.simulate_mouse_move(right_of_first, MouseButton::Left, Modifiers::default());
+        assert_eq!(hint(&host, cx), Some(("t0".to_owned(), Side::After)));
+        // Over itself too, as flex-layout shows it.
+        cx.simulate_mouse_move(second.center(), MouseButton::Left, Modifiers::default());
+        assert_eq!(hint(&host, cx).map(|(over, _)| over).as_deref(), Some("t1"));
+        cx.simulate_mouse_move(right_of_first, MouseButton::Left, Modifiers::default());
+        settle(cx);
+
+        cx.simulate_mouse_up(right_of_first, MouseButton::Left, Modifiers::default());
+        assert_eq!(log(&host, cx), ["move t1 t0 After"], "a drag is not a click");
+        assert_eq!(hint(&host, cx), None);
+    }
+
+    #[gpui_kit::test]
+    fn a_tab_dragged_off_the_tabs_lands_nowhere(cx: &mut TestAppContext) {
+        let (host, cx) = strip(2, "t0", cx);
+        let (first, second) = (tab_at(&host, 0, cx), tab_at(&host, 1, cx));
+        drag(second.center(), first.center(), cx);
+        assert_eq!(hint(&host, cx).map(|(over, _)| over).as_deref(), Some("t0"));
+
+        let below = point(first.center().x, first.bottom() + px(40.));
+        cx.simulate_mouse_move(below, MouseButton::Left, Modifiers::default());
+        assert_eq!(hint(&host, cx), None);
+        cx.simulate_mouse_up(below, MouseButton::Left, Modifiers::default());
+        assert_eq!(log(&host, cx), Vec::<String>::new());
+    }
+
+    #[gpui_kit::test]
+    fn a_tab_scrolled_out_of_the_strip_is_no_drop_target(cx: &mut TestAppContext) {
+        let (host, cx) = strip(25, "t0", cx);
+        // The last tab lies past the strip's right edge, under "+" and the Hidden tabs button.
+        let hidden = tab_at(&host, 24, cx);
+        let viewport = cx.update(|_, cx| host.read(cx).state.scroll.bounds());
+        assert!(hidden.left() > viewport.right());
+        drag(tab_at(&host, 0, cx).center(), hidden.center(), cx);
+        assert_eq!(hint(&host, cx), None);
     }
 }

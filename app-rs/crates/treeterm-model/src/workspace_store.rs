@@ -17,7 +17,7 @@ use treeterm_core::attention::{
     ObservedSession, ObservedWorkspace, SessionStatus, apply_attention_mutations, has_unread_workspace_attention,
 };
 use treeterm_core::daemon::DaemonConnection;
-use treeterm_core::layout::{Layout, LayoutTab};
+use treeterm_core::layout::{Layout, LayoutTab, Side};
 use treeterm_core::pty::CreatePty;
 use treeterm_core::settings::Settings;
 use treeterm_core::wire::workspace_file::{AppState, WorkspaceFile};
@@ -1535,6 +1535,19 @@ impl WorkspaceStore {
         }
         self.workspace.file.active_tab_id = Some(tab_id.to_owned());
         self.save_layout();
+        self.changed(cx);
+    }
+
+    /// A tab dragged in the strip and dropped on `side` of `target`: it moves there in the
+    /// layout (into the target's tabset) and is shown, and the layout is saved
+    /// (flex-layout's tab drag, which `FlexLayoutPane` saves to `metadata.layoutModel`).
+    pub fn move_tab(&mut self, dragged: &str, target: &str, side: Side, cx: &mut Context<Self>) {
+        let mut layout = self.layout();
+        if !layout.move_tab(dragged, target, side) {
+            return;
+        }
+        self.workspace.file.metadata.insert(LAYOUT_MODEL.to_owned(), layout.to_json());
+        self.workspace.file.active_tab_id = Some(dragged.to_owned());
         self.changed(cx);
     }
 

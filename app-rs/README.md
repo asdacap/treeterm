@@ -79,8 +79,9 @@ Done (tested against a real in-process daemon unless noted):
   retry, body CAS with parentHash chain, echo suppression, conflict rewrite, watch reopen,
   lock ops), tabs (add/close/activate/state, PTY creation keyed by `ptyHandle`, close-on-exit,
   kill-on-close), app registry from settings, tab strip in the order of Electron's
-  flex-layout model (`metadata.layoutModel`, saved back as tabs are added, closed and
-  selected; scrolls when full, Hidden tabs menu, "+" kept at its end), new-tab menu.
+  flex-layout model (`metadata.layoutModel`, saved back as tabs are added, closed, selected
+  and dragged into order; scrolls when full, Hidden tabs menu, "+" kept at its end),
+  new-tab menu.
 - **Git and worktrees (M2):** exec/fs/git clients, open a directory as a workspace, child
   workspaces (new branch, existing branch, remote branch, existing worktree, quick fork; live
   git output), merge/squash-merge (keep or remove), remove with or without git cleanup.
@@ -270,6 +271,9 @@ The chrome was matched to Electron's computed styles, measured side by side on o
 - A terminal takes keyboard focus when it comes into view as the shown tab, but not from an
   open dialog, and not again on every workspace change while it stays shown (Electron
   focused it on each, taking focus from the sidebar's inputs and from dialogs).
+- A tab dropped in the strip becomes the active tab (`activeTabId`). Electron's strip showed
+  the dropped tab, but its `activeTabId`, which its tab shortcuts act on, stayed on the tab
+  that was active before.
 - The attention ding is the system bell (Electron synthesised an 880 Hz tone).
 - The analyzer reads the tab's own terminal; Electron attached a second, headless one.
 - The code editors colour files Electron shows as plain text: Makefile, Dockerfile,

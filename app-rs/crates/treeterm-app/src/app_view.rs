@@ -1898,7 +1898,7 @@ fn workspace_tab_strip(
     cx: &mut Context<AppView>,
 ) -> AnyElement {
     use std::rc::Rc;
-    use crate::tab_strip::{NewTabApp, OnId, StripTab, TabStrip};
+    use crate::tab_strip::{NewTabApp, OnId, OnMove, StripTab, TabStrip};
     let registry = connected.session.read(cx).registry().clone();
     let store = workspace.read(cx);
     let file = &store.workspace().file;
@@ -1934,6 +1934,13 @@ fn workspace_tab_strip(
         let workspace = workspace.clone();
         Rc::new(move |tab: &str, _: &mut Window, cx: &mut App| workspace.update(cx, |w, cx| w.remove_tab(tab, cx)))
     };
+    let on_move: OnMove = {
+        let (workspace, view) = (workspace.clone(), view.clone());
+        Rc::new(move |dragged: &str, target: &str, side, _: &mut Window, cx: &mut App| {
+            workspace.update(cx, |w, cx| w.move_tab(dragged, target, side, cx));
+            view.update(cx, |view, cx| view.focus_active_tab(cx));
+        })
+    };
     let on_new_tab: OnId = {
         let workspace = workspace.clone();
         Rc::new(move |app: &str, _: &mut Window, cx: &mut App| {
@@ -1941,7 +1948,7 @@ fn workspace_tab_strip(
             view.update(cx, |view, cx| view.focus_active_tab(cx));
         })
     };
-    let strip = TabStrip { tabs, active, apps, on_select, on_close, on_new_tab };
+    let strip = TabStrip { tabs, active, apps, on_select, on_close, on_move, on_new_tab };
     let state = connected.tab_strips.entry(workspace_id.to_owned()).or_default();
     strip.render(workspace_id, state, cx.entity_id(), cx)
 }

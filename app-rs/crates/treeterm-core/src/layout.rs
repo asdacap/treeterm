@@ -2,9 +2,10 @@
 //! workspace's `metadata.layoutModel` (`FlexLayoutPane.tsx`, `utils/layoutModel.ts`).
 //!
 //! Both apps read and write it. The native app shows the layout's tabs in one strip, tabsets
-//! depth-first, and saves the layout whenever a tab is added, closed or selected, as Electron
-//! saves every change to its model. The operations follow flex-layout's own (`addNode`,
-//! `deleteTab`, `selectTab`, `tidy`), and what the native app does not use (the `global` block, borders, ids, weights, other
+//! depth-first, and saves the layout whenever a tab is added, closed, selected or dragged to
+//! another place, as Electron saves every change to its model. The operations follow
+//! flex-layout's own (`addNode`, `deleteTab`, `selectTab`, `moveNode` into a tabset, `tidy`),
+//! and what the native app does not use (the `global` block, borders, ids, weights, other
 //! attributes) is written back as it was read, so Electron restores its splits.
 
 use serde_json::{Value, json};
@@ -29,6 +30,13 @@ impl LayoutTab<'_> {
             "enableClose": self.can_close,
         })
     }
+}
+
+/// Which side of the tab it is dropped on a dragged tab lands.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Side {
+    Before,
+    After,
 }
 
 /// A layout model, kept as JSON so that attributes the native app does not know survive.
@@ -136,12 +144,36 @@ impl Layout {
         self.activate(&path);
     }
 
+    /// Drop `dragged` on `side` of `target` (`Actions.moveNode` into the target's tabset, at
+    /// the target's index): it joins that tabset there, selected, and the tabset becomes the
+    /// active one; a tabset it leaves empty is deleted. `false`, changing nothing, unless
+    /// both are tabs of tabsets.
+    pub fn move_tab(&mut self, dragged: &str, target: &str, side: Side) -> bool {
+        let (Some((from, from_index)), Some((to, to_index))) = (self.find(dragged), self.find(target)) else {
+            return false;
+        };
+        let mut index = match side {
+            Side::Before => to_index,
+            Side::After => to_index + 1,
+        };
+        // The tab leaves first, so a later place in its own tabset moves down one.
+        if from == to && from_index < index {
+            index -= 1;
+        }
+        let Some(node) = self.node_mut(&from).and_then(|tabset| remove_child(tabset, from_index, 0)) else {
+            return false;
+        };
+        self.drop_tab(&to, Some(index), node);
+        self.tidy();
+        true
+    }
+
     /// `Actions.addNode(tab, tabset, CENTER, -1, select)` on the active tabset, else the
     /// first one (a tidy layout always has one).
     fn add(&mut self, tab: &LayoutTab<'_>) {
         let tabsets = self.tabsets();
         if let Some(path) = self.active_tabset(&tabsets).or(tabsets.first()) {
-            self.drop_tab(path, tab.node());
+            self.drop_tab(path, None, tab.node());
         }
     }
 
@@ -166,17 +198,17 @@ impl Layout {
         }
     }
 
-    /// The tabset's `drop` in the centre at the end: the tab goes there, selected, and the
-    /// tabset becomes the active one.
-    fn drop_tab(&mut self, path: &[usize], tab: Value) {
+    /// The tabset's `drop` in the centre at `index` (the end when `None`): the tab goes
+    /// there, selected, and the tabset becomes the active one.
+    fn drop_tab(&mut self, path: &[usize], index: Option<usize>, tab: Value) {
         let Some(tabset) = self.node_mut(path) else {
             return;
         };
         let Some(children) = children_mut(tabset) else {
             return;
         };
-        children.push(tab);
-        let index = children.len() - 1;
+        let index = index.unwrap_or(children.len()).min(children.len());
+        children.insert(index, tab);
         set(tabset, "selected", json!(index));
         self.activate(path);
     }
@@ -607,13 +639,83 @@ mod tests {
     }
 
     #[test]
-    fn tabs_in_borders_count_and_leave() {
+    fn a_dragged_tab_moves_within_its_tabset_and_is_selected() {
+        // flex-layout's `moveNode('t1', 'main', CENTER, 2)`.
+        let mut layout = split();
+        assert!(layout.move_tab("t1", "t2", Side::After));
+        let expected = r##"{"global":{"splitterSize":4,"splitterExtra":4,"tabEnableRename":false,"tabEnableRenderOnDemand":false},"borders":[],"layout":{"type":"row","id":"#root","children":[{"type":"tabset","id":"main","weight":50,"selected":1,"children":[{"type":"tab","id":"t2","name":"T t2","component":"terminal","enableClose":true},{"type":"tab","id":"t1","name":"T t1","component":"terminal","enableClose":true}],"active":true},{"type":"row","id":"#column","weight":50,"children":[{"type":"tabset","id":"#top","weight":50,"children":[{"type":"tab","id":"t3","name":"T t3","component":"terminal","enableClose":true}]},{"type":"tabset","id":"#bottom","weight":50,"children":[{"type":"tab","id":"t4","name":"T t4","component":"terminal","enableClose":true}]}]}]},"popouts":{}}"##;
+        assert_eq!(model(&layout), electron(expected));
+
+        let mut layout = Layout::default_for(&tabs(&["a", "b", "c"]), Some("a"));
+        assert!(layout.move_tab("c", "a", Side::Before));
+        assert_eq!(layout.tab_order(), ["c", "a", "b"]);
+        assert_eq!(layout.selected_tab().as_deref(), Some("c"));
+        assert!(layout.move_tab("c", "b", Side::After));
+        assert_eq!(layout.tab_order(), ["a", "b", "c"]);
+        assert!(layout.move_tab("a", "c", Side::Before));
+        assert_eq!(layout.tab_order(), ["b", "a", "c"]);
+        assert_eq!(layout.selected_tab().as_deref(), Some("a"));
+    }
+
+    #[test]
+    fn a_tab_dragged_into_another_tabset_leaves_its_empty_tabset() {
+        // flex-layout's `moveNode('t4', 'main', CENTER, 0)`: t4's tabset goes, t3's takes
+        // the column's place.
+        let mut layout = split();
+        assert!(layout.move_tab("t4", "t1", Side::Before));
+        let expected = r##"{"global":{"splitterSize":4,"splitterExtra":4,"tabEnableRename":false,"tabEnableRenderOnDemand":false},"borders":[],"layout":{"type":"row","id":"#root","children":[{"type":"tabset","id":"main","weight":50,"children":[{"type":"tab","id":"t4","name":"T t4","component":"terminal","enableClose":true},{"type":"tab","id":"t1","name":"T t1","component":"terminal","enableClose":true},{"type":"tab","id":"t2","name":"T t2","component":"terminal","enableClose":true}],"active":true},{"type":"tabset","id":"#top","weight":50,"children":[{"type":"tab","id":"t3","name":"T t3","component":"terminal","enableClose":true}]}]},"popouts":{}}"##;
+        let mut written = model(&layout);
+        // flex-layout leaves `selected` out at its default, 0.
+        assert_eq!(written["layout"]["children"][0]["selected"], 0);
+        written["layout"]["children"][0].as_object_mut().unwrap().shift_remove("selected");
+        assert_eq!(written, electron(expected));
+        assert_eq!(layout.tab_order(), ["t4", "t1", "t2", "t3"]);
+    }
+
+    #[test]
+    fn a_tab_dragged_out_of_the_active_tabset_takes_the_activation() {
+        // flex-layout's `moveNode('t2', '#top', CENTER, 0)`.
+        let mut layout = split();
+        assert!(layout.move_tab("t2", "t3", Side::Before));
+        let expected = r##"{"global":{"splitterSize":4,"splitterExtra":4,"tabEnableRename":false,"tabEnableRenderOnDemand":false},"borders":[],"layout":{"type":"row","id":"#root","children":[{"type":"tabset","id":"main","weight":50,"children":[{"type":"tab","id":"t1","name":"T t1","component":"terminal","enableClose":true}]},{"type":"row","id":"#column","weight":50,"children":[{"type":"tabset","id":"#top","weight":50,"children":[{"type":"tab","id":"t2","name":"T t2","component":"terminal","enableClose":true},{"type":"tab","id":"t3","name":"T t3","component":"terminal","enableClose":true}],"active":true},{"type":"tabset","id":"#bottom","weight":50,"children":[{"type":"tab","id":"t4","name":"T t4","component":"terminal","enableClose":true}]}]}]},"popouts":{}}"##;
+        let mut written = model(&layout);
+        // flex-layout leaves `selected` out at its default, 0.
+        for pointer in ["/layout/children/0", "/layout/children/1/children/0"] {
+            let tabset = written.pointer_mut(pointer).unwrap();
+            assert_eq!(tabset["selected"], 0);
+            tabset.as_object_mut().unwrap().shift_remove("selected");
+        }
+        assert_eq!(written, electron(expected));
+        assert_eq!(layout.selected_tab().as_deref(), Some("t2"));
+    }
+
+    #[test]
+    fn a_tab_dropped_on_itself_stays_and_is_selected() {
+        let mut layout = split();
+        assert!(layout.move_tab("t1", "t1", Side::Before));
+        assert_eq!(layout.tab_order(), ["t1", "t2", "t3", "t4"]);
+        assert_eq!(layout.selected_tab().as_deref(), Some("t1"));
+        assert!(layout.move_tab("t1", "t1", Side::After));
+        assert_eq!(layout.tab_order(), ["t1", "t2", "t3", "t4"]);
+    }
+
+    #[test]
+    fn a_drag_of_or_onto_an_unknown_tab_changes_nothing() {
+        let mut layout = split();
+        assert!(!layout.move_tab("gone", "t1", Side::Before));
+        assert!(!layout.move_tab("t1", "gone", Side::After));
+        assert_eq!(model(&layout), electron(SPLIT));
+    }
+
+    #[test]
+    fn tabs_in_borders_count_and_leave_but_do_not_move() {
         let bordered = SPLIT.replace(
             r#""borders":[]"#,
             r#""borders":[{"type":"border","location":"left","selected":1,"children":[{"type":"tab","id":"b1"},{"type":"tab","id":"b2"}]}]"#,
         );
         let mut layout = Layout::parse(&bordered).unwrap();
         assert_eq!(layout.tab_order(), ["t1", "t2", "t3", "t4", "b1", "b2"]);
+        assert!(!layout.move_tab("b1", "t1", Side::Before));
         layout.reconcile(&tabs(&["t1", "t2", "t3", "t4", "b2"]));
         assert_eq!(layout.tab_order(), ["t1", "t2", "t3", "t4", "b2"]);
         assert_eq!(model(&layout)["borders"][0]["selected"], 0);
