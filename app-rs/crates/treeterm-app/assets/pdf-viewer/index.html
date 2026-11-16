@@ -1,0 +1,102 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="viewer.css">
+<style>
+  /* Chromium's PDF viewer (as Electron's PdfViewer shows a PDF): its dark toolbar over the
+     pages on grey, a sidebar of thumbnails and the outline, all drawn by pdf.js. */
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #525659; color: #f1f3f4;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 13px; }
+  [hidden] { display: none !important; }
+  button { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px;
+    padding: 0; border: none; border-radius: 50%; background: none; color: inherit; cursor: pointer; }
+  button:hover { background: rgba(255, 255, 255, 0.08); }
+  button:disabled { opacity: 0.38; cursor: default; background: none; }
+  button svg { width: 20px; height: 20px; fill: currentColor; }
+  input { height: 28px; padding: 0 4px; border: none; border-radius: 4px; outline: none;
+    background: #191b1c; color: inherit; font: inherit; text-align: center; }
+  input:focus { box-shadow: 0 0 0 2px #8ab4f8; }
+  #toolbar { position: absolute; top: 0; left: 0; right: 0; height: 56px; z-index: 2; display: flex;
+    align-items: center; padding: 0 16px 0 8px; background: #323639;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 1px 3px 1px rgba(0, 0, 0, 0.15); }
+  #start, #end { flex: 1; display: flex; align-items: center; min-width: 0; }
+  #end { justify-content: flex-end; gap: 4px; }
+  #title { margin-left: 8px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 14px; }
+  #center { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+  #page-input { width: 32px; }
+  #page-count { padding: 0 4px; }
+  #zoom-input { width: 56px; }
+  .divider { width: 1px; height: 20px; margin: 0 12px; background: rgba(255, 255, 255, 0.3); }
+  #main { position: absolute; top: 56px; left: 0; right: 0; bottom: 0; display: flex; }
+  #sidebar { flex: 0 0 auto; width: 196px; display: flex; flex-direction: column; background: #3c4043;
+    overflow: hidden; }
+  #sidebar-tabs { display: flex; justify-content: center; gap: 8px; padding: 8px 0; }
+  #sidebar-tabs button.selected { background: rgba(138, 180, 248, 0.24); color: #8ab4f8; }
+  #thumbnails, #outline { flex: 1; overflow-y: auto; }
+  #thumbnails { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 12px 0 24px; }
+  .thumbnail { display: flex; flex-direction: column; align-items: center; gap: 6px; width: auto; height: auto;
+    border-radius: 4px; padding: 4px; color: #f1f3f4; font-size: 12px; }
+  .thumbnail:hover { background: none; }
+  .thumbnail canvas { display: block; width: 140px; background: white; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+    border: 3px solid transparent; }
+  .thumbnail.current canvas { border-color: #8ab4f8; }
+  #outline { padding: 8px 0; }
+  .outline-item { display: block; width: 100%; height: auto; padding: 6px 12px; border-radius: 0; text-align: left;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 13px; }
+  .outline-children { padding-left: 16px; }
+  #viewer-pane { position: relative; flex: 1; min-width: 0; }
+  #viewerContainer { position: absolute; inset: 0; overflow: auto; }
+  #viewerContainer .pdfViewer { padding: 8px 0; }
+  #viewerContainer .pdfViewer .page { border: none; margin: 4px auto 8px; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5); }
+  .placeholder { position: absolute; inset: 56px 0 0; padding: 40px 20px; text-align: center; color: #c4c7c5; }
+  .error { position: absolute; inset: 56px 0 0; padding: 20px; text-align: center; color: #f28b82; font-size: 14px; }
+  #printContainer { display: none; }
+  @media print {
+    @page { margin: 0; }
+    html, body { height: auto; overflow: visible; background: white; }
+    body > :not(#printContainer) { display: none !important; }
+    #printContainer { display: block; }
+    #printContainer img { display: block; width: 100%; break-after: page; }
+  }
+</style>
+</head>
+<body>
+<div id="toolbar">
+  <div id="start">
+    <button id="sidebar-toggle" title="Menu" aria-pressed="false" disabled><svg viewBox="0 0 24 24"><path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/></svg></button>
+    <span id="title"></span>
+  </div>
+  <div id="center" hidden>
+    <input id="page-input" aria-label="Page number" inputmode="numeric"><span id="page-count"></span>
+    <span class="divider"></span>
+    <button id="zoom-out" title="Zoom out"><svg viewBox="0 0 24 24"><path d="M19 13H5v-2h14v2z"/></svg></button>
+    <input id="zoom-input" aria-label="Zoom level">
+    <button id="zoom-in" title="Zoom in"><svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg></button>
+    <span class="divider"></span>
+    <button id="fit" title="Fit to page"><svg id="fit-page-icon" viewBox="0 0 24 24"><path d="M7 7h10v10H7V7zm-2-2v14h14V5H5zm-4 0v4h2V5h0V3H3c-1.1 0-2 .9-2 2zm2 14H1v-4h2v4h2v2H3c-1.1 0-2-.9-2-2zm20-14v4h2V5c0-1.1-.9-2-2-2h-2v2h2zm0 14h-2v2h2c1.1 0 2-.9 2-2v-4h-2v4z"/></svg><svg id="fit-width-icon" viewBox="0 0 24 24" hidden><path d="M8 7l-5 5 5 5V13h8v4l5-5-5-5v4H8V7z"/></svg></button>
+    <button id="rotate" title="Rotate counterclockwise"><svg viewBox="0 0 24 24"><path d="M7.11 8.53L5.7 7.11C4.8 8.27 4.24 9.61 4.07 11h2.02c.14-.87.49-1.72 1.02-2.47zM6.09 13H4.07c.17 1.39.72 2.73 1.62 3.89l1.41-1.42c-.52-.75-.87-1.59-1.01-2.47zm1.01 5.32c1.16.9 2.51 1.44 3.9 1.61V17.9c-.87-.15-1.71-.49-2.46-1.03L7.1 18.32zM13 4.07V1L8.45 5.55 13 10V6.09c2.84.48 5 2.94 5 5.91s-2.16 5.43-5 5.91v2.02c3.95-.49 7-3.85 7-7.93s-3.05-7.44-7-7.93z"/></svg></button>
+  </div>
+  <div id="end">
+    <button id="download" title="Download"><svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg></button>
+    <button id="print" title="Print" disabled><svg viewBox="0 0 24 24"><path d="M19 8H5c-1.66 0-3 1.34-3 3v6h4v4h12v-4h4v-6c0-1.66-1.34-3-3-3zm-3 11H8v-5h8v5zm3-7c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1zm-1-9H6v4h12V3z"/></svg></button>
+  </div>
+</div>
+<div id="main">
+  <div id="sidebar" hidden>
+    <div id="sidebar-tabs" hidden>
+      <button id="show-thumbnails" class="selected" title="Thumbnails"><svg viewBox="0 0 24 24"><path d="M4 5h7v6H4V5zm9 0h7v6h-7V5zM4 13h7v6H4v-6zm9 0h7v6h-7v-6z"/></svg></button>
+      <button id="show-outline" title="Document outline"><svg viewBox="0 0 24 24"><path d="M3 9h14V7H3v2zm0 4h14v-2H3v2zm0 4h14v-2H3v2zm16 0h2v-2h-2v2zm0-10v2h2V7h-2zm0 6h2v-2h-2v2z"/></svg></button>
+    </div>
+    <div id="thumbnails"></div>
+    <div id="outline" hidden></div>
+  </div>
+  <div id="viewer-pane"><div id="viewerContainer"><div id="viewer" class="pdfViewer"></div></div></div>
+</div>
+<div id="loading" class="placeholder">Loading…</div>
+<div id="load-error" class="error" hidden></div>
+<div id="printContainer"></div>
+<script type="module" src="viewer.js"></script>
+</body>
+</html>

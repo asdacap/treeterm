@@ -135,8 +135,9 @@ Done (tested against a real in-process daemon unless noted):
 - **AI harness (M5):** per-tab LLM analyzer (classification, auto-approve, titles, branch
   names), activity states with transitions, unread attention markers with the ding.
 - **Files / editor (M6):** file tree with favourites (a child worktree inherits its ancestors'),
-  highlighted viewer, Markdown preview, images, PDF and 3D models (webview; three.js bundled
-  by `assets/model-viewer/build.sh`), download, search panel (in file / in repo), find, go to
+  highlighted viewer, Markdown preview, images, PDF and 3D models (webview; pdf.js and
+  three.js bundled by `assets/pdf-viewer/build.sh` and `assets/model-viewer/build.sh`),
+  download, search panel (in file / in repo), find, go to
   definition (F12, Cmd/Ctrl+click, the context menu; a word with a definition is underlined
   while Cmd/Ctrl is held over it), review comments (click a line number; commented lines
   marked in the glyph margin); editor tab with go to definition, Change All Occurrences
@@ -483,10 +484,14 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   between them: Electron's browser runs consecutive HTML blocks together into one paragraph
   of text. Images show as broken with their alt text, as in Electron (where none loads),
   with the grey image-off icon in place of Chromium's broken-picture icon.
-- PDFs show in WebKit's viewer, which has no toolbar: a strip above it has Chromium's Zoom
-  out, zoom level, Zoom in and Print (100% is the width WebKit fits the pages to, not the
-  pages' own size). There is no page box, thumbnails, fit or rotate; those need a bundled
-  PDF viewer (pdf.js).
+- PDFs show in Chromium's PDF viewer rebuilt on pdf.js (its legacy build, for older
+  WebKits): the toolbar's Menu (a sidebar of thumbnails, and the document outline when there
+  is one), page box, zoom presets and level, Fit to page / Fit to width, Rotate
+  counterclockwise, Download and Print. Chromium's ⋮ menu (two-page view, annotations,
+  document properties) and find in the PDF are missing; Print lays the pages out as 150 dpi
+  images, as pdf.js prints. pdf.js's CMaps and standard fonts are not bundled: text in a font
+  the PDF does not embed is drawn in a system font, and text using a predefined (CJK) CMap
+  the PDF does not embed may not show.
 - While a tab is dragged, the outline of where it would dock jumps to its place (flex-layout
   slides it there in 0.3 s), the edge docks' arrows are text triangles, and a pane showing a
   web page (Browser, Web App, a PDF) draws its page over the outline and edge docks: native

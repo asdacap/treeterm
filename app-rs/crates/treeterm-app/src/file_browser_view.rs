@@ -37,7 +37,7 @@ use treeterm_core::files::{
 };
 use treeterm_model::file_browser::{
     DefinitionLookup, Favourites, FileBrowser, FileView, LineDraft, Listing, NameResults, SearchOpen, SearchOpened,
-    SearchPanel, Star, ZoomDirection, pdf_zoom_step,
+    SearchPanel, Star,
 };
 use treeterm_model::review::Notice;
 
@@ -425,13 +425,21 @@ impl Render for TreeResize {
     }
 }
 
+/// The webview page showing a PDF, 3D model or AVIF image.
+struct ShownPage {
+    /// The read (its bytes) the page was built from.
+    read: std::sync::Arc<Vec<u8>>,
+    view: Entity<crate::browser_view::AssetPageView>,
+    /// What the page asks of the viewer (the PDF viewer's Download).
+    _requests: Subscription,
+}
+
 pub struct FileBrowserView {
     model: Entity<FileBrowser>,
     layout: Layout,
-    /// The webview page showing a PDF, 3D model or AVIF image, and the read (its bytes) it
-    /// was built from. Dropped when anything else is shown ([`shows_page`]), and while the
+    /// The webview page. Dropped when anything else is shown ([`shows_page`]), and while the
     /// tab is unmounted ([`Self::set_mounted`]).
-    page: Option<(std::sync::Arc<Vec<u8>>, Entity<crate::browser_view::AssetPageView>)>,
+    page: Option<ShownPage>,
     /// The tab's workspace is shown ([`Self::set_mounted`]).
     mounted: bool,
     /// The markdown file showing its preview (`viewMode`); a file opens on its source.
@@ -553,64 +561,6 @@ pub(crate) fn image_drawing(format: ImageFormat) -> ImageDrawing {
     }
 }
 
-/// The zoom and print controls of Chromium's PDF viewer, in a strip above WebKit's (which
-/// has none): Zoom out, the zoom level, Zoom in, Print. A failure shows in red beside them.
-fn pdf_toolbar(page: &Entity<crate::browser_view::AssetPageView>, cx: &App) -> AnyElement {
-    use crate::browser_view::PageCommand;
-    use gpui_kit::component::tooltip::Tooltip;
-    let c = colors(cx);
-    let (zoom, command) = {
-        let page = page.read(cx);
-        (page.zoom(), page.command().clone())
-    };
-    let step = |id: &'static str, icon: IconName, label: &'static str, direction: ZoomDirection| {
-        let at_end = pdf_zoom_step(zoom, direction) == zoom;
-        let button = ui::find_button(id, icon, at_end, cx).tooltip(move |window, cx| Tooltip::new(label).build(window, cx));
-        if at_end {
-            button
-        } else {
-            let page = page.clone();
-            button.on_click(move |_, _, cx| page.update(cx, |p, cx| p.set_zoom(pdf_zoom_step(p.zoom(), direction), cx)))
-        }
-    };
-    let print = {
-        let page = page.clone();
-        ui::find_button("pdf-print", IconName::Printer, false, cx)
-            .tooltip(|window, cx| Tooltip::new("Print").build(window, cx))
-            .on_click(move |_, _, cx| page.update(cx, |p, cx| p.print(cx)))
-    };
-    let failure = match command {
-        PageCommand::Done => None,
-        PageCommand::Failed(message) => {
-            Some(div().min_w_0().truncate().mr(px(8.)).text_size(px(ui::SMALL)).text_color(rgb(ui::FILE_ERROR)).child(message))
-        }
-    };
-    h_flex()
-        .flex_shrink_0()
-        .h(px(32.))
-        .px(px(8.))
-        .gap(px(4.))
-        .justify_end()
-        .bg(c.bg_secondary)
-        .border_b_1()
-        .border_color(c.border)
-        .children(failure)
-        .child(step("pdf-zoom-out", IconName::ZoomOut, "Zoom out", ZoomDirection::Out))
-        .child(
-            div()
-                .min_w(px(40.))
-                .flex()
-                .justify_center()
-                .text_size(px(ui::SMALL))
-                .text_color(c.text_secondary)
-                .child(format!("{}%", (zoom * 100.).round())),
-        )
-        .child(step("pdf-zoom-in", IconName::ZoomIn, "Zoom in", ZoomDirection::In))
-        .child(div().w(px(8.)))
-        .child(print)
-        .into_any_element()
-}
-
 /// The read `view` shows in a webview page: a PDF, a 3D model or an image GPUI cannot
 /// decode.
 fn page_read(view: &FileView) -> Option<&std::sync::Arc<Vec<u8>>> {
@@ -710,8 +660,8 @@ impl FileBrowserView {
     /// it. A page the shown file no longer uses is dropped.
     pub fn set_shown(&mut self, shown: bool, cx: &mut Context<Self>) {
         self.drop_stale_page(cx);
-        if let Some((_, page)) = &self.page {
-            page.update(cx, |p, cx| p.set_shown(shown, cx));
+        if let Some(page) = &self.page {
+            page.view.update(cx, |p, cx| p.set_shown(shown, cx));
         }
     }
 
@@ -751,14 +701,15 @@ impl FileBrowserView {
     /// Electron unmounts its viewer then (the model stage and its WebGL context are
     /// disposed), so coming back builds a fresh page from the bytes read now.
     fn drop_stale_page(&mut self, cx: &App) {
-        if let Some((built, _)) = &self.page
-            && !shows_page(self.model.read(cx).view(), built)
+        if let Some(page) = &self.page
+            && !shows_page(self.model.read(cx).view(), &page.read)
         {
             self.page = None;
         }
     }
 
-    /// The webview page for the read of `bytes`, built when another read is shown.
+    /// The webview page for the read of `bytes`, built when another read is shown. The PDF
+    /// viewer's Download saves the file as the header's Download does.
     fn page_for(
         &mut self,
         bytes: &std::sync::Arc<Vec<u8>>,
@@ -766,13 +717,40 @@ impl FileBrowserView {
         cx: &mut Context<Self>,
     ) -> Entity<crate::browser_view::AssetPageView> {
         match &self.page {
-            Some((built, view)) if std::sync::Arc::ptr_eq(built, bytes) => view.clone(),
+            Some(page) if std::sync::Arc::ptr_eq(&page.read, bytes) => page.view.clone(),
             Some(_) | None => {
                 let view = cx.new(|_| build());
-                self.page = Some((bytes.clone(), view.clone()));
+                let requests = cx.subscribe(&view, |this, _, event, cx| match event {
+                    crate::browser_view::AssetPageEvent::Download => {
+                        if let Some(path) = this.model.read(cx).selected().map(str::to_owned) {
+                            this.save_copy(path, cx);
+                        }
+                    }
+                });
+                self.page = Some(ShownPage { read: bytes.clone(), view: view.clone(), _requests: requests });
                 view
             }
         }
+    }
+
+    /// Download: a save panel, then the file read again into the place picked.
+    fn save_copy(&mut self, path: String, cx: &mut Context<Self>) {
+        // The read the download belongs to: another file may be picked while the save panel
+        // is open, and the download must not show on that file's button.
+        let read = self.model.read(cx).reads();
+        let name = path.rsplit('/').next().unwrap_or("download").to_owned();
+        let dir = dirs::download_dir().or_else(dirs::home_dir).unwrap_or_default();
+        let picked = cx.prompt_for_new_path(&dir, Some(&name));
+        let model = self.model.clone();
+        cx.spawn(async move |_, cx| {
+            let destination = match picked.await {
+                Ok(Ok(Some(destination))) => destination,
+                Ok(Ok(None)) | Err(_) => return, // cancelled
+                Ok(Err(error)) => return tracing::error!(%error, "save dialog failed"),
+            };
+            model.update(cx, |m, cx| m.download(&path, destination, read, cx));
+        })
+        .detach();
     }
 
     /// The editor for `path`, created when the shown file changes or is read again.
@@ -1402,15 +1380,12 @@ impl FileBrowserView {
     fn download_button(&self, path: &str, cx: &mut Context<Self>) -> Vec<AnyElement> {
         use treeterm_model::file_browser::DownloadState;
         let state = self.model.read(cx).download_state().clone();
-        // The read this button belongs to: another file may be picked while the save panel
-        // is open, and the download must not show on that file's button.
-        let read = self.model.read(cx).reads();
         let (label, busy) = match &state {
             DownloadState::Idle => ("Download", false),
             DownloadState::Downloading => ("Downloading…", true),
             DownloadState::Failed(_) => ("Retry download", false),
         };
-        let (model, owned) = (self.model.clone(), path.to_owned());
+        let owned = path.to_owned();
         let mut out = Vec::new();
         if let DownloadState::Failed(error) = state {
             let tooltip = SharedString::from(error.clone());
@@ -1436,21 +1411,7 @@ impl FileBrowserView {
         let button = if busy {
             button
         } else {
-            button.on_click(cx.listener(move |_, _, _, cx| {
-                let name = owned.rsplit('/').next().unwrap_or("download").to_owned();
-                let dir = dirs::download_dir().or_else(dirs::home_dir).unwrap_or_default();
-                let picked = cx.prompt_for_new_path(&dir, Some(&name));
-                let (model, path) = (model.clone(), owned.clone());
-                cx.spawn(async move |_, cx| {
-                    let destination = match picked.await {
-                        Ok(Ok(Some(destination))) => destination,
-                        Ok(Ok(None)) | Err(_) => return, // cancelled
-                        Ok(Err(error)) => return tracing::error!(%error, "save dialog failed"),
-                    };
-                    model.update(cx, |m, cx| m.download(&path, destination, read, cx));
-                })
-                .detach();
-            }))
+            button.on_click(cx.listener(move |view, _, _, cx| view.save_copy(owned.clone(), cx)))
         };
         out.push(button.into_any_element());
         out
@@ -1580,13 +1541,9 @@ impl FileBrowserView {
                 (path, "image".into(), body)
             }
             FileView::Pdf { path, bytes } => {
-                let page = self.page_for(&bytes, || crate::browser_view::AssetPageView::pdf(bytes.clone()), cx);
-                let body = v_flex()
-                    .size_full()
-                    .child(pdf_toolbar(&page, cx))
-                    .child(div().flex_1().min_h_0().child(page))
-                    .into_any_element();
-                (path, "pdf".into(), body)
+                let name = file_name(&path).to_owned();
+                let page = self.page_for(&bytes, || crate::browser_view::AssetPageView::pdf(bytes.clone(), &name), cx);
+                (path, "pdf".into(), div().size_full().child(page).into_any_element())
             }
             FileView::Model { path, bytes, format } => {
                 let page =

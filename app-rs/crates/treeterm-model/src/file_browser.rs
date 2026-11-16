@@ -237,32 +237,6 @@ pub fn is_favourite_path(path: &str, favourites: &[String]) -> bool {
     })
 }
 
-/// The zoom factors Chromium's PDF viewer steps through (`kPresetZoomFactors`).
-pub const PDF_ZOOM_FACTORS: [f64; 17] =
-    [0.25, 1. / 3., 0.5, 2. / 3., 0.75, 0.8, 0.9, 1., 1.1, 1.25, 1.5, 1.75, 2., 2.5, 3., 4., 5.];
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ZoomDirection {
-    In,
-    Out,
-}
-
-/// The PDF zoom after one step from `current`: the next preset factor that way, staying at
-/// the smallest or largest one.
-pub fn pdf_zoom_step(current: f64, direction: ZoomDirection) -> f64 {
-    // Within a hair of a preset counts as on it (1/3 and 2/3 are not exact).
-    const EPSILON: f64 = 1e-6;
-    let next = match direction {
-        ZoomDirection::In => PDF_ZOOM_FACTORS.iter().find(|&&factor| factor > current + EPSILON),
-        ZoomDirection::Out => PDF_ZOOM_FACTORS.iter().rev().find(|&&factor| factor < current - EPSILON),
-    };
-    match (next, direction) {
-        (Some(&factor), _) => factor,
-        (None, ZoomDirection::In) => PDF_ZOOM_FACTORS[PDF_ZOOM_FACTORS.len() - 1],
-        (None, ZoomDirection::Out) => PDF_ZOOM_FACTORS[0],
-    }
-}
-
 /// Where the browser is shown, which decides where a repo search hit opens.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Host {
@@ -1431,23 +1405,6 @@ mod tests {
         );
         assert_eq!(presentation_of("/w/main.rs"), Presentation::Text);
         assert_eq!(presentation_of("/w/Makefile"), Presentation::Text);
-    }
-
-    #[test]
-    fn pdf_zoom_steps_through_chromiums_presets_and_stops_at_the_ends() {
-        let step = pdf_zoom_step;
-        assert_eq!(step(1., ZoomDirection::In), 1.1);
-        assert_eq!(step(1., ZoomDirection::Out), 0.9);
-        assert_eq!(step(0.5, ZoomDirection::Out), 1. / 3.);
-        assert_eq!(step(1. / 3., ZoomDirection::Out), 0.25);
-        assert_eq!(step(1. / 3., ZoomDirection::In), 0.5);
-        // Clamped at both ends.
-        assert_eq!(step(0.25, ZoomDirection::Out), 0.25);
-        assert_eq!(step(5., ZoomDirection::In), 5.);
-        assert_eq!(step(9., ZoomDirection::In), 5.);
-        // From a factor between presets, to the nearest one that way.
-        assert_eq!(step(1.3, ZoomDirection::In), 1.5);
-        assert_eq!(step(1.3, ZoomDirection::Out), 1.25);
     }
 
     #[test]
