@@ -18,6 +18,10 @@ pub struct TreeViewState {
     collapsed: HashSet<String>,
     /// The session's parent links when last observed, to tell which children are new.
     edges: HashSet<ChildEdge>,
+    /// The links the session had before it was rebuilt, not seen again since: its
+    /// workspaces load again one by one, and a child loading under the parent it had is not
+    /// new.
+    reloading: HashSet<ChildEdge>,
 }
 
 impl TreeViewState {
@@ -26,6 +30,7 @@ impl TreeViewState {
         Self {
             collapsed: HashSet::new(),
             edges,
+            reloading: HashSet::new(),
         }
     }
 
@@ -53,9 +58,21 @@ impl TreeViewState {
     /// its children again.
     pub fn observe(&mut self, edges: HashSet<ChildEdge>) {
         for edge in edges.difference(&self.edges) {
-            self.collapsed.remove(&edge.parent);
+            if !self.reloading.remove(edge) {
+                self.collapsed.remove(&edge.parent);
+            }
         }
+        // A child seen under another parent has moved: the link it had is gone.
+        self.reloading
+            .retain(|old| !edges.iter().any(|edge| edge.child == old.child));
         self.edges = edges;
+    }
+
+    /// The session is rebuilt from the daemon (the connection's next generation): what is
+    /// collapsed stays collapsed while its workspaces load again. A child that was not
+    /// there before the rebuild still opens its parent.
+    pub fn reload(&mut self) {
+        self.reloading.extend(self.edges.drain());
     }
 }
 
@@ -135,6 +152,55 @@ mod tests {
         assert!(view.is_collapsed("root"));
         view.observe(edges(&[("a", "root")]));
         assert!(!view.is_collapsed("root"));
+    }
+
+    #[test]
+    fn a_rebuilt_session_keeps_its_collapsed_rows_collapsed_while_it_loads_again() {
+        let mut view = TreeViewState::new(edges(&[("a", "root"), ("b", "root"), ("c", "other")]));
+        view.toggle("root");
+        view.reload();
+        // The new session's snapshot (placeholders only), then its workspaces one by one.
+        view.observe(edges(&[]));
+        view.observe(edges(&[("a", "root")]));
+        view.observe(edges(&[("a", "root"), ("c", "other")]));
+        view.observe(edges(&[("a", "root"), ("b", "root"), ("c", "other")]));
+        assert!(view.is_collapsed("root"));
+        assert_eq!(view.collapsed(), &HashSet::from(["root".to_owned()]));
+    }
+
+    #[test]
+    fn a_child_new_since_the_rebuild_opens_its_parent() {
+        let mut view = TreeViewState::new(edges(&[("a", "root")]));
+        view.toggle("root");
+        view.reload();
+        view.observe(edges(&[("a", "root"), ("new", "root")]));
+        assert!(!view.is_collapsed("root"));
+    }
+
+    #[test]
+    fn once_loaded_again_a_child_that_comes_back_opens_its_parent() {
+        let mut view = TreeViewState::new(edges(&[("a", "root")]));
+        view.toggle("root");
+        view.reload();
+        view.observe(edges(&[("a", "root")]));
+        view.observe(edges(&[]));
+        assert!(view.is_collapsed("root"));
+        view.observe(edges(&[("a", "root")]));
+        assert!(!view.is_collapsed("root"));
+    }
+
+    #[test]
+    fn a_child_moved_while_rebuilding_opens_its_new_parent_and_later_its_old_one() {
+        let mut view = TreeViewState::new(edges(&[("a", "old")]));
+        view.toggle("old");
+        view.toggle("new");
+        view.reload();
+        view.observe(edges(&[("a", "new")]));
+        assert!(!view.is_collapsed("new"));
+        assert!(view.is_collapsed("old"));
+        // Its link to the old parent is forgotten: moving back is gaining a child.
+        view.observe(edges(&[("a", "old")]));
+        assert!(!view.is_collapsed("old"));
     }
 
     #[test]

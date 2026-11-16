@@ -1,18 +1,19 @@
-//! Left pane: the session's workspace tree (read-only so far).
+//! Left pane: a connection's section of the sidebar (`SessionPanel`), whatever the
+//! connection's state: its header, banner and workspace tree.
 
 use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::{Sizable as _, WindowExt as _, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{AnyElement, ClickEvent, Context, Entity, EventEmitter, SharedString, Window, div, px};
-use treeterm_core::connection::{ConnectionId, OutdatedDaemon};
+use treeterm_core::connection::{ConnectPhase, ConnectionId, OutdatedDaemon};
 use treeterm_model::app_store::{AppStore, ConnState};
 use treeterm_model::keybinding_store::KeybindingStore;
 use treeterm_core::tree::DropPosition;
 use treeterm_model::session_store::{RemoveMode, SessionState, SessionStore, WorkspaceEntry};
 use treeterm_model::tree_view_state::TreeViewState;
 
-use crate::app_view::{BannerAction, BannerKind, SessionIcon, connect_phase_label, connection_banner, session_icon};
 use crate::theme::colors;
 use crate::ui;
 use gpui_kit::assets::IconName;
@@ -20,14 +21,17 @@ use gpui_kit::assets::IconName;
 /// Emitted when the user picks a workspace.
 pub struct WorkspaceSelected(pub String);
 
+/// One per connection, from its first connect until it is disconnected: the fold, the
+/// workspaces' expand state and a rename in progress outlive the connection's generations.
 pub struct TreePane {
-    session: Entity<SessionStore>,
+    /// The session store the tree shows.
+    session: Shown,
     /// The session's connection: the header shows its status, and while it is down the
     /// tree shows its banner and dims the rows.
     app: Entity<AppStore>,
     connection: ConnectionId,
     keybindings: Entity<KeybindingStore>,
-    /// The session's name: custom, else "Local" or the ssh label.
+    /// The session's name: custom, else "LOCAL" or the ssh label.
     names: Entity<treeterm_model::session_names::SessionNames>,
     target: treeterm_core::connection::ConnectionTarget,
     /// Renaming the session in place (double-click its name); saved on Enter or blur.
@@ -40,8 +44,19 @@ pub struct TreePane {
     drop_hint: Option<(String, DropPosition)>,
     /// Per-window view state: which workspaces have their children hidden.
     view: TreeViewState,
-    /// Bytes per second received from this connection's daemon.
-    traffic: Entity<crate::traffic_badge::TrafficBadge>,
+}
+
+/// The session store a connection's tree shows (`SessionSlot::shown_session`).
+enum Shown {
+    /// None yet: the connection's first connect is under way or failed.
+    Nothing,
+    /// The connected generation's store, or the last one's while the connection is down.
+    Session {
+        store: Entity<SessionStore>,
+        /// Bytes per second received from that generation's daemon.
+        traffic: Entity<crate::traffic_badge::TrafficBadge>,
+        _changes: gpui_kit::Subscription,
+    },
 }
 
 impl EventEmitter<WorkspaceSelected> for TreePane {}
@@ -83,8 +98,9 @@ pub struct DisconnectRequested;
 impl EventEmitter<DisconnectRequested> for TreePane {}
 
 impl TreePane {
+    /// The section of connection `connection`, showing no session until
+    /// [`Self::set_session`] gives it one.
     pub fn new(
-        session: Entity<SessionStore>,
         app: Entity<AppStore>,
         connection: ConnectionId,
         keybindings: Entity<KeybindingStore>,
@@ -92,23 +108,12 @@ impl TreePane {
         target: treeterm_core::connection::ConnectionTarget,
         cx: &mut Context<Self>,
     ) -> Self {
-        // A collapsed workspace opens when it gains a child, whoever added it.
-        cx.observe(&session, |pane, session, cx| {
-            let edges = session.read(cx).child_edges(cx);
-            pane.view.observe(edges);
-            cx.notify();
-        })
-        .detach();
         cx.observe(&app, |_, _, cx| cx.notify()).detach();
         cx.observe(&keybindings, |_, _, cx| cx.notify()).detach();
         cx.observe(&names, |_, _, cx| cx.notify()).detach();
-        let meter = session.read(cx).traffic().clone();
-        let traffic = cx.new(|cx| crate::traffic_badge::TrafficBadge::new(meter, "connection-traffic", cx));
         let remote = matches!(target, treeterm_core::connection::ConnectionTarget::Remote(_));
-        let view = TreeViewState::new(session.read(cx).child_edges(cx));
         Self {
-            traffic,
-            session,
+            session: Shown::Nothing,
             app,
             connection,
             keybindings,
@@ -118,15 +123,53 @@ impl TreePane {
             remote,
             folded: false,
             drop_hint: None,
-            view,
+            view: TreeViewState::new(Default::default()),
         }
     }
 
-    /// Edit the session's name in place (`SessionPanel` double-click).
+    /// The session store the connection's slot shows now (`SessionSlot::shown_session`).
+    /// A new generation's store keeps the fold, what is collapsed and a rename in progress.
+    pub fn set_session(&mut self, session: Option<Entity<SessionStore>>, cx: &mut Context<Self>) {
+        if self.store() == session.as_ref() {
+            return;
+        }
+        self.drop_hint = None;
+        self.view.reload();
+        self.session = match session {
+            None => Shown::Nothing,
+            Some(store) => {
+                // A collapsed workspace opens when it gains a child, whoever added it.
+                let changes = cx.observe(&store, |pane, store, cx| {
+                    let edges = store.read(cx).child_edges(cx);
+                    pane.view.observe(edges);
+                    cx.notify();
+                });
+                self.view.observe(store.read(cx).child_edges(cx));
+                let meter = store.read(cx).traffic().clone();
+                let traffic = cx.new(|cx| crate::traffic_badge::TrafficBadge::new(meter, "connection-traffic", cx));
+                Shown::Session { store, traffic, _changes: changes }
+            }
+        };
+        cx.notify();
+    }
+
+    /// The session store shown, if any.
+    fn store(&self) -> Option<&Entity<SessionStore>> {
+        match &self.session {
+            Shown::Nothing => None,
+            Shown::Session { store, .. } => Some(store),
+        }
+    }
+
+    /// Edit the session's name in place (`SessionPanel` double-click), its text selected
+    /// (`onFocus` select).
     fn start_rename(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let current = self.names.read(cx).name(&self.target);
         let input = cx.new(|cx| InputState::new(window, cx).default_value(current));
-        input.update(cx, |input, cx| input.focus(window, cx));
+        input.update(cx, |input, cx| {
+            input.focus(window, cx);
+            input.select_all(window, cx);
+        });
         let subscription = cx.subscribe(&input, |pane, input, event: &InputEvent, cx| match event {
             InputEvent::PressEnter { .. } | InputEvent::Blur => {
                 let text = input.read(cx).value().to_string();
@@ -150,7 +193,10 @@ impl TreePane {
     /// it is added (`createChildWithLoading` makes it the active workspace). A failure is
     /// only logged, as in Electron.
     pub fn quick_fork(&mut self, id: &str, cx: &mut Context<Self>) {
-        let forked = self.session.update(cx, |s, cx| s.quick_fork(id, cx));
+        let Some(session) = self.store() else {
+            return; // no session: no row to fork
+        };
+        let forked = session.update(cx, |s, cx| s.quick_fork(id, cx));
         cx.spawn(async move |pane, cx| match forked.await {
             Ok(Ok(child)) => match pane.update(cx, |pane, cx| pane.select(child, cx)) {
                 Ok(()) | Err(_) => {} // Err: the pane closed
@@ -164,14 +210,17 @@ impl TreePane {
     /// "+": type or pick a directory and open it as a root workspace with the chosen default
     /// application (`OpenWorkspaceDialog`, `handleOpenWorkspaceSubmit`).
     pub fn open_workspace(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(session) = self.store().cloned() else {
+            return; // "+" shows only once connected
+        };
         let pane = cx.entity().downgrade();
         let location = if self.remote {
-            crate::open_workspace_dialog::Location::Remote(self.session.clone())
+            crate::open_workspace_dialog::Location::Remote(session.clone())
         } else {
             crate::open_workspace_dialog::Location::Local(self.app.read(cx).settings().clone())
         };
         let recent = self.names.read(cx).recent_directories(&self.target).to_vec();
-        let choices = treeterm_model::tool_tabs::workspace_settings::default_app_choices(self.session.read(cx).registry());
+        let choices = treeterm_model::tool_tabs::workspace_settings::default_app_choices(session.read(cx).registry());
         crate::open_workspace_dialog::open(
             location,
             recent,
@@ -181,7 +230,10 @@ impl TreePane {
                     // `handleOpen`: remembered for this connection's next Open Workspace.
                     let target = pane.target.clone();
                     pane.names.update(cx, |names, cx| names.add_recent_directory(&target, &path, cx));
-                    let id = pane.session.update(cx, |s, cx| s.open_workspace(path, settings, cx));
+                    // The session shown now: a reconnect while the dialog was open replaced
+                    // the one it was opened on.
+                    let Some(session) = pane.store().cloned() else { return };
+                    let id = session.update(cx, |s, cx| s.open_workspace(path, settings, cx));
                     pane.select(id, cx);
                 }) {
                     Ok(()) | Err(_) => {} // Err: the pane closed
@@ -202,96 +254,41 @@ impl TreePane {
 impl Render for TreePane {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let c = colors(cx);
-        let (text_secondary, error, hover, accent, primary, border) =
-            (c.text_secondary, c.error, c.bg_hover, c.accent, c.text_primary, c.border);
-        let session = self.session.read(cx);
-        let rows: Result<Vec<RowData>, AnyElement> = match session.state() {
-            SessionState::Waiting => Err(status_line("Loading session…", text_secondary)),
-            SessionState::Failed(reason) => Err(status_line(reason.clone(), error)),
-            SessionState::Live => Ok(session
-                .tree_rows(self.view.collapsed(), cx)
-                .into_iter()
-                .filter_map(|row| Some(RowData {
-                    activity: session
-                        .workspace_store(&row.id)
-                        .map(|w| w.read(cx).overall_activity())
-                        .unwrap_or_default(),
-                    is_worktree: session
-                        .workspace_store(&row.id)
-                        .is_some_and(|w| w.read(cx).file().is_worktree),
-                    unread: session
-                        .workspace_store(&row.id)
-                        .is_some_and(|w| w.read(cx).has_unread_attention()),
-                    favourite: session.workspace_store(&row.id).is_some_and(|w| w.read(cx).is_favourite()),
-                    has_parent: session
-                        .workspace_store(&row.id)
-                        .is_some_and(|w| w.read(cx).file().parent_id.as_deref().is_some_and(|p| !p.is_empty())),
-                    pr: session.git_controller(&row.id).and_then(|git| {
-                        let status = git.read(cx).status();
-                        match &status.pull_request {
-                            treeterm_core::git_status::PullRequest::Found(pr) => {
-                                Some((pr.number, pr_state_color(pr), treeterm_model::git_controller::pr_signal(status)))
-                            }
-                            treeterm_core::git_status::PullRequest::None => None,
-                        }
-                    }),
-                    git_repo: session.workspace_store(&row.id).is_some_and(|w| w.read(cx).file().is_git_repo),
-                    label: Label::of(session.entry(&row.id)?, cx),
-                    id: row.id,
-                    depth: row.depth,
-                    has_children: row.has_children,
-                }))
-                .collect()),
-        };
+        let (text_secondary, hover, accent, primary, border) = (c.text_secondary, c.bg_hover, c.accent, c.text_primary, c.border);
         // The connection (`SessionPanel`'s `connection.status`); `None` only while this view
         // is being dropped with its connection.
         let link = self.app.read(cx).session_slot(&self.connection).map(|slot| slot.state.clone());
-        let body = match (&link, rows) {
-            // `renderStatusContent`: the connect phase in place of the rows.
-            (Some(ConnState::Connecting(phase)), _) => div()
-                .px(px(8.))
-                .py(px(4.))
-                .text_size(px(12.))
-                .text_color(text_secondary)
-                .child(connect_phase_label(*phase))
-                .into_any_element(),
-            (_, Err(status)) => status,
-            // `.tree-empty`: 16px padding, 12px secondary text.
-            (_, Ok(rows)) if rows.is_empty() => div()
-                .p(px(16.))
-                .text_size(px(12.))
-                .text_color(text_secondary)
-                .child("No workspaces. Click + to add one.")
-                .into_any_element(),
-            (_, Ok(rows)) => {
-                let mut list = v_flex().w_full();
-                for row in rows {
-                    list = list.child(self.render_row(row, cx));
-                }
-                match &link {
-                    // `isDegraded`: the rows stay, dimmed, and take no clicks, drags or menus
-                    // (`opacity: 0.6; pointer-events: none`).
-                    Some(ConnState::Reconnecting { .. } | ConnState::Failed { .. }) => div()
-                        .relative()
-                        .opacity(0.6)
-                        .child(list)
-                        .child(div().id("tree-inert").absolute().inset_0().occlude())
-                        .into_any_element(),
-                    Some(ConnState::Connected(_) | ConnState::Connecting(_)) | None => list.into_any_element(),
-                }
-            }
+        let body = match (&link, &self.session) {
+            // `renderStatusContent`: the connect phase in place of the rows, a `.tree-empty`
+            // line (centred) with 12px text and 4px 8px padding.
+            (Some(ConnState::Connecting(phase)), _) => Some(
+                div()
+                    .px(px(8.))
+                    .py(px(4.))
+                    .text_size(px(12.))
+                    .text_color(text_secondary)
+                    .text_center()
+                    .child(connect_phase_label(*phase))
+                    .into_any_element(),
+            ),
+            // No session yet (its first connect failed): the banner only.
+            (_, Shown::Nothing) => None,
+            (_, Shown::Session { store, .. }) => Some(self.tree(&store.clone(), link.as_ref(), cx)),
         };
         let banner = self.connection_banner(link.as_ref(), cx);
-        let status_icon = match &link {
-            Some(ConnState::Connected(_)) | None => {
-                div().size(px(8.)).flex_shrink_0().rounded_full().bg(gpui_kit::rgb(0x4caf50)).into_any_element()
-            }
-            Some(ConnState::Connecting(_)) => session_icon(SessionIcon::Connecting, cx),
-            Some(ConnState::Reconnecting { .. }) => session_icon(SessionIcon::Reconnecting, cx),
-            Some(ConnState::Failed { .. }) => session_icon(SessionIcon::Failed, cx),
-        };
+        let status_icon = status_icon(link.as_ref(), cx);
         let connected = matches!(link, Some(ConnState::Connected(_)));
-        let locked = self.session.read(cx).is_locked();
+        let traffic = match &self.session {
+            Shown::Session { traffic, .. } => traffic.clone().into_any_element(),
+            // `ConnectionTrafficBadge` before its first sample.
+            Shown::Nothing => div()
+                .flex_shrink_0()
+                .font_weight(gpui_kit::FontWeight::NORMAL)
+                .whitespace_nowrap()
+                .child("↓ …")
+                .into_any_element(),
+        };
+        let locked = self.store().filter(|session| session.read(cx).is_locked()).cloned();
         let title = match &self.renaming {
             Some((input, _)) => div()
                 .id("session-rename")
@@ -319,8 +316,8 @@ impl Render for TreePane {
                 .text_color(text_secondary)
                 .child(status_icon)
                 .child(div().truncate().child(self.names.read(cx).name(&self.target).to_uppercase()))
-                .child(self.traffic.clone())
-                .when(locked, |d| {
+                .child(traffic)
+                .when_some(locked, |d, session| {
                     d.child(
                         div()
                             .id("force-unlock")
@@ -330,10 +327,10 @@ impl Render for TreePane {
                             .hover(move |d| d.bg(hover))
                             .tooltip(|window, cx| gpui_kit::component::tooltip::Tooltip::new("Force unlock session").build(window, cx))
                             .child(ui::icon(IconName::LockOpen, 14., primary))
-                            .on_click(cx.listener(|pane, _: &ClickEvent, _, cx| {
+                            .on_click(move |_: &ClickEvent, _, cx| {
                                 cx.stop_propagation();
-                                pane.session.update(cx, |s, cx| s.force_unlock(cx));
-                            })),
+                                session.update(cx, |s, cx| s.force_unlock(cx));
+                            }),
                     )
                 })
                 .on_click(cx.listener(|pane, event: &ClickEvent, window, cx| {
@@ -404,7 +401,82 @@ impl Render for TreePane {
                         )
                     }),
             )
-            .when(!self.folded, |d| d.child(div().pb(px(4.)).children(banner).child(body)))
+            // The banner folds with the rows (`.tree-list`).
+            .when(!self.folded, |d| d.child(div().pb(px(4.)).children(banner).children(body)))
+    }
+}
+
+impl TreePane {
+    /// The session's rows, its loading line or its empty state.
+    fn tree(&self, entity: &Entity<SessionStore>, link: Option<&ConnState>, cx: &mut Context<Self>) -> AnyElement {
+        let c = colors(cx);
+        let (text_secondary, error) = (c.text_secondary, c.error);
+        let session = entity.read(cx);
+        let rows: Result<Vec<RowData>, AnyElement> = match session.state() {
+            SessionState::Waiting => Err(status_line("Loading session…", text_secondary)),
+            SessionState::Failed(reason) => Err(status_line(reason.clone(), error)),
+            SessionState::Live => Ok(session
+                .tree_rows(self.view.collapsed(), cx)
+                .into_iter()
+                .filter_map(|row| Some(RowData {
+                    activity: session
+                        .workspace_store(&row.id)
+                        .map(|w| w.read(cx).overall_activity())
+                        .unwrap_or_default(),
+                    is_worktree: session
+                        .workspace_store(&row.id)
+                        .is_some_and(|w| w.read(cx).file().is_worktree),
+                    unread: session
+                        .workspace_store(&row.id)
+                        .is_some_and(|w| w.read(cx).has_unread_attention()),
+                    favourite: session.workspace_store(&row.id).is_some_and(|w| w.read(cx).is_favourite()),
+                    has_parent: session
+                        .workspace_store(&row.id)
+                        .is_some_and(|w| w.read(cx).file().parent_id.as_deref().is_some_and(|p| !p.is_empty())),
+                    pr: session.git_controller(&row.id).and_then(|git| {
+                        let status = git.read(cx).status();
+                        match &status.pull_request {
+                            treeterm_core::git_status::PullRequest::Found(pr) => {
+                                Some((pr.number, pr_state_color(pr), treeterm_model::git_controller::pr_signal(status)))
+                            }
+                            treeterm_core::git_status::PullRequest::None => None,
+                        }
+                    }),
+                    git_repo: session.workspace_store(&row.id).is_some_and(|w| w.read(cx).file().is_git_repo),
+                    label: Label::of(session.entry(&row.id)?, cx),
+                    id: row.id,
+                    depth: row.depth,
+                    has_children: row.has_children,
+                }))
+                .collect()),
+        };
+        match rows {
+            Err(status) => status,
+            // `.tree-empty`: 16px padding, 12px secondary text.
+            Ok(rows) if rows.is_empty() => div()
+                .p(px(16.))
+                .text_size(px(12.))
+                .text_color(text_secondary)
+                .child("No workspaces. Click + to add one.")
+                .into_any_element(),
+            Ok(rows) => {
+                let mut list = v_flex().w_full();
+                for row in rows {
+                    list = list.child(self.render_row(entity, row, cx));
+                }
+                match link {
+                    // `isDegraded`: the rows stay, dimmed, and take no clicks, drags or menus
+                    // (`opacity: 0.6; pointer-events: none`).
+                    Some(ConnState::Reconnecting { .. } | ConnState::Failed { .. }) => div()
+                        .relative()
+                        .opacity(0.6)
+                        .child(list)
+                        .child(div().id("tree-inert").absolute().inset_0().occlude())
+                        .into_any_element(),
+                    Some(ConnState::Connected(_) | ConnState::Connecting(_)) | None => list.into_any_element(),
+                }
+            }
+        }
     }
 }
 
@@ -422,7 +494,7 @@ impl TreePane {
                 cx,
             )),
             ConnState::Failed { error, hash_mismatch } => {
-                let mut buttons: Vec<(&'static str, BannerAction<Self>)> = vec![
+                let mut buttons: Vec<(&'static str, BannerAction)> = vec![
                     ("Reconnect", Box::new(|pane: &mut Self, cx: &mut Context<Self>| pane.app.read(cx).reconnect(&pane.connection))),
                     ("Disconnect", Box::new(|_: &mut Self, cx: &mut Context<Self>| cx.emit(DisconnectRequested))),
                 ];
@@ -445,8 +517,97 @@ impl TreePane {
     }
 }
 
+/// `renderStatusIcon`: an 8px green dot once connected; 14px, a spinner while connecting
+/// (orange while reconnecting) and a red alert once failed.
+fn status_icon(link: Option<&ConnState>, cx: &gpui_kit::App) -> AnyElement {
+    let spinner = |color: gpui_kit::Hsla| {
+        Spinner::new()
+            .icon(gpui_kit::component::Icon::new(IconName::LoaderCircle))
+            .with_size(px(14.))
+            .color(color)
+            .into_any_element()
+    };
+    match link {
+        Some(ConnState::Connected(_)) | None => {
+            div().size(px(8.)).flex_shrink_0().rounded_full().bg(gpui_kit::rgb(0x4caf50)).into_any_element()
+        }
+        Some(ConnState::Connecting(_)) => spinner(colors(cx).text_secondary),
+        Some(ConnState::Reconnecting { .. }) => spinner(gpui_kit::rgb(0xff9800).into()),
+        Some(ConnState::Failed { .. }) => ui::icon(IconName::CircleAlert, 14., gpui_kit::rgb(0xf44336)).into_any_element(),
+    }
+}
+
+/// What a connection that is still connecting shows in place of its tree.
+fn connect_phase_label(phase: ConnectPhase) -> &'static str {
+    match phase {
+        ConnectPhase::Bootstrap => "Bootstrapping...",
+        ConnectPhase::Tunnel => "Establishing tunnel...",
+        ConnectPhase::Daemon => "Connecting to daemon...",
+    }
+}
+
+enum BannerKind {
+    Reconnecting,
+    Error,
+}
+
+type BannerAction = Box<dyn Fn(&mut TreePane, &mut Context<TreePane>)>;
+
+/// `.connection-banner`: an 11px coloured strip with small outlined buttons.
+fn connection_banner(
+    kind: BannerKind,
+    text: String,
+    buttons: Vec<(&'static str, BannerAction)>,
+    cx: &mut Context<TreePane>,
+) -> AnyElement {
+    let (color, background, icon): (u32, u32, AnyElement) = match kind {
+        BannerKind::Reconnecting => (
+            0xff9800,
+            0xff980014,
+            Spinner::new()
+                .icon(gpui_kit::component::Icon::new(IconName::LoaderCircle))
+                .with_size(px(12.))
+                .color(gpui_kit::rgb(0xff9800).into())
+                .into_any_element(),
+        ),
+        BannerKind::Error => (0xf44336, 0xf4433614, ui::icon(IconName::CircleAlert, 12., gpui_kit::rgb(0xf44336)).into_any_element()),
+    };
+    let border = colors(cx).border;
+    let mut banner = h_flex()
+        .gap(px(6.))
+        .px(px(8.))
+        .py(px(4.))
+        .items_center()
+        .text_size(px(11.))
+        .text_color(gpui_kit::rgb(color))
+        .bg(gpui_kit::rgba(background))
+        .border_b_1()
+        .border_color(border)
+        .child(icon)
+        .child(div().flex_1().min_w_0().truncate().child(text));
+    for (index, (label, action)) in buttons.into_iter().enumerate() {
+        banner = banner.child(
+            div()
+                .id(("banner-button", index))
+                .flex_shrink_0()
+                .px(px(6.))
+                .py(px(1.))
+                .rounded(px(3.))
+                .border_1()
+                .border_color(gpui_kit::rgb(color))
+                .text_size(px(10.))
+                .whitespace_nowrap()
+                .cursor_pointer()
+                .hover(|d| d.bg(gpui_kit::rgba(0xffffff1a)))
+                .child(label)
+                .on_click(cx.listener(move |pane, _, _, cx| action(pane, cx))),
+        );
+    }
+    banner.into_any_element()
+}
+
 impl TreePane {
-    fn render_row(&self, row: RowData, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+    fn render_row(&self, session: &Entity<SessionStore>, row: RowData, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let RowData { id, depth, has_children, label, is_worktree, unread, favourite, has_parent, pr, git_repo, activity } = row;
         let busy = activity != treeterm_model::workspace_store::ActivityState::Idle;
         let c = colors(cx);
@@ -469,7 +630,7 @@ impl TreePane {
             ),
             Label::Error(name) => (ui::icon(IconName::CircleAlert, 16., c.error).into_any_element(), name),
         };
-        let selected = self.session.read(cx).viewed_workspace() == Some(id.as_str());
+        let selected = session.read(cx).viewed_workspace() == Some(id.as_str());
         // Workspace focus mode (prefix + w) moves this cursor with the arrow keys.
         let focus_cursor = self.keybindings.read(cx).machine().focused_workspace() == Some(id.as_str());
         let expand = match (has_children, self.view.is_collapsed(&id)) {
@@ -487,7 +648,7 @@ impl TreePane {
         );
         let hint = self.drop_hint.as_ref().filter(|(target, _)| *target == id).map(|(_, position)| *position);
         let menu_id = id.clone();
-        let session = self.session.clone();
+        let (session, drop_session, fork_session) = (session.clone(), session.clone(), session.clone());
         let pane = cx.entity();
         let group = SharedString::from(format!("ws-row-group-{id}"));
         let root = depth == 0;
@@ -532,7 +693,7 @@ impl TreePane {
                     Some(_) | None => DropPosition::Onto,
                 };
                 let (drag, target) = (dragged.id.clone(), drop_id.clone());
-                pane.session.update(cx, |s, cx| s.move_workspace(&drag, &target, position, cx));
+                drop_session.update(cx, |s, cx| s.move_workspace(&drag, &target, position, cx));
                 if position == DropPosition::Onto {
                     pane.view.expand(&target);
                 }
@@ -613,9 +774,9 @@ impl TreePane {
                         .when(!root, |d| d.invisible().group_hover(group.clone(), |d| d.visible()))
                         .tooltip(|window, cx| gpui_kit::component::tooltip::Tooltip::new("Fork").build(window, cx))
                         .child(ui::icon(IconName::GitFork, 16., secondary))
-                        .on_click(cx.listener(move |pane, _: &ClickEvent, window, cx| {
+                        .on_click(cx.listener(move |_, _: &ClickEvent, window, cx| {
                             cx.stop_propagation();
-                            let (session, id) = (pane.session.clone(), fork_id.clone());
+                            let (session, id) = (fork_session.clone(), fork_id.clone());
                             let label = session
                                 .read(cx)
                                 .workspace_store(&id)

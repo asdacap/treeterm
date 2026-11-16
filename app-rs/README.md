@@ -284,6 +284,8 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   gone), and the window stays on the session it shows; Electron made the reconnected
   session's first workspace active and switched the window to it, even from another
   session's terminal in use.
+- A session's fold and its workspaces' expand state survive a reconnect (Electron rebuilt
+  the session panel on reconnect, unfolding it and expanding every workspace).
 - A workspace counts as viewed (it gets no unread marker, and its marker is cleared) only
   while it is the one on screen. Electron counted the one its navigation last named (the
   one last clicked, or a session's first), also after a quick fork or a new workspace put
