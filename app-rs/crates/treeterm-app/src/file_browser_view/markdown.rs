@@ -344,14 +344,18 @@ impl MarkdownPlugin for BrokenImage {
     }
 }
 
+/// The `alt` is laid out as a browser lays out text: each run of whitespace one space (none at
+/// the ends). A label over several lines keeps its line endings (`\r\n` too) in the `alt`,
+/// which must not reach the one-line box the text is drawn in.
 fn broken_image(node: &Node) -> Option<MarkdownNode> {
     let alt = match node {
         Node::Image(image) => &image.alt,
         Node::ImageReference(image) => &image.alt,
         _ => return None,
     };
-    let broken = if alt.is_empty() { Broken::NoAlt } else { Broken::Alt(alt.clone().into()) };
-    Some(MarkdownNode::new(BROKEN_IMAGE, broken).text(alt.clone()))
+    let text = alt.split_ascii_whitespace().collect::<Vec<_>>().join(" ");
+    let broken = if alt.is_empty() { Broken::NoAlt } else { Broken::Alt(text.clone().into()) };
+    Some(MarkdownNode::new(BROKEN_IMAGE, broken).text(text))
 }
 
 /// The 16px icon (`ImageOff`, as for the Files viewer's broken image) at the top of the line,
@@ -510,6 +514,27 @@ mod tests {
         assert!(broken_image(&kit_blocks("text")[0]).is_none());
     }
 
+    /// An `alt` over several lines (`\n` or `\r\n`), or with runs of spaces and tabs, is one
+    /// line with each run of whitespace one space, as a browser lays out the text; one of only
+    /// whitespace still draws the icon.
+    #[test]
+    fn an_images_alt_is_one_line() {
+        let broken = |markdown: &str| {
+            let blocks = kit_blocks(markdown);
+            let image = &blocks[0].children().expect("a paragraph")[0];
+            let node = broken_image(image).expect("an image");
+            (node.data::<Broken>().expect("what to draw").clone(), node.as_text().to_owned())
+        };
+        let alt = |text: &str| (Broken::Alt(text.to_owned().into()), text.to_owned());
+        assert_eq!(broken("![two\nlines](u)"), alt("two lines"));
+        assert_eq!(broken("![two\r\nlines](u)"), alt("two lines"));
+        assert_eq!(broken("![two\r\n  lines\rand\t three](u)"), alt("two lines and three"));
+        assert_eq!(broken("![two\r\nlines][r]\n\n[r]: u"), alt("two lines"));
+        assert_eq!(broken("![two\nlines]\n\n[two lines]: u"), alt("two lines"));
+        assert_eq!(broken("![ ](u)"), alt(""));
+        assert_eq!(broken("![](u)"), (Broken::NoAlt, String::new()));
+    }
+
     struct Host {
         text: String,
     }
@@ -538,7 +563,8 @@ mod tests {
         assert!(cx.debug_bounds(LITERAL_HTML).is_none());
         assert!(cx.debug_bounds(BROKEN_IMAGE).is_none());
         host.update_in(cx, |host, _, cx| {
-            host.text = "<div>block</div>\n\nAn ![image](https://e.com/x.png) here.".into();
+            // An `alt` over lines must not reach text shaping with its line ending.
+            host.text = "<div>block</div>\n\nAn ![an\r\nimage](https://e.com/x.png) and ![](y.png) here.".into();
             cx.notify();
         });
         draw(cx);
