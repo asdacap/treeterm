@@ -975,6 +975,47 @@ fn review_counts_views_lists_commits_and_shows_a_commits_changes(cx: &mut TestAp
 }
 
 #[gpui_kit::test]
+fn selecting_a_commit_keeps_the_branchs_viewed_marks(cx: &mut TestAppContext) {
+    use treeterm_model::review::Loaded;
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let repo = TempRepo::new(&h);
+    repo.write("a.txt", "one\ntwo\n");
+    repo.commit_all("base");
+    repo.git(&["checkout", "-q", "-b", "feature"]);
+    repo.write("a.txt", "ONE\ntwo\n");
+    repo.commit_all("first");
+    repo.write("a.txt", "ONE\nTWO\n");
+    repo.commit_all("second");
+    let store = open_store(cx, &h);
+    let workspace = open_repo_workspace(cx, &h, &store, &repo);
+    let (_, review) =
+        open_review_with(cx, &workspace, serde_json::json!({ "viewMode": "committed", "baseBranchOverride": "main" }));
+    wait_review(cx, &review, "committed", |r, _| matches!(r.content(), ReviewContent::Committed(_)));
+    review.update(cx, |r, cx| r.toggle_viewed("a.txt", cx));
+    let marked = metadata(cx, &workspace, "reviewViewedFiles");
+    assert_eq!(marked, Some(serde_json::json!({ "a.txt": { "kind": "text", "additions": 2, "deletions": 2 } })));
+
+    // The first commit changed the file differently from the whole branch: picking it, or
+    // reloading while it is picked, keeps the branch's mark (`loadCommitDiff` does not
+    // reconcile).
+    review.update(cx, |r, cx| r.set_mode(ReviewMode::Commits, cx));
+    wait_review(cx, &review, "commits", |r, _| matches!(r.content(), ReviewContent::Commits(c) if c.len() == 2));
+    let first = review.read_with(cx, |r, _| match r.content() {
+        ReviewContent::Commits(commits) => commits[1].hash.clone(),
+        other => panic!("{other:?}"),
+    });
+    review.update(cx, |r, cx| r.select_commit(&first, cx));
+    wait_review(cx, &review, "commit diff", |r, _| matches!(r.selected_commit().map(|s| &s.diff), Some(Loaded::Ready(_))));
+    assert_eq!(metadata(cx, &workspace, "reviewViewedFiles"), marked);
+    assert_eq!(review.read_with(cx, |r, cx| r.viewed_count(cx).unwrap()), (1, 1));
+    review.update(cx, |r, cx| r.refresh(cx));
+    wait_review(cx, &review, "refreshed", |r, _| !r.is_refreshing());
+    assert_eq!(metadata(cx, &workspace, "reviewViewedFiles"), marked);
+}
+
+#[gpui_kit::test]
 fn the_review_header_takes_the_child_actions_from_the_tabs_parent_id(cx: &mut TestAppContext) {
     let _serial = serial();
     cx.executor().allow_parking();

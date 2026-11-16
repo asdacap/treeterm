@@ -727,7 +727,6 @@ impl ReviewModel {
                     && selected.commit.hash == hash
                 {
                     selected.diff = diff;
-                    model.reconcile_viewed(cx);
                     model.load_images(cx);
                     cx.notify();
                 }
@@ -1399,10 +1398,17 @@ impl ReviewModel {
         Ok((order.iter().filter(|path| viewed.contains_key(path.as_str())).count(), order.len()))
     }
 
-    /// Drop marks whose file changed since it was marked (`reconcileViewedFiles`).
+    /// Drop marks whose file changed since it was marked (`reconcileViewedFiles`), against the
+    /// files of the branch's or the working tree's diff. Never against a commit's: one commit
+    /// can change a file differently from the whole branch (`loadCommitDiff` does not
+    /// reconcile).
     fn reconcile_viewed(&mut self, cx: &mut Context<Self>) {
-        let files: Vec<(String, treeterm_core::git::FileChangeStats)> =
-            self.shown_files().iter().map(|file| (file.path.to_owned(), file.stats)).collect();
+        let files: Vec<(String, treeterm_core::git::FileChangeStats)> = match &self.content {
+            ReviewContent::Committed(_) | ReviewContent::Uncommitted(_) => {
+                self.shown_files().iter().map(|file| (file.path.to_owned(), file.stats)).collect()
+            }
+            ReviewContent::Commits(_) | ReviewContent::Loading | ReviewContent::Failed(_) => return,
+        };
         if files.is_empty() {
             return;
         }
