@@ -664,8 +664,19 @@ impl SessionStore {
         }
     }
 
-    /// `handleExternalUpdate`.
+    /// `handleExternalUpdate`. The first snapshot restores the session; each later one is
+    /// logged at debug only, as the daemon sends one every 15 s.
     fn handle_external_update(&mut self, session: Session, cx: &mut Context<Self>) {
+        let (id, version, refs) = (session.id.as_str(), session.version, session.workspace_refs.len());
+        match (&self.state, refs) {
+            (SessionState::Live, _) => tracing::debug!(session = %id, version, "session sync received with {refs} refs"),
+            (SessionState::Waiting | SessionState::Failed(_), 0) => {
+                tracing::info!(session = %id, version, "no workspaces to restore");
+            }
+            (SessionState::Waiting | SessionState::Failed(_), _) => {
+                tracing::info!(session = %id, version, "restoring {refs} workspace refs");
+            }
+        }
         if session.version < self.version {
             return; // overtaken by a newer snapshot
         }
@@ -2565,6 +2576,7 @@ impl SessionStore {
     /// are reference counted: a store kept alive by a stray handle must not keep writing
     /// the same files as its replacement (the "ghost session writer").
     pub fn dispose(&mut self, cx: &mut Context<Self>) {
+        tracing::info!(session = %self.session_id, "session store disposed");
         self.disposed = true;
         self.syncs.clear();
         self.ops.clear();

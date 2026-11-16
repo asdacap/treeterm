@@ -517,6 +517,7 @@ impl AppStore {
         let Some(slot) = self.sessions.get(id) else {
             return;
         };
+        tracing::info!(%id, "creating new session store");
         let (client_id, settings, llm) = (self.client_id.clone(), self.settings.clone(), self.llm.clone());
         let traffic = slot.traffic.clone();
         let remote = (!slot.is_local()).then(|| crate::web_app::RemoteHost {
@@ -558,6 +559,7 @@ impl AppStore {
     /// is built to replace it. Until then the slot keeps the state the connection was lost
     /// with.
     fn hand_over(&mut self, id: &ConnectionId, session: Entity<SessionStore>, daemon: DaemonConnection, cx: &mut Context<Self>) {
+        tracing::info!(%id, session = %session.read(cx).session_id(), "connection reconnected");
         let flush = session.update(cx, |s, cx| s.hand_over(daemon.clone(), cx));
         let owned = id.clone();
         let task = cx.spawn(async move |this, cx| {

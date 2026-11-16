@@ -29,6 +29,7 @@ use treeterm_model::web_app::{RemoteHost, WebAppModel, WebAppPhase};
 use treeterm_model::workspace_store::{TabContent, WorkspaceStore};
 use treeterm_proto::treeterm::WorkspaceRef;
 use treeterm_testkit::fake_ssh::{Proxy, fake_ssh_response, remote_config, ssh_env};
+use treeterm_testkit::logs::Captured;
 
 mod common;
 use common::{Harness, Proxy as DaemonProxy, harness, refusing_daemon, wait_until, wait_until_app};
@@ -379,6 +380,73 @@ fn a_reconnect_neither_lands_again_nor_opens_another_home_workspace(cx: &mut Tes
     assert_eq!(workspaces(cx, &second), [home]);
 }
 
+/// The lines logged so far that contain `needle`.
+fn logged(logs: &Captured, needle: &str) -> Vec<String> {
+    logs.text()
+        .lines()
+        .filter(|line| line.contains(needle))
+        .map(str::to_owned)
+        .collect()
+}
+
+/// The first line logged so far that contains `needle`.
+fn logged_line(logs: &Captured, needle: &str) -> String {
+    logs.line(needle)
+        .unwrap_or_else(|| panic!("no {needle:?} in:\n{}", logs.text()))
+}
+
+/// What the log says of a connection's session stores (`getOrCreateSession`,
+/// `addRemoteSession`, `session:sync`, `handleReconnected`, `disposeSessionForConnection`):
+/// each one built, its session restored, the later snapshots, the reconnect, and each one
+/// disposed.
+#[gpui_kit::test]
+fn the_log_follows_a_connections_session_stores(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    isolated_home();
+    let h = harness();
+    publish_a_and_b(&h);
+    let app = app(cx, &h, None);
+    let logs = treeterm_testkit::logs::capture();
+
+    app.connect(cx);
+    let first = app.restored(cx);
+    let session = format!("session={}", first.read_with(cx, |s, _| s.session_id().to_owned()));
+    let created = logged(&logs, "creating new session store");
+    assert_eq!(created.len(), 1, "{}", logs.text());
+    assert!(created[0].contains(" INFO ") && created[0].ends_with("id=remote-1"), "{created:?}");
+    let restoring = logged_line(&logs, "restoring 2 workspace refs");
+    assert!(restoring.contains(" INFO ") && restoring.contains(&session), "{restoring}");
+    assert_eq!(logged(&logs, "disposed"), Vec::<String>::new());
+
+    // A later snapshot is logged at debug only.
+    publish(&h, &[("a", body("a"))]);
+    wait_until(cx, &first, |s| s.workspace_ids().count() == 1);
+    let sync = logged_line(&logs, "session sync received with 1 refs");
+    assert!(sync.contains("DEBUG") && sync.contains(&session), "{sync}");
+
+    // A reconnect: the kept store hands over, a new one is built, and the kept one is
+    // disposed once the new one is restored.
+    let forced = app.app.read_with(cx, |a, _| a.manager().force_reconnect(&remote_id()));
+    forced.unwrap();
+    wait_until_app(cx, &app.app, |a, cx| {
+        remote(a)
+            .and_then(SessionSlot::session)
+            .is_some_and(|s| *s != first && matches!(s.read(cx).state(), SessionState::Live))
+    });
+    let reconnected = logged_line(&logs, "connection reconnected");
+    assert!(reconnected.contains(" INFO ") && reconnected.contains("id=remote-1"), "{reconnected}");
+    assert!(reconnected.contains(&session), "{reconnected}");
+    assert_eq!(logged(&logs, "creating new session store").len(), 2, "{}", logs.text());
+    assert!(logs.line("restoring 1 workspace refs").is_some(), "{}", logs.text());
+    let disposed = logged(&logs, "session store disposed");
+    assert_eq!(disposed.len(), 1, "{}", logs.text());
+    assert!(disposed[0].contains(" INFO ") && disposed[0].contains(&session), "{disposed:?}");
+
+    // Disconnecting disposes the connection's store.
+    app.app.update(cx, |a, cx| a.disconnect(&remote_id(), cx));
+    assert_eq!(logged(&logs, "session store disposed").len(), 2, "{}", logs.text());
+}
+
 #[gpui_kit::test]
 fn a_failed_connect_lands_nowhere_and_a_retry_shows_only_existing_workspaces(
     cx: &mut TestAppContext,
@@ -462,6 +530,7 @@ fn a_local_session_without_workspaces_lands_nowhere(cx: &mut TestAppContext) {
     cx.executor().allow_parking();
     isolated_home();
     let h = harness();
+    let logs = treeterm_testkit::logs::capture();
     let app = app(cx, &h, Some(h.daemon.socket_path()));
 
     wait_until_app(cx, &app.app, |a, cx| {
@@ -476,6 +545,9 @@ fn a_local_session_without_workspaces_lands_nowhere(cx: &mut TestAppContext) {
         workspaces(cx, &session).is_empty(),
         "no home workspace for a local session"
     );
+    let nothing = logged_line(&logs, "no workspaces to restore");
+    assert!(nothing.contains(" INFO "), "{nothing}");
+    assert_eq!(logs.line("restoring"), None);
 }
 
 fn idle(cx: &mut TestAppContext, app: &App) -> IdlePane {
