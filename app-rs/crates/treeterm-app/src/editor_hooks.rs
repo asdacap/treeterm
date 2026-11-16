@@ -174,9 +174,14 @@ impl CompletionProvider for WordSuggestions {
     }
 }
 
-/// Give `editor` Monaco's word-based suggestions.
+/// Give `editor` Monaco's word-based suggestions, their letters that match what was typed
+/// highlighted.
 pub(crate) fn install_word_suggestions(editor: &Entity<EditorState>, cx: &mut App) {
-    editor.update(cx, |editor, _| editor.lsp_mut().completion_provider = Some(Rc::new(WordSuggestions)));
+    editor.update(cx, |editor, _| {
+        let lsp = editor.lsp_mut();
+        lsp.completion_provider = Some(Rc::new(WordSuggestions));
+        lsp.set_completion_highlighter(Rc::new(|typed: &str, item: &CompletionItem| words::highlights(typed, &item.label)));
+    });
 }
 
 #[cfg(test)]

@@ -1,10 +1,13 @@
 //! The Editor tab's word-based aids, as Monaco's: the suggestions its base editor worker
 //! offers while typing, in every language (`WordBasedCompletionItemProvider` and the
-//! worker's `textualSuggest`), and Change All Occurrences (`editor.action.changeAll`).
+//! worker's `textualSuggest`), filtered and ranked as its suggest widget does ([`fuzzy`]),
+//! and Change All Occurrences (`editor.action.changeAll`).
 //!
 //! A word is Monaco's default: a run of characters that are neither whitespace nor one of
 //! the editor's word separators. (Monaco's default word pattern also reads `3.14` or `.5`
 //! as one word; such words are numbers, which are never suggested.)
+
+pub mod fuzzy;
 
 use std::collections::HashSet;
 use std::ops::Range;
@@ -96,10 +99,11 @@ pub struct Suggestions {
     pub words: Vec<String>,
 }
 
-/// The words of `text` to suggest at byte `offset`: those that start with what was typed of
-/// the word at the cursor, in any case, but never that word itself or a number. Words
-/// typed in the same case come first, then in byte order (the label order Monaco breaks
-/// ties with).
+/// The words of `text` to suggest at byte `offset`: those [`fuzzy`] matches what was typed
+/// of the word at the cursor with (its letters in order, the first at a word start or a
+/// camelCase hump), but never that word itself or a number. The best matches come first,
+/// then in byte order (the label order Monaco breaks ties with). With nothing typed (asked
+/// for), every word, in byte order.
 pub fn suggestions(text: &str, offset: usize, trigger: Trigger) -> Suggestions {
     let word = word_around(text, offset);
     let replace = word.start..offset.max(word.start);
@@ -119,11 +123,31 @@ pub fn suggestions(text: &str, offset: usize, trigger: Trigger) -> Suggestions {
             break;
         }
     }
-    let typed_lower = typed.to_lowercase();
-    let mut words: Vec<String> =
-        found.into_iter().filter(|word| word.to_lowercase().starts_with(&typed_lower)).map(str::to_owned).collect();
-    words.sort_by(|a, b| (!a.starts_with(typed), a).cmp(&(!b.starts_with(typed), b)));
-    Suggestions { replace, words }
+    let mut ranked: Vec<(i32, &str)> = if typed.is_empty() {
+        found.into_iter().map(|word| (0, word)).collect()
+    } else {
+        found.into_iter().filter_map(|word| Some((fuzzy::score(typed, word)?.score, word))).collect()
+    };
+    ranked.sort_by(|(score_a, a), (score_b, b)| score_b.cmp(score_a).then_with(|| a.cmp(b)));
+    Suggestions { replace, words: ranked.into_iter().map(|(_, word)| word.to_owned()).collect() }
+}
+
+/// The bytes of a suggested `word` that match what was `typed`, as the suggest widget
+/// highlights them; none when they do not match.
+pub fn highlights(typed: &str, word: &str) -> Vec<Range<usize>> {
+    let Some(found) = fuzzy::score(typed, word) else {
+        return Vec::new();
+    };
+    let starts: Vec<(usize, char)> = word.char_indices().collect();
+    let mut ranges: Vec<Range<usize>> = Vec::new();
+    for position in found.positions {
+        let (start, c) = starts[position];
+        match ranges.last_mut() {
+            Some(last) if last.end == start => last.end = start + c.len_utf8(),
+            _ => ranges.push(start..start + c.len_utf8()),
+        }
+    }
+    ranges
 }
 
 /// Whether `a` and `b` are the same character in any case.
@@ -193,6 +217,27 @@ mod tests {
         // What was typed replaces only the part before the cursor.
         let at = text.find('|').unwrap();
         assert_eq!(suggestions(&text.replace('|', ""), at, Trigger::Typing).replace, at - 2..at);
+    }
+
+    #[test]
+    fn suggests_words_with_the_typed_letters_in_order_from_a_word_start_or_hump() {
+        // `ba` starts the hump of `fooBar` and the part after `_`; `foobar` and `sidebar`
+        // have no `b` at a word start.
+        assert_eq!(words_at("foobar fooBar sidebar foo_bar\nba|", "|", Trigger::Typing), ["fooBar", "foo_bar"]);
+        assert_eq!(words_at("foobar fooBar foo_bar\noo|", "|", Trigger::Typing), Vec::<String>::new());
+        // The best matches first: a prefix, then the closest humps; ties in byte order.
+        assert_eq!(
+            words_at("fooBar foo_bar fileBuffer fbx Fb oops\nfb|", "|", Trigger::Typing),
+            ["Fb", "fbx", "fooBar", "fileBuffer", "foo_bar"]
+        );
+    }
+
+    #[test]
+    fn highlights_the_matched_letters() {
+        assert_eq!(highlights("fb", "fooBar"), [0..1, 3..4]);
+        assert_eq!(highlights("fo", "foobar"), vec![0..2]);
+        assert_eq!(highlights("éb", "éBar"), vec![0..3]);
+        assert_eq!(highlights("oo", "foobar"), Vec::<Range<usize>>::new());
     }
 
     #[test]

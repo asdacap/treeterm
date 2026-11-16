@@ -6,7 +6,8 @@
 //! As in Monaco: F12, Cmd/Ctrl+click and the context menu go to the definition of the word
 //! under the cursor (holding Cmd/Ctrl over a word with one underlines it); Cmd/Ctrl+F2
 //! puts a cursor on every occurrence of the word or selection (Change All Occurrences);
-//! typing a word suggests the document's words that start with it (Ctrl+Space asks).
+//! typing a word suggests the document's words that have its letters in order, the first
+//! at a word start or camelCase hump (Ctrl+Space asks).
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -413,5 +414,36 @@ mod tests {
         cx.simulate_keystrokes("x");
         cx.run_until_parked();
         assert!(!cx.update(|_, cx| editor.read(cx).completion_menu_state().open));
+    }
+
+    #[gpui_kit::test]
+    fn typed_letters_in_order_suggest_words_best_first_with_them_highlighted(cx: &mut gpui_kit::TestAppContext) {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            bind_keys(cx);
+        });
+        let text = "let fooBar = foobar;\n";
+        let (host, cx) = cx.add_window_view(|window, cx| Host {
+            editor: cx.new(|cx| EditorState::new(window, cx).language("rust").default_value(text)),
+        });
+        let editor = cx.update(|_, cx| host.read(cx).editor.clone());
+        cx.update(|window, cx| {
+            crate::editor_hooks::install_word_suggestions(&editor, cx);
+            editor.update(cx, |editor, cx| {
+                editor.focus(window, cx);
+                editor.set_selected_range(text.len()..text.len(), cx);
+            });
+        });
+        cx.run_until_parked();
+        cx.simulate_keystrokes("f b");
+        cx.run_until_parked();
+        let shown = cx.update(|_, cx| {
+            let editor = editor.read(cx);
+            let menu = editor.completion_menu_state();
+            let highlight = editor.lsp().completion_highlighter();
+            menu.items.iter().map(|item| (item.label.clone(), highlight(&menu.query, item))).collect::<Vec<_>>()
+        });
+        // `b` at a hump matches better than inside a word.
+        assert_eq!(shown, [("fooBar".to_owned(), vec![0..1, 3..4]), ("foobar".to_owned(), vec![0..1, 3..4])]);
     }
 }
