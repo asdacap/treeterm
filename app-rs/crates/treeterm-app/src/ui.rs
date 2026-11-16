@@ -1001,9 +1001,12 @@ pub fn viewer_button(id: impl Into<ElementId>, disabled: Option<f32>, cx: &App) 
 }
 
 /// `.file-editor-save-btn` / `.file-editor-toggle-btn`: as [`viewer_button`] at 12px with
-/// 12px side padding; disabled at half opacity.
+/// 12px side padding; disabled at half opacity, with the not-allowed cursor.
 pub fn editor_button(id: impl Into<ElementId>, disabled: bool, cx: &App) -> Stateful<Div> {
-    viewer_button(id, disabled.then_some(0.5), cx).px(px(12.)).text_size(px(12.))
+    viewer_button(id, disabled.then_some(0.5), cx)
+        .px(px(12.))
+        .text_size(px(12.))
+        .when(disabled, |d| d.cursor_not_allowed())
 }
 
 /// `.file-viewer-language` / `.file-editor-language`: the language, a small tertiary pill.
