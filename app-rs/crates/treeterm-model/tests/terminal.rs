@@ -104,7 +104,9 @@ fn output_bytes_count_toward_the_workspace_meter_and_the_connection(cx: &mut Tes
     assert!(counter.total() >= after_prompt + 2000);
     assert!(h.conn.received().total() >= connection_before + counter.total());
 
-    let meter = cx.new(|cx| treeterm_model::traffic::TrafficMeter::new(counter.clone(), cx));
+    let meter = cx.new(|cx| {
+        treeterm_model::traffic::TrafficMeter::new(treeterm_model::traffic::MeterKind::Workspace, counter.clone(), cx)
+    });
     cx.executor().advance_clock(treeterm_core::traffic::TRAFFIC_TICK);
     cx.run_until_parked();
     assert_eq!(meter.read_with(cx, |m, _| m.rate().total_bytes), counter.total());

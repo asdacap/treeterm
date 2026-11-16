@@ -9,6 +9,7 @@ use treeterm_core::local_daemon::LocalDaemonSpec;
 use treeterm_model::app_store::{AppStore, ConnState, SessionSlot};
 use treeterm_model::session_store::{ConnectionStatus, SessionState, SessionStore, WorkspaceEntry};
 use treeterm_model::settings_store::SettingsStore;
+use treeterm_model::traffic::ConnectionTraffic;
 use treeterm_model::workspace_store::WorkspaceStore;
 use treeterm_proto::treeterm::WorkspaceRef;
 
@@ -39,7 +40,16 @@ fn publish_a(h: &Harness) {
 fn open_store(cx: &mut TestAppContext, conn: &DaemonConnection) -> Entity<SessionStore> {
     let conn = conn.clone();
     let settings = cx.new(|_| SettingsStore::in_memory(Default::default()));
-    cx.new(|cx| SessionStore::new(conn, "client-a".to_owned(), settings, None, cx))
+    cx.new(|cx| {
+        SessionStore::new(
+            conn,
+            "client-a".to_owned(),
+            settings,
+            None,
+            cx.new(ConnectionTraffic::new),
+            cx,
+        )
+    })
 }
 
 fn loaded(s: &SessionStore) -> bool {

@@ -14,6 +14,7 @@ use treeterm_model::review_find::DiffLayout;
 use treeterm_model::session_store::{SessionState, SessionStore, WorkspaceEntry};
 use treeterm_model::settings_store::SettingsStore;
 use treeterm_model::text_editor::{EditorDoc, TextEditor};
+use treeterm_model::traffic::ConnectionTraffic;
 use treeterm_model::workspace_store::{TabContent, WorkspaceStore};
 use treeterm_proto::treeterm::WorkspaceRef;
 
@@ -905,7 +906,7 @@ fn open_store(cx: &mut TestAppContext, h: &Harness) -> Entity<SessionStore> {
     .unwrap();
     let conn = h.conn.clone();
     let settings = cx.new(|_| SettingsStore::in_memory(settings));
-    cx.new(|cx| SessionStore::new(conn, "client-a".into(), settings, None, cx))
+    cx.new(|cx| SessionStore::new(conn, "client-a".into(), settings, None, cx.new(ConnectionTraffic::new), cx))
 }
 
 /// The repo as a workspace with no tabs (no terminal whose shell could start while a test's

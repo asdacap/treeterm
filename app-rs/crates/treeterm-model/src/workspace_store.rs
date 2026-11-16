@@ -257,8 +257,10 @@ pub struct WorkspaceStore {
     remote: Option<crate::web_app::RemoteHost>,
     /// Runs AI-harness analyzers; `None` leaves them off (tests, no LLM client).
     llm: Option<LlmService>,
-    /// PTY bytes received by this workspace's terminals, and their rate.
+    /// PTY bytes received by this workspace's terminals, and their rate: kept by the
+    /// connection across its generations.
     traffic: Entity<crate::traffic::TrafficMeter>,
+    /// What the terminals add to (`traffic`'s).
     traffic_counter: treeterm_core::traffic::ByteCounter,
     /// The merge into the parent running or last finished, until dismissed.
     merge_output: Option<MergeOutput>,
@@ -314,6 +316,7 @@ pub(crate) fn new_tab_id() -> String {
 }
 
 impl WorkspaceStore {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         workspace: Workspace,
         conn: DaemonConnection,
@@ -321,11 +324,10 @@ impl WorkspaceStore {
         settings: Rc<Settings>,
         llm: Option<LlmService>,
         remote: Option<crate::web_app::RemoteHost>,
+        traffic: Entity<crate::traffic::TrafficMeter>,
         cx: &mut Context<Self>,
     ) -> Self {
-        let traffic_counter = treeterm_core::traffic::ByteCounter::default();
-        let counter = traffic_counter.clone();
-        let traffic = cx.new(|cx| crate::traffic::TrafficMeter::new(counter, cx));
+        let traffic_counter = traffic.read(cx).counter().clone();
         let mut store = Self {
             workspace,
             conn,

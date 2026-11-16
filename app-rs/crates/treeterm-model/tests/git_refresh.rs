@@ -16,6 +16,7 @@ use treeterm_core::github::UnavailableGitHub;
 use treeterm_model::review::{GitOp, ReviewEvent, ReviewModel, StageTarget};
 use treeterm_model::session_store::{AfterMerge, SessionState, SessionStore, WorkspaceEntry};
 use treeterm_model::settings_store::SettingsStore;
+use treeterm_model::traffic::ConnectionTraffic;
 use treeterm_model::workspace_store::{MergeState, TabContent, WorkspaceStore};
 
 mod common;
@@ -72,7 +73,16 @@ fn publish_empty(h: &Harness) {
 fn open_store(cx: &mut TestAppContext, h: &Harness, client: &str) -> Entity<SessionStore> {
     let (conn, client) = (h.conn.clone(), client.to_owned());
     let settings = cx.new(|_| SettingsStore::in_memory(Default::default()));
-    let store = cx.new(|cx| SessionStore::new(conn, client, settings, None, cx));
+    let store = cx.new(|cx| {
+        SessionStore::new(
+            conn,
+            client,
+            settings,
+            None,
+            cx.new(ConnectionTraffic::new),
+            cx,
+        )
+    });
     store.update(cx, |s, _| {
         s.set_github_api(Arc::new(UnavailableGitHub::new("tls".to_owned())))
     });

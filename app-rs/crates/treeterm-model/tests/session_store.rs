@@ -12,6 +12,7 @@ use treeterm_model::session_store::{
     AdoptOptions, RemoveMode, SessionEvent, SessionState, SessionStore, WorkspaceEntry,
 };
 use treeterm_model::settings_store::SettingsStore;
+use treeterm_model::traffic::{ConnectionTraffic, TrafficMeter};
 use treeterm_model::tree_view_state::{ChildEdge, TreeViewState};
 use treeterm_model::workspace_store::{MergeState, TabContent, Workspace, WorkspaceStore};
 use treeterm_proto::treeterm::WorkspaceRef;
@@ -45,7 +46,7 @@ fn open_store(cx: &mut TestAppContext, h: &Harness, client: &str) -> Entity<Sess
     let conn = h.conn.clone();
     let client = client.to_owned();
     let settings = cx.new(|_| SettingsStore::in_memory(Default::default()));
-    let store = cx.new(|cx| SessionStore::new(conn, client, settings, None, cx));
+    let store = cx.new(|cx| SessionStore::new(conn, client, settings, None, cx.new(ConnectionTraffic::new), cx));
     // Every workspace refreshes its git status on load: a child's PR lookup fails at once
     // instead of running the machine's `gh`.
     let github = std::sync::Arc::new(treeterm_core::github::UnavailableGitHub::new("not in tests".to_owned()));
@@ -206,7 +207,7 @@ fn record_session_events(
 /// A store on `conn`, once its session watch failed, with the events it emitted.
 fn failed_store(cx: &mut TestAppContext, conn: DaemonConnection) -> (Entity<SessionStore>, Vec<SessionEvent>) {
     let settings = cx.new(|_| SettingsStore::in_memory(Default::default()));
-    let store = cx.new(|cx| SessionStore::new(conn, "client-a".to_owned(), settings, None, cx));
+    let store = cx.new(|cx| SessionStore::new(conn, "client-a".to_owned(), settings, None, cx.new(ConnectionTraffic::new), cx));
     let events = record_session_events(cx, &store);
     wait_until(cx, &store, |s| matches!(s.state(), SessionState::Failed(_)));
     // The stream's end follows its error.
@@ -246,7 +247,7 @@ fn a_loaded_session_whose_watch_fails_reports_a_lost_connection(cx: &mut TestApp
     let proxy = Proxy::start(&socket, h.daemon.socket_path());
     let conn = futures::executor::block_on(DaemonConnection::open(&h.rt, &socket)).unwrap().unwrap();
     let settings = cx.new(|_| SettingsStore::in_memory(Default::default()));
-    let store = cx.new(|cx| SessionStore::new(conn, "client-a".to_owned(), settings, None, cx));
+    let store = cx.new(|cx| SessionStore::new(conn, "client-a".to_owned(), settings, None, cx.new(ConnectionTraffic::new), cx));
     let events = record_session_events(cx, &store);
     wait_until(cx, &store, |s| matches!(s.state(), SessionState::Live));
 
@@ -332,6 +333,74 @@ fn follows_ref_removal_and_body_changes(cx: &mut TestAppContext) {
     publish(&h, &["a"]);
     wait_until(cx, &store, |s| s.entry("b").is_none());
     wait_until_app(cx, &store, |s, cx| s.tree_rows(&HashSet::new(), cx).len() == 1);
+}
+
+fn tick(cx: &mut TestAppContext) {
+    cx.executor().advance_clock(treeterm_core::traffic::TRAFFIC_TICK);
+    cx.run_until_parked();
+}
+
+fn total(cx: &mut TestAppContext, meter: &Entity<TrafficMeter>) -> u64 {
+    meter.read_with(cx, |m, _| m.rate().total_bytes)
+}
+
+#[gpui_kit::test]
+fn a_workspaces_download_meter_outlives_its_session_store(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    std::fs::write(h.daemon.workspaces_dir().join("a.json"), body("a", None)).unwrap();
+    publish(&h, &["a"]);
+    let traffic = cx.new(ConnectionTraffic::new);
+    let settings = cx.new(|_| SettingsStore::in_memory(Default::default()));
+    let open = |cx: &mut TestAppContext| {
+        let (conn, settings, traffic) = (h.conn.clone(), settings.clone(), traffic.clone());
+        let store = cx.new(|cx| SessionStore::new(conn, "client-a".into(), settings, None, traffic, cx));
+        wait_until(cx, &store, |s| loaded(s, "a"));
+        store
+    };
+    let first = open(cx);
+    let meter = traffic.update(cx, |t, cx| t.workspace("a", cx));
+    assert_eq!(first.read_with(cx, |s, cx| ws(s, "a").read(cx).traffic().clone()), meter);
+    // What the workspace's terminals add to.
+    meter.read_with(cx, |m, _| m.counter().add(100));
+    tick(cx);
+
+    // The connection's next generation (`handleReconnected`): a fresh store on the same meters.
+    first.update(cx, |s, cx| s.dispose(cx));
+    drop(first);
+    let second = open(cx);
+    tick(cx);
+
+    assert_eq!(second.read_with(cx, |s, cx| ws(s, "a").read(cx).traffic().clone()), meter);
+    assert_eq!(total(cx, &meter), 100);
+}
+
+#[gpui_kit::test]
+fn a_removed_workspace_drops_its_download_meter_and_starts_from_0_if_it_comes_back(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    std::fs::write(h.daemon.workspaces_dir().join("a.json"), body("a", None)).unwrap();
+    publish(&h, &["a", "broken"]);
+    let traffic = cx.new(ConnectionTraffic::new);
+    let (conn, settings) = (h.conn.clone(), cx.new(|_| SettingsStore::in_memory(Default::default())));
+    let store = cx.new(|cx| SessionStore::new(conn, "client-a".into(), settings, None, traffic.clone(), cx));
+    wait_until(cx, &store, |s| loaded(s, "a") && matches!(s.entry("broken"), Some(WorkspaceEntry::Error { .. })));
+    let meter = store.read_with(cx, |s, cx| ws(s, "a").read(cx).traffic().clone());
+    meter.read_with(cx, |m, _| m.counter().add(100));
+    // An earlier generation of the connection loaded "broken".
+    let broken = traffic.update(cx, |t, cx| t.workspace("broken", cx));
+
+    // Another writer removes both (`onWorkspaceRemoved`; "broken" is a placeholder here).
+    publish(&h, &[]);
+    wait_until(cx, &store, |s| s.entry("a").is_none() && s.entry("broken").is_none());
+    assert_ne!(traffic.update(cx, |t, cx| t.workspace("broken", cx)), broken);
+
+    publish(&h, &["a"]);
+    wait_until(cx, &store, |s| loaded(s, "a"));
+    let back = store.read_with(cx, |s, cx| ws(s, "a").read(cx).traffic().clone());
+    tick(cx);
+    assert_ne!(back, meter);
+    assert_eq!(total(cx, &back), 0);
 }
 
 #[gpui_kit::test]
@@ -502,7 +571,7 @@ fn settings_changes_reach_live_terminals(cx: &mut TestAppContext) {
     publish(&h, &["a"]);
     let settings = cx.new(|_| SettingsStore::in_memory(Default::default()));
     let conn = h.conn.clone();
-    let store = cx.new(|cx| SessionStore::new(conn, "client-a".into(), settings.clone(), None, cx));
+    let store = cx.new(|cx| SessionStore::new(conn, "client-a".into(), settings.clone(), None, cx.new(ConnectionTraffic::new), cx));
     wait_until(cx, &store, |s| loaded(s, "a"));
     let workspace = store.read_with(cx, |s, _| ws(s, "a"));
     let tab = workspace.update(cx, |w, cx| w.add_tab("terminal", cx)).unwrap();
@@ -595,7 +664,7 @@ fn an_ai_harness_set_to_disable_scrollbar_draws_none(cx: &mut TestAppContext) {
     .unwrap();
     let settings = cx.new(|_| SettingsStore::in_memory(settings));
     let conn = h.conn.clone();
-    let store = cx.new(|cx| SessionStore::new(conn, "client-a".into(), settings.clone(), None, cx));
+    let store = cx.new(|cx| SessionStore::new(conn, "client-a".into(), settings.clone(), None, cx.new(ConnectionTraffic::new), cx));
     wait_until(cx, &store, |s| loaded(s, "a"));
     let workspace = store.read_with(cx, |s, _| ws(s, "a"));
     let bot = workspace.update(cx, |w, cx| w.add_tab("aiharness-bot", cx)).unwrap();
@@ -1870,7 +1939,7 @@ fn an_ai_harness_tab_is_classified_by_its_analyzer(cx: &mut TestAppContext) {
     let llm = LlmService::new(Arc::new(fake.clone()), h.rt.clone());
     let conn = h.conn.clone();
     let settings_store = cx.new(|_| SettingsStore::in_memory(settings));
-    let store = cx.new(|cx| SessionStore::new(conn, "client-a".into(), settings_store, Some(llm), cx));
+    let store = cx.new(|cx| SessionStore::new(conn, "client-a".into(), settings_store, Some(llm), cx.new(ConnectionTraffic::new), cx));
     wait_until(cx, &store, |s| loaded(s, "a"));
     let workspace = store.read_with(cx, |s, _| ws(s, "a"));
 
@@ -1913,7 +1982,7 @@ fn finished_work_in_an_unviewed_workspace_is_marked_unread_until_viewed(cx: &mut
     settings.terminal_analyzer.idle_debounce = std::time::Duration::from_millis(300);
     let conn = h.conn.clone();
     let settings_store = cx.new(|_| SettingsStore::in_memory(settings));
-    let store = cx.new(|cx| SessionStore::new(conn, "client-a".into(), settings_store, None, cx));
+    let store = cx.new(|cx| SessionStore::new(conn, "client-a".into(), settings_store, None, cx.new(ConnectionTraffic::new), cx));
     let recorded = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
     let sink = recorded.clone();
     cx.update(|cx| {
@@ -2167,7 +2236,7 @@ fn a_web_app_gets_a_free_port_starts_its_server_and_is_ready(cx: &mut TestAppCon
     .unwrap();
     let conn = h.conn.clone();
     let settings_store = cx.new(|_| SettingsStore::in_memory(settings));
-    let store = cx.new(|cx| SessionStore::new(conn, "client-a".into(), settings_store, None, cx));
+    let store = cx.new(|cx| SessionStore::new(conn, "client-a".into(), settings_store, None, cx.new(ConnectionTraffic::new), cx));
     wait_until(cx, &store, |s| loaded(s, "a"));
     let workspace = store.read_with(cx, |s, _| ws(s, "a"));
     let tab = workspace.update(cx, |w, cx| w.add_tab("webapp-py", cx)).unwrap();
@@ -2209,7 +2278,7 @@ fn a_local_browser_tab_opens_its_remembered_page_directly(cx: &mut TestAppContex
     .unwrap();
     let conn = h.conn.clone();
     let settings_store = cx.new(|_| SettingsStore::in_memory(settings));
-    let store = cx.new(|cx| SessionStore::new(conn, "client-a".into(), settings_store, None, cx));
+    let store = cx.new(|cx| SessionStore::new(conn, "client-a".into(), settings_store, None, cx.new(ConnectionTraffic::new), cx));
     wait_until(cx, &store, |s| loaded(s, "a"));
     let workspace = store.read_with(cx, |s, _| ws(s, "a"));
     let tab = workspace.update(cx, |w, cx| w.add_tab_with("browser-docs", serde_json::json!({ "path": "/guide?x=1" }), cx)).unwrap();
@@ -2240,7 +2309,7 @@ fn local_browser_page(
     }))
     .unwrap();
     let (conn, settings) = (h.conn.clone(), cx.new(|_| SettingsStore::in_memory(settings)));
-    let store = cx.new(|cx| SessionStore::new(conn, "client-a".into(), settings, None, cx));
+    let store = cx.new(|cx| SessionStore::new(conn, "client-a".into(), settings, None, cx.new(ConnectionTraffic::new), cx));
     wait_until(cx, &store, |s| loaded(s, "a"));
     let workspace = store.read_with(cx, |s, _| ws(s, "a"));
     let tab = workspace.update(cx, |w, cx| w.add_tab("browser-docs", cx)).unwrap();

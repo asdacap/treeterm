@@ -11,6 +11,7 @@ use treeterm_core::settings::TerminalSettings;
 use treeterm_model::active_processes::{ActiveProcesses, ProcessList, workspace_labels};
 use treeterm_model::session_store::{SessionStore, WorkspaceEntry};
 use treeterm_model::settings_store::SettingsStore;
+use treeterm_model::traffic::ConnectionTraffic;
 use treeterm_proto::treeterm::WorkspaceRef;
 
 mod common;
@@ -166,7 +167,16 @@ fn publish(h: &Harness, refs: Vec<WorkspaceRef>) {
 fn open_session(cx: &mut TestAppContext, h: &Harness) -> Entity<SessionStore> {
     let conn = h.conn.clone();
     let settings = cx.new(|_| SettingsStore::in_memory(Default::default()));
-    let store = cx.new(|cx| SessionStore::new(conn, "client-a".to_owned(), settings, None, cx));
+    let store = cx.new(|cx| {
+        SessionStore::new(
+            conn,
+            "client-a".to_owned(),
+            settings,
+            None,
+            cx.new(ConnectionTraffic::new),
+            cx,
+        )
+    });
     let github = std::sync::Arc::new(treeterm_core::github::UnavailableGitHub::new(
         "not in tests".to_owned(),
     ));

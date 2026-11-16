@@ -18,6 +18,7 @@ use treeterm_model::tool_tabs::comments::PushState;
 use treeterm_model::tool_tabs::prompt_debugger::{DebugMode, DebugOutput, PromptDebuggerEvent};
 use treeterm_model::tool_tabs::ssh_upload::UploadTarget;
 use treeterm_model::tool_tabs::tty_list::{ProcessList, referenced_pty_ids};
+use treeterm_model::traffic::ConnectionTraffic;
 use treeterm_model::workspace_store::{TabContent, WorkspaceStore};
 use treeterm_proto::treeterm::WorkspaceRef;
 
@@ -55,7 +56,7 @@ fn open_window(
 ) -> Entity<SessionStore> {
     let (conn, client) = (h.conn.clone(), client.to_owned());
     let settings = cx.new(|_| SettingsStore::in_memory(settings));
-    cx.new(|cx| SessionStore::new(conn, client, settings, llm, cx))
+    cx.new(|cx| SessionStore::new(conn, client, settings, llm, cx.new(ConnectionTraffic::new), cx))
 }
 
 /// A directory under the daemon's root as a loaded workspace with no tabs; its id and store.

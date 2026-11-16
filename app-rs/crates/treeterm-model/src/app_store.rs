@@ -33,6 +33,7 @@ use treeterm_core::wire::workspace_file::WorktreeSettings;
 
 use crate::session_store::{ConnectionStatus as SessionConnection, Restore, SessionEvent, SessionState, SessionStore};
 use crate::settings_store::SettingsStore;
+use crate::traffic::ConnectionTraffic;
 
 /// What a connection is doing, with its session store once connected.
 #[derive(Clone)]
@@ -59,6 +60,9 @@ pub struct SessionSlot {
     forwards_started: bool,
     /// Where the window goes once the session is restored.
     landing: Landing,
+    /// The connection's download meters: they outlive its generations, and a failed
+    /// connection replaced by a new connect keeps them.
+    traffic: Entity<ConnectionTraffic>,
     _events: Option<Subscription>,
 }
 
@@ -96,6 +100,12 @@ impl SessionSlot {
 
     pub fn is_local(&self) -> bool {
         matches!(self.target, ConnectionTarget::Local)
+    }
+
+    /// The connection's download meters (Main's `getByteCounter(connectionId)`, which the
+    /// slot's lookup by id makes unable to miss).
+    pub fn traffic(&self) -> &Entity<ConnectionTraffic> {
+        &self.traffic
     }
 
     /// The session store of the connected generation.
@@ -208,18 +218,19 @@ impl AppStore {
             sessions: IndexMap::new(),
             _status: status,
         };
-        store.insert_slot(local.id().clone(), ConnectionTarget::Local);
+        store.insert_slot(local.id().clone(), ConnectionTarget::Local, cx);
         store
     }
 
-    fn insert_slot(&mut self, id: ConnectionId, target: ConnectionTarget) {
-        self.sessions.entry(id.clone()).or_insert(SessionSlot {
+    fn insert_slot(&mut self, id: ConnectionId, target: ConnectionTarget, cx: &mut Context<Self>) {
+        self.sessions.entry(id.clone()).or_insert_with(|| SessionSlot {
             id,
             target,
             state: ConnState::Connecting(ConnectPhase::Daemon),
             previous: Previous::Nothing,
             forwards_started: false,
             landing: Landing::Stay,
+            traffic: cx.new(ConnectionTraffic::new),
             _events: None,
         });
     }
@@ -268,7 +279,7 @@ impl AppStore {
         {
             slot.state = ConnState::Connecting(ConnectPhase::Bootstrap);
         }
-        self.insert_slot(id.clone(), target);
+        self.insert_slot(id.clone(), target, cx);
         if let Some(slot) = self.sessions.get_mut(&id) {
             slot.landing = Landing::FirstOrHome;
         }
@@ -364,7 +375,7 @@ impl AppStore {
             cx.notify();
             return;
         }
-        self.insert_slot(id.clone(), target);
+        self.insert_slot(id.clone(), target, cx);
         let Some(slot) = self.sessions.get_mut(&id) else {
             return;
         };
@@ -378,6 +389,8 @@ impl AppStore {
             ConnectionStatus::Connecting { phase } => slot.state = ConnState::Connecting(phase),
             ConnectionStatus::Connected { daemon } => {
                 tracing::info!(%id, "connected");
+                let received = daemon.received().clone();
+                slot.traffic.update(cx, |traffic, cx| traffic.attach_generation(received, cx));
                 match std::mem::replace(&mut slot.previous, Previous::Nothing) {
                     Previous::Nothing => {
                         // The connection's first session (also a failed first connect,
@@ -426,9 +439,10 @@ impl AppStore {
             return;
         };
         let (client_id, settings, llm) = (self.client_id.clone(), self.settings.clone(), self.llm.clone());
+        let traffic = slot.traffic.clone();
         let remote = (!slot.is_local()).then(|| crate::web_app::RemoteHost { app: cx.weak_entity(), connection: id.clone() });
         let session = cx.new(|cx| {
-            let mut session = SessionStore::new(daemon, client_id, settings, llm, cx);
+            let mut session = SessionStore::new(daemon, client_id, settings, llm, traffic, cx);
             session.set_restore(restore);
             session.use_worktree_registry();
             if let Some(remote) = remote {

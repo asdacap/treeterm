@@ -18,6 +18,7 @@ use treeterm_model::harness_prompts::{self, HarnessPrompt};
 use treeterm_model::session_store::{SessionState, SessionStore, WorkspaceEntry};
 use treeterm_model::settings_store::SettingsStore;
 use treeterm_model::terminal::{Overlay, ScrollbarVisibility, TerminalModel, TerminalOptions};
+use treeterm_model::traffic::ConnectionTraffic;
 use treeterm_model::workspace_store::{TabContent, WorkspaceStore};
 use treeterm_proto::treeterm::WorkspaceRef;
 use treeterm_term::fit::WidthLimit;
@@ -72,7 +73,16 @@ fn open_store(
 ) -> Entity<SessionStore> {
     let conn = h.conn.clone();
     let settings = cx.new(|_| SettingsStore::in_memory(settings));
-    cx.new(|cx| SessionStore::new(conn, "client-a".into(), settings, llm, cx))
+    cx.new(|cx| {
+        SessionStore::new(
+            conn,
+            "client-a".into(),
+            settings,
+            llm,
+            cx.new(ConnectionTraffic::new),
+            cx,
+        )
+    })
 }
 
 /// A directory under the daemon's root as a loaded workspace with these tabs; its id and

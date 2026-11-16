@@ -15,6 +15,7 @@ use treeterm_model::keybinding_store::KeybindingStore;
 use treeterm_model::navigation::AfterDisconnect;
 use treeterm_model::session_names::Side;
 use treeterm_model::session_store::{SessionEvent, SessionStore, WorkspaceEntry};
+use treeterm_model::traffic::TrafficMeter;
 use treeterm_model::workspace_store::{ActivityStyle as _, PageHost, TabContent, WorkspaceStore};
 
 use crate::terminal_view::{Focus, TerminalView};
@@ -312,10 +313,13 @@ impl AppView {
     /// session shown (rebuilt for each new connection generation; a lost connection's last
     /// session stays, dimmed).
     fn sync(&mut self, store: &Entity<AppStore>, cx: &mut Context<Self>) {
-        let wanted: Vec<(ConnectionId, Option<Entity<SessionStore>>, treeterm_core::connection::ConnectionTarget)> = store
+        let wanted: Vec<_> = store
             .read(cx)
             .sessions()
-            .map(|slot| (slot.id.clone(), slot.shown_session().cloned(), slot.target.clone()))
+            .map(|slot| {
+                let traffic = slot.traffic().read(cx).connection().clone();
+                (slot.id.clone(), slot.shown_session().cloned(), slot.target.clone(), traffic)
+            })
             .collect();
         // The session the window shows: its pane, else its workspace view.
         let shown_before = match &self.info {
@@ -325,11 +329,11 @@ impl AppView {
         self.trees.retain(|id, _| wanted.iter().any(|(w, ..)| w == id));
         self.sessions
             .retain(|id, connected| wanted.iter().any(|(w, session, ..)| w == id && session.as_ref() == Some(&connected.session)));
-        for (id, session, target) in wanted {
+        for (id, session, target, traffic) in wanted {
             let pane = match self.trees.get(&id) {
                 Some(tree) => tree.pane.clone(),
                 None => {
-                    let tree = self.new_tree(id.clone(), target, cx);
+                    let tree = self.new_tree(id.clone(), target, traffic, cx);
                     let pane = tree.pane.clone();
                     self.trees.insert(id.clone(), tree);
                     pane
@@ -444,10 +448,17 @@ impl AppView {
         self.show_session(id, cx);
     }
 
-    /// Connection `id`'s sidebar section; [`Self::sync`] gives it the session to show.
-    fn new_tree(&mut self, id: ConnectionId, target: treeterm_core::connection::ConnectionTarget, cx: &mut Context<Self>) -> SessionTree {
+    /// Connection `id`'s sidebar section, with its download meter `traffic`; [`Self::sync`]
+    /// gives it the session to show.
+    fn new_tree(
+        &mut self,
+        id: ConnectionId,
+        target: treeterm_core::connection::ConnectionTarget,
+        traffic: Entity<TrafficMeter>,
+        cx: &mut Context<Self>,
+    ) -> SessionTree {
         let (keybindings, names, app) = (self.keybindings.clone(), self.names.clone(), self.store.clone());
-        let pane = cx.new(|cx| TreePane::new(app, id.clone(), keybindings, names, target, cx));
+        let pane = cx.new(|cx| TreePane::new(app, id.clone(), traffic, keybindings, names, target, cx));
         let (disconnect_id, info_id) = (id.clone(), id.clone());
         let events = [
             cx.subscribe(&pane, move |view, _, _: &crate::tree_pane::DisconnectRequested, cx| {
@@ -468,16 +479,18 @@ impl AppView {
         cx.observe(&session, |_, _, cx| cx.notify()).detach();
         let events_id = id.clone();
         let session_events = cx.subscribe(&session, move |view, session, event: &SessionEvent, cx| match event {
-            // The workspace shown was dismissed or removed (its session has none active): an
-            // edit of its header goes with it.
-            SessionEvent::WorkspaceRemoved(_) => {
-                if session.read(cx).active_workspace().is_some() {
+            SessionEvent::WorkspaceRemoved(workspace) => {
+                let Some(connected) = view.sessions.get_mut(&events_id) else {
                     return;
-                }
-                if let Some(connected) = view.sessions.get_mut(&events_id) {
+                };
+                // Its badge holds its meter, gone from the connection's (`removeWorkspace`).
+                connected.traffic_badges.remove(workspace);
+                // The workspace shown was dismissed or removed (its session has none
+                // active): an edit of its header goes with it.
+                if session.read(cx).active_workspace().is_none() {
                     connected.header_edit = None;
+                    cx.notify();
                 }
-                cx.notify();
             }
             // Where the window lands once restored is the app store's (`AppEvent::ShowSession`).
             SessionEvent::Restored

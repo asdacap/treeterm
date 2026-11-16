@@ -18,6 +18,7 @@ use treeterm_model::auto_open::{AutoOpenEvent, AutoOpenModel, AutoOpenRow};
 use treeterm_model::child_dialog::Listing;
 use treeterm_model::session_store::{AdoptOptions, SessionState, SessionStore, WorkspaceEntry};
 use treeterm_model::settings_store::SettingsStore;
+use treeterm_model::traffic::ConnectionTraffic;
 use treeterm_proto::treeterm::WorkspaceRef;
 
 mod common;
@@ -57,7 +58,14 @@ impl Fixture {
         );
         let conn = h.conn.clone();
         let store = cx.new(|cx| {
-            let mut store = SessionStore::new(conn, "client-a".to_owned(), settings, None, cx);
+            let mut store = SessionStore::new(
+                conn,
+                "client-a".to_owned(),
+                settings,
+                None,
+                cx.new(ConnectionTraffic::new),
+                cx,
+            );
             store.set_worktree_registry(registry);
             store
         });

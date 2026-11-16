@@ -415,8 +415,9 @@ pub struct SessionStore {
     disposed: bool,
     /// The daemon's id for the session (from the last snapshot).
     session_id: String,
-    /// Every byte received from the daemon on this connection, and its rate.
-    traffic: Entity<crate::traffic::TrafficMeter>,
+    /// The connection's download meters (its slot's): each workspace's is kept by id across
+    /// generations.
+    traffic: Entity<crate::traffic::ConnectionTraffic>,
     _session_watch: Task<()>,
 }
 
@@ -426,6 +427,7 @@ impl SessionStore {
         client_id: String,
         settings: Entity<SettingsStore>,
         llm: Option<crate::analyzer::LlmService>,
+        traffic: Entity<crate::traffic::ConnectionTraffic>,
         cx: &mut Context<Self>,
     ) -> Self {
         let github_settings: crate::git_controller::SharedGithubSettings =
@@ -458,8 +460,6 @@ impl SessionStore {
         let settings_events = cx.subscribe(&settings, |session, _, event: &SettingsEvent, cx| match event {
             SettingsEvent::Changed => session.on_settings_changed(cx),
         });
-        let received = conn.received().clone();
-        let traffic = cx.new(|cx| crate::traffic::TrafficMeter::new(received, cx));
         Self {
             conn,
             llm,
@@ -547,11 +547,6 @@ impl SessionStore {
             "workspaceDataDir": self.data_dir,
             "workspaces": workspaces,
         })
-    }
-
-    /// The connection's download rate (`ConnectionTrafficBadge`).
-    pub fn traffic(&self) -> &Entity<crate::traffic::TrafficMeter> {
-        &self.traffic
     }
 
     pub fn registry(&self) -> &Rc<AppRegistry> {
@@ -756,6 +751,8 @@ impl SessionStore {
             .collect();
         for id in dropped_placeholders {
             self.syncs.remove(&id);
+            // An earlier generation may have loaded it.
+            self.traffic.update(cx, |traffic, _| traffic.remove_workspace(&id));
             self.entries.shift_remove(&id);
             self.git_controllers.remove(&id);
             self.forget_active(&id);
@@ -801,6 +798,7 @@ impl SessionStore {
             store.update(cx, |store, _| store.dispose());
         }
         self.git_controllers.remove(id);
+        self.traffic.update(cx, |traffic, _| traffic.remove_workspace(id));
         self.forget_active(id);
         self.refresh_inherited(cx);
         cx.emit(SessionEvent::WorkspaceRemoved(id.to_owned()));
@@ -1010,7 +1008,8 @@ impl SessionStore {
         let settings = self.settings.read(cx).settings().clone();
         let llm = self.llm.clone();
         let remote = self.remote.clone();
-        let store = cx.new(|cx| WorkspaceStore::new(workspace, conn, registry, settings, llm, remote, cx));
+        let traffic = self.traffic.update(cx, |traffic, cx| traffic.workspace(&id, cx));
+        let store = cx.new(|cx| WorkspaceStore::new(workspace, conn, registry, settings, llm, remote, traffic, cx));
         let owned = id.clone();
         let subscription = cx.subscribe(&store, move |session, store, event: &WorkspaceEvent, cx| match event {
             WorkspaceEvent::Changed => session.enqueue_content_sync(&owned, cx),

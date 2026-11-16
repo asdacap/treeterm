@@ -7,6 +7,7 @@ use serde_json::{Value, json};
 use treeterm_core::layout::{Dock, DropTarget, Edge, Layout, LayoutNode, LayoutTabSet, Maximize, Orientation, Side};
 use treeterm_model::session_store::{SessionState, SessionStore, WorkspaceEntry};
 use treeterm_model::settings_store::SettingsStore;
+use treeterm_model::traffic::ConnectionTraffic;
 use treeterm_model::workspace_store::WorkspaceStore;
 use treeterm_proto::treeterm::WorkspaceRef;
 
@@ -16,7 +17,7 @@ use common::{Harness, harness, wait_until, wait_until_app};
 fn open_store(cx: &mut TestAppContext, h: &Harness) -> Entity<SessionStore> {
     let conn = h.conn.clone();
     let settings = cx.new(|_| SettingsStore::in_memory(Default::default()));
-    cx.new(|cx| SessionStore::new(conn, "client-a".into(), settings, None, cx))
+    cx.new(|cx| SessionStore::new(conn, "client-a".into(), settings, None, cx.new(ConnectionTraffic::new), cx))
 }
 
 /// Settings tabs (no PTY, closable) with these ids, titled after them.

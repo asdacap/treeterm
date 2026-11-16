@@ -30,6 +30,8 @@ pub struct TreePane {
     /// tree shows its banner and dims the rows.
     app: Entity<AppStore>,
     connection: ConnectionId,
+    /// Bytes per second received from the connection's daemon, across its generations.
+    traffic: Entity<crate::traffic_badge::TrafficBadge>,
     keybindings: Entity<KeybindingStore>,
     /// The session's name: custom, else "LOCAL" or the ssh label.
     names: Entity<treeterm_model::session_names::SessionNames>,
@@ -53,8 +55,6 @@ enum Shown {
     /// The connected generation's store, or the last one's while the connection is down.
     Session {
         store: Entity<SessionStore>,
-        /// Bytes per second received from that generation's daemon.
-        traffic: Entity<crate::traffic_badge::TrafficBadge>,
         _changes: gpui_kit::Subscription,
     },
 }
@@ -99,10 +99,11 @@ impl EventEmitter<DisconnectRequested> for TreePane {}
 
 impl TreePane {
     /// The section of connection `connection`, showing no session until
-    /// [`Self::set_session`] gives it one.
+    /// [`Self::set_session`] gives it one. `traffic` is the connection's download meter.
     pub fn new(
         app: Entity<AppStore>,
         connection: ConnectionId,
+        traffic: Entity<treeterm_model::traffic::TrafficMeter>,
         keybindings: Entity<KeybindingStore>,
         names: Entity<treeterm_model::session_names::SessionNames>,
         target: treeterm_core::connection::ConnectionTarget,
@@ -112,10 +113,12 @@ impl TreePane {
         cx.observe(&keybindings, |_, _, cx| cx.notify()).detach();
         cx.observe(&names, |_, _, cx| cx.notify()).detach();
         let remote = matches!(target, treeterm_core::connection::ConnectionTarget::Remote(_));
+        let traffic = cx.new(|cx| crate::traffic_badge::TrafficBadge::new(traffic, "connection-traffic", cx));
         Self {
             session: Shown::Nothing,
             app,
             connection,
+            traffic,
             keybindings,
             names,
             target,
@@ -145,9 +148,7 @@ impl TreePane {
                     cx.notify();
                 });
                 self.view.observe(store.read(cx).child_edges(cx));
-                let meter = store.read(cx).traffic().clone();
-                let traffic = cx.new(|cx| crate::traffic_badge::TrafficBadge::new(meter, "connection-traffic", cx));
-                Shown::Session { store, traffic, _changes: changes }
+                Shown::Session { store, _changes: changes }
             }
         };
         cx.notify();
@@ -278,16 +279,6 @@ impl Render for TreePane {
         let banner = self.connection_banner(link.as_ref(), cx);
         let status_icon = status_icon(link.as_ref(), cx);
         let connected = matches!(link, Some(ConnState::Connected(_)));
-        let traffic = match &self.session {
-            Shown::Session { traffic, .. } => traffic.clone().into_any_element(),
-            // `ConnectionTrafficBadge` before its first sample.
-            Shown::Nothing => div()
-                .flex_shrink_0()
-                .font_weight(gpui_kit::FontWeight::NORMAL)
-                .whitespace_nowrap()
-                .child("↓ …")
-                .into_any_element(),
-        };
         let locked = self.store().filter(|session| session.read(cx).is_locked()).cloned();
         let title = match &self.renaming {
             Some((input, _)) => div()
@@ -316,7 +307,7 @@ impl Render for TreePane {
                 .text_color(text_secondary)
                 .child(status_icon)
                 .child(div().truncate().child(self.names.read(cx).name(&self.target).to_uppercase()))
-                .child(traffic)
+                .child(self.traffic.clone())
                 .when_some(locked, |d, session| {
                     d.child(
                         div()

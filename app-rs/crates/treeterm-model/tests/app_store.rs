@@ -15,9 +15,11 @@ use treeterm_core::connection::process::ProcessCommand;
 use treeterm_core::connection::{ConnectionId, OutdatedDaemon, StatusKind};
 use treeterm_core::local_daemon::LocalDaemonSpec;
 use treeterm_core::settings::{Extra, PortForwardSpec, SshConnectionConfig};
+use treeterm_core::traffic::TrafficRate;
 use treeterm_model::app_store::{AppEvent, AppStore, ConnState, SessionSlot};
 use treeterm_model::session_store::{SessionState, SessionStore, WorkspaceEntry};
 use treeterm_model::settings_store::SettingsStore;
+use treeterm_model::traffic::{ConnectionTraffic, TrafficMeter};
 use treeterm_proto::treeterm::WorkspaceRef;
 use treeterm_testkit::fake_ssh::{Proxy, fake_ssh_response, remote_config, ssh_env};
 
@@ -610,4 +612,84 @@ fn the_sidebars_reconnect_after_a_session_that_did_not_load_stops_at_the_error_a
             StatusKind::Error
         ]
     );
+}
+
+fn tick(cx: &mut TestAppContext) {
+    cx.executor()
+        .advance_clock(treeterm_core::traffic::TRAFFIC_TICK);
+    cx.run_until_parked();
+}
+
+/// The remote connection's download meters, and what its own one shows.
+fn remote_traffic(
+    cx: &mut TestAppContext,
+    app: &App,
+) -> (Entity<ConnectionTraffic>, Entity<TrafficMeter>, TrafficRate) {
+    let traffic = app
+        .app
+        .read_with(cx, |a, _| remote(a).unwrap().traffic().clone());
+    let meter = traffic.read_with(cx, |t, _| t.connection().clone());
+    let rate = meter.read_with(cx, |m, _| m.rate());
+    (traffic, meter, rate)
+}
+
+#[gpui_kit::test]
+fn the_connections_download_meter_spans_its_reconnects(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    isolated_home();
+    let h = harness();
+    let app = app(cx, &h, None);
+    app.connect(cx);
+    let first = app.restored(cx);
+    tick(cx);
+    let (traffic, meter, before) = remote_traffic(cx, &app);
+    assert!(before.total_bytes > 0, "the session was downloaded");
+
+    let forced = app
+        .app
+        .read_with(cx, |a, _| a.manager().force_reconnect(&remote_id()));
+    forced.unwrap();
+    wait_until_app(cx, &app.app, |a, cx| {
+        remote(a)
+            .and_then(SessionSlot::session)
+            .is_some_and(|s| *s != first && matches!(s.read(cx).state(), SessionState::Live))
+    });
+    tick(cx);
+
+    let (traffic_after, meter_after, after) = remote_traffic(cx, &app);
+    assert_eq!((traffic_after, meter_after), (traffic, meter.clone()));
+    // Never "↓ …" again, and the next generation's bytes count on from the total.
+    assert!(meter.read_with(cx, |m, _| m.is_sampled()));
+    assert!(after.total_bytes > before.total_bytes);
+}
+
+#[gpui_kit::test]
+fn a_failed_connection_replaced_by_a_new_connect_keeps_its_download_meter(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    isolated_home();
+    let h = harness();
+    let app = app(cx, &h, None);
+    let (broken, _conn) = refusing_daemon(tonic::Status::internal("boom"));
+    *app.host_daemon.lock().unwrap() = broken.socket_path().to_owned();
+    app.connect(cx);
+    wait_until(cx, &app.app, |a| {
+        matches!(
+            remote(a).map(|slot| &slot.state),
+            Some(ConnState::Failed { .. })
+        )
+    });
+    tick(cx);
+    let (traffic, meter, before) = remote_traffic(cx, &app);
+    assert!(before.total_bytes > 0, "the refusal was received");
+
+    // Connect again: the failed connection is replaced (`connectionManager.ts`: a replaced
+    // stale entry hands over its counter).
+    *app.host_daemon.lock().unwrap() = h.daemon.socket_path().to_owned();
+    app.connect(cx);
+    app.restored(cx);
+    tick(cx);
+
+    let (traffic_after, meter_after, after) = remote_traffic(cx, &app);
+    assert_eq!((traffic_after, meter_after), (traffic, meter));
+    assert!(after.total_bytes > before.total_bytes);
 }
