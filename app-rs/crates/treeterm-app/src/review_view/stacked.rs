@@ -586,11 +586,8 @@ impl ReviewView {
         let input = cx.new(|cx| {
             TextareaState::new(window, cx).placeholder("Add your comment... (Cmd/Ctrl+Enter to submit, Esc to cancel)")
         });
+        // Cmd/Ctrl+Enter submits in `comment_input`, before the textarea sees it.
         let events = cx.subscribe_in(&input, window, |view, input, event: &InputEvent, _, cx| match event {
-            InputEvent::PressEnter { secondary: true, .. } => {
-                let text = input.read(cx).value().to_string();
-                view.model.update(cx, |m, cx| m.submit_comment(&text, cx));
-            }
             InputEvent::Change => {
                 if let Some(draft) = &mut view.draft_input {
                     draft.text = input.read(cx).value().to_string();
