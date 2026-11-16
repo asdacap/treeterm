@@ -1123,6 +1123,15 @@ impl Render for AppView {
         for (_, connected) in self.sessions.iter().filter(|(id, _)| on_screen.as_ref() != Some(*id)) {
             hide_tab_views(connected, cx);
         }
+        // Electron keeps the workspace pane of the session it shows mounted, behind that
+        // session's pane too, and in it only the active workspace's tabs.
+        let mounted = match &info {
+            Some(info) => Some(info.read(cx).connection(cx)),
+            None => self.active.clone(),
+        };
+        for (id, connected) in &self.sessions {
+            unmount_hidden_reviews(connected, mounted.as_ref() == Some(id), cx);
+        }
         // A session off screen shows no terminal: its terminals are shown again (fit again,
         // the active tab's takes focus) when it returns.
         for (_, connected) in self.sessions.iter_mut().filter(|(id, _)| on_screen.as_ref() != Some(*id)) {
@@ -2323,6 +2332,29 @@ fn tabset_strip(
     let id = format!("{workspace_id}-{}", path.iter().map(usize::to_string).collect::<Vec<_>>().join("-"));
     let state = connected.tab_strips.entry((workspace_id.to_owned(), path)).or_default();
     strip.render(&id, state, cx.entity_id(), cx)
+}
+
+/// Electron unmounts the tabs of every workspace but the active one of the session shown
+/// (`TabContentPortals`; `session_shown`: this is that session), and keeps that one's
+/// mounted while it shows an operation's failure: the other Review tabs' file trees start
+/// afresh when shown again.
+fn unmount_hidden_reviews(connected: &Connected, session_shown: bool, cx: &mut Context<AppView>) {
+    let mounted = {
+        let session = connected.session.read(cx);
+        match session.active_workspace().and_then(|id| session.entry(id)) {
+            Some(WorkspaceEntry::Loaded(store) | WorkspaceEntry::OperationError { store, .. }) if session_shown => {
+                Some(store.entity_id())
+            }
+            Some(WorkspaceEntry::Loaded(_) | WorkspaceEntry::OperationError { .. } | WorkspaceEntry::Loading { .. } | WorkspaceEntry::Error { .. })
+            | None => None,
+        }
+    };
+    let reviews: Vec<Entity<crate::review_view::ReviewView>> = connected.review_views.values().cloned().collect();
+    for view in reviews {
+        if mounted != Some(view.read(cx).workspace_id()) {
+            view.update(cx, |v, _| v.unmount_file_trees());
+        }
+    }
 }
 
 /// No workspace's tabs are on screen (none picked, or the one picked was removed, is loading,

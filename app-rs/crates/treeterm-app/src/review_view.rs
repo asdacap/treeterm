@@ -1091,6 +1091,17 @@ impl ReviewView {
         self.model.update(cx, |m, cx| m.set_visible(visible, cx));
     }
 
+    /// The workspace whose tab this is.
+    pub fn workspace_id(&self) -> EntityId {
+        self.workspace.entity_id()
+    }
+
+    /// Electron unmounted the tab, its workspace no longer the one it shows: its file trees
+    /// mount again with every directory open.
+    pub fn unmount_file_trees(&mut self) {
+        self.folds.unmount_all();
+    }
+
     /// `renderRightPane`: the selected favourite's file viewer in the diff's place. Electron
     /// unmounts the diff's list meanwhile: back to the diff, a new list starts.
     fn favourite_pane(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {

@@ -201,6 +201,12 @@ impl<K: Copy + Eq + Hash> DirFolds<K> {
         self.open.remove(&tree);
     }
 
+    /// Every tree is unmounted (Electron unmounts the whole tab).
+    pub fn unmount_all(&mut self) {
+        self.open.clear();
+        self.shown.clear();
+    }
+
     /// A frame was drawn: the trees it did not show are unmounted.
     pub fn end_frame(&mut self) {
         let shown = std::mem::take(&mut self.shown);
@@ -418,6 +424,24 @@ mod tests {
         folds.unmount(Tree::Staged);
         folds.show(Tree::Staged, &tree);
         assert!(folds.is_open(Tree::Staged, "src"));
+    }
+
+    #[test]
+    fn every_tree_starts_afresh_once_the_tab_is_unmounted() {
+        let tree = build_tree(&[("src/a.rs", text(1, 0))]);
+        let mut folds = DirFolds::default();
+        for kind in [Tree::Staged, Tree::Unstaged] {
+            folds.show(kind, &tree);
+            folds.toggle(kind, "src");
+        }
+        folds.end_frame();
+        folds.unmount_all();
+        // Shown again: every directory open, one that appeared meanwhile too.
+        let grown = build_tree(&[("src/a.rs", text(1, 0)), ("lib/b.rs", text(1, 0))]);
+        for kind in [Tree::Staged, Tree::Unstaged] {
+            folds.show(kind, &grown);
+            assert!(folds.is_open(kind, "src") && folds.is_open(kind, "lib"), "{kind:?}");
+        }
     }
 
     #[test]
