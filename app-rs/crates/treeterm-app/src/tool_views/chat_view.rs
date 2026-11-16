@@ -24,7 +24,8 @@ pub struct ChatView {
     /// after every render of the chat: a change of the conversation (a message, a streamed
     /// chunk, an error, streaming starting or stopping, the reasoning), a keystroke in the
     /// input, and the tab shown again (see `render`). GPUI also renders on a hover, which
-    /// must not pin the list to the bottom while it is being scrolled up.
+    /// must not pin the list to the bottom while it is being scrolled up (a list at its bottom
+    /// stays there, see `render`).
     scroll_pending: bool,
     _subscriptions: Vec<Subscription>,
 }
@@ -113,7 +114,12 @@ impl Render for ChatView {
         // after frame: a new one means the chat was not on screen (or is new).
         let mut shown = false;
         window.use_keyed_state(SharedString::from(format!("chat-shown-{}", cx.entity_id())), cx, |_, _| shown = true);
-        if std::mem::take(&mut self.scroll_pending) || shown {
+        // Electron lays a message out in the render that scrolls to it. A text view parses a
+        // text over 4 KiB, and every chunk appended to one, in the background, and the list
+        // grows a frame or more later (its view is notified then): content that grows under
+        // a list at its bottom carries it down. A list scrolled up stays where it is.
+        let at_bottom = -self.scroll.offset().y >= self.scroll.max_offset().y - px(0.5);
+        if std::mem::take(&mut self.scroll_pending) || shown || at_bottom {
             self.scroll.scroll_to_bottom();
         }
         let c = colors(cx);
@@ -469,14 +475,33 @@ mod tests {
         assert_eq!(scrolled(pane, cx).0, px(0.), "the wheel scrolled the list to its top");
     }
 
+    /// The pane's chat over `state`, as a message sent or a streamed chunk changes the
+    /// conversation, which reaches the view as a notification of its model. A `ChatModel`
+    /// changes its messages only from an LLM through a workspace, which this test has not.
+    fn change(pane: &Entity<Pane>, state: Value, cx: &mut VisualTestContext) {
+        let chat = cx.update(|_, cx| pane.read(cx).chat.clone());
+        chat.update(cx, |view, cx| {
+            view.model = cx.new(|_| ChatModel::new(None, &state, WeakEntity::new_invalid()));
+            view.scroll_to_bottom(cx);
+        });
+    }
+
     /// Electron's `ScrollAnchor` scrolls to the bottom after every render of the chat: when the
     /// conversation changes (an error added below a long conversation included), on every
     /// keystroke in the input, and when the tab is shown again. A hover does not move it.
+    /// Electron lays a message out in the render that adds it. Here a text over 4 KiB, and every
+    /// chunk appended to one, is parsed off the UI thread and laid out in a later frame, after
+    /// the one that scrolled: it must carry the list at its bottom down with it.
     #[gpui_kit::test]
     fn the_list_scrolls_to_the_bottom_when_the_chat_changes_is_typed_in_or_is_shown_again(cx: &mut TestAppContext) {
-        let texts: Vec<String> = (0..40).map(|ix| format!("message {ix}")).collect();
-        let texts: Vec<&str> = texts.iter().map(String::as_str).collect();
-        let (chat, pane, cx) = open(conversation(&texts), cx);
+        let mut texts: Vec<String> = (0..38).map(|ix| format!("message {ix}")).collect();
+        // Pasted code, over 4 KiB once escaped, and a reply with code over 4 KiB.
+        texts.push("    let x = 1;\n".repeat(100));
+        texts.push(format!("Here is the code:\n\n```rust\n{}```\n", "let x = 1;\n".repeat(400)));
+        let state = |texts: &[String]| conversation(&texts.iter().map(String::as_str).collect::<Vec<_>>());
+        // Opening the window draws the chat, and `open` draws it again once the long messages
+        // are parsed.
+        let (chat, pane, cx) = open(state(&texts), cx);
         assert!(at_bottom(&pane, cx), "a chat opens at its last message: {:?}", scrolled(&pane, cx));
 
         // Scrolled up, the list stays where it is while the pointer moves over it.
@@ -509,8 +534,26 @@ mod tests {
             pane.shown = true;
             cx.notify();
         });
+        // The frame that hands the messages their text, then the one that lays out the long
+        // ones once parked.
         draw(cx);
-        assert!(at_bottom(&pane, cx), "showing the tab again scrolled to the bottom");
+        draw(cx);
+        assert!(at_bottom(&pane, cx), "showing the tab again scrolled to the bottom: {:?}", scrolled(&pane, cx));
+
+        // A long message of yours sent, and the start of the reply.
+        let pasted = "    let y = 2;\n".repeat(100);
+        texts.extend([pasted, "Here is".to_owned()]);
+        change(&pane, state(&texts), cx);
+        draw(cx);
+        draw(cx);
+        assert!(at_bottom(&pane, cx), "a long message sent kept the list at its bottom: {:?}", scrolled(&pane, cx));
+
+        // A chunk streamed into the reply.
+        *texts.last_mut().expect("the reply") = format!("Here is{}", "\n\nmore of it".repeat(30));
+        change(&pane, state(&texts), cx);
+        draw(cx);
+        draw(cx);
+        assert!(at_bottom(&pane, cx), "a streamed chunk kept the list at its bottom: {:?}", scrolled(&pane, cx));
 
         // Drawn again while shown, it keeps its place.
         wheel_to_top(&pane, cx);
