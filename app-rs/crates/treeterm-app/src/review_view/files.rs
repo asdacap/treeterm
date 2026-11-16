@@ -250,13 +250,14 @@ fn rows(
                 outline_button(SharedString::from(format!("{id}-stage-{}", file.path)), 10., (2., 8.), 3., !busy, cx)
                     .ml_auto()
                     .child(if staged { "Unstage" } else { "Stage" })
-                    .when(!busy, |d| {
-                        d.on_click(cx.listener(move |view, _: &ClickEvent, _, cx| {
-                            cx.stop_propagation();
+                    .on_click(cx.listener(move |view, _: &ClickEvent, _, cx| {
+                        // Disabled while staging runs, it still keeps the click from the row.
+                        cx.stop_propagation();
+                        if !busy {
                             let target = target.clone();
                             view.model.update(cx, |m, cx| if staged { m.unstage(target, cx) } else { m.stage(target, cx) });
-                        }))
-                    })
+                        }
+                    }))
             });
             let row = div()
                 .id(SharedString::from(format!("{id}-file-{}", file.path)))

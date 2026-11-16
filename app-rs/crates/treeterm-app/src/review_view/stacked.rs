@@ -872,15 +872,16 @@ fn header_row(
                 Staging::Staged => (format!("header-unstage-{}", file.path), "Unstage"),
                 Staging::Unstaged => (format!("header-stage-{}", file.path), "Stage"),
             };
-            outline_button(SharedString::from(id), 11., (1., 6.), 3., !staging_busy, cx).child(label).when(!staging_busy, |d| {
-                d.on_click(move |_, _, cx| {
-                    cx.stop_propagation();
+            outline_button(SharedString::from(id), 11., (1., 6.), 3., !staging_busy, cx).child(label).on_click(move |_, _, cx| {
+                // Disabled while staging runs, it still keeps the click from the header.
+                cx.stop_propagation();
+                if !staging_busy {
                     let target = target.clone();
                     model.update(cx, |m, cx| match staged {
                         Staging::Staged => m.unstage(target, cx),
                         Staging::Unstaged => m.stage(target, cx),
                     });
-                })
+                }
             })
         })
         .collect();
