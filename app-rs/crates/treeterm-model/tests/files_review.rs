@@ -1157,6 +1157,65 @@ fn review_find_lists_the_diffs_matches_this_file_first_and_steps_through_them(cx
     assert_eq!(review.read_with(cx, |r, _| r.find().clone()), DiffFind::Closed { query: String::new() });
 }
 
+#[gpui_kit::test]
+fn review_find_opens_only_while_the_diff_list_is_on_screen(cx: &mut TestAppContext) {
+    use treeterm_model::review::Loaded;
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let repo = TempRepo::new(&h);
+    repo.write("notes.md", "notes\n");
+    let (workspace, review) = feature_review(cx, &h, &repo, "commits");
+    // Cmd+F: whether the bar opens (closed again after).
+    let opens = |cx: &mut TestAppContext| {
+        review.update(cx, |r, cx| r.open_find("a.txt", cx));
+        let open = matches!(review.read_with(cx, |r, _| r.find().clone()), DiffFind::Open(_));
+        assert_eq!(open, review.read_with(cx, |r, _| r.diff_on_screen()));
+        review.update(cx, |r, cx| r.close_find(cx));
+        open
+    };
+
+    // Commits: not while it loads, nor before a commit is picked; then even while the
+    // commit's diff loads (its list shows "0/0 viewed").
+    assert!(matches!(review.read_with(cx, |r, _| r.content()), ReviewContent::Loading));
+    assert!(!opens(cx));
+    wait_review(cx, &review, "commits", |r, _| matches!(r.content(), ReviewContent::Commits(c) if c.len() == 1));
+    assert!(!opens(cx));
+    let picked = review.read_with(cx, |r, _| match r.content() {
+        ReviewContent::Commits(commits) => commits[0].hash.clone(),
+        other => panic!("{other:?}"),
+    });
+    review.update(cx, |r, cx| r.select_commit(&picked, cx));
+    assert!(matches!(review.read_with(cx, |r, _| r.selected_commit().map(|s| s.diff.clone())), Some(Loaded::Loading)));
+    assert!(opens(cx));
+
+    // Committed and Uncommitted with changes.
+    review.update(cx, |r, cx| r.set_mode(ReviewMode::Committed, cx));
+    wait_review(cx, &review, "committed", |r, _| matches!(r.content(), ReviewContent::Committed(c) if c.files.len() == 1));
+    assert!(opens(cx));
+    review.update(cx, |r, cx| r.set_mode(ReviewMode::Uncommitted, cx));
+    wait_review(cx, &review, "uncommitted", |r, _| matches!(r.content(), ReviewContent::Uncommitted(u) if u.changes.files.len() == 1));
+    assert!(opens(cx));
+
+    // A favourite's viewer in the diff's place: not until the diff is back.
+    workspace.update(cx, |w, cx| w.add_favourite_path("notes.md", cx));
+    wait_review(cx, &review, "favourites", |r, _| matches!(r.favourites(), Favourites::Ready(files) if files.len() == 1));
+    let Favourites::Ready(files) = review.read_with(cx, |r, _| r.favourites().clone()) else { unreachable!() };
+    review.update(cx, |r, cx| r.select_favourite(files[0].clone(), cx));
+    assert!(!opens(cx));
+    review.update(cx, |r, cx| r.show_diff(cx));
+    assert!(opens(cx));
+
+    // No changes ("No committed changes to show"), and a diff that failed to load.
+    review.update(cx, |r, cx| r.set_mode(ReviewMode::Committed, cx));
+    review.update(cx, |r, cx| r.set_base(Some("feature".into()), cx));
+    wait_review(cx, &review, "no changes", |r, _| matches!(r.content(), ReviewContent::Committed(c) if c.files.is_empty()));
+    assert!(!opens(cx));
+    review.update(cx, |r, cx| r.set_base(Some("no-such-branch".into()), cx));
+    wait_review(cx, &review, "failed", |r, _| matches!(r.content(), ReviewContent::Failed(_)));
+    assert!(!opens(cx));
+}
+
 /// A Review tab with `state` (e.g. a base override) on the repo's workspace, and its tab id.
 fn open_review_with(cx: &mut TestAppContext, workspace: &Entity<WorkspaceStore>, state: serde_json::Value) -> (String, Entity<ReviewModel>) {
     let tab = workspace.update(cx, |w, cx| w.add_tab_with("review", state, cx)).unwrap();

@@ -627,18 +627,6 @@ impl ReviewView {
             .bg(colors(cx).bg_primary)
             .border_0()
             .decorations(decorations)
-            .on_line_hover({
-                // The file being read, for the find bar's "In this file".
-                let this = this.clone();
-                move |position, _, cx| {
-                    if let Some(position) = position {
-                        let path = position.path().to_string();
-                        match this.update(cx, |view, _| view.hovered_file = Some(path)) {
-                            Ok(()) | Err(_) => {} // Err: the tab closed
-                        }
-                    }
-                }
-            })
             .annotations(annotations)
             // `.file-diff-header` is `position: sticky; top: 0` in its file's section.
             .render_sticky_header(move |file, _, cx| {
@@ -1541,6 +1529,30 @@ mod tests {
         assert_eq!(file_at(298., cx).as_deref(), Some("b.txt"));
         assert_eq!(file_at(299., cx), None, "below the rows");
         assert_eq!(cx.update(|_, cx| state.read(cx).file_at(gpui_kit::point(px(400.), px(50.)))), None, "beside them");
+    }
+
+    #[gpui_kit::test]
+    fn a_line_scrolled_to_a_third_of_the_way_down_sits_there(cx: &mut gpui_kit::TestAppContext) {
+        use gpui_kit::test::TestQueryExt as _;
+        let (state, cx) = three_files(cx);
+        let line = DiffLinePosition::new("b.txt", DiffSide::Modified, 20);
+        let top = |cx: &mut gpui_kit::VisualTestContext| {
+            cx.update(|window, _| f32::from(window.find_by_label("Select Modified line 20").bounds().top()))
+        };
+        state.update(cx, |s, cx| s.scroll_to_line(line.clone(), cx));
+        draw(cx);
+        let at_top = top(cx);
+        // The rows above it are estimated until laid out: again once they are.
+        for _ in 0..2 {
+            state.update(cx, |s, cx| s.scroll_to_line_at(line.clone(), 1. / 3., cx));
+            draw(cx);
+        }
+        assert!((top(cx) - at_top - 100.).abs() <= 1., "{} below the top", top(cx) - at_top);
+
+        // At the start of the list it stops there.
+        state.update(cx, |s, cx| s.scroll_to_line_at(DiffLinePosition::new("a.txt", DiffSide::Modified, 1), 1. / 3., cx));
+        draw(cx);
+        assert_eq!(header_top(&state, "a.txt", cx), Some(px(0.)));
     }
 
     fn band(state: &Entity<DiffState>, cx: &mut gpui_kit::VisualTestContext) -> Vec<String> {

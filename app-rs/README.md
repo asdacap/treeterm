@@ -109,9 +109,9 @@ Done (tested against a real in-process daemon unless noted):
   comments (Electron's metadata format), viewed files, image diffs (before / after), each
   file's diff loading, failing and refreshed (its header's refresh button) on its own,
   favourites outside the diff shown in the Files viewer (with its comments) in the diff's place,
-  find in the diff (Cmd/Ctrl+F: matches in the file being read, then the rest of the diff,
-  then the repo; the diff's menu searches or copies the selected text or the word under the
-  pointer), prompting the AI harness; live merge
+  find in the diff (Cmd/Ctrl+F: matches in the file at the top of the diff, then the rest of
+  the diff, then the repo; the diff's menu searches or copies the selected text or the word
+  under the pointer), prompting the AI harness; live merge
   output; git status (uncommitted / conflicts / behind, Pull) and PR indicators.
 - **Web (M8):** Browser tabs in a native webview (localhost guard); Web App tabs (free port
   probed on the daemon's host, dev server with `$PORT`, page once it answers); on remote
@@ -188,6 +188,9 @@ are not ours). Its changes are marked `TreeTerm patch` (`grep -rn "TreeTerm patc
   painted under a point) and `DiffState::file_at` (the file whose row is under it), so the
   diff's right-click menu searches or copies the word under the pointer and searches the
   file right-clicked, as Electron's `StackedDiffList` does.
+- `src/diff/state.rs`: `DiffState::scroll_to_line_at` parks a line part of the way down the
+  viewport, so a find match sits a third of the way down, clear of the pinned file header,
+  as in Electron; `scroll_to_line` puts it at the very top, under that header.
 - `src/highlighter/languages.rs`: TSX is highlighted with the Kit's TypeScript query, as
   TypeScript is. The Kit used `tree_sitter_typescript::HIGHLIGHTS_QUERY`, which only adds
   TypeScript's captures to the JavaScript query, so `.tsx` files (in the Files viewer, the
@@ -249,8 +252,6 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   out, zoom level, Zoom in and Print (100% is the width WebKit fits the pages to, not the
   pages' own size). There is no page box, thumbnails, fit or rotate; those need a bundled
   PDF viewer (pdf.js).
-- Review's find: "In this file" for Cmd/Ctrl+F is the file last under the pointer (else the
-  one at the top of the diff).
 
 ## Known differences from Electron (deliberate)
 

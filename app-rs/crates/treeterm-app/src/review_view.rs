@@ -90,8 +90,6 @@ pub struct ReviewView {
     /// shown when it last scrolled.
     merge_scroll: ScrollHandle,
     merge_len: usize,
-    /// The file under the pointer last ("In this file" for Cmd/Ctrl+F).
-    hovered_file: Option<String>,
     /// The find bar's box, its results list, and the matches it lists.
     find_input: Option<(Entity<InputState>, Subscription)>,
     find_results: crate::search_panel::ResultsList,
@@ -99,8 +97,11 @@ pub struct ReviewView {
     /// The bar opening and the chosen match last applied (`focus`, `seq`).
     find_focused: u64,
     find_revealed: u64,
+    /// The line the chosen match selected in the diff, unselected when no match is chosen.
+    find_selection: Option<gpui_kit::component::diff::DiffLineRange>,
     _observe: Subscription,
     _events: Subscription,
+    _focus_lost: Subscription,
 }
 
 impl ReviewView {
@@ -119,6 +120,16 @@ impl ReviewView {
             | ReviewEvent::CloseRequested
             | ReviewEvent::MergeRequested { .. }
             | ReviewEvent::CloseAndCleanRequested => {}
+        });
+        // Electron's Cmd/Ctrl+F works with focus on nothing (`document.body`), as once the find
+        // box or a comment box is gone: here focus goes back into the Review, nearest to what
+        // went, so its shortcuts still reach it.
+        let focus_lost = cx.on_focus_lost(window, |view, window, cx| {
+            if let Some(target) = window.focus_lost_restore_target(cx)
+                && view.focus.contains(&target, window)
+            {
+                window.focus(&target, cx);
+            }
         });
         Self {
             model,
@@ -146,14 +157,15 @@ impl ReviewView {
             commits_scroll: ScrollHandle::new(),
             merge_scroll: ScrollHandle::new(),
             merge_len: 0,
-            hovered_file: None,
             find_input: None,
             find_results: crate::search_panel::ResultsList::new(),
             find_matches: Rc::new(Vec::new()),
             find_focused: 0,
             find_revealed: 0,
+            find_selection: None,
             _observe: observe,
             _events: events,
+            _focus_lost: focus_lost,
         }
     }
 
@@ -1558,6 +1570,12 @@ fn squeezed_button(id: &'static str, label: &'static str, enabled: bool, cx: &Ap
 
 impl Render for ReviewView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Electron's Cmd/Ctrl+F works with focus on nothing (`document.body`, as after a click
+        // in the sidebar). Here the window's root then holds focus (or nothing does), off the
+        // Review's key context: the Review, shown, takes it.
+        if window.focused(cx).is_none_or(|focused| focused != self.focus && focused.contains(&self.focus, window)) {
+            window.focus(&self.focus, cx);
+        }
         let (mode, base, header) = {
             let model = self.model.read(cx);
             (model.mode(), model.base().clone(), model.header(cx))

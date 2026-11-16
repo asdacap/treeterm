@@ -2119,9 +2119,27 @@ impl ReviewModel {
         &self.find
     }
 
+    /// Whether the diff list is on screen (`StackedDiffList` is mounted and shown): not while a
+    /// favourite's viewer takes its place, nor while its view has no changes, is loading or
+    /// failed; in Commits, once a commit is picked.
+    pub fn diff_on_screen(&self) -> bool {
+        if matches!(self.favourite, FavouriteSelection::Selected { .. }) {
+            return false;
+        }
+        match self.content() {
+            ReviewContent::Committed(committed) => !committed.files.is_empty(),
+            ReviewContent::Uncommitted(uncommitted) => !uncommitted.changes.files.is_empty(),
+            ReviewContent::Commits(_) => self.selected_commit.is_some(),
+            ReviewContent::Loading | ReviewContent::Failed(_) => false,
+        }
+    }
+
     /// Cmd/Ctrl+F: open the bar (keeping its query) on `file`, the file being read, and
-    /// focus it.
+    /// focus it; nothing while the diff is not on screen ([`Self::diff_on_screen`]).
     pub fn open_find(&mut self, file: &str, cx: &mut Context<Self>) {
+        if !self.diff_on_screen() {
+            return;
+        }
         self.find_seq += 1;
         match &mut self.find {
             DiffFind::Open(state) => {

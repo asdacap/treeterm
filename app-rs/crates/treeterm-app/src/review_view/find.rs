@@ -26,6 +26,10 @@ actions!(review, [FindInDiff]);
 /// The Review tab, where Cmd/Ctrl+F finds in the diff.
 pub(super) const CONTEXT: &str = "Review";
 
+/// How far down the diff a chosen match's line is parked: a third, clear of the pinned file
+/// header.
+const MATCH_AT: f32 = 1. / 3.;
+
 pub fn bind_keys(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new(if cfg!(target_os = "macos") { "cmd-f" } else { "ctrl-f" }, FindInDiff, Some(CONTEXT)),
@@ -48,16 +52,16 @@ impl ReviewView {
         }
     }
 
-    /// The file being read: under the pointer last, else the one at the top of the diff,
-    /// else the first of the diff (Electron took the top one on screen).
+    /// The file being read (`topVisibleFile`): the one at the top of the diff, else (before
+    /// the diff is laid out) its first.
     fn reading(&self, cx: &App) -> String {
-        let order = self.diff.as_ref().map(|diff| diff.paths()).unwrap_or_default();
-        self.hovered_file
-            .clone()
-            .filter(|file| order.contains(file))
-            .or_else(|| self.model.read(cx).active_file().map(str::to_owned).filter(|file| order.contains(file)))
-            .or_else(|| order.first().cloned())
-            .unwrap_or_default()
+        let Some(diff) = &self.diff else {
+            return String::new();
+        };
+        match diff.state.read(cx).top_band().first() {
+            Some(top) => top.to_string(),
+            None => diff.paths().first().cloned().unwrap_or_default(),
+        }
     }
 
     /// Cmd/Ctrl+F (also from a text box in the tab: its own Search action bubbles here).
@@ -69,11 +73,8 @@ impl ReviewView {
         self.open_find(cx);
     }
 
+    /// The model opens the bar only while the diff is on screen.
     fn open_find(&mut self, cx: &mut Context<Self>) {
-        // Only where a diff is shown (not the commit list alone, not a favourite's viewer).
-        if self.diff.is_none() {
-            return;
-        }
         let file = self.reading(cx);
         self.model.update(cx, |m, cx| m.open_find(&file, cx));
     }
@@ -98,8 +99,8 @@ impl ReviewView {
         input
     }
 
-    /// Bring the chosen match into view and select its line, once per choice; focus the box
-    /// when the bar was (re)opened.
+    /// Bring the chosen match into view and select its line, once per choice; with none
+    /// chosen, its line is no longer selected. Focus the box when the bar was (re)opened.
     fn apply_find(&mut self, state: &Entity<DiffState>, window: &mut Window, cx: &mut Context<Self>) {
         let DiffFind::Open(find) = self.model.read(cx).find().clone() else {
             return;
@@ -115,16 +116,34 @@ impl ReviewView {
                 input.select_all(window, cx);
             });
         }
-        if let Some(target) = find.active
-            && target.seq != self.find_revealed
-        {
-            self.find_revealed = target.seq;
-            let side = diff_side(target.side);
-            let line = target.line as usize;
-            state.update(cx, |s, cx| {
-                s.scroll_to_line(DiffLinePosition::new(target.path.clone(), side, line), cx);
-                s.set_selected_lines(Some(DiffLineRange::new(target.path.clone(), side, line, line)), cx);
-            });
+        match find.active {
+            Some(target) if target.seq != self.find_revealed => {
+                self.find_revealed = target.seq;
+                let side = diff_side(target.side);
+                let line = target.line as usize;
+                let position = DiffLinePosition::new(target.path.clone(), side, line);
+                self.find_selection = state.update(cx, |s, cx| {
+                    s.scroll_to_line_at(position.clone(), MATCH_AT, cx);
+                    s.set_selected_lines(Some(DiffLineRange::new(target.path.clone(), side, line, line)), cx);
+                    s.selected_lines()
+                });
+                // The rows above it are estimated until laid out: aim again once they are.
+                let state = state.clone();
+                window.on_next_frame(move |_, cx| state.update(cx, |s, cx| s.scroll_to_line_at(position, MATCH_AT, cx)));
+            }
+            Some(_) => {}
+            None => self.clear_find_selection(state, cx),
+        }
+    }
+
+    /// No match is chosen any more (the bar closed, the query changed): its line is no longer
+    /// selected, unless something else has been selected since.
+    fn clear_find_selection(&mut self, state: &Entity<DiffState>, cx: &mut Context<Self>) {
+        let Some(selected) = self.find_selection.take() else {
+            return;
+        };
+        if state.read(cx).selected_lines().as_ref() == Some(&selected) {
+            state.update(cx, |s, cx| s.set_selected_lines(None, cx));
         }
     }
 
@@ -139,6 +158,7 @@ impl ReviewView {
     ) -> Option<AnyElement> {
         let DiffFind::Open(find) = self.model.read(cx).find().clone() else {
             self.find_matches = Rc::new(Vec::new());
+            self.clear_find_selection(state, cx);
             return None;
         };
         let layout = self.layout();

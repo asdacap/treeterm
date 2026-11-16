@@ -1028,6 +1028,32 @@ impl DiffState {
         cx.notify();
     }
 
+    /// TreeTerm patch: [`Self::scroll_to_line`] parking the line's row `fraction` of the way
+    /// down the viewport (a third: clear of a pinned file header), measuring the rows above
+    /// it as they were last laid out. The list stops at its ends.
+    pub fn scroll_to_line_at(
+        &mut self,
+        position: DiffLinePosition,
+        fraction: f32,
+        cx: &mut Context<Self>,
+    ) {
+        if self.line_index(&position).is_none() {
+            return;
+        }
+        if self.collapsed.remove(position.path().as_str()) {
+            self.rebuild_at_anchor();
+        }
+        if let Some(item_ix) = self.expand_line(&position) {
+            self.list.scroll_to(ListOffset {
+                item_ix,
+                offset_in_item: px(0.),
+            });
+            self.list
+                .scroll_by(-(self.list.viewport_bounds().size.height * fraction));
+            cx.notify();
+        }
+    }
+
     /// TreeTerm patch: the source line whose text was painted under `point` (window
     /// coordinates) at the last paint, its text and the byte offset in it of the character
     /// there. `None` off the code text: a gutter, a header, a fold, the space after a line.
