@@ -1183,6 +1183,10 @@ impl ReviewView {
         let tree = files::tree(self, files::Tree::Committed, &shown, &viewed, None, false, cx);
         let favourites = files::favourites(self, &listed, cx);
         let list = v_flex().child(search).children(favourites).when(has_changes, |d| d.child(tree)).into_any_element();
+        // `hasCommittedChanges ? <StackedDiffList> : "No committed changes to show"`.
+        if !has_changes {
+            self.unmount_list();
+        }
         let right = match self.favourite_pane(cx) {
             Some(pane) => pane,
             None if has_changes => self.stacked(&committed.patch, &shown, &viewed, true, window, cx),
@@ -1258,6 +1262,10 @@ impl ReviewView {
                 continue;
             }
             list = list.child(files::section_title(title, cx)).child(files::tree(self, *tree, shown, &viewed, Some(busy), true, cx));
+        }
+        // `hasUncommitted ? <StackedDiffList> : "No uncommitted changes"`.
+        if !has_changes {
+            self.unmount_list();
         }
         let right = match self.favourite_pane(cx) {
             Some(pane) => pane,
@@ -1450,6 +1458,9 @@ impl ReviewView {
                 None => self.stacked(&patch, &shown, &viewed, false, window, cx),
             };
             column = column.child(self.content_row(list, right, cx));
+        } else {
+            // `selectedCommit && <StackedDiffList>`.
+            self.unmount_list();
         }
         column.into_any_element()
     }
@@ -1468,25 +1479,37 @@ impl ReviewView {
             .collect()
     }
 
+    /// Electron unmounts `StackedDiffList` here (another view, no changes, no commit picked,
+    /// loading or a load error): the next list's files start afresh, at the top, with
+    /// "Collapse all" untouched (`collapseAll` nonce 0).
+    fn unmount_list(&mut self) {
+        self.diff = None;
+        self.collapse_all = CollapseAll::Untouched;
+    }
+
     fn body(&mut self, mode: ReviewMode, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        // Each view mounts its own list (`StackedDiffList`): its files start afresh, at the
-        // top, and "Collapse all" untouched (`collapseAll` nonce 0).
+        // Each view mounts its own list.
         if self.diff.as_ref().is_some_and(|diff| diff.mode() != mode) {
-            self.diff = None;
-            self.collapse_all = CollapseAll::Untouched;
+            self.unmount_list();
         }
         let secondary = colors(cx).text_secondary;
         let content = self.model.read(cx).content();
         match content {
-            ReviewContent::Loading => Self::message(
-                match mode {
-                    ReviewMode::Commits => "Loading commits...",
-                    ReviewMode::Committed | ReviewMode::Uncommitted => "Loading changes...",
-                },
-                secondary,
-                40.,
-            ),
-            ReviewContent::Failed(text) => Self::message(text, rgb(ERROR_RED).into(), 40.),
+            ReviewContent::Loading => {
+                self.unmount_list();
+                Self::message(
+                    match mode {
+                        ReviewMode::Commits => "Loading commits...",
+                        ReviewMode::Committed | ReviewMode::Uncommitted => "Loading changes...",
+                    },
+                    secondary,
+                    40.,
+                )
+            }
+            ReviewContent::Failed(text) => {
+                self.unmount_list();
+                Self::message(text, rgb(ERROR_RED).into(), 40.)
+            }
             ReviewContent::Committed(committed) => self.committed(committed, window, cx),
             ReviewContent::Uncommitted(uncommitted) => self.uncommitted(uncommitted, window, cx),
             ReviewContent::Commits(commits) => self.commits(commits, window, cx),
