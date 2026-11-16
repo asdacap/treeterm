@@ -194,18 +194,19 @@ impl TreePane {
         cx.notify();
     }
 
-    /// A row's Fork (`handleQuickFork`): the new child is shown, Loading first, as soon as
-    /// it is added (`createChildWithLoading` makes it the active workspace). A failure is
-    /// only logged, as in Electron.
+    /// A row's Fork (`handleQuickFork`): the new child becomes the session's active
+    /// workspace as soon as it is added, Loading first (`createChildWithLoading`), so the
+    /// window shows it if it shows this session's workspaces. The window stays where it is
+    /// otherwise (another session, or a session pane), as Electron never navigates here; the
+    /// child's row is highlighted once the session is shown. A failure is only logged, as in
+    /// Electron.
     pub fn quick_fork(&mut self, id: &str, cx: &mut Context<Self>) {
         let Some(session) = self.store() else {
             return; // no session: no row to fork
         };
         let forked = session.update(cx, |s, cx| s.quick_fork(id, cx));
-        cx.spawn(async move |pane, cx| match forked.await {
-            Ok(Ok(child)) => match pane.update(cx, |pane, cx| pane.select(child, cx)) {
-                Ok(()) | Err(_) => {} // Err: the pane closed
-            },
+        cx.spawn(async move |_, _| match forked.await {
+            Ok(Ok(_child)) => {}
             Ok(Err(error)) => tracing::error!(%error, "quick fork"),
             Err(_) => tracing::debug!("quick fork dropped with the session store"),
         })
