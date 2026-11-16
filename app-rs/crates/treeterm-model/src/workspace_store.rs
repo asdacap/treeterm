@@ -843,7 +843,7 @@ impl WorkspaceStore {
                         crate::review::ReviewEvent::CloseAndCleanRequested => {
                             cx.emit(WorkspaceEvent::CloseAndCleanRequested { tab: owned_tab.clone() });
                         }
-                        crate::review::ReviewEvent::Alert(_) => {}
+                        crate::review::ReviewEvent::Alert(_) | crate::review::ReviewEvent::ConfirmMerge { .. } => {}
                     }
                 });
                 self.tabs.insert(tab_id.to_owned(), TabRef::Review { model, _events: events });

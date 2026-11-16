@@ -104,6 +104,7 @@ impl ReviewView {
                 cx.notify();
             }
             ReviewEvent::Alert(message) => alert(message.clone(), window, cx),
+            ReviewEvent::ConfirmMerge { squash, files } => view.confirm_merge(*squash, *files, window, cx),
             ReviewEvent::StateChanged(_)
             | ReviewEvent::StateRemoved(_)
             | ReviewEvent::CloseRequested
@@ -390,7 +391,8 @@ impl ReviewView {
         let has_uncommitted = overview.uncommitted > 0;
         let white = gpui_kit::white();
         let mut actions = h_flex().gap(px(8.)).items_center().flex_shrink_0();
-        if conflicts.check == ConflictCheck::Checking {
+        // Also while a merge checks first (Electron showed nothing then).
+        if conflicts.check == ConflictCheck::Checking || processing == Processing::CheckingConflicts {
             actions = actions.child(div().text_size(px(12.)).italic().text_color(secondary).child("Checking for conflicts..."));
         }
         actions = actions.child(
@@ -472,7 +474,7 @@ impl ReviewView {
                                 }),
                         )
                     })
-                    .child(self.merge_group(has_conflicts, idle, has_uncommitted, merging, accent, cx))
+                    .child(self.merge_group(has_conflicts, idle, merging, accent, cx))
                     .child(cancel("Cancel", cx));
             }
         }
@@ -486,7 +488,6 @@ impl ReviewView {
         &mut self,
         has_conflicts: bool,
         idle: bool,
-        has_uncommitted: bool,
         merging: Option<MergeOutput>,
         accent: gpui_kit::Hsla,
         cx: &mut Context<Self>,
@@ -504,7 +505,7 @@ impl ReviewView {
             .when(plain_merge, |d| d.child(div().mr(px(6.)).child(spinner(12., white))))
             .child(format!("{}{}", if plain_merge { "Merging..." } else { "Merge" }, if has_conflicts { " (has conflicts)" } else { "" }))
             .when(enabled, |d| {
-                d.on_click(cx.listener(move |view, _: &ClickEvent, window, cx| view.start_merge(false, AfterMerge::Remove, has_uncommitted, window, cx)))
+                d.on_click(cx.listener(move |view, _: &ClickEvent, _, cx| view.start_merge(false, AfterMerge::Remove, cx)))
             });
         let toggle = action_button("review-merge-more", accent, blue_hover, white, enabled)
             .px(px(6.))
@@ -535,9 +536,9 @@ impl ReviewView {
                     .child(format!("{label}{suffix}"))
                     .when(!enabled, |d| d.opacity(0.5))
                     .when(enabled, |d| {
-                        d.cursor_pointer().hover(move |d| d.bg(hover)).on_click(cx.listener(move |view, _: &ClickEvent, window, cx| {
+                        d.cursor_pointer().hover(move |d| d.bg(hover)).on_click(cx.listener(move |view, _: &ClickEvent, _, cx| {
                             view.merge_menu = false;
-                            view.start_merge(squash, after, has_uncommitted, window, cx);
+                            view.start_merge(squash, after, cx);
                         }))
                     })
             };
@@ -564,26 +565,25 @@ impl ReviewView {
         group.into_any_element()
     }
 
-    /// `handleMerge` / `handleMergeAndKeep`: a merge that removes the workspace first asks
-    /// whether its uncommitted files may be committed.
-    fn start_merge(&mut self, squash: bool, after: AfterMerge, has_uncommitted: bool, window: &mut Window, cx: &mut Context<Self>) {
-        let count = self.model.read(cx).overview().uncommitted;
-        if !(has_uncommitted && after == AfterMerge::Remove) {
-            self.model.update(cx, |m, cx| m.merge(squash, after, cx));
-            return;
-        }
+    /// `handleMerge` / `handleMergeAndKeep`: the model checks for conflicts first.
+    fn start_merge(&mut self, squash: bool, after: AfterMerge, cx: &mut Context<Self>) {
+        self.model.update(cx, |m, cx| m.merge(squash, after, cx));
+    }
+
+    /// A merge that removes the workspace asks whether its uncommitted files may be committed.
+    fn confirm_merge(&mut self, squash: bool, files: usize, window: &mut Window, cx: &mut Context<Self>) {
         let model = self.model.clone();
         window.open_alert_dialog(cx, move |alert, _, _| {
             let model = model.clone();
             alert
                 .title("Uncommitted changes")
                 .description(format!(
-                    "You have {count} uncommitted file{}. These changes will be auto-committed before merging. Continue?",
-                    if count == 1 { "" } else { "s" }
+                    "You have {files} uncommitted file{}. These changes will be auto-committed before merging. Continue?",
+                    if files == 1 { "" } else { "s" }
                 ))
                 .show_cancel(true)
                 .on_ok(move |_, _, cx| {
-                    model.update(cx, |m, cx| m.merge(squash, after, cx));
+                    model.update(cx, |m, cx| m.confirm_merge(squash, cx));
                     true
                 })
         });

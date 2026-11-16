@@ -119,6 +119,9 @@ pub enum ReviewEvent {
     CloseRequested,
     /// The merge buttons: merge this workspace's branch into its parent.
     MergeRequested { squash: bool, after: AfterMerge },
+    /// A merge that removes this workspace would commit its `files` uncommitted files: the
+    /// view asks first, and a yes is [`ReviewModel::confirm_merge`].
+    ConfirmMerge { squash: bool, files: usize },
     /// "Close and Clean": remove this (detached) workspace, keeping its branch.
     CloseAndCleanRequested,
     /// Electron's `alert()`: the view shows the message until it is dismissed.
@@ -131,6 +134,8 @@ impl EventEmitter<ReviewEvent> for ReviewModel {}
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Processing {
     Idle,
+    /// The fresh conflict check a merge runs first.
+    CheckingConflicts,
     /// This workspace is merging into its parent.
     Merging,
     /// This workspace is being removed ("Close and Clean", or from the tree).
@@ -383,6 +388,8 @@ pub struct ReviewModel {
     refreshing: bool,
     _overview: Option<Task<()>>,
     _conflicts: Option<Task<()>>,
+    /// The fresh conflict check before a merge, while it runs.
+    pre_merge: Option<Task<()>>,
     _branches: Option<Task<()>>,
     _commit: Option<Task<()>>,
     _more: Option<Task<()>>,
@@ -509,6 +516,7 @@ impl ReviewModel {
             refreshing: false,
             _overview: None,
             _conflicts: None,
+            pre_merge: None,
             _branches: None,
             _commit: None,
             _more: None,
@@ -788,10 +796,62 @@ impl ReviewModel {
         cx.emit(ReviewEvent::CloseRequested);
     }
 
-    /// The merge buttons (`mergeAndRemove` / `mergeAndKeep`). The session runs the merge;
-    /// its output is the workspace's [`Self::merge_output`].
+    /// The merge buttons (`handleMerge` / `handleMergeAndKeep`). When both branches are
+    /// known, a fresh dry-run comes first: conflicts that appeared since the last check
+    /// refuse the merge ("Cannot merge: …") and show, so `git merge` never stops half-way in
+    /// the parent's worktree. A merge that removes this workspace then asks before committing
+    /// its uncommitted files ([`ReviewEvent::ConfirmMerge`]). The session runs the merge; its
+    /// output is the workspace's [`Self::merge_output`].
     pub fn merge(&mut self, squash: bool, after: AfterMerge, cx: &mut Context<Self>) {
-        cx.emit(ReviewEvent::MergeRequested { squash, after });
+        if self.processing(cx) != Processing::Idle {
+            return;
+        }
+        let header = self.header(cx);
+        // An unknown parent: no dry-run; the session refuses the merge itself.
+        let (Some(parent), false) = (header.parent_branch, header.branch.is_empty()) else {
+            self.merge_checked(squash, after, cx);
+            return;
+        };
+        let (git, path, branch) = (self.git.clone(), self.path.clone(), header.branch);
+        self.pre_merge = Some(cx.spawn(async move |this, cx| {
+            let fresh = git.check_merge_conflicts(&path, &branch, &parent).await;
+            match this.update(cx, |model, cx| {
+                model.pre_merge = None;
+                match fresh {
+                    Ok(conflicts) if conflicts.has_conflicts => {
+                        let message = format!(
+                            "Cannot merge: {} conflict(s) detected. Resolve conflicts first.",
+                            conflicts.conflicted_files.len()
+                        );
+                        model.conflicts.last = conflicts;
+                        cx.emit(ReviewEvent::Alert(message));
+                    }
+                    Ok(_) => model.merge_checked(squash, after, cx),
+                    // As Electron: a dry-run that cannot run does not hold the merge back.
+                    Err(error) => {
+                        tracing::warn!(%error, "conflict check before merging failed");
+                        model.merge_checked(squash, after, cx);
+                    }
+                }
+                cx.notify();
+            }) {
+                Ok(()) | Err(_) => {} // Err: tab closed
+            }
+        }));
+        cx.notify();
+    }
+
+    /// The merge passed its conflict check.
+    fn merge_checked(&mut self, squash: bool, after: AfterMerge, cx: &mut Context<Self>) {
+        match (after, self.overview.uncommitted) {
+            (AfterMerge::Remove, files @ 1..) => cx.emit(ReviewEvent::ConfirmMerge { squash, files }),
+            (AfterMerge::Remove, 0) | (AfterMerge::Keep, _) => cx.emit(ReviewEvent::MergeRequested { squash, after }),
+        }
+    }
+
+    /// Yes to [`ReviewEvent::ConfirmMerge`]: merge, committing the uncommitted files first.
+    pub fn confirm_merge(&mut self, squash: bool, cx: &mut Context<Self>) {
+        cx.emit(ReviewEvent::MergeRequested { squash, after: AfterMerge::Remove });
     }
 
     /// This workspace's merge into its parent, running or finished (`mergeOutput`).
@@ -809,6 +869,8 @@ impl ReviewModel {
             Processing::Merging
         } else if workspace.is_removing() {
             Processing::Removing
+        } else if self.pre_merge.is_some() {
+            Processing::CheckingConflicts
         } else {
             Processing::Idle
         }

@@ -514,8 +514,13 @@ fn merging_a_child_brings_its_commits_into_the_parent_and_removes_it(cx: &mut Te
     };
     // As a user would: once the tab has loaded. Its git reads in the worktree would race
     // the auto-commit for the index lock.
-    wait_until(cx, &review, |r| !r.is_refreshing());
+    wait_until(cx, &review, |r| !r.is_refreshing() && r.overview().uncommitted == 1);
+    let (events, _events) = record_events(cx, &review);
     review.update(cx, |r, cx| r.merge(false, AfterMerge::Remove, cx));
+    // After the conflict check, the uncommitted file is confirmed first.
+    wait_until(cx, &review, |_| events.borrow().contains(&ReviewEvent::ConfirmMerge { squash: false, files: 1 }));
+    assert!(child_ws.read_with(cx, |w, _| w.merge_output().is_none()), "nothing merges before the answer");
+    review.update(cx, |r, cx| r.confirm_merge(false, cx));
     wait_until(cx, &store, |s| s.entry(&child).is_none() || matches!(s.entry(&child), Some(WorkspaceEntry::OperationError { .. })));
     if let Some(error) = store.read_with(cx, |s, _| match s.entry(&child) {
         Some(WorkspaceEntry::OperationError { error, .. }) => Some(error.clone()),
@@ -555,11 +560,8 @@ fn a_failed_merge_shows_on_the_merged_workspace_only(cx: &mut TestAppContext) {
         panic!("not a review tab");
     };
     review.update(cx, |r, cx| r.merge(true, AfterMerge::Keep, cx));
-    assert_eq!(review.read_with(cx, |r, cx| r.processing(cx)), Processing::Merging);
-    // A running merge's output cannot be hidden.
-    review.update(cx, |r, cx| r.dismiss_merge_output(cx));
-    assert!(review.read_with(cx, |r, cx| r.merge_output(cx).is_some()));
-
+    // The conflict check comes first (an untracked file in the parent is no conflict).
+    assert_eq!(review.read_with(cx, |r, cx| r.processing(cx)), Processing::CheckingConflicts);
     wait_until(cx, &child_ws, |w| w.merge_output().is_some_and(|o| o.state == MergeState::Failed));
     let output = review.read_with(cx, |r, cx| r.merge_output(cx)).unwrap();
     assert_eq!(output.title(), "Squash merge feat-fail");
@@ -572,6 +574,13 @@ fn a_failed_merge_shows_on_the_merged_workspace_only(cx: &mut TestAppContext) {
     assert!(store.read_with(cx, |s, _| matches!(s.entry(&child), Some(WorkspaceEntry::OperationError { .. }))));
     let root_ws = store.read_with(cx, |s, _| ws(s, &root));
     assert!(root_ws.read_with(cx, |w, _| w.merge_output().is_none()), "the parent shows no merge output");
+
+    // A running merge's output cannot be hidden (the session's merge is running at once).
+    store.update(cx, |s, cx| s.merge_workspace(&child, true, AfterMerge::Keep, cx));
+    assert_eq!(review.read_with(cx, |r, cx| r.processing(cx)), Processing::Merging);
+    review.update(cx, |r, cx| r.dismiss_merge_output(cx));
+    assert!(review.read_with(cx, |r, cx| r.merge_output(cx).is_some()));
+    wait_until(cx, &child_ws, |w| w.merge_output().is_some_and(|o| o.state == MergeState::Failed));
     review.update(cx, |r, cx| r.dismiss_merge_output(cx));
     assert!(child_ws.read_with(cx, |w, _| w.merge_output().is_none()));
 }
@@ -601,6 +610,8 @@ fn merge_and_keep_reloads_the_review(cx: &mut TestAppContext) {
     wait_until(cx, &review, |r| r.overview().committed == 1);
 
     review.update(cx, |r, cx| r.merge(false, AfterMerge::Keep, cx));
+    // A clean conflict check first, then the merge itself.
+    assert_eq!(review.read_with(cx, |r, cx| r.processing(cx)), Processing::CheckingConflicts);
     wait_until(cx, &child_ws, |w| w.merge_output().is_some_and(|o| o.state != MergeState::Running));
     let output = child_ws.read_with(cx, |w, _| w.merge_output().cloned()).unwrap();
     assert_eq!(output.state, MergeState::Succeeded, "{}", output.output);
@@ -624,14 +635,14 @@ fn commit_file(dir: &std::path::Path, file: &str, text: &str) {
     git_in(dir, &["commit", "-q", "-m", file]);
 }
 
-/// A child of `repo`'s workspace whose branch and the parent's both changed `a.txt`'s line
-/// since it was made, with a Review tab open on it: `(child id, child, its review)`.
-fn conflicting_child(
+/// A child of `repo`'s workspace whose branch changed `a.txt`'s line, with a Review tab open
+/// on it: `(child, its review)`. The parent is still at the line's first version.
+fn child_with_review(
     cx: &mut TestAppContext,
     store: &Entity<SessionStore>,
     repo: &TempRepo,
     name: &str,
-) -> (String, Entity<WorkspaceStore>, Entity<treeterm_model::review::ReviewModel>) {
+) -> (Entity<WorkspaceStore>, Entity<treeterm_model::review::ReviewModel>) {
     commit_file(&repo.path, "a.txt", "base\n");
     let root = open_repo_workspace(cx, store, repo);
     let child = store.update(cx, |s, cx| s.add_child_workspace(&root, name.into(), false, None, cx)).unwrap();
@@ -639,42 +650,141 @@ fn conflicting_child(
     let child_ws = store.read_with(cx, |s, _| ws(s, &child));
     let child_dir = std::path::PathBuf::from(child_ws.read_with(cx, |w, _| w.workspace().path.clone()));
     commit_file(&child_dir, "a.txt", "child\n");
-    commit_file(&repo.path, "a.txt", "root\n");
-    let tab = child_ws.update(cx, |w, cx| w.add_tab("review", cx)).unwrap();
-    let Some(TabContent::Review(review)) = child_ws.read_with(cx, |w, _| w.tab_content(&tab)) else {
-        panic!("not a review tab");
-    };
-    (child, child_ws, review)
+    let review = review_tab(cx, &child_ws, serde_json::json!({}));
+    (child_ws, review)
+}
+
+/// "Refresh changes", until its conflict check is over: every conflict state shown meanwhile.
+fn recheck(cx: &mut TestAppContext, review: &Entity<treeterm_model::review::ReviewModel>) -> Vec<treeterm_model::review::Conflicts> {
+    use treeterm_model::review::{ConflictCheck, Conflicts};
+    let seen = std::rc::Rc::new(std::cell::RefCell::new(Vec::<Conflicts>::new()));
+    let record = seen.clone();
+    let _observe = cx.update(|cx| cx.observe(review, move |review, cx| record.borrow_mut().push(review.read(cx).conflicts().clone())));
+    review.update(cx, |r, cx| r.refresh(cx));
+    wait_until(cx, review, |_| {
+        let seen = seen.borrow();
+        let checking = seen.iter().position(|c| c.check == ConflictCheck::Checking);
+        checking.is_some_and(|at| seen[at..].iter().any(|c| c.check != ConflictCheck::Checking))
+    });
+    seen.take()
 }
 
 #[gpui_kit::test]
 fn the_last_conflicts_stay_while_rechecking(cx: &mut TestAppContext) {
-    use treeterm_model::review::{ConflictCheck, Conflicts};
+    use treeterm_model::review::ConflictCheck;
     cx.executor().allow_parking();
     let h = harness();
     publish(&h, &[]);
     let repo = TempRepo::new(&h);
     let store = open_store(cx, &h, "client-a");
-    let (_, _, review) = conflicting_child(cx, &store, &repo, "feat-stale");
-    wait_until(cx, &review, |r| r.conflicts().has_conflicts() && r.conflicts().check == ConflictCheck::Idle);
+    let (_, review) = child_with_review(cx, &store, &repo, "feat-stale");
+    commit_file(&repo.path, "a.txt", "root\n");
+    recheck(cx, &review);
     let conflicts = review.read_with(cx, |r, _| r.conflicts().clone());
+    assert_eq!(conflicts.check, ConflictCheck::Idle);
     assert_eq!(conflicts.last.conflicted_files, vec!["a.txt".to_owned()]);
     assert!(conflicts.parent_has_new_commits);
 
     // Every state shown during a re-check still has the conflicts and the parent's commits
     // (the banner, "(has conflicts)" and the prompt buttons stay).
-    let seen = std::rc::Rc::new(std::cell::RefCell::new(Vec::<Conflicts>::new()));
-    let record = seen.clone();
-    let _observe = cx.update(|cx| cx.observe(&review, move |review, cx| record.borrow_mut().push(review.read(cx).conflicts().clone())));
-    review.update(cx, |r, cx| r.refresh(cx));
-    wait_until(cx, &review, |_| {
-        let seen = seen.borrow();
-        let checking = seen.iter().position(|c| c.check == ConflictCheck::Checking);
-        checking.is_some_and(|at| seen[at..].iter().any(|c| c.check == ConflictCheck::Idle))
-    });
-    for state in seen.borrow().iter() {
+    for state in recheck(cx, &review) {
         assert!(state.has_conflicts() && state.parent_has_new_commits, "{state:?}");
     }
+}
+
+#[gpui_kit::test]
+fn a_merge_that_now_conflicts_is_refused_before_git_merge(cx: &mut TestAppContext) {
+    use treeterm_model::session_store::AfterMerge;
+    cx.executor().allow_parking();
+    let h = harness();
+    publish(&h, &[]);
+    let repo = TempRepo::new(&h);
+    let store = open_store(cx, &h, "client-a");
+    let (child_ws, review) = child_with_review(cx, &store, &repo, "feat-now");
+    recheck(cx, &review);
+    assert!(!review.read_with(cx, |r, _| r.conflicts().has_conflicts()), "no conflicts yet");
+    // The parent moves on with a conflicting edit; the tab has not checked since.
+    commit_file(&repo.path, "a.txt", "root\n");
+
+    let (events, _events) = record_events(cx, &review);
+    for (squash, after) in [(false, AfterMerge::Remove), (true, AfterMerge::Keep)] {
+        review.update(cx, |r, cx| r.merge(squash, after, cx));
+        // The fresh check runs first; a second click meanwhile does nothing.
+        assert_eq!(review.read_with(cx, |r, cx| r.processing(cx)), Processing::CheckingConflicts);
+        review.update(cx, |r, cx| r.merge(squash, after, cx));
+        wait_until_app(cx, &review, |r, cx| r.processing(cx) == Processing::Idle);
+    }
+    let refused = "Cannot merge: 1 conflict(s) detected. Resolve conflicts first.".to_owned();
+    assert_eq!(alerts(&events), vec![refused.clone(), refused]);
+    assert!(
+        !events.borrow().iter().any(|e| matches!(e, ReviewEvent::MergeRequested { .. } | ReviewEvent::ConfirmMerge { .. })),
+        "{:?}",
+        events.borrow()
+    );
+    // The banner and "(has conflicts)" show them; what the parent has is the next check's.
+    let conflicts = review.read_with(cx, |r, _| r.conflicts().clone());
+    assert_eq!(conflicts.last.conflicted_files, vec!["a.txt".to_owned()]);
+    assert!(!conflicts.parent_has_new_commits);
+    // git never ran the merge: the parent is clean, not stopped half-way.
+    assert!(!repo.path.join(".git/MERGE_HEAD").exists());
+    assert_eq!(repo.git(&["status", "--porcelain"]), "");
+    assert!(child_ws.read_with(cx, |w, _| w.merge_output().is_none()));
+}
+
+#[gpui_kit::test]
+fn a_merge_whose_conflict_check_cannot_run_still_merges(cx: &mut TestAppContext) {
+    use treeterm_model::session_store::AfterMerge;
+    cx.executor().allow_parking();
+    let h = harness();
+    publish(&h, &[]);
+    let repo = TempRepo::new(&h);
+    let store = open_store(cx, &h, "client-a");
+    let root = open_repo_workspace(cx, &store, &repo);
+    let child = store.update(cx, |s, cx| s.add_child_workspace(&root, "feat-gone".into(), false, None, cx)).unwrap();
+    wait_child(cx, &store, &child);
+    // The child records a branch git does not have: the dry-run fails on it.
+    let child_ws = store.read_with(cx, |s, _| ws(s, &child));
+    child_ws.update(cx, |w, cx| w.set_git_branch("no-such-branch", cx));
+    let review = review_tab(cx, &child_ws, serde_json::json!({}));
+    let (events, _events) = record_events(cx, &review);
+
+    review.update(cx, |r, cx| r.merge(false, AfterMerge::Keep, cx));
+    assert_eq!(review.read_with(cx, |r, cx| r.processing(cx)), Processing::CheckingConflicts);
+    // As Electron, the merge goes ahead, and git's own refusal is the outcome.
+    wait_until(cx, &child_ws, |w| w.merge_output().is_some_and(|o| o.state == MergeState::Failed));
+    assert!(events.borrow().contains(&ReviewEvent::MergeRequested { squash: false, after: AfterMerge::Keep }));
+    assert!(alerts(&events).is_empty());
+    let output = child_ws.read_with(cx, |w, _| w.merge_output().cloned()).unwrap();
+    let last = output.output.trim_end().rsplit('\n').next().unwrap_or_default().to_owned();
+    assert!(last.starts_with("Merge failed: ") && !last.starts_with("Merge failed: Merge failed:"), "{}", output.output);
+}
+
+#[gpui_kit::test]
+fn a_merge_skips_the_conflict_check_while_the_parent_is_unknown(cx: &mut TestAppContext) {
+    use treeterm_model::session_store::AfterMerge;
+    cx.executor().allow_parking();
+    let h = harness();
+    let orphan = serde_json::json!({
+        "name": "orphan", "status": "active", "isGitRepo": true, "isWorktree": true, "gitBranch": "feat",
+        "parentId": "missing", "appStates": {}, "metadata": {}, "createdAt": 1, "lastActivity": 1, "parentHash": ""
+    });
+    std::fs::write(h.daemon.workspaces_dir().join("orphan.json"), orphan.to_string()).unwrap();
+    publish(&h, &["orphan"]);
+    let store = open_store(cx, &h, "client-a");
+    wait_until(cx, &store, |s| loaded(s, "orphan"));
+    let workspace = store.read_with(cx, |s, _| ws(s, "orphan"));
+    let review = review_tab(cx, &workspace, serde_json::json!({}));
+    let header = review.read_with(cx, |r, cx| r.header(cx));
+    assert!(header.has_parent && header.parent_branch.is_none() && !header.detached, "{header:?}");
+    let (events, _events) = record_events(cx, &review);
+
+    // No branch to check against: the merge is asked for at once, and the session refuses it.
+    review.update(cx, |r, cx| r.merge(false, AfterMerge::Keep, cx));
+    assert!(events.borrow().contains(&ReviewEvent::MergeRequested { squash: false, after: AfterMerge::Keep }));
+    assert_eq!(review.read_with(cx, |r, cx| r.processing(cx)), Processing::Merging);
+    wait_until(cx, &workspace, |w| w.merge_output().is_some_and(|o| o.state == MergeState::Failed));
+    let output = workspace.read_with(cx, |w, _| w.merge_output().cloned()).unwrap();
+    assert!(output.output.ends_with("\nMerge failed: Parent workspace not found or not a git repo\n"), "{}", output.output);
 }
 
 type Events = std::rc::Rc<std::cell::RefCell<Vec<ReviewEvent>>>;

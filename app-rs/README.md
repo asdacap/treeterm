@@ -218,6 +218,8 @@ The chrome was matched to Electron's computed styles, measured side by side on o
 - Corrupt `settings.json` is an error (logged; defaults used) instead of being overwritten.
 - Merge-and-remove stages untracked files before its WIP commit (Electron's `commit -am`
   skips them, failing the merge or losing new files with the deleted worktree).
+- Review's fresh conflict check before a merge shows "Checking for conflicts..." and disables
+  the header's actions while it runs (Electron showed nothing and left them clickable).
 - A failed merge's output ends with `Merge failed: <error>` once (Electron doubled the prefix
   when `git merge` itself failed), or `Merge succeeded but cleanup failed: <error>` when only
   the worktree removal after it failed.
