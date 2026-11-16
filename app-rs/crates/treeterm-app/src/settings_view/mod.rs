@@ -240,7 +240,7 @@ impl SettingsView {
         }
         let texts = self.inputs.read(cx);
         let lists = self.lists(cx);
-        let edited = match form::build(&self.draft, &texts, lists, Os::host()) {
+        let edited = match form::build(&self.draft, &texts, lists) {
             Ok(edited) => edited,
             Err(error) => {
                 self.section = error.section;

@@ -7,7 +7,7 @@ use std::path::Path;
 use std::str::FromStr;
 use std::time::Duration;
 
-use treeterm_core::keybinding::{Key, Os, PrefixAction, Shortcut, format_accelerator};
+use treeterm_core::keybinding::{Os, PrefixAction, format_accelerator};
 use treeterm_core::settings::{
     AiHarnessInstance, AppearanceSettings, BrowserInstance, ClassifiedState, ClassifierCriteria,
     CustomRunnerInstance, DebugSettings, GithubSettings, Instances, Keybindings, LlmSettings,
@@ -143,7 +143,7 @@ impl Texts {
     }
 
     /// Parse the fields into `settings`; nothing is written unless all of them are valid.
-    pub fn apply(&self, settings: &mut Settings, os: Os) -> Result<(), FormError> {
+    pub fn apply(&self, settings: &mut Settings) -> Result<(), FormError> {
         let font_size = match self.font_size.trim().parse::<f32>() {
             Ok(size) if size.is_finite() && size > 0. => size,
             Ok(_) | Err(_) => return Err(FormError::new(Section::Terminal, "Font size must be a positive number")),
@@ -157,19 +157,9 @@ impl Texts {
         let idle_debounce_unread = whole_number::<u64>(&self.idle_debounce_unread, 0).ok_or_else(|| {
             FormError::new(Section::Llm, "Idle debounce when unread must be a whole number of milliseconds")
         })?;
-        let prefix_key = self.prefix_key.trim();
-        if let Err(error) = Shortcut::parse(prefix_key, os) {
-            return Err(FormError::new(Section::Keybindings, format!("Prefix key “{prefix_key}”: {error}")));
-        }
         let timeout = whole_number::<u64>(&self.prefix_timeout, 1).ok_or_else(|| {
             FormError::new(Section::Keybindings, "Prefix timeout must be a positive whole number of milliseconds")
         })?;
-        for (action, key) in PrefixAction::ALL.iter().zip(&self.action_keys) {
-            let key = key.trim();
-            if let Err(error) = Key::parse(key) {
-                return Err(FormError::new(Section::Keybindings, format!("{} key “{key}”: {error}", action.label())));
-            }
-        }
 
         let terminal = &mut settings.terminal;
         terminal.font_size = font_size;
@@ -190,10 +180,12 @@ impl Texts {
         analyzer.buffer_lines = buffer_lines;
         analyzer.idle_debounce = Duration::from_millis(idle_debounce);
         analyzer.idle_debounce_unread = Duration::from_millis(idle_debounce_unread);
-        settings.prefix_mode.prefix_key = prefix_key.to_owned();
+        // The keys as recorded, a Space action key (` `) included: one that matches no key
+        // press only disables itself (`KeybindingSettings`), as in Electron.
+        settings.prefix_mode.prefix_key = self.prefix_key.clone();
         settings.prefix_mode.timeout = Duration::from_millis(timeout);
         for (action, key) in PrefixAction::ALL.iter().zip(&self.action_keys) {
-            *action_key_mut(&mut settings.keybindings, *action) = key.trim().to_owned();
+            *action_key_mut(&mut settings.keybindings, *action) = key.clone();
         }
         settings.github.pat = self.github_pat.clone();
         Ok(())
@@ -259,9 +251,9 @@ impl Lists {
 /// The settings "Save" writes: `draft` (the toggles and choices) with the typed text and
 /// the instance lists, or why the text is invalid. An instance's problem is only a warning
 /// under it: the instance is saved as typed.
-pub fn build(draft: &Settings, texts: &Texts, lists: Lists, os: Os) -> Result<Settings, FormError> {
+pub fn build(draft: &Settings, texts: &Texts, lists: Lists) -> Result<Settings, FormError> {
     let mut edited = draft.clone();
-    texts.apply(&mut edited, os)?;
+    texts.apply(&mut edited)?;
     lists.store_in(&mut edited);
     Ok(edited)
 }
@@ -559,7 +551,7 @@ mod tests {
         assert_eq!(texts.font_size, "13.5");
         assert_eq!(texts.safe_paths, "/tmp, /var/tmp");
         let mut applied = settings.clone();
-        texts.apply(&mut applied, Os::MacOs).unwrap();
+        texts.apply(&mut applied).unwrap();
         assert_eq!(applied, settings);
     }
 
@@ -572,10 +564,10 @@ mod tests {
         texts.idle_debounce = "0".into();
         texts.prefix_timeout = "900".into();
         texts.criteria[0] = "busy".into();
-        texts.action_keys[5] = " W ".into();
+        texts.action_keys[5] = "W".into();
         texts.llm_api_key = "sk-1".into();
         let mut settings = Settings::default();
-        texts.apply(&mut settings, Os::Linux).unwrap();
+        texts.apply(&mut settings).unwrap();
         assert_eq!(settings.terminal.font_size, 16.);
         assert_eq!(settings.terminal.max_cols, 120);
         assert_eq!(settings.terminal_analyzer.safe_paths, ["/tmp", "/work"]);
@@ -586,12 +578,31 @@ mod tests {
         assert_eq!(settings.llm.api_key, "sk-1");
     }
 
+    /// `handleSave` saves the recorded keys untouched: Space stays ` `, and a key the app
+    /// cannot match (it only disables itself) is saved too.
+    #[test]
+    fn keys_are_saved_as_recorded() {
+        let mut texts = texts();
+        texts.prefix_key = "Hyper+B".into();
+        texts.action_keys[0] = " ".into();
+        texts.action_keys[1] = "CapsLock".into();
+        let mut settings = Settings::default();
+        texts.apply(&mut settings).unwrap();
+        assert_eq!(settings.prefix_mode.prefix_key, "Hyper+B");
+        assert_eq!(settings.keybindings.new_tab, " ");
+        assert_eq!(settings.keybindings.close_tab, "CapsLock");
+
+        texts.prefix_key = String::new();
+        texts.apply(&mut settings).unwrap();
+        assert_eq!(settings.prefix_mode.prefix_key, "");
+    }
+
     /// An edit to the texts, the section it belongs to, and how the error starts.
     type InvalidCase = (fn(&mut Texts), Section, &'static str);
 
     #[test]
     fn invalid_text_names_the_field_and_its_section_and_writes_nothing() {
-        let cases: [InvalidCase; 9] = [
+        let cases: [InvalidCase; 7] = [
             (|t| t.font_size = "big".into(), Section::Terminal, "Font size must be a positive number"),
             (|t| t.font_size = "0".into(), Section::Terminal, "Font size must be a positive number"),
             (|t| t.max_cols = "1".into(), Section::Terminal, "Max columns must be a whole number of at least 2"),
@@ -607,15 +618,13 @@ mod tests {
                 Section::Keybindings,
                 "Prefix timeout must be a positive whole number of milliseconds",
             ),
-            (|t| t.prefix_key = "Hyper+B".into(), Section::Keybindings, "Prefix key “Hyper+B”"),
-            (|t| t.action_keys[1] = String::new(), Section::Keybindings, "Close Tab key “”"),
         ];
         for (edit, section, message) in cases {
             let mut texts = texts();
             texts.github_pat = "ghp_x".into();
             edit(&mut texts);
             let mut settings = Settings::default();
-            let error = texts.apply(&mut settings, Os::MacOs).unwrap_err();
+            let error = texts.apply(&mut settings).unwrap_err();
             assert_eq!(error.section, section, "{message}");
             assert!(error.message.starts_with(message), "{} does not start with {message}", error.message);
             assert_eq!(settings, Settings::default(), "{message}");
@@ -640,7 +649,7 @@ mod tests {
         lists.browsers.push(BrowserInstance::added("browser-1".into()));
         let mut texts = texts();
         texts.font_family = "  Iosevka  ".into();
-        let edited = build(&draft, &texts, lists, Os::MacOs).unwrap();
+        let edited = build(&draft, &texts, lists).unwrap();
         assert_eq!(edited.terminal.cursor_style, CursorStyle::Bar);
         assert_eq!(edited.terminal.font_family, "Iosevka");
         assert_eq!(edited.browser.instances.len(), 1);
@@ -657,7 +666,7 @@ mod tests {
         assert!(grafana.problem().is_some());
         lists.browsers.push(grafana.clone());
         // Electron only shows the problem under the instance; Save still writes it.
-        let edited = build(&draft, &texts(), lists, Os::MacOs).unwrap();
+        let edited = build(&draft, &texts(), lists).unwrap();
         assert_eq!(edited.browser.instances, vec![grafana]);
     }
 
