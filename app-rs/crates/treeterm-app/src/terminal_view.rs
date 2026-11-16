@@ -226,6 +226,7 @@ impl TerminalView {
     // ---- keyboard ----------------------------------------------------------------------
 
     fn on_key_down(&mut self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
+        self.model.read(cx).key_pressed();
         // While composing, every key belongs to the input method.
         if self.marked_text.is_some() {
             return;
@@ -301,6 +302,13 @@ impl TerminalView {
             self.model.update(cx, |model, cx| model.write_input(&bytes, cx));
         }
         true
+    }
+
+    /// A press of any button, before it is handled (Electron's capture-phase pointerdown):
+    /// a click into a terminal that kept focus claims the PTY's input back, and a right-click
+    /// claims it before the context menu's Paste.
+    fn claim_on_press(&mut self, _: &MouseDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
+        self.model.read(cx).claim_input();
     }
 
     fn on_mouse_down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
@@ -656,6 +664,7 @@ impl Render for TerminalView {
             .on_action(cx.listener(Self::refresh_stream))
             .on_action(cx.listener(Self::toggle_width_limit))
             .on_key_down(cx.listener(Self::on_key_down))
+            .capture_any_mouse_down(cx.listener(Self::claim_on_press))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
             .on_mouse_down(MouseButton::Middle, cx.listener(Self::on_mouse_down))
             .on_mouse_move(cx.listener(Self::on_mouse_move))
@@ -815,6 +824,8 @@ impl gpui_kit::EntityInputHandler for TerminalView {
         self.marked_text = None;
         self.reset_blink();
         if !text.is_empty() {
+            // Text from the input method: its key presses may not have reached `on_key_down`.
+            self.model.read(cx).key_pressed();
             let bytes = text.as_bytes().to_vec();
             self.model.update(cx, |model, cx| {
                 model.clear_selection(cx);

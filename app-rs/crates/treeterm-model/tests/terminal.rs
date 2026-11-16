@@ -469,3 +469,114 @@ fn a_double_click_on_pinned_unpins_then_scrolls_to_the_top(cx: &mut TestAppConte
     advance(cx, BADGE_DOUBLE_CLICK);
     assert_eq!(position(cx, &model), ScrollPosition::Top);
 }
+
+/// Focus `model` and wait until the daemon took a line from it: it now owns the input.
+fn take_input(cx: &mut TestAppContext, model: &Entity<TerminalModel>, line: &str, output: &str) {
+    model.update(cx, |m, cx| m.set_focused(true, cx));
+    type_line(cx, model, line);
+    wait_until(cx, model, |m| m.screen_text().contains(output));
+}
+
+/// Two terminals on one shell, as two windows or machines show it, both focused: `b`
+/// took the input from `a`.
+fn two_terminals_b_owning(cx: &mut TestAppContext, h: &Harness) -> (Entity<TerminalModel>, Entity<TerminalModel>) {
+    let pty = spawn_shell(h);
+    let a = open(cx, h, options(pty.clone()));
+    let b = open(cx, h, options(pty));
+    take_input(cx, &a, "echo took-a-$((0+1))", "took-a-1");
+    take_input(cx, &b, "echo b-$((1+1))", "b-2");
+    (a, b)
+}
+
+/// Resize through `model`'s input queue and wait for the daemon to apply it: everything
+/// queued before it has been handled by then.
+fn drain_input(cx: &mut TestAppContext, model: &Entity<TerminalModel>) {
+    let target = GridSize { cols: 100, rows: 30 };
+    model.update(cx, |m, _| m.request_size(target));
+    wait_until(cx, model, |m| m.grid_size() == target);
+}
+
+#[gpui_kit::test]
+fn a_key_press_in_a_terminal_that_kept_focus_claims_the_input_back(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    let (a, _b) = two_terminals_b_owning(cx, &h);
+
+    // `a` kept focus while `b` claimed: no focus change fires, so its line is dropped.
+    type_line(cx, &a, "echo dropped-$((2+2))");
+    a.read_with(cx, |m, _| m.key_pressed());
+    type_line(cx, &a, "echo a-$((3+3))");
+    wait_until(cx, &a, |m| m.screen_text().contains("a-6"));
+    assert!(!a.read_with(cx, |m, _| m.screen_text().contains("dropped-4")));
+}
+
+#[gpui_kit::test]
+fn a_key_press_in_an_unfocused_terminal_claims_nothing(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    let pty = spawn_shell(&h);
+    let a = open(cx, &h, options(pty.clone()));
+    let b = open(cx, &h, options(pty));
+    take_input(cx, &a, "echo took-a-$((0+1))", "took-a-1");
+
+    b.read_with(cx, |m, _| m.key_pressed());
+    drain_input(cx, &b);
+    type_line(cx, &a, "echo a-$((1+1))");
+    wait_until(cx, &a, |m| m.screen_text().contains("a-2"));
+}
+
+#[gpui_kit::test]
+fn a_pointer_press_claims_the_input_even_unfocused(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    let (a, b) = two_terminals_b_owning(cx, &h);
+
+    // A right-click into `a` while its window is in the background.
+    a.update(cx, |m, cx| m.set_focused(false, cx));
+    a.read_with(cx, |m, _| m.claim_input());
+    drain_input(cx, &a);
+    type_line(cx, &b, "echo dropped-$((2+2))");
+    b.read_with(cx, |m, _| m.key_pressed());
+    type_line(cx, &b, "echo b-$((4+4))");
+    wait_until(cx, &b, |m| m.screen_text().contains("b-8"));
+    assert!(!b.read_with(cx, |m, _| m.screen_text().contains("dropped-4")));
+}
+
+#[gpui_kit::test]
+fn paste_claims_the_input_before_writing(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    let (a, _b) = two_terminals_b_owning(cx, &h);
+
+    a.update(cx, |m, cx| m.paste("echo pasted-$((5+5))", cx));
+    type_line(cx, &a, "");
+    wait_until(cx, &a, |m| m.screen_text().contains("pasted-10"));
+}
+
+#[gpui_kit::test]
+fn refresh_claims_the_input_for_the_new_attachment_when_focused(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    let (a, _b) = two_terminals_b_owning(cx, &h);
+
+    a.update(cx, |m, cx| m.refresh(cx));
+    wait_until(cx, &a, |m| *m.overlay() == Overlay::Hidden && m.screen_text().contains("b-2"));
+    type_line(cx, &a, "echo a-$((3+3))");
+    wait_until(cx, &a, |m| m.screen_text().contains("a-6"));
+}
+
+#[gpui_kit::test]
+fn refresh_of_an_unfocused_terminal_claims_nothing(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    let pty = spawn_shell(&h);
+    let a = open(cx, &h, options(pty.clone()));
+    let b = open(cx, &h, options(pty));
+    take_input(cx, &b, "echo took-b-$((0+1))", "took-b-1");
+
+    a.update(cx, |m, cx| m.refresh(cx));
+    wait_until(cx, &a, |m| *m.overlay() == Overlay::Hidden);
+    drain_input(cx, &a);
+    type_line(cx, &b, "echo b-$((1+1))");
+    wait_until(cx, &b, |m| m.screen_text().contains("b-2"));
+}

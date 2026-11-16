@@ -391,8 +391,10 @@ impl TerminalModel {
     }
 
     /// Paste text, bracketed when the program asked for it. Not gated on focus: the context
-    /// menu pastes into a terminal that may not hold keyboard focus.
+    /// menu pastes into a terminal that may not hold keyboard focus. Claims the PTY's input
+    /// first, as the key press or right-click that pastes does in Electron.
     pub fn paste(&mut self, text: &str, cx: &mut Context<Self>) {
+        self.claim_input();
         let mode = *self.attachment.term.lock().mode();
         let bytes = paste_bytes(text, mode);
         let write = self.attachment.input.write(&bytes);
@@ -419,9 +421,7 @@ impl TerminalModel {
         }
         gate.set_focused(focused);
         if focused {
-            if self.attachment.input.focus().is_err() {
-                tracing::debug!(pty = %self.options.pty_id, "focus claim dropped: stream closed");
-            }
+            self.claim_input();
             let mode = *self.attachment.term.lock().mode();
             if let Some(report) = treeterm_term::keys::focus_report(true, mode)
                 && self.attachment.input.send(report).is_err()
@@ -435,6 +435,25 @@ impl TerminalModel {
 
     pub fn is_focused(&self) -> bool {
         self.attachment.gate.is_focused()
+    }
+
+    /// Claim the PTY's input for this attachment: the daemon takes writes only from the
+    /// terminal attachment that claimed last. Sent whenever the user arrives at or acts in
+    /// the terminal (Electron's `onKeyboardFocus`), since another machine or window may have
+    /// claimed since and no focus change fires at a terminal that kept focus. Sends no
+    /// focus report: those go out on focus changes only.
+    pub fn claim_input(&self) {
+        if self.attachment.input.focus().is_err() {
+            tracing::debug!(pty = %self.options.pty_id, "focus claim dropped: stream closed");
+        }
+    }
+
+    /// A key press in this terminal, before it is written: claims the PTY's input while the
+    /// terminal holds keyboard focus, as Electron does on every keydown.
+    pub fn key_pressed(&self) {
+        if self.is_focused() {
+            self.claim_input();
+        }
     }
 
     /// Cell size in pixels, for programs that ask for the text area size.
@@ -659,6 +678,10 @@ impl TerminalModel {
         let pinned = self.attachment.gate.is_pinned();
         self.attachment = Self::attach(&self.conn, &self.options, cx);
         self.attachment.gate.set_focused(focused);
+        if focused {
+            // The new attachment owns the input at once, as Electron's remount claims.
+            self.claim_input();
+        }
         self.attachment.gate.set_pinned(pinned);
         self.overlay = Overlay::Loading;
         self.pty_size = PtySize::Unknown;

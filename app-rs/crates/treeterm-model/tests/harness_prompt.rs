@@ -234,6 +234,12 @@ fn a_prompt_lands_raw_while_another_terminal_holds_the_input(cx: &mut TestAppCon
         .unwrap();
     assert_eq!(active_tab(cx, &workspace), Some(other));
 
+    // The tab's terminal held the input; its keystroke landing proves it.
+    terminal.update(cx, |t, cx| {
+        t.set_focused(true, cx);
+        t.write_input(b"held-by-tab\r", cx);
+    });
+    wait_until(cx, &terminal, |t| t.screen_text().contains("held-by-tab"));
     // Another terminal of the PTY claims its input; its own keystroke landing proves it.
     let pty = terminal.read_with(cx, |t, _| t.pty_id().to_owned());
     let claimer = viewer(cx, &h, &pty);
@@ -244,8 +250,9 @@ fn a_prompt_lands_raw_while_another_terminal_holds_the_input(cx: &mut TestAppCon
     wait_until(cx, &terminal, |t| {
         t.screen_text().contains("claimed-by-viewer")
     });
-    // The tab's own terminal attachment is now gated by the daemon.
-    terminal.update(cx, |t, cx| t.paste("dropped-by-daemon", cx));
+    // The tab's own terminal attachment is now gated by the daemon: it kept focus, so no
+    // key press claimed the input back.
+    terminal.update(cx, |t, cx| t.write_input(b"dropped-by-daemon", cx));
 
     let result = prompt(cx, &workspace, "hello\nworld");
     assert_eq!(result, Ok(()));
