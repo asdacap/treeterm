@@ -97,6 +97,8 @@ impl ToolViews {
             | TabContent::Review(_)
             | TabContent::Browser { .. }
             | TabContent::StartingTerminal
+            | TabContent::StartingHarness
+            | TabContent::InvalidHarnessState
             | TabContent::Failed(_)
             | TabContent::NotPorted(_)
             | TabContent::WebApp { .. } => None,
@@ -145,6 +147,8 @@ impl ToolViews {
             | TabContent::Review(_)
             | TabContent::Browser { .. }
             | TabContent::StartingTerminal
+            | TabContent::StartingHarness
+            | TabContent::InvalidHarnessState
             | TabContent::Failed(_)
             | TabContent::NotPorted(_)
             | TabContent::WebApp { .. } => {

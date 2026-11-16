@@ -2649,6 +2649,8 @@ fn tab_content(
         Some(TabContent::StartingTerminal) => {
             centered(div().text_color(secondary).child("Starting terminal…"))
         }
+        Some(TabContent::StartingHarness) => harness_message(0x888888, "Starting AI harness..."),
+        Some(TabContent::InvalidHarnessState) => harness_message(0xf44747, "Error: Invalid AI harness state"),
         Some(TabContent::Failed(message)) => centered(div().text_color(error).child(message)),
         Some(TabContent::NotPorted(app)) => centered(
             div()
@@ -2657,6 +2659,19 @@ fn tab_content(
         ),
         None => centered(div().text_color(secondary).child("No tabs")),
     }
+}
+
+/// `AiHarness`'s messages in place of its terminal: top-left with 16px padding, in the
+/// body's 16px text.
+fn harness_message(color: u32, text: &'static str) -> AnyElement {
+    div()
+        .size_full()
+        .p(px(16.))
+        .text_size(px(16.))
+        .line_height(crate::ui::normal_line(16.))
+        .text_color(gpui_kit::rgb(color))
+        .child(text)
+        .into_any_element()
 }
 
 /// A tab being drawn in its tabset: the terminals the last render showed, and whether it is

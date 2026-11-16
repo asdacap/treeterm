@@ -773,6 +773,53 @@ fn an_ai_harness_draws_on_its_css_background_whether_sandboxed_or_not(cx: &mut T
 }
 
 #[gpui_kit::test]
+fn an_ai_harness_tab_says_it_is_starting_and_that_a_state_without_a_sandbox_is_invalid(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    // A harness tab whose state has no `sandbox` (a corrupt file), not started yet.
+    let mut file: serde_json::Value = serde_json::from_str(&body("a", None)).unwrap();
+    file["appStates"]["broken"] = serde_json::json!({
+        "applicationId": "aiharness-bot", "title": "Bot",
+        "state": { "ptyId": null, "ptyHandle": "broken-handle", "keepOnExit": true }
+    });
+    std::fs::write(h.daemon.workspaces_dir().join("a.json"), file.to_string()).unwrap();
+    publish(&h, &["a"]);
+    let settings = treeterm_core::settings::from_value(serde_json::json!({
+        "aiHarness": { "instances": [{
+            "id": "bot", "name": "Bot", "icon": "B", "command": "sleep 60",
+            "isDefault": false, "enableSandbox": false, "allowNetwork": true,
+            "backgroundColor": "#1a1a24", "disableScrollbar": false, "keepOnExit": true
+        }]}
+    }))
+    .unwrap();
+    let settings = cx.new(|_| SettingsStore::in_memory(settings));
+    let conn = h.conn.clone();
+    let store = cx.new(|cx| SessionStore::new(conn, "client-a".into(), settings, None, cx.new(ConnectionTraffic::new), cx));
+    wait_until(cx, &store, |s| loaded(s, "a"));
+    let workspace = store.read_with(cx, |s, _| ws(s, "a"));
+    let invalid = |w: &WorkspaceStore| matches!(w.tab_content("broken"), Some(TabContent::InvalidHarnessState));
+    assert!(workspace.read_with(cx, |w, _| invalid(w)));
+
+    // While their PTYs are being created: the harness says so, a terminal its own way.
+    let (bot, shell, starting) = workspace.update(cx, |w, cx| {
+        let bot = w.add_tab("aiharness-bot", cx).unwrap();
+        let shell = w.add_tab("terminal", cx).unwrap();
+        let starting = (w.tab_content(&bot), w.tab_content(&shell));
+        (bot, shell, starting)
+    });
+    assert!(matches!(starting, (Some(TabContent::StartingHarness), Some(TabContent::StartingTerminal))));
+    wait_until(cx, &workspace, |w| terminal_of(w, &bot).is_some() && terminal_of(w, &shell).is_some());
+
+    // The invalid tab's terminal runs all the same; only the error shows.
+    wait_until(cx, &workspace, |w| w.file().app_states["broken"].state["ptyId"].is_string());
+    assert!(workspace.read_with(cx, |w, _| invalid(w)));
+    // Once its state has a sandbox, the terminal it kept shows.
+    let sandbox = serde_json::json!({ "enabled": false, "allowNetwork": true, "allowedPaths": [] });
+    workspace.update(cx, |w, cx| w.update_tab_state("broken", |state| state["sandbox"] = sandbox, cx));
+    assert!(workspace.read_with(cx, |w, _| terminal_of(w, "broken").is_some()));
+}
+
+#[gpui_kit::test]
 fn a_ghostty_tab_copies_its_selection_as_it_is_made(cx: &mut TestAppContext) {
     use treeterm_model::terminal::SelectionCopy;
     cx.executor().allow_parking();

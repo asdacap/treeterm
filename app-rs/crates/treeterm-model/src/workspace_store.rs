@@ -168,6 +168,11 @@ pub enum TabContent {
     },
     /// The tab's PTY is being created.
     StartingTerminal,
+    /// An AI-harness tab's PTY is being created (`AiHarness`: "Starting AI harness...").
+    StartingHarness,
+    /// An AI-harness tab whose state is not a harness state (`isAiHarnessState`): it shows
+    /// only the error, while its terminal and analyzer run on as `onWorkspaceLoad` runs them.
+    InvalidHarnessState,
     Failed(String),
     /// An application the native app does not have yet.
     NotPorted(String),
@@ -405,8 +410,15 @@ impl WorkspaceStore {
             };
             return Some(TabContent::WebApp { app: web_app.model.clone(), server, forward: web_app.forward.clone() });
         }
+        // `AiHarness` checks the state before anything else.
+        let harness =
+            self.registry.get(&tab.application_id).is_some_and(|app| matches!(app.kind, AppKind::AiHarness { .. }));
+        if harness && !is_ai_harness_state(&tab.state) {
+            return Some(TabContent::InvalidHarnessState);
+        }
         Some(match self.tabs.get(tab_id) {
             Some(TabRef::Terminal(TerminalTab::Attached { model, .. })) => TabContent::Terminal(model.clone()),
+            Some(TabRef::Terminal(TerminalTab::Creating { .. })) if harness => TabContent::StartingHarness,
             Some(TabRef::Terminal(TerminalTab::Creating { .. })) => TabContent::StartingTerminal,
             Some(TabRef::Terminal(TerminalTab::Failed(error))) => TabContent::Failed(error.clone()),
             Some(TabRef::Files { model, .. }) => TabContent::Files(model.clone()),

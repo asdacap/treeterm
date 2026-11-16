@@ -479,6 +479,10 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   xterm.js's black, as an unreadable colour does in Electron, also Chromium's newer `lab()`,
   `oklch()` or `color()`. A change reaches open harness tabs at once; Electron kept the colour
   a tab's view was mounted with until it was mounted again.
+- An AI-harness tab whose state is not a harness state (no `sandbox` object, from a corrupt
+  workspace file) shows "Error: Invalid AI harness state" in red, the message Electron's
+  `AiHarness` view has for it; Electron's renderer checked first and left such a tab blank.
+  In both apps its terminal and analyzer run on behind it.
 - URLs in a terminal's text are links in every terminal tab, with the schemes ghostty-web
   links (`http(s)`, `mailto`, `ftp`, `ssh`, `git`, `tel`, `magnet`, `gemini`, `gopher`,
   `news`): Cmd/Ctrl+click opens one, and it is underlined only while Cmd/Ctrl is held, so a
