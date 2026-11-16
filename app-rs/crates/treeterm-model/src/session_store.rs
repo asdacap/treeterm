@@ -174,6 +174,16 @@ pub enum AfterMerge {
     Keep,
 }
 
+/// Why a merge did not go through.
+enum MergeFailure {
+    /// Refused before git ran (`mergeWorkspaceCore`'s guards, the session lock): only the
+    /// merge output says why.
+    Refused(String),
+    /// git failed, or the merge went through and its cleanup failed: the workspace shows the
+    /// error too.
+    Failed(String),
+}
+
 /// The git side of removing one workspace.
 enum GitCleanup {
     Nothing,
@@ -2123,7 +2133,8 @@ impl SessionStore {
     /// uncommitted changes. Before a merge that removes the child, its uncommitted work is
     /// committed as WIP; after it the child is marked merged and removed with its worktree
     /// and branch. git's output, the removal's included, goes to the child (its Review tab
-    /// shows it, and it goes with the child); failures also show on the child.
+    /// shows it, and it goes with the child). Failures also show on the child, unless the
+    /// merge was refused before git ran (the lock, a child or parent it cannot merge).
     pub fn merge_workspace(&mut self, id: &str, squash: bool, after: AfterMerge, cx: &mut Context<Self>) {
         let Some(store) = self.workspace_store(id).cloned() else {
             return;
@@ -2159,7 +2170,7 @@ impl SessionStore {
                             }
                             remove_locked(&this, &id, RemoveMode::DeleteWorktreeAndBranch, &git, progress, cx)
                                 .await
-                                .map_err(|error| format!("Merge succeeded but cleanup failed: {error}"))
+                                .map_err(|error| MergeFailure::Failed(format!("Merge succeeded but cleanup failed: {error}")))
                         }
                         (Ok(()), AfterMerge::Keep) => {
                             match this.update(cx, |session, cx| session.clear_workspace_error(&id, cx)) {
@@ -2172,14 +2183,16 @@ impl SessionStore {
                     release(&this, cx).await;
                     result
                 }
-                Err(error) => Err(error),
+                Err(error) => Err(MergeFailure::Refused(error)),
             };
             // All of git's output is in before the outcome is appended.
             drop(lines_tx);
             forward.await;
-            match this.update(cx, |session, cx| {
-                store.update(cx, |w, cx| w.finish_merge_output(&result, cx));
-                if let Err(error) = result {
+            match this.update(cx, |session, cx| match result {
+                Ok(()) => store.update(cx, |w, cx| w.finish_merge_output(&Ok(()), cx)),
+                Err(MergeFailure::Refused(error)) => store.update(cx, |w, cx| w.finish_merge_output(&Err(error), cx)),
+                Err(MergeFailure::Failed(error)) => {
+                    store.update(cx, |w, cx| w.finish_merge_output(&Err(error.clone()), cx));
                     session.set_operation_error(&id, &store, error, cx);
                 }
             }) {
@@ -2483,41 +2496,51 @@ async fn merge_locked(
     git: &treeterm_core::git::GitApi,
     progress: treeterm_core::git::Progress<'_>,
     cx: &mut gpui_kit::AsyncApp,
-) -> Result<(), String> {
+) -> Result<(), MergeFailure> {
     use treeterm_core::git::MergeMode;
     let (child_path, child_name, child_branch, parent_path) = this
-        .update(cx, |session, cx| -> Result<_, String> {
-            let child = session.workspace_store(id).ok_or("Workspace not found")?.read(cx).workspace();
+        .update(cx, |session, cx| -> Result<_, MergeFailure> {
+            let refused = |error: &str| MergeFailure::Refused(error.to_owned());
+            let child = session.workspace_store(id).ok_or_else(|| refused("Workspace not found"))?.read(cx).workspace();
             let (true, Some(parent_id)) = (child.file.is_worktree, child.file.parent_id.clone()) else {
-                return Err("Not a worktree workspace".to_owned());
+                return Err(refused("Not a worktree workspace"));
             };
             let parent = session
                 .workspace_store(&parent_id)
                 .map(|p| p.read(cx).workspace())
                 .filter(|p| p.file.git_root_path.is_some() && p.file.git_branch.is_some())
-                .ok_or("Parent workspace not found or not a git repo")?;
-            let branch = child.file.git_branch.clone().ok_or("Workspace has no branch to merge")?;
+                .ok_or_else(|| refused("Parent workspace not found or not a git repo"))?;
+            // Electron let `git merge ''` fail here, which showed on the workspace.
+            let branch = child
+                .file
+                .git_branch
+                .clone()
+                .ok_or_else(|| MergeFailure::Failed("Workspace has no branch to merge".to_owned()))?;
             Ok((child.path.clone(), child.file.name.clone(), branch, parent.path.clone()))
         })
-        .map_err(|_| "session store dropped".to_owned())??;
-    if git.has_uncommitted_changes(&parent_path).await.map_err(|e| e.to_string())? {
-        return Err("Parent workspace has uncommitted changes. Commit or stash them before merging.".to_owned());
-    }
-    if after == AfterMerge::Remove && git.has_uncommitted_changes(&child_path).await.map_err(|e| e.to_string())? {
-        // Deviation from Electron: stage untracked files too. `commit -am` alone skips
-        // them, so untracked-only work made the merge fail, and new files next to edits were
-        // left out of the commit and then deleted with the worktree.
-        git.stage_all(&child_path)
+        .map_err(|_| MergeFailure::Failed("session store dropped".to_owned()))??;
+    let merged: Result<(), String> = async {
+        if git.has_uncommitted_changes(&parent_path).await.map_err(|e| e.to_string())? {
+            return Err("Parent workspace has uncommitted changes. Commit or stash them before merging.".to_owned());
+        }
+        if after == AfterMerge::Remove && git.has_uncommitted_changes(&child_path).await.map_err(|e| e.to_string())? {
+            // Deviation from Electron: stage untracked files too. `commit -am` alone skips
+            // them, so untracked-only work made the merge fail, and new files next to edits
+            // were left out of the commit and then deleted with the worktree.
+            git.stage_all(&child_path)
+                .await
+                .map_err(|e| format!("Failed to stage changes: {e}"))?;
+            git.commit_all(&child_path, &format!("WIP: Auto-commit before merge from {child_name}"), progress)
+                .await
+                .map_err(|e| format!("Failed to commit changes: {e}"))?;
+        }
+        let mode = if squash { MergeMode::Squash } else { MergeMode::Merge };
+        git.merge(&parent_path, &child_branch, mode, progress)
             .await
-            .map_err(|e| format!("Failed to stage changes: {e}"))?;
-        git.commit_all(&child_path, &format!("WIP: Auto-commit before merge from {child_name}"), progress)
-            .await
-            .map_err(|e| format!("Failed to commit changes: {e}"))?;
+            .map_err(|e| format!("Merge failed: {e}"))
     }
-    let mode = if squash { MergeMode::Squash } else { MergeMode::Merge };
-    git.merge(&parent_path, &child_branch, mode, progress)
-        .await
-        .map_err(|e| format!("Merge failed: {e}"))
+    .await;
+    merged.map_err(MergeFailure::Failed)
 }
 
 fn remember_hash(sync: &mut WorkspaceSync, sha: String) {

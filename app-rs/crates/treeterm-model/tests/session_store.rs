@@ -795,6 +795,41 @@ fn a_merge_skips_the_conflict_check_while_the_parent_is_unknown(cx: &mut TestApp
     wait_until(cx, &workspace, |w| w.merge_output().is_some_and(|o| o.state == MergeState::Failed));
     let output = workspace.read_with(cx, |w, _| w.merge_output().cloned()).unwrap();
     assert!(output.output.ends_with("\nMerge failed: Parent workspace not found or not a git repo\n"), "{}", output.output);
+    assert!(store.read_with(cx, |s, _| loaded(s, "orphan")), "a refusal shows no error on the workspace");
+}
+
+#[gpui_kit::test]
+fn a_merge_refused_before_git_runs_shows_in_its_output_only(cx: &mut TestAppContext) {
+    use treeterm_model::session_store::AfterMerge;
+    cx.executor().allow_parking();
+    let h = harness();
+    let write = |id: &str, body: String| std::fs::write(h.daemon.workspaces_dir().join(format!("{id}.json")), body).unwrap();
+    // "root" is not a git repo (no gitRootPath); "plain" is not a worktree, dragged under it.
+    write("root", body("root", None));
+    write("nogit", detached_body("nogit", true, "root"));
+    write("plain", detached_body("plain", false, "root"));
+    publish(&h, &["root", "nogit", "plain"]);
+    let store = open_store(cx, &h, "client-a");
+    wait_until(cx, &store, |s| ["root", "nogit", "plain"].iter().all(|id| loaded(s, id)));
+    let merge_refused = |cx: &mut TestAppContext, id: &str, error: &str| {
+        let workspace = store.read_with(cx, |s, _| ws(s, id));
+        store.update(cx, |s, cx| s.merge_workspace(id, false, AfterMerge::Remove, cx));
+        wait_until(cx, &workspace, |w| w.merge_output().is_some_and(|o| o.state == MergeState::Failed));
+        let output = workspace.read_with(cx, |w, _| w.merge_output().cloned()).unwrap();
+        assert_eq!(output.output, format!("\nMerge failed: {error}\n"), "{id}");
+        // No warning on the workspace (Electron only returned the error to the output).
+        assert!(store.read_with(cx, |s, _| loaded(s, id)), "{id}");
+    };
+    merge_refused(cx, "plain", "Not a worktree workspace");
+    merge_refused(cx, "nogit", "Parent workspace not found or not a git repo");
+
+    // Another connection holds the session lock: the merge cannot start.
+    let other = futures::executor::block_on(treeterm_core::daemon::DaemonConnection::open(&h.rt, h.daemon.socket_path()))
+        .unwrap()
+        .unwrap();
+    let locked = futures::executor::block_on(other.lock_session(std::time::Duration::from_secs(600))).unwrap().unwrap();
+    assert!(matches!(locked, treeterm_core::daemon::SessionLockResult::Acquired(_)));
+    merge_refused(cx, "nogit", "Session is locked by another window");
 }
 
 #[gpui_kit::test]
