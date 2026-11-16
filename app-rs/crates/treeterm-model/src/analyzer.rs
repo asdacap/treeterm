@@ -122,8 +122,8 @@ impl AnalyzerModel {
         let mut analyzer = Analyzer::new(cwd, settings);
         analyzer.start();
         // Electron's analyzer snapshots its terminal after a resize too: a reflowed screen is
-        // a change to classify.
-        terminal.update(cx, |terminal, _| terminal.set_idle_snapshots(IdleSnapshots::AfterOutputAndResize));
+        // a change to classify (a blank one, at any size, is not).
+        terminal.update(cx, |terminal, cx| terminal.set_idle_snapshots(IdleSnapshots::AfterOutputAndResize, cx));
         let events = cx.subscribe(&terminal, |model, _, event: &TerminalEvent, cx| model.on_terminal(event, cx));
         Self {
             analyzer,

@@ -955,7 +955,7 @@ fn a_resize_is_a_change_of_screen_only_where_resizes_are_snapshotted(cx: &mut Te
     let h = harness();
     let pty = spawn_cat(&h);
     let analyzed = open(cx, &h, TerminalOptions { idle_timeout: Some(IDLE), ..options(pty.clone()) });
-    analyzed.update(cx, |m, _| m.set_idle_snapshots(IdleSnapshots::AfterOutputAndResize));
+    analyzed.update(cx, |m, cx| m.set_idle_snapshots(IdleSnapshots::AfterOutputAndResize, cx));
     let plain = open(cx, &h, TerminalOptions { idle_timeout: Some(IDLE), ..options(pty) });
     // The daemon types the startup command once the shell is ready; `cat` runs once it echoes
     // a line back, and nothing else is printed after that.
@@ -980,6 +980,63 @@ fn a_resize_is_a_change_of_screen_only_where_resizes_are_snapshotted(cx: &mut Te
     let edge = IdleEdge { snapshot: screen.clone(), idle_timeout: IDLE };
     assert_eq!(*analyzed_events.borrow(), vec![TerminalEvent::Activity(screen), TerminalEvent::Idle(edge)]);
     assert_eq!(*plain_events.borrow(), Vec::new());
+}
+
+/// A shell that prints nothing, as a new AI harness's shell before its prompt: its first
+/// startup file replaces it with `sleep`.
+fn spawn_silent(h: &Harness) -> String {
+    let root = h.daemon.root();
+    // zsh reads `$ZDOTDIR/.zshenv` first; bash and sh read a profile from `$HOME`.
+    for file in [".zshenv", ".bash_profile", ".profile"] {
+        std::fs::write(root.join(file), "exec sleep 60\n").unwrap();
+    }
+    let dir = root.to_string_lossy().into_owned();
+    let env = HashMap::from([("ZDOTDIR".to_owned(), dir.clone()), ("HOME".to_owned(), dir.clone())]);
+    futures::executor::block_on(h.conn.create_pty(CreatePty {
+        cwd: dir,
+        env,
+        size: Some((80, 24)),
+        ..CreatePty::default()
+    }))
+    .unwrap()
+    .unwrap()
+}
+
+#[gpui_kit::test]
+fn a_blank_screen_resized_is_no_change_where_resizes_are_snapshotted(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    let pty = spawn_silent(&h);
+    let conn = h.conn.clone();
+    let options = TerminalOptions { idle_timeout: Some(IDLE), ..options(pty) };
+    // As the workspace store does: the analyzer asks for resize snapshots on a terminal it was
+    // just given, before anything arrived.
+    let model = cx.new(|cx| {
+        let mut model = TerminalModel::new(conn, options, cx);
+        model.set_idle_snapshots(IdleSnapshots::AfterOutputAndResize, cx);
+        model
+    });
+    let (events, _subscription) = record(cx, &model);
+    // The attach replay reports the PTY's size; only then does a fit resize it.
+    wait_until(cx, &model, |m| *m.overlay() == Overlay::Hidden);
+
+    // The view's first fit, while the harness has printed nothing.
+    let taller = GridSize { cols: 80, rows: 45 };
+    model.update(cx, |m, _| m.fit(taller));
+    wait_until(cx, &model, |m| m.grid_size() == taller);
+    advance(cx, IDLE * 2);
+    assert!(model.read_with(cx, |m, _| m.viewport().trim().is_empty()), "the shell printed something");
+    assert_eq!(*events.borrow(), Vec::new());
+
+    // A refreshed stream starts on a placeholder grid of another size, replayed blank.
+    model.update(cx, |m, cx| m.refresh(cx));
+    wait_until(cx, &model, |m| *m.overlay() == Overlay::Hidden && m.grid_size() == taller);
+    let shorter = GridSize { cols: 80, rows: 30 };
+    model.update(cx, |m, _| m.fit(shorter));
+    wait_until(cx, &model, |m| m.grid_size() == shorter);
+    advance(cx, IDLE * 2);
+    assert!(model.read_with(cx, |m, _| m.viewport().trim().is_empty()), "the shell printed something");
+    assert_eq!(*events.borrow(), Vec::new());
 }
 
 #[gpui_kit::test]

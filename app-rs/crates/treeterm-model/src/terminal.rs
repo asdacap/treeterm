@@ -133,8 +133,20 @@ pub enum IdleSnapshots {
     /// After output, as a terminal tab's detector does in Electron (`BaseTerminal`).
     AfterOutput,
     /// After output and after a resize (a reflowed screen is a change), as Electron's
-    /// analyzer does with the AI harness it reads.
+    /// analyzer does with the AI harness it reads. A blank screen reads as nothing at any
+    /// size, as there (`extractBuffer() ?? ''`): the first fit of a harness that has printed
+    /// nothing yet is no change.
     AfterOutputAndResize,
+}
+
+impl IdleSnapshots {
+    /// The viewport as the idle detector compares it.
+    fn snapshot(self, viewport: String) -> String {
+        match self {
+            Self::AfterOutputAndResize if viewport.trim().is_empty() => String::new(),
+            Self::AfterOutput | Self::AfterOutputAndResize => viewport,
+        }
+    }
 }
 
 /// Whether the grid has the PTY's size. The daemon reports it in every attachment's replay;
@@ -297,8 +309,10 @@ impl TerminalModel {
     pub fn new(conn: DaemonConnection, options: TerminalOptions, cx: &mut Context<Self>) -> Self {
         let attachment = Self::attach(&conn, &options, cx);
         let now = cx.background_executor().now();
+        let idle_snapshots = IdleSnapshots::AfterOutput;
         let idle = options.idle_timeout.map(|timeout| {
-            IdleDetector::new(view::snapshot_viewport(&*attachment.term.lock()), timeout, now)
+            let snapshot = idle_snapshots.snapshot(view::snapshot_viewport(&*attachment.term.lock()));
+            IdleDetector::new(snapshot, timeout, now)
         });
         Self {
             conn,
@@ -314,7 +328,7 @@ impl TerminalModel {
             exited: None,
             data_version: 0,
             idle,
-            idle_snapshots: IdleSnapshots::AfterOutput,
+            idle_snapshots,
             idle_timer: None,
             badge_click: None,
             pointer: None,
@@ -452,6 +466,11 @@ impl TerminalModel {
         view::snapshot_viewport(&*self.attachment.term.lock())
     }
 
+    /// The viewport as the idle detector compares it ([`IdleSnapshots`]).
+    fn idle_snapshot(&self) -> String {
+        self.idle_snapshots.snapshot(self.viewport())
+    }
+
     /// Change how long output must be quiet before an idle edge (`None`: no detection).
     /// Takes effect from the next burst.
     pub fn set_idle_timeout(&mut self, timeout: Option<Duration>, cx: &mut Context<Self>) {
@@ -462,7 +481,7 @@ impl TerminalModel {
         match (timeout, self.idle.is_some()) {
             (Some(timeout), false) => {
                 let now = cx.background_executor().now();
-                self.idle = Some(IdleDetector::new(self.viewport(), timeout, now));
+                self.idle = Some(IdleDetector::new(self.idle_snapshot(), timeout, now));
             }
             (None, true) => {
                 self.idle = None;
@@ -472,9 +491,20 @@ impl TerminalModel {
         }
     }
 
-    /// Which viewport changes the idle detector looks at from now on.
-    pub fn set_idle_snapshots(&mut self, snapshots: IdleSnapshots) {
+    /// Which viewport changes the idle detector looks at from now on. Detection starts over
+    /// from the screen as now read, so set it before output arrives (the analyzer does, as it
+    /// is created with the terminal).
+    pub fn set_idle_snapshots(&mut self, snapshots: IdleSnapshots, cx: &mut Context<Self>) {
+        if self.idle_snapshots == snapshots {
+            return;
+        }
         self.idle_snapshots = snapshots;
+        self.idle_timer = None;
+        let now = cx.background_executor().now();
+        self.idle = self
+            .options
+            .idle_timeout
+            .map(|timeout| IdleDetector::new(self.idle_snapshot(), timeout, now));
     }
 
     /// Report an idle edge now if output is quiet, else at the end of the current burst.
@@ -1018,9 +1048,10 @@ impl TerminalModel {
         self.title = None;
         self.idle_timer = None;
         let now = cx.background_executor().now();
-        self.idle = self.options.idle_timeout.map(|timeout| {
-            IdleDetector::new(view::snapshot_viewport(&*self.attachment.term.lock()), timeout, now)
-        });
+        self.idle = self
+            .options
+            .idle_timeout
+            .map(|timeout| IdleDetector::new(self.idle_snapshot(), timeout, now));
         self.refresh_viewport_state();
         cx.notify();
     }
@@ -1124,10 +1155,13 @@ impl TerminalModel {
     }
 
     fn detect_activity(&mut self, cx: &mut Context<Self>) {
+        if self.idle.is_none() {
+            return;
+        }
+        let snapshot = self.idle_snapshot();
         let (Some(detector), Some(timeout)) = (self.idle.as_mut(), self.options.idle_timeout) else {
             return;
         };
-        let snapshot = view::snapshot_viewport(&*self.attachment.term.lock());
         let now = cx.background_executor().now();
         let outputs = detector.process_snapshot(snapshot, now, timeout);
         self.emit_idle(outputs, cx);
