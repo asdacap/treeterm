@@ -68,6 +68,14 @@ fn provider_error(error: &str) -> Result<AnalyzeOutcome, String> {
     })
 }
 
+/// Checks that `text` was logged, at `level` (`ERROR`, `WARN`, `DEBUG`, ...).
+fn logged(logs: &crate::test_logs::Captured, level: &str, text: &str) {
+    let line = logs
+        .line(text)
+        .unwrap_or_else(|| panic!("no {text:?} in:\n{}", logs.text()));
+    assert!(line.contains(level), "{line}");
+}
+
 fn titled(title: &str, description: &str, branch_name: &str) -> Result<TitleOutcome, String> {
     Ok(TitleOutcome {
         result: Ok(TitleSuggestion {
@@ -479,6 +487,7 @@ fn analyzes_with_empty_api_key_valid_for_self_hosted_like_ollama() {
 
 #[test]
 fn analyze_calls_llm_analyze_terminal_and_updates_state() {
+    let logs = crate::test_logs::capture();
     let mut h = Harness::new();
     h.emit("$ echo hello\nhello\n$ ");
     h.advance(500);
@@ -504,10 +513,17 @@ fn analyze_calls_llm_analyze_terminal_and_updates_state() {
             classification("$ echo hello\nhello\n$ ", "prompt visible")
         ))
     );
+    logged(&logs, "DEBUG", "terminal-analyzer: buffer: $ echo hello");
+    logged(
+        &logs,
+        "DEBUG",
+        "terminal-analyzer: state set: idle reason: prompt visible",
+    );
 }
 
 #[test]
 fn analyze_handles_error_result() {
+    let logs = crate::test_logs::capture();
     let mut h = Harness::new().answering(provider_error("API error"));
     h.emit("$ echo hello\nhello\n$ ");
     h.advance(1000);
@@ -515,20 +531,30 @@ fn analyze_handles_error_result() {
     assert_eq!(h.analyzer.ai_state(), ActivityState::Error);
     assert_eq!(h.analyzer.reason(), "API error");
     assert!(!h.analyzer.analyzing());
+    logged(&logs, "ERROR", "terminal-analyzer: error: API error");
+    assert_eq!(logs.line("LLM call failed"), None);
 }
 
 #[test]
 fn analyze_handles_llm_call_failure() {
+    let logs = crate::test_logs::capture();
     let mut h = Harness::new().answering(Err("Network error".to_owned()));
     h.emit("$ echo hello\nhello\n$ ");
     h.advance(1000);
     h.advance_async(0);
     assert_eq!(h.analyzer.ai_state(), ActivityState::Error);
     assert_eq!(h.analyzer.reason(), "Network error");
+    logged(
+        &logs,
+        "ERROR",
+        "terminal-analyzer: LLM call failed: Network error",
+    );
+    assert_eq!(logs.line("terminal-analyzer: error:"), None);
 }
 
 #[test]
 fn applies_a_response_discarded_during_a_blip_once_the_screen_returns_to_what_was_classified() {
+    let logs = crate::test_logs::capture();
     let mut h = Harness::new().manual();
     h.emit("$ done");
     h.advance_async(1000);
@@ -540,6 +566,12 @@ fn applies_a_response_discarded_during_a_blip_once_the_screen_returns_to_what_wa
     h.resolve(0, classified(ActivityState::Idle, "prompt visible"));
     h.advance_async(50);
     assert_eq!(h.history()[0].error(), Some("[discarded]"));
+    logged(
+        &logs,
+        "DEBUG",
+        "terminal-analyzer: discarding stale response",
+    );
+    assert_eq!(logs.line("state set"), None);
 
     // ...and the screen goes back to the classified one: a blip, which fires no idle edge.
     h.emit("$ done");
@@ -547,6 +579,11 @@ fn applies_a_response_discarded_during_a_blip_once_the_screen_returns_to_what_wa
     assert_eq!(h.analyzer.reason(), "prompt visible");
     // Reused from the cache, not asked again.
     assert_eq!(h.classify_calls.len(), 1);
+    logged(
+        &logs,
+        "DEBUG",
+        "terminal-analyzer: reusing cached result for unchanged buffer",
+    );
 }
 
 #[test]
@@ -906,6 +943,7 @@ fn refresh_title_and_description_reports_failure_when_no_model_is_configured() {
 
 #[test]
 fn refresh_title_and_description_surfaces_the_llm_error_message_and_writes_no_metadata() {
+    let logs = crate::test_logs::capture();
     let mut h = started();
     h.title = Box::new(|_| {
         Ok(TitleOutcome {
@@ -923,10 +961,13 @@ fn refresh_title_and_description_surfaces_the_llm_error_message_and_writes_no_me
         )]
     );
     assert!(h.metadata.is_empty());
+    // Only a call that fails is logged.
+    assert_eq!(logs.line("title generation failed"), None);
 }
 
 #[test]
 fn refresh_title_and_description_surfaces_a_thrown_llm_error() {
+    let logs = crate::test_logs::capture();
     let mut h = started();
     h.title = Box::new(|_| Err("network down".to_owned()));
     let id = h.refresh_title_and_description();
@@ -937,6 +978,11 @@ fn refresh_title_and_description_surfaces_a_thrown_llm_error() {
             Refresh::TitleAndDescription,
             Err("network down".to_owned())
         )]
+    );
+    logged(
+        &logs,
+        "ERROR",
+        "analyzer: title generation failed: network down",
     );
 }
 
@@ -997,6 +1043,7 @@ fn refresh_branch_name_does_not_rename_when_the_llm_omits_the_branch_name() {
 
 #[test]
 fn refresh_branch_name_surfaces_a_rename_failure() {
+    let logs = crate::test_logs::capture();
     let mut h = started();
     h.rename = Box::new(|_, _| Err("branch already exists".to_owned()));
     let id = h.refresh_branch_name();
@@ -1010,6 +1057,12 @@ fn refresh_branch_name_surfaces_a_rename_failure() {
         )]
     );
     assert!(h.metadata.is_empty());
+    logged(
+        &logs,
+        "ERROR",
+        "analyzer: branch rename failed: branch already exists",
+    );
+    assert_eq!(logs.line("automatic"), None);
 }
 
 #[test]
@@ -1298,19 +1351,34 @@ fn marks_the_branch_as_defined_when_auto_renaming_so_later_analyzers_leave_it_al
 
 #[test]
 fn marks_the_branch_as_defined_even_when_the_automatic_rename_is_skipped_or_fails() {
+    let logs = crate::test_logs::capture();
     let mut h = titled_harness();
     h.title = Box::new(|_| titled("Test Title", "d", "Not Valid"));
     h.user_input("\r");
     h.advance_async(1000);
     assert!(h.has_metadata("branchIsUserDefined", "true", "analyzerSetBranch"));
     assert!(h.renames.is_empty());
+    logged(
+        &logs,
+        "WARN",
+        "analyzer: automatic branch rename skipped: LLM suggested an invalid branch name",
+    );
+    assert_eq!(logs.line("branch rename failed"), None);
+    drop(logs);
 
+    let logs = crate::test_logs::capture();
     let mut failing = titled_harness();
     failing.rename = Box::new(|_, _| Err("exists".to_owned()));
     failing.user_input("\r");
     failing.advance_async(1000);
     assert_eq!(failing.renames.len(), 1);
     assert!(failing.refreshes.is_empty());
+    logged(&logs, "ERROR", "analyzer: branch rename failed: exists");
+    logged(
+        &logs,
+        "WARN",
+        "analyzer: automatic branch rename skipped: exists",
+    );
 }
 
 #[test]
@@ -1326,6 +1394,7 @@ fn skips_title_description_and_branch_rename_when_workspace_has_no_parent() {
 
 #[test]
 fn logs_title_generation_failure_to_history() {
+    let logs = crate::test_logs::capture();
     let mut h = titled_harness();
     h.title = Box::new(|_| Err("Title API error".to_owned()));
     h.user_input("hello\r");
@@ -1339,6 +1408,16 @@ fn logs_title_generation_failure_to_history() {
     assert_eq!(entry.error(), Some("Title API error"));
     assert_eq!(entry.response(), "");
     assert!(h.metadata.is_empty());
+    logged(
+        &logs,
+        "ERROR",
+        "analyzer: title generation failed: Title API error",
+    );
+    logged(
+        &logs,
+        "WARN",
+        "analyzer: automatic title generation failed: Title API error",
+    );
 }
 
 // === git refresh on AI state change ===
@@ -1640,6 +1719,7 @@ fn real_jev_adapter_handles_choices_without_auto_approval() {
 
 #[test]
 fn reports_an_invalid_classifier_endpoint_as_an_error_without_a_request() {
+    let logs = crate::test_logs::capture();
     let mut s = settings();
     s.terminal_analyzer.provider = ClassifierProvider::Classifier;
     s.llm.base_url = "not a url".to_owned();
@@ -1653,6 +1733,11 @@ fn reports_an_invalid_classifier_endpoint_as_an_error_without_a_request() {
         h.history()[0].record,
         HistoryRecord::CallFailed { .. }
     ));
+    logged(
+        &logs,
+        "ERROR",
+        "terminal-analyzer: LLM call failed: Invalid URL",
+    );
 }
 
 #[test]

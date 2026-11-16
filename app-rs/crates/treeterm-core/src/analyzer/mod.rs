@@ -526,6 +526,7 @@ impl Analyzer {
                     self.analyze(viewport, now, &mut out);
                     return out;
                 }
+                tracing::error!("terminal-analyzer: LLM call failed: {error}");
                 self.analyzing = false;
                 self.update_ai_state(ActivityState::Error, Some(&error), viewport, &mut out);
                 self.record(
@@ -544,6 +545,7 @@ impl Analyzer {
         // Compare the screen itself, not a change counter: a blip that ends back on the
         // requested buffer fires no idle edge to re-analyze, so its response must still apply.
         if non_blank(viewport) != Some(buffer.as_str()) || configuration_changed {
+            tracing::debug!("terminal-analyzer: discarding stale response");
             let reanalyze = reanalyze || configuration_changed;
             // Still a valid answer for the screen it was asked about: if the screen returns
             // there, the next analysis reuses it instead of asking again.
@@ -575,12 +577,17 @@ impl Analyzer {
                 run.remember(identity, analyzed.classification.clone());
                 self.analyzing = false;
                 let Classification { state, reason } = analyzed.classification;
+                tracing::debug!(
+                    "terminal-analyzer: state set: {} reason: {reason}",
+                    state.as_str()
+                );
                 self.update_ai_state(state, Some(&reason), viewport, &mut out);
                 ResponseStatus::Ok {
                     cached: analyzed.cached,
                 }
             }
             Err(error) => {
+                tracing::error!("terminal-analyzer: error: {error}");
                 self.analyzing = false;
                 self.update_ai_state(ActivityState::Error, Some(&error), viewport, &mut out);
                 ResponseStatus::Error(error)
@@ -690,6 +697,7 @@ impl Analyzer {
                 }
             }
             Err(error) => {
+                tracing::error!("analyzer: title generation failed: {error}");
                 self.record(
                     now,
                     HistoryKind::Title,
@@ -747,7 +755,8 @@ impl Analyzer {
         match (self.renames.remove(&id), result) {
             (None, _) | (Some(RenamePurpose::Automatic), Ok(())) => Vec::new(),
             (Some(RenamePurpose::Automatic), Err(error)) => {
-                tracing::warn!("analyzer: automatic branch rename failed: {error}");
+                tracing::error!("analyzer: branch rename failed: {error}");
+                tracing::warn!("analyzer: automatic branch rename skipped: {error}");
                 Vec::new()
             }
             (Some(RenamePurpose::Refresh(refresh)), Ok(())) => vec![
@@ -759,6 +768,7 @@ impl Analyzer {
                 finished(refresh, Refresh::BranchName, Ok(())),
             ],
             (Some(RenamePurpose::Refresh(refresh)), Err(error)) => {
+                tracing::error!("analyzer: branch rename failed: {error}");
                 vec![finished(refresh, Refresh::BranchName, Err(error))]
             }
         }
@@ -822,6 +832,7 @@ impl Analyzer {
             Ok(identity) => identity,
             Err(error) => {
                 let error = error.to_string();
+                tracing::error!("terminal-analyzer: LLM call failed: {error}");
                 self.analyzing = false;
                 self.update_ai_state(ActivityState::Error, Some(&error), viewport, out);
                 let record = HistoryRecord::CallFailed { error };
@@ -829,9 +840,11 @@ impl Analyzer {
             }
         };
         if let Some(Classification { state, reason }) = run.cached(&identity) {
+            tracing::debug!("terminal-analyzer: reusing cached result for unchanged buffer");
             self.analyzing = false;
             return self.update_ai_state(state, Some(&reason), viewport, out);
         }
+        tracing::debug!("terminal-analyzer: buffer: {buffer}");
         self.next_id += 1;
         let id = RequestId(self.next_id);
         run.request = Request::InFlight(Box::new(InFlight {
