@@ -2,11 +2,12 @@
 
 use std::rc::Rc;
 
+use gpui_kit::base::SelectableText;
 use gpui_kit::component::input::{InputEvent, InputState, TextareaState};
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::*;
-use gpui_kit::{Context, Entity, FocusHandle, FontWeight, Subscription, Window, div, px};
+use gpui_kit::{App, Context, Entity, FocusHandle, FontWeight, Subscription, Window, div, px};
 use treeterm_model::tool_tabs::workspace_settings::{default_app_choices, default_app_label};
 use treeterm_model::workspace_store::WorkspaceStore;
 
@@ -17,7 +18,8 @@ pub struct WorkspaceSettingsView {
     workspace: Entity<WorkspaceStore>,
     /// The page's own focus, as Electron's `document.body`: Enter in a field moves it here
     /// (`blur()`), and so does a mouse-down on the page outside the fields (Electron blurs the
-    /// field).
+    /// field). Cmd/Ctrl+C then reaches the Kit root's Copy of the selected text rather than a
+    /// field's own Copy, which takes the keystroke even with nothing selected.
     focus: FocusHandle,
     fields: Fields,
     json_open: bool,
@@ -105,6 +107,38 @@ impl Fields {
     }
 }
 
+/// `.workspace-settings-json pre`: at most 400px tall, scrolling both ways (`overflow: auto`)
+/// over lines that do not wrap. Its text can be selected and copied, as the rest of the page's.
+fn json_box(json: String, cx: &App) -> impl IntoElement {
+    let c = colors(cx);
+    div()
+        .id("workspace-json")
+        .debug_selector(|| "workspace-json".to_owned())
+        .mt(px(8.))
+        .max_h(px(400.))
+        .overflow_scroll()
+        // GPUI scrolls as far as the children's boxes reach, and a block child is only as wide
+        // as the box: in a row, the text keeps the width of its longest line.
+        .flex()
+        .items_start()
+        .p(px(12.))
+        .rounded(px(4.))
+        .border_1()
+        .border_color(c.border)
+        .bg(c.bg_tertiary)
+        .font_family(MONO)
+        .text_size(px(12.))
+        .line_height(normal_line(12.))
+        .text_color(c.text_primary)
+        .whitespace_nowrap()
+        .child(
+            div()
+                .flex_none()
+                .debug_selector(|| "workspace-json-text".to_owned())
+                .child(SelectableText::new("workspace-json-text", json)),
+        )
+}
+
 impl Render for WorkspaceSettingsView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let c = colors(cx);
@@ -126,6 +160,7 @@ impl Render for WorkspaceSettingsView {
             mono: false,
             height,
         };
+        // The heading, labels and hint are ordinary page text: selectable, as the JSON is.
         let group = |label: &'static str| {
             v_flex().gap(px(6.)).child(
                 div()
@@ -133,7 +168,7 @@ impl Render for WorkspaceSettingsView {
                     .line_height(normal_line(13.))
                     .font_weight(FontWeight::MEDIUM)
                     .text_color(primary)
-                    .child(label),
+                    .child(SelectableText::new(label, label)),
             )
         };
         let workspace = self.workspace.clone();
@@ -166,7 +201,7 @@ impl Render for WorkspaceSettingsView {
                     .text_size(px(16.))
                     .line_height(normal_line(16.))
                     .font_weight(FontWeight::SEMIBOLD)
-                    .child("Workspace Settings"),
+                    .child(SelectableText::new("workspace-settings-title", "Workspace Settings")),
             )
             .child(group("Name").child(field(&self.fields.name, style(34.), window, cx)))
             // A `<textarea>` keeps Chromium's monospace font: `.settings-input` sets none.
@@ -177,7 +212,10 @@ impl Render for WorkspaceSettingsView {
             .child(
                 group("Default Application for Children").child(picker).child(
                     div().mt(px(2.)).text_size(px(11.)).line_height(normal_line(11.)).text_color(secondary).child(
-                        "The default application to open when creating child workspaces. If not set, inherits from the nearest ancestor that sets one, or uses the global default.",
+                        SelectableText::new(
+                            "default-app-hint",
+                            "The default application to open when creating child workspaces. If not set, inherits from the nearest ancestor that sets one, or uses the global default.",
+                        ),
                     ),
                 ),
             )
@@ -200,25 +238,7 @@ impl Render for WorkspaceSettingsView {
                                 cx.notify();
                             })),
                     )
-                    .when(self.json_open, |d| {
-                        d.child(
-                            div()
-                                .id("workspace-json")
-                                .mt(px(8.))
-                                .max_h(px(400.))
-                                .overflow_y_scroll()
-                                .p(px(12.))
-                                .rounded(px(4.))
-                                .border_1()
-                                .border_color(border)
-                                .bg(tertiary)
-                                .font_family(MONO)
-                                .text_size(px(12.))
-                                .line_height(normal_line(12.))
-                                .text_color(primary)
-                                .children(json.lines().map(|line| div().whitespace_nowrap().child(line.to_owned()))),
-                        )
-                    }),
+                    .when(self.json_open, |d| d.child(json_box(json, cx))),
             );
         // The whole tab, also beside the 600px column, takes the focus from a field.
         div().size_full().track_focus(&self.focus).child(page)
@@ -227,19 +247,23 @@ impl Render for WorkspaceSettingsView {
 
 #[cfg(test)]
 mod tests {
+    use gpui_kit::base::TextSelection;
     use gpui_kit::{
-        Focusable as _, KeyDownEvent, KeyUpEvent, Keystroke, Modifiers, TestAppContext, VisualTestContext, WindowOptions,
-        point,
+        Bounds, Focusable as _, KeyDownEvent, KeyUpEvent, Keystroke, Modifiers, MouseButton, Pixels, Point, ScrollDelta,
+        ScrollEvent, ScrollSource, TestAppContext, TouchPhase, VisualTestContext, WindowOptions, point,
     };
 
     use super::*;
 
+    const COPY: &str = if cfg!(target_os = "macos") { "cmd-c" } else { "ctrl-c" };
     const SUBMIT: &str = if cfg!(target_os = "macos") { "cmd-enter" } else { "ctrl-enter" };
 
-    /// The Settings tab's page, 300px wide: its fields, recording what they save.
+    /// The Settings tab's page, 300px wide: its fields, recording what they save, over the
+    /// Raw Workspace JSON.
     struct Page {
         focus: FocusHandle,
         fields: Fields,
+        json: String,
         saved: Vec<(Field, String)>,
     }
 
@@ -261,7 +285,8 @@ mod tests {
                     .w(px(300.))
                     .gap(px(20.))
                     .child(field(&self.fields.name, style, window, cx))
-                    .child(pane_text_area(&self.fields.description, description, window, cx)),
+                    .child(pane_text_area(&self.fields.description, description, window, cx))
+                    .child(json_box(self.json.clone(), cx)),
             )
         }
     }
@@ -280,9 +305,10 @@ mod tests {
         cx.run_until_parked();
     }
 
-    /// A window showing the page with empty fields. The window is inactive, as one driven by
-    /// automation from behind other apps.
-    fn inactive_page(cx: &mut TestAppContext) -> (Entity<Page>, &mut VisualTestContext) {
+    /// A window showing the page with empty fields over `json`. The window is inactive, as
+    /// one driven by automation from behind other apps.
+    fn inactive_page<'a>(json: &str, cx: &'a mut TestAppContext) -> (Entity<Page>, &'a mut VisualTestContext) {
+        let json = json.to_owned();
         let (window, view) = cx.update(|cx| {
             gpui_kit::init(cx);
             crate::theme::install(cx);
@@ -297,7 +323,7 @@ mod tests {
                     };
                     let focus = cx.focus_handle();
                     let fields = Fields::new(String::new(), String::new(), focus.clone(), save, window, cx);
-                    Page { focus, fields, saved: Vec::new() }
+                    Page { focus, fields, json, saved: Vec::new() }
                 })
             })
             .expect("open a window")
@@ -308,8 +334,8 @@ mod tests {
     }
 
     /// [`inactive_page`] in the active window, the only one GPUI reports focus changes in.
-    fn page(cx: &mut TestAppContext) -> (Entity<Page>, &mut VisualTestContext) {
-        let (view, cx) = inactive_page(cx);
+    fn page<'a>(json: &str, cx: &'a mut TestAppContext) -> (Entity<Page>, &'a mut VisualTestContext) {
+        let (view, cx) = inactive_page(json, cx);
         cx.update(|window, _| window.activate_window());
         draw(cx);
         (view, cx)
@@ -362,7 +388,7 @@ mod tests {
     /// by a mouse-down on the page too, saves it as well.
     #[gpui_kit::test]
     fn enter_leaves_the_name_field_which_saves_it(cx: &mut TestAppContext) {
-        let (view, cx) = page(cx);
+        let (view, cx) = page("{}", cx);
         focus(&view, Field::Name, cx);
         cx.simulate_input("Renamed");
         draw(cx);
@@ -389,7 +415,7 @@ mod tests {
     /// blur only); Enter, or Cmd/Ctrl+Enter, types nothing and `blur()`s it, which saves.
     #[gpui_kit::test]
     fn shift_enter_types_a_newline_in_the_description_and_enter_leaves_it(cx: &mut TestAppContext) {
-        let (view, cx) = page(cx);
+        let (view, cx) = page("{}", cx);
         focus(&view, Field::Description, cx);
         cx.simulate_input("first");
         press("shift-enter", cx);
@@ -425,7 +451,7 @@ mod tests {
     /// automation drives).
     #[gpui_kit::test]
     fn enter_saves_without_a_reported_blur(cx: &mut TestAppContext) {
-        let (view, cx) = inactive_page(cx);
+        let (view, cx) = inactive_page("{}", cx);
         focus(&view, Field::Name, cx);
         cx.simulate_input("Renamed");
         press("enter", cx);
@@ -435,5 +461,86 @@ mod tests {
         assert_eq!(focused(&view, cx), Focused::Page);
         let expected = vec![(Field::Name, "Renamed".to_owned()), (Field::Description, "what it is for".to_owned())];
         assert_eq!(saved(&view, cx), expected);
+    }
+
+    /// 60 lines, the second far wider than the box.
+    fn long_json() -> String {
+        let mut lines = vec!["{".to_owned(), format!("  \"reviewComments\": \"{}\",", "x".repeat(200))];
+        lines.extend((0..57).map(|n| format!("  \"key{n}\": {n},")));
+        lines.push("}".to_owned());
+        lines.join("\n")
+    }
+
+    fn bounds(selector: &'static str, cx: &mut VisualTestContext) -> Bounds<Pixels> {
+        cx.debug_bounds(selector).unwrap_or_else(|| panic!("{selector} is drawn"))
+    }
+
+    /// A wheel or trackpad scroll by (`dx`, `dy`) over `at`.
+    fn scroll(at: Point<Pixels>, dx: f32, dy: f32, cx: &mut VisualTestContext) {
+        cx.simulate_mouse_move(at, None, Modifiers::none());
+        cx.simulate_event(ScrollEvent {
+            position: at,
+            delta: ScrollDelta::Pixels(point(px(dx), px(dy))),
+            modifiers: Modifiers::none(),
+            touch_phase: TouchPhase::Moved,
+            source: ScrollSource::Pointer,
+        });
+        draw(cx);
+    }
+
+    /// `overflow: auto` with `max-height: 400px`: a line wider than the box is laid out
+    /// whole and scrolled to sideways, inside the box, and the lines below 400px are
+    /// scrolled to downwards.
+    #[gpui_kit::test]
+    fn the_json_box_scrolls_long_lines_sideways_and_its_lines_downwards(cx: &mut TestAppContext) {
+        let (_, cx) = page(&long_json(), cx);
+        let (outer, text) = (bounds("workspace-json", cx), bounds("workspace-json-text", cx));
+        assert_eq!(outer.size.height, px(400.), "at most 400px tall");
+        assert_eq!(outer.size.width, px(300.));
+        assert!(text.size.width > px(1000.), "the long line keeps its width: {text:?}");
+        assert!(text.size.height > px(400.), "every line is laid out: {text:?}");
+
+        scroll(outer.center(), -150., 0., cx);
+        let moved = bounds("workspace-json-text", cx);
+        assert_eq!(moved.origin, point(text.origin.x - px(150.), text.origin.y), "scrolled sideways");
+
+        scroll(outer.center(), 0., -100., cx);
+        let moved = bounds("workspace-json-text", cx);
+        assert_eq!(moved.origin, point(text.origin.x - px(150.), text.origin.y - px(100.)), "scrolled down");
+
+        // As far as the end of the long line, in view, and no further.
+        scroll(outer.center(), -5000., 0., cx);
+        let end = bounds("workspace-json-text", cx);
+        assert!(
+            end.right() < outer.right() && end.right() > outer.right() - px(24.),
+            "the line's end is in the box: {end:?} in {outer:?}"
+        );
+    }
+
+    /// The JSON is ordinary page text, as in Electron's `<pre>`: after an edit in a field, a
+    /// drag over it leaves the field (which saves it), selects the JSON across lines, and
+    /// Cmd/Ctrl+C copies it, not the field's text.
+    #[gpui_kit::test]
+    fn a_drag_over_the_json_selects_it_and_copy_copies_it(cx: &mut TestAppContext) {
+        let json = "{\n  \"id\": \"ws-1\",\n  \"path\": \"/srv/app\"\n}";
+        let (view, cx) = page(json, cx);
+        focus(&view, Field::Name, cx);
+        cx.simulate_input("Renamed");
+        draw(cx);
+
+        let text = bounds("workspace-json-text", cx);
+        let from = point(text.left() + px(1.), text.top() + px(1.));
+        let to = point(text.right() - px(1.), text.bottom() - px(1.));
+        cx.simulate_mouse_move(from, None, Modifiers::none());
+        assert!(cx.update(|window, cx| TextSelection::is_selectable_at(from, window, cx)), "the JSON is selectable");
+        cx.simulate_mouse_down(from, MouseButton::Left, Modifiers::none());
+        cx.simulate_mouse_move(to, MouseButton::Left, Modifiers::none());
+        cx.simulate_mouse_up(to, MouseButton::Left, Modifiers::none());
+        draw(cx);
+        assert_eq!(focused(&view, cx), Focused::Page, "the drag left the field");
+        assert_eq!(saved(&view, cx), vec![(Field::Name, "Renamed".to_owned())]);
+
+        cx.simulate_keystrokes(COPY);
+        assert_eq!(cx.read_from_clipboard().and_then(|item| item.text()).as_deref(), Some(json));
     }
 }
