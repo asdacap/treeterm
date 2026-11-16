@@ -425,6 +425,34 @@ fn an_attach_that_fails_says_so(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn a_terminal_whose_attach_failed_takes_no_input(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let (_daemon, conn) = refusing_daemon(tonic::Status::unavailable("Connection refused"));
+    let model = cx.new(|cx| TerminalModel::new(conn, options("p1".into()), cx));
+    let failed = Overlay::AttachFailed("14 UNAVAILABLE: Connection refused".to_owned());
+    wait_until(cx, &model, |m| *m.overlay() == failed);
+    let (events, _subscription) = record(cx, &model);
+
+    // Electron has no tty after an attach that throws: keystrokes, mouse reports and pastes
+    // go nowhere, and the attach failure keeps showing.
+    model.update(cx, |m, cx| {
+        m.set_focused(true, cx);
+        m.write_input(b"x", cx);
+        m.paste("y", cx);
+    });
+    cx.run_until_parked();
+    assert_eq!(model.read_with(cx, |m, _| m.overlay().clone()), failed);
+    assert!(!events.borrow().iter().any(|e| matches!(e, TerminalEvent::Input(_))));
+
+    // A refresh attaches again, and that attachment takes input until it fails in turn.
+    model.update(cx, |m, cx| {
+        m.refresh(cx);
+        m.write_input(b"x", cx);
+    });
+    assert!(events.borrow().iter().any(|e| matches!(e, TerminalEvent::Input(_))));
+}
+
+#[gpui_kit::test]
 fn selection_copies_the_selected_text(cx: &mut TestAppContext) {
     cx.executor().allow_parking();
     let h = harness();

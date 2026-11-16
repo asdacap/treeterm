@@ -257,11 +257,22 @@ enum StreamEnd {
     Failed(String),
 }
 
+/// Whether an attachment's stream opened.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AttachStatus {
+    /// Attaching or attached: the stream has not failed before its first event.
+    Open,
+    /// The attach call failed. Electron has no tty then, so nothing typed, pasted or
+    /// reported by the mouse is written, and the attach failure keeps showing.
+    Failed,
+}
+
 /// One attachment generation. Refreshing the stream replaces it whole.
 struct Attachment {
     term: SharedTerm,
     gate: Arc<Gate>,
     input: PtyInputHandle,
+    status: AttachStatus,
     connected_at: Instant,
     _parser: Task<()>,
     _deliver: Task<()>,
@@ -388,6 +399,7 @@ impl TerminalModel {
             term,
             gate,
             input,
+            status: AttachStatus::Open,
             connected_at: cx.background_executor().now(),
             _parser: parser,
             _deliver: deliver,
@@ -455,12 +467,16 @@ impl TerminalModel {
 
     /// Typed input or encoded keys. Dropped while replaying or unfocused: keystrokes can only
     /// come from the focused terminal, and anything else would be the emulator answering a
-    /// query that was answered when it first ran. A write that fails shows why, as Electron
-    /// does.
+    /// query that was answered when it first ran. Dropped too after the attach failed, as
+    /// Electron then has no tty. A write that fails shows why, as Electron does.
     pub fn write_input(&mut self, bytes: &[u8], cx: &mut Context<Self>) {
         let gate = &self.attachment.gate;
         if gate.is_replaying() || !gate.is_focused() {
             return;
+        }
+        match self.attachment.status {
+            AttachStatus::Failed => return,
+            AttachStatus::Open => {}
         }
         if let Err(error) = self.attachment.input.send(bytes) {
             tracing::error!(pty = %self.options.pty_id, %error, "pty write failed");
@@ -545,8 +561,13 @@ impl TerminalModel {
     /// first, as the key press or right-click that pastes does in Electron. The paste is
     /// input like typing (a pasted line ending starts the analyzer's title capture). A paste
     /// that fails shows why, as Electron does, even over a newer attachment: one pending
-    /// across a refresh fails with "pty stream detached".
+    /// across a refresh fails with "pty stream detached". Nothing is pasted after the attach
+    /// failed, as Electron then has no tty.
     pub fn paste(&mut self, text: &str, cx: &mut Context<Self>) {
+        match self.attachment.status {
+            AttachStatus::Failed => return,
+            AttachStatus::Open => {}
+        }
         self.claim_input();
         let mode = *self.attachment.term.lock().mode();
         let bytes = paste_bytes(text, mode);
@@ -1138,6 +1159,7 @@ impl TerminalModel {
         match batch.end {
             Some(StreamEnd::AttachFailed(message)) => {
                 tracing::error!(pty = %self.options.pty_id, %message, "failed to attach to PTY");
+                self.attachment.status = AttachStatus::Failed;
                 self.overlay = Overlay::AttachFailed(message);
             }
             Some(StreamEnd::Failed(message)) => {
