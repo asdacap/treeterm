@@ -1,6 +1,9 @@
 //! A real daemon (`treeterm_daemon::serve`) running in-process, for contract tests.
 
 pub mod fake_ssh;
+/// What a test logs on its own thread (`logs::capture()`), for tests of a log line Electron
+/// printed to its console.
+pub use treeterm_core::test_logs as logs;
 
 use std::path::{Path, PathBuf};
 

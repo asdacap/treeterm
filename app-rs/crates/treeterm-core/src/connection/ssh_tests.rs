@@ -344,6 +344,30 @@ mod bootstrap_remote_daemon {
         assert!(log.contains(&"TREETERM_ARCH:x86_64".to_owned()));
     }
 
+    /// Electron `console.log`ged every bootstrap line; the app's log shows them at its default
+    /// level.
+    #[tokio::test]
+    async fn logs_every_line_at_info() {
+        let logs = crate::test_logs::capture();
+        let harness = Harness::new();
+        harness.spawner.respond(exits_with(
+            "TREETERM_OS:Linux\nTREETERM_ARCH:x86_64\nTREETERM_SOCKET:/tmp/treeterm-1000/daemon.sock\n",
+        ));
+        harness
+            .connector(OutdatedDaemon::Report)
+            .bootstrap()
+            .await
+            .unwrap();
+        let text = logs.text();
+        for line in [
+            "Bootstrapping remote daemon on testuser@example.com...",
+            "$ ssh -o StrictHostKeyChecking=accept-new",
+            "TREETERM_ARCH:x86_64",
+        ] {
+            assert!(logs.line(line).expect(&text).contains(" INFO "), "{text}");
+        }
+    }
+
     #[tokio::test]
     async fn rejects_on_non_zero_exit_code() {
         let harness = Harness::new();
@@ -806,6 +830,32 @@ mod start_tunnel {
         assert!(log.contains(&"hello".to_owned()));
         assert!(log.contains(&"[stderr] broken pipe".to_owned()));
         assert_eq!(log.last().unwrap(), &end.to_string());
+    }
+
+    /// Electron `console.log`ged every tunnel line; the app's log shows them at its default
+    /// level.
+    #[tokio::test]
+    async fn logs_every_line_at_info() {
+        let logs = crate::test_logs::capture();
+        let harness = Harness::new();
+        harness.spawner.respond(tunnel_creates_socket);
+        let mut tunnel = harness
+            .connector(OutdatedDaemon::Report)
+            .open_tunnel(harness.local_socket(), "/tmp/remote.sock")
+            .await
+            .unwrap();
+        let ssh = harness.spawner.process(0).await;
+        ssh.stdout("hello\n");
+        ssh.stderr("broken pipe\n");
+        ssh.exit(1);
+        tunnel.closed().await;
+
+        let text = logs.text();
+        let log = harness.sink.lines(OutputKind::Tunnel);
+        assert!(log.len() >= 6, "{log:?}");
+        for line in log {
+            assert!(logs.line(&line).expect(&text).contains(" INFO "), "{text}");
+        }
     }
 
     #[tokio::test]

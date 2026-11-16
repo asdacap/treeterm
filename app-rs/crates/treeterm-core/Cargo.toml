@@ -47,6 +47,8 @@ icu_calendar = { version = "2.4", default-features = false }
 # over. Without `fs`: the files are read into its in-memory env, so Electron's are never
 # locked or written.
 rusty-leveldb = { version = "4", default-features = false }
+# `test_logs` (`test-support`): what a test logs, for other crates' tests.
+tracing-subscriber = { workspace = true, optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Electron's locale is the preferred localization of its app bundle (`NSBundle`).
@@ -54,14 +56,16 @@ core-foundation = "0.10"
 core-foundation-sys = "0.8"
 
 [features]
-# `electron_local_storage::testing`: Electron's localStorage written for other crates' tests.
-test-support = []
+# For other crates' tests: `electron_local_storage::testing` (Electron's localStorage
+# written) and `test_logs` (what a test logs).
+test-support = ["dep:tracing-subscriber"]
 
 [dev-dependencies]
 # The analyzer tests drive it with the real idle detector, as the GPUI model does.
 treeterm-term.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
+tracing-subscriber.workspace = true
 
 [lints]
 workspace = true

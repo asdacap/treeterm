@@ -8,8 +8,9 @@ description = "Test support: a real TreeTerm daemon running in-process on a temp
 
 [dependencies]
 treeterm-daemon.workspace = true
-# The fake ssh host drives the core connection manager's process spawner.
-treeterm-core.workspace = true
+# The fake ssh host drives the core connection manager's process spawner; `logs` is its
+# `test_logs`.
+treeterm-core = { workspace = true, features = ["test-support"] }
 tokio.workspace = true
 tempfile.workspace = true
 # `RefusingDaemon`: a gRPC server that fails every call.

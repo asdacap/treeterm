@@ -247,8 +247,10 @@ impl PortForward {
         self.emit_status();
     }
 
+    /// Also to the app's log at the default level: Electron's main process `console.log`ged
+    /// every line (`appendOutput`).
     fn append(&mut self, line: String) {
-        tracing::debug!(forward = %self.config.id, "{line}");
+        tracing::info!(forward = %self.config.id, "{line}");
         self.output.push(line.clone());
         self.events.push_back(ForwardEvent::Output(line));
     }
@@ -389,6 +391,25 @@ mod tests {
             let (mut pf, generation) = started(Instant::now());
             pf.on_process_event(generation, ProcessEvent::Stdout("tunnel ready".to_owned()));
             assert!(pf.output().contains(&"[portfwd] tunnel ready".to_owned()));
+        }
+
+        /// Electron `console.log`ged every line; the app's log shows them at its default level.
+        #[test]
+        fn logs_every_output_line_at_info() {
+            let logs = crate::test_logs::capture();
+            let (mut pf, generation) = started(Instant::now());
+            pf.on_process_event(generation, ProcessEvent::Stdout("tunnel ready".to_owned()));
+            pf.on_process_event(
+                generation,
+                ProcessEvent::Stderr("warning: something".to_owned()),
+            );
+            let text = logs.text();
+            for line in [
+                "[portfwd] tunnel ready forward=pf-1",
+                "[portfwd:err] warning: something forward=pf-1",
+            ] {
+                assert!(logs.line(line).expect(&text).contains(" INFO "), "{text}");
+            }
         }
 
         #[test]

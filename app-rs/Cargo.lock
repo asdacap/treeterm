@@ -9317,6 +9317,7 @@ dependencies = [
  "tonic",
  "tower",
  "tracing",
+ "tracing-subscriber",
  "treeterm-proto",
  "treeterm-term",
  "url",

@@ -37,6 +37,8 @@ pub mod run_actions;
 pub mod search;
 pub mod settings;
 pub mod system_monitor;
+#[cfg(any(test, feature = "test-support"))]
+pub mod test_logs;
 pub mod traffic;
 pub mod transport;
 pub mod tree;

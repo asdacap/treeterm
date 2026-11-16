@@ -757,8 +757,10 @@ impl SshConnector {
         Ok(tunnel)
     }
 
+    /// Also to the app's log at the default level: Electron's main process `console.log`ged
+    /// every bootstrap and tunnel line (`appendBootstrapOutput`, `appendTunnelOutput`).
     fn log(&self, kind: OutputKind, line: String) {
-        tracing::debug!(host = %self.config.host, ?kind, "{line}");
+        tracing::info!(host = %self.config.host, ?kind, "{line}");
         self.log.line(kind, line);
     }
 
@@ -883,8 +885,9 @@ impl Tunnel {
         Some(end)
     }
 
+    /// Also to the app's log at the default level, as [`SshConnector::log`].
     fn log(&self, line: String) {
-        tracing::debug!(socket = ?self.local_socket, "{line}");
+        tracing::info!(socket = ?self.local_socket, "{line}");
         self.log.line(OutputKind::Tunnel, line);
     }
 }
