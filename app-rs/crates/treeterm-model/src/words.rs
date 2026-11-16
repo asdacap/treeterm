@@ -1,15 +1,17 @@
 //! The Editor tab's word-based aids, as Monaco's: the suggestions its base editor worker
 //! offers while typing, in every language (`WordBasedCompletionItemProvider` and the
 //! worker's `textualSuggest`), filtered and ranked as its suggest widget does ([`fuzzy`]),
-//! and Change All Occurrences (`editor.action.changeAll`).
+//! and Change All Occurrences (`editor.action.changeAll`); and the word under the cursor
+//! the Files viewer's "Search" looks for ([`word_at`], `getWordAtPosition`).
 //!
-//! The two read words differently, as in Monaco:
-//! - Suggestions use the language's word pattern (its language configuration's
-//!   `wordPattern`): CSS, SCSS and Less words hold `-` and may start with `.`, `#`, `@`, `!`
-//!   or `:`; HTML words hold `-`, `#`, `%` and `?`; TypeScript, JavaScript and PHP words
-//!   hold `$`; Java and Kotlin words `@` and `$`; C# words `@`. Other languages use
-//!   Monaco's default pattern: a number with a decimal point (`3.14`, `.5`), or a run of
-//!   characters that are neither whitespace nor one of the default word separators.
+//! They read words differently, as in Monaco:
+//! - Suggestions and [`word_at`] use the language's word pattern (its language
+//!   configuration's `wordPattern`): CSS, SCSS and Less words hold `-` and may start with
+//!   `.`, `#`, `@`, `!` or `:`; HTML words hold `-`, `#`, `%` and `?`; TypeScript,
+//!   JavaScript and PHP words hold `$`; Java and Kotlin words `@` and `$`; C# words `@`.
+//!   Other languages use Monaco's default pattern: a number with a decimal point (`3.14`,
+//!   `.5`), or a run of characters that are neither whitespace nor one of the default word
+//!   separators.
 //! - Change All Occurrences uses the editor's word separators (`editor.wordSeparators`,
 //!   through `getConfiguredWordAtPosition`) in every language: on `name` in PHP's `$name`
 //!   it also changes `$this->name`, as Monaco does.
@@ -108,6 +110,13 @@ fn pattern_word_around(pattern: &Regex, text: &str, offset: usize) -> Range<usiz
         .find_iter(line)
         .find(|found| found.start() <= at && at <= found.end())
         .map_or(offset..offset, |found| start + found.start()..start + found.end())
+}
+
+/// The word at byte `offset` of `text`, a file of Monaco's `language`, as Monaco's
+/// `getWordAtPosition` reads it: by the language's word pattern, touching `offset` on either
+/// side. Empty when there is none, or when `offset` is not a character boundary of `text`.
+pub fn word_at<'a>(text: &'a str, offset: usize, language: &str) -> &'a str {
+    text.get(pattern_word_around(word_pattern(language), text, offset)).unwrap_or_default()
 }
 
 /// Whether `c` can be part of a word, by the editor's word separators.
@@ -406,6 +415,34 @@ mod tests {
     fn suggests_nothing_while_typing_outside_a_word_but_everything_when_asked() {
         assert_eq!(words_at("alpha beta\n|", "|", Trigger::Typing), Vec::<String>::new());
         assert_eq!(words_at("beta alpha 7\n|", "|", Trigger::Invoked), ["alpha", "beta"]);
+    }
+
+    /// The word at `|` in `text`, a file of Monaco's `language`.
+    fn word_at_bar(language: &str, text: &str) -> String {
+        word_at(&text.replace('|', ""), text.find('|').unwrap(), language).to_owned()
+    }
+
+    #[test]
+    fn the_word_at_the_cursor_is_read_with_the_languages_word_pattern() {
+        assert_eq!(word_at_bar("css", "a { back|ground-color: red }"), "background-color");
+        assert_eq!(word_at_bar("typescript", "const $e|l = 1"), "$el");
+        assert_eq!(word_at_bar("plaintext", "cost $pr|ice"), "price");
+        assert_eq!(word_at_bar("json", "{\"a-|b\": 1}"), "a-b");
+        assert_eq!(word_at_bar("html", "<p data-|id=\"1\">"), "data-id");
+        assert_eq!(word_at_bar("rust", "let n = -1.|5e3;"), "-1.5e3");
+        assert_eq!(word_at_bar("markdown", "naï|ve café"), "naïve");
+    }
+
+    #[test]
+    fn the_word_at_the_cursor_touches_it_on_either_side_of_its_line() {
+        // Right after a word, the first word touching the cursor.
+        assert_eq!(word_at_bar("rust", "foo_bar|(baz)"), "foo_bar");
+        assert_eq!(word_at_bar("rust", "foo_bar(|baz)"), "baz");
+        assert_eq!(word_at_bar("rust", "a\r\nfoo|\r\nb"), "foo");
+        assert_eq!(word_at_bar("rust", "a  |  b"), "");
+        // Inside a character, or past the end.
+        assert_eq!(word_at("é", 1, "rust"), "");
+        assert_eq!(word_at("ab", 3, "rust"), "");
     }
 
     #[test]

@@ -32,13 +32,14 @@ use gpui_kit::{App, Context, Entity, EventEmitter, Subscription, Task, WeakEntit
 use serde_json::{Value, json};
 use treeterm_core::daemon::ApiError;
 use treeterm_core::exec::{ExecApi, ExecError};
-use treeterm_core::files::{FavouriteFile, normalize_favourite_path, resolve_favourite_files};
+use treeterm_core::files::{FavouriteFile, detect_monaco_language, normalize_favourite_path, resolve_favourite_files};
 use treeterm_core::fs::{FsClient, FsError, ReadOutcome};
 use treeterm_core::rt::TaskLost;
 use treeterm_core::git::GitApi;
 use treeterm_core::search::{self, DefinitionLocation, RepoHit, RepoSearchEvent};
 use treeterm_proto::treeterm::FileEntry;
 
+use crate::words;
 use crate::workspace_store::WorkspaceStore;
 
 #[path = "file_browser_comments.rs"]
@@ -984,28 +985,13 @@ impl FileBrowser {
 
     /// Open the panel (Cmd/Ctrl+F, or the context menu's "Search"). A single-line
     /// `selection` becomes the query; otherwise, with a `cursor` (the context menu), the word
-    /// under it. With neither, an open panel keeps its query.
+    /// under it as Monaco reads it in the file's language. With neither, an open panel keeps
+    /// its query.
     pub fn open_search(&mut self, selection: &str, cursor: Option<usize>, cx: &mut Context<Self>) {
         let seed = if !selection.is_empty() && !selection.contains('\n') {
             Some(selection.to_owned())
         } else {
-            match (&self.view, cursor) {
-                (FileView::Text { text, .. }, Some(offset)) => {
-                    Some(search::word_at(text, offset)).filter(|word| !word.is_empty()).map(str::to_owned)
-                }
-                (_, None)
-                | (
-                    FileView::Nothing
-                    | FileView::Loading(_)
-                    | FileView::Image { .. }
-                    | FileView::Pdf { .. }
-                    | FileView::Model { .. }
-                    | FileView::Binary { .. }
-                    | FileView::TooLarge { .. }
-                    | FileView::Failed { .. },
-                    Some(_),
-                ) => None,
-            }
+            cursor.and_then(|offset| self.word_at(offset))
         };
         match (&self.search, seed) {
             (SearchPanel::Open(_), None) => {}
@@ -1023,6 +1009,25 @@ impl FileBrowser {
             }
         }
         cx.notify();
+    }
+
+    /// The word at byte `cursor` of the shown text, by the file's language
+    /// ([`words::word_at`]); none when there is no word there or the file is not text.
+    fn word_at(&self, cursor: usize) -> Option<String> {
+        match &self.view {
+            FileView::Text { path, text } => {
+                let word = words::word_at(text, cursor, detect_monaco_language(path));
+                Some(word).filter(|word| !word.is_empty()).map(str::to_owned)
+            }
+            FileView::Nothing
+            | FileView::Loading(_)
+            | FileView::Image { .. }
+            | FileView::Pdf { .. }
+            | FileView::Model { .. }
+            | FileView::Binary { .. }
+            | FileView::TooLarge { .. }
+            | FileView::Failed { .. } => None,
+        }
     }
 
     /// Close the panel; a running repo search is cancelled.

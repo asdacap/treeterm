@@ -379,6 +379,7 @@ fn the_search_panel_opens_on_the_selection_or_the_word_under_the_cursor(cx: &mut
     let h = harness();
     let repo = TempRepo::new(&h);
     repo.write("a.rs", "let alpha = beta;\n");
+    repo.write("style.css", "a { background-color: red }\n");
     repo.commit_all("a");
     let (_store, _workspace, browser) = open_browser(cx, &h, &repo, "a.rs");
     let query = |browser: &FileBrowser| match browser.search() {
@@ -397,6 +398,14 @@ fn the_search_panel_opens_on_the_selection_or_the_word_under_the_cursor(cx: &mut
     assert_eq!(browser.read_with(cx, |b, _| query(b)), Some("beta".into()));
     browser.update(cx, |b, cx| b.open_search("alpha", Some(beta), cx));
     assert_eq!(browser.read_with(cx, |b, _| query(b)), Some("alpha".into()));
+
+    // The word is read as Monaco reads the file's language: a CSS one holds `-`.
+    let css = format!("{}/style.css", repo.root());
+    browser.update(cx, |b, cx| b.select_file(&css, cx));
+    wait_until(cx, &browser, |b| matches!(b.view(), FileView::Text { path, .. } if path.ends_with("style.css")));
+    let background = browser.read_with(cx, |b, _| offset_of(b, "background", 0)) + 2;
+    browser.update(cx, |b, cx| b.open_search("", Some(background), cx));
+    assert_eq!(browser.read_with(cx, |b, _| query(b)), Some("background-color".into()));
 }
 
 #[gpui_kit::test]
