@@ -177,9 +177,10 @@ pub fn summarize(entry: &HistoryEntry) -> CallSummary {
     }
 }
 
-/// A transition's or call's clock time (`formatTime`).
+/// A transition's or call's clock time (`formatTime`: `toLocaleTimeString` with a 2-digit
+/// hour, minute and second, so `02:15:30 PM` in en-US and `14:15:30` in en-GB).
 pub fn clock(at: SystemTime) -> String {
-    treeterm_core::clock::time_of_day(at)
+    treeterm_core::clock::locale_time_two_digit(at)
 }
 
 #[cfg(test)]
@@ -204,6 +205,13 @@ mod tests {
         let classified = TransitionDetail::Classification { snapshot: String::new(), reason: "asks".into() };
         assert_eq!(transition_extra(&classified), "asks");
         assert_eq!(transition_extra(&TransitionDetail::Debugger { snapshot: String::new() }), "");
+    }
+
+    #[test]
+    fn clock_times_are_two_digit_in_electrons_locale() {
+        let at = SystemTime::UNIX_EPOCH + Duration::from_secs(1_763_315_832);
+        let t = treeterm_core::clock::local(at).unwrap();
+        assert_eq!(clock(at), treeterm_core::locale::ElectronLocale::current().time_two_digit(t));
     }
 
     #[test]

@@ -36,6 +36,18 @@ url = "2"
 httpdate = "1"
 # Line diffs, for searching a diff the way the viewer lays it out.
 similar = "2"
+# `localeCompare` in Electron's locale: Chromium collates with ICU; this is ICU4X's collator
+# with its CLDR data compiled in.
+icu_locale_core = "2.4"
+icu_collator = "2.4"
+# Thai and Farsi dates, which Electron prints in the Buddhist and solar Hijri calendars
+# (arithmetic calendars, so no data).
+icu_calendar = { version = "2.4", default-features = false }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# Electron's locale is the preferred localization of its app bundle (`NSBundle`).
+core-foundation = "0.10"
+core-foundation-sys = "0.8"
 
 [dev-dependencies]
 # The analyzer tests drive it with the real idle detector, as the GPUI model does.

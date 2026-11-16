@@ -1,7 +1,9 @@
-//! Wall-clock times as the user reads them, in the local time zone (what Electron's
-//! `toLocaleTimeString` / `toLocaleString` show, in a fixed 24-hour format).
+//! Wall-clock times as the user reads them, in the local time zone: fixed `HH:MM:SS` formats,
+//! and what Electron's `toLocaleString` and friends print in its locale ([`crate::locale`]).
 
 use std::time::{SystemTime, UNIX_EPOCH};
+
+use crate::locale::ElectronLocale;
 
 /// Calendar fields of a moment in the local time zone.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,18 +62,29 @@ pub fn date_time(at: SystemTime) -> String {
     }
 }
 
-/// `new Date(millis).toLocaleString()` (en-US): `11/11/2026, 5:57:12 PM`, local time.
+/// `new Date(millis).toLocaleString()` in Electron's locale (en-US: `11/11/2026, 5:57:12 PM`);
+/// `?` when it cannot be converted.
 pub fn locale_date_time(millis: i64) -> String {
-    match local(from_millis(millis)) {
-        Some(t) => {
-            let (hour, half) = match t.hour {
-                0 => (12, "AM"),
-                1..=11 => (t.hour, "AM"),
-                12 => (12, "PM"),
-                _ => (t.hour - 12, "PM"),
-            };
-            format!("{}/{}/{}, {hour}:{:02}:{:02} {half}", t.month, t.day, t.year, t.minute, t.second)
-        }
+    match local(from_millis(millis)).and_then(|t| ElectronLocale::current().date_time(t)) {
+        Some(text) => text,
+        None => "?".to_owned(),
+    }
+}
+
+/// `new Date(millis).toLocaleDateString()` in Electron's locale (en-US: `11/11/2026`); `?` when
+/// it cannot be converted.
+pub fn locale_date(millis: i64) -> String {
+    match local(from_millis(millis)).and_then(|t| ElectronLocale::current().date(t)) {
+        Some(text) => text,
+        None => "?".to_owned(),
+    }
+}
+
+/// `toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })` in
+/// Electron's locale (en-US: `05:57:12 PM`, en-GB: `17:57:12`); `?` when it cannot be converted.
+pub fn locale_time_two_digit(at: SystemTime) -> String {
+    match local(at) {
+        Some(t) => ElectronLocale::current().time_two_digit(t),
         None => "?".to_owned(),
     }
 }
@@ -102,11 +115,13 @@ mod tests {
     }
 
     #[test]
-    fn locale_times_are_twelve_hour_without_date_padding() {
-        let text = locale_date_time(0);
-        assert!(text.ends_with(" AM") || text.ends_with(" PM"), "{text}");
-        assert!(!text.starts_with('0'), "{text}");
-        assert!(text.contains(", "), "{text}");
+    fn locale_times_are_electrons_for_the_local_time() {
+        let epoch = local(UNIX_EPOCH).unwrap();
+        let locale = ElectronLocale::current();
+        assert_eq!(Some(locale_date_time(0)), locale.date_time(epoch));
+        assert_eq!(Some(locale_date(0)), locale.date(epoch));
+        assert_eq!(locale_time_two_digit(UNIX_EPOCH), locale.time_two_digit(epoch));
+        assert_ne!(locale_date_time(1_763_315_832_000), "?");
     }
 
     #[test]

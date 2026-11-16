@@ -834,13 +834,10 @@ pub fn parse_iso(text: &str) -> Option<i64> {
     Some(((days * 86_400 + hour * 3600 + minute * 60 + second) - offset_minutes * 60) * 1000)
 }
 
-/// `new Date(iso).toLocaleDateString()` (en-US): `11/11/2026`, local time.
+/// `new Date(iso).toLocaleDateString()` in Electron's locale (en-US: `11/11/2026`), local time.
 pub fn locale_date(iso: &str) -> String {
-    let Some(millis) = parse_iso(iso) else {
-        return iso.to_owned();
-    };
-    match treeterm_core::clock::local(treeterm_core::clock::from_millis(millis)) {
-        Some(t) => format!("{}/{}/{}", t.month, t.day, t.year),
+    match parse_iso(iso) {
+        Some(millis) => treeterm_core::clock::locale_date(millis),
         None => iso.to_owned(),
     }
 }
@@ -858,10 +855,9 @@ mod tests {
     }
 
     #[test]
-    fn locale_dates_have_no_padding() {
+    fn commit_dates_are_locale_dates() {
         let date = locale_date("2026-01-05T12:00:00Z");
-        assert!(date.ends_with("/2026"), "{date}");
-        assert!(!date.starts_with('0'), "{date}");
+        assert_eq!(date, treeterm_core::clock::locale_date(1_767_614_400_000));
         assert_eq!(locale_date("garbage"), "garbage");
     }
 

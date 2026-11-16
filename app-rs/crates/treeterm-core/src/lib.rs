@@ -25,6 +25,7 @@ pub mod keybinding;
 pub mod layout;
 pub mod llm;
 pub mod local_daemon;
+pub mod locale;
 pub mod paths;
 pub mod pty;
 pub mod review;

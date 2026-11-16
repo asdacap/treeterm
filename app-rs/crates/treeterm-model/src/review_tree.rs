@@ -3,8 +3,8 @@
 
 use std::cmp::Ordering;
 
-use treeterm_core::files::favourites::locale_compare;
 use treeterm_core::git::FileChangeStats;
+use treeterm_core::locale;
 
 /// One row of the tree. Files refer to their index in the list the tree was built from.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -94,7 +94,7 @@ fn sort(nodes: &mut [TreeNode]) {
     nodes.sort_by(|a, b| match (a, b) {
         (TreeNode::Dir { .. }, TreeNode::File { .. }) => Ordering::Less,
         (TreeNode::File { .. }, TreeNode::Dir { .. }) => Ordering::Greater,
-        _ => locale_compare(a.name(), b.name()),
+        _ => locale::compare(a.name(), b.name()),
     });
     for node in nodes {
         if let TreeNode::Dir { children, .. } = node {
@@ -253,6 +253,14 @@ mod tests {
         assert_eq!(names(children), ["y", "x.md"]);
         assert_eq!((*additions, *deletions), (0, 5));
         assert_eq!(tree_order(&tree), [4, 3, 2, 1, 0]);
+    }
+
+    #[test]
+    fn names_sort_as_locale_compare_does() {
+        // ICU collation: an accented letter sorts beside its base letter, not after `z` as
+        // its code point would (in every locale Electron ships).
+        let tree = build_tree(&[("zed.rs", text(1, 0)), ("éa.rs", text(1, 0)), ("fa.rs", text(1, 0))]);
+        assert_eq!(names(&tree), ["éa.rs", "fa.rs", "zed.rs"]);
     }
 
     #[test]

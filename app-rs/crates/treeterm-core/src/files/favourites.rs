@@ -4,7 +4,6 @@
 //! Favourites are stored as workspace-relative paths with `/` separators, so they stay
 //! portable between local and remote hosts.
 
-use std::cmp::Ordering;
 use std::collections::{HashSet, VecDeque};
 
 use indexmap::IndexMap;
@@ -12,6 +11,7 @@ use treeterm_proto::treeterm::FileEntry;
 
 use crate::fs::FsError;
 use crate::fs_ext::DirectoryApi;
+use crate::locale;
 
 /// A favourite file, expanded from a favourite path (a directory favourite expands to every
 /// file under it).
@@ -126,7 +126,7 @@ pub async fn resolve_favourite_files(
     }
 
     let mut files: Vec<FavouriteFile> = files.into_values().collect();
-    files.sort_by(|a, b| locale_compare(&a.relative_path, &b.relative_path));
+    files.sort_by(|a, b| locale::compare(&a.relative_path, &b.relative_path));
     Ok(files)
 }
 
@@ -162,14 +162,6 @@ async fn resolve_entry(
         directory_path = entry.path;
     }
     Ok(None)
-}
-
-/// An approximation of `String.prototype.localeCompare` (ICU root collation) for paths:
-/// letters compare case-insensitively, and on a tie lowercase sorts first.
-pub fn locale_compare(a: &str, b: &str) -> Ordering {
-    a.to_lowercase()
-        .cmp(&b.to_lowercase())
-        .then_with(|| b.cmp(a))
 }
 
 #[cfg(test)]
@@ -310,6 +302,31 @@ mod tests {
             .unwrap();
             assert_eq!(files, vec![favourite("a.ts")]);
         }
+
+        #[test]
+        fn sorts_files_as_locale_compare_does() {
+            // An accented letter sorts beside its base letter (in every locale Electron
+            // ships), not after `z` as its code point would.
+            let fs = FakeFs::new();
+            fs.set_directory(
+                "/repo",
+                vec![
+                    entry("zed.ts", false),
+                    entry("éa.ts", false),
+                    entry("fa.ts", false),
+                ],
+            );
+            let files = block_on(resolve_favourite_files(
+                "/repo",
+                &paths(&["zed.ts", "éa.ts", "fa.ts"]),
+                fs.as_ref(),
+            ))
+            .unwrap();
+            assert_eq!(
+                files,
+                vec![favourite("éa.ts"), favourite("fa.ts"), favourite("zed.ts")]
+            );
+        }
     }
 
     mod favourite_file_name {
@@ -343,12 +360,5 @@ mod tests {
             normalize_file_entry_relative_path("src\\a.ts", "/repo"),
             "src\\a.ts"
         );
-    }
-
-    #[test]
-    fn locale_compare_ignores_case_then_puts_lowercase_first() {
-        let mut names = vec!["b", "A", "a", "C", "_x"];
-        names.sort_by(|a, b| locale_compare(a, b));
-        assert_eq!(names, vec!["_x", "a", "A", "b", "C"]);
     }
 }
