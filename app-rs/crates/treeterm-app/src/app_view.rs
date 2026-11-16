@@ -409,19 +409,34 @@ impl AppView {
                 (Some(_), ActiveView::Workspace(_)) | (_, ActiveView::Nothing) | (None, ActiveView::Workspace(_)) => None,
             };
             for row in session.tree_rows(&Default::default(), cx) {
-                let Some(store) = session.workspace_store(&row.id) else { continue };
-                let workspace = store.read(cx);
-                let name = SharedString::from(workspace.file().display_name().to_owned());
-                let is_worktree = workspace.file().is_worktree;
-                let favourite = workspace.is_favourite();
-                let activity = workspace.overall_activity();
+                let Some(entry) = session.entry(&row.id) else { continue };
                 let is_shown = shown.as_deref() == Some(row.id.as_str());
                 let color = if is_shown { primary } else { secondary };
-                let icon = if activity == treeterm_model::workspace_store::ActivityState::Idle {
-                    crate::ui::icon(if is_worktree { IconName::GitBranch } else { IconName::Folder }, 16., color).into_any_element()
-                } else {
-                    crate::ui::activity_glyph(activity, 14., color)
+                // A placeholder shows a spinner and a failed workspace an alert, under its name.
+                let (name, icon, favourite) = match entry {
+                    WorkspaceEntry::Loaded(store) | WorkspaceEntry::OperationError { store, .. } => {
+                        let workspace = store.read(cx);
+                        let activity = workspace.overall_activity();
+                        let icon = if activity == treeterm_model::workspace_store::ActivityState::Idle {
+                            let glyph = if workspace.file().is_worktree { IconName::GitBranch } else { IconName::Folder };
+                            crate::ui::icon(glyph, 16., color).into_any_element()
+                        } else {
+                            crate::ui::activity_glyph(activity, 14., color)
+                        };
+                        (workspace.file().display_name().to_owned(), icon, workspace.is_favourite())
+                    }
+                    WorkspaceEntry::Loading { name, .. } => {
+                        let spinner = Spinner::new()
+                            .icon(gpui_kit::component::Icon::new(IconName::LoaderCircle))
+                            .with_size(px(16.))
+                            .color(color);
+                        (name.clone(), spinner.into_any_element(), false)
+                    }
+                    WorkspaceEntry::Error { name, .. } => {
+                        (name.clone(), crate::ui::icon(IconName::CircleAlert, 16., c.error).into_any_element(), false)
+                    }
                 };
+                let name = SharedString::from(name);
                 let (tree, id) = (connected.tree.clone(), row.id.clone());
                 rail = rail.child(
                     div()

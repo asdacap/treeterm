@@ -205,7 +205,7 @@ impl Render for TreePane {
             SessionState::Live => Ok(session
                 .tree_rows(&self.collapsed, cx)
                 .into_iter()
-                .map(|row| RowData {
+                .filter_map(|row| Some(RowData {
                     activity: session
                         .workspace_store(&row.id)
                         .map(|w| w.read(cx).overall_activity())
@@ -230,13 +230,11 @@ impl Render for TreePane {
                         }
                     }),
                     git_repo: session.workspace_store(&row.id).is_some_and(|w| w.read(cx).file().is_git_repo),
-                    label: session
-                        .entry(&row.id)
-                        .map_or(Label::Loading, |entry| Label::of(entry, cx)),
+                    label: Label::of(session.entry(&row.id)?, cx),
                     id: row.id,
                     depth: row.depth,
                     has_children: row.has_children,
-                })
+                }))
                 .collect()),
         };
         // The connection (`SessionPanel`'s `connection.status`); `None` only while this view
@@ -455,15 +453,15 @@ impl TreePane {
                 ui::icon(if is_worktree { IconName::GitBranch } else { IconName::Folder }, 16., secondary).into_any_element(),
                 name,
             ),
-            Label::Loading => (
+            Label::Loading(name) => (
                 gpui_kit::component::spinner::Spinner::new()
                     .icon(gpui_kit::component::Icon::new(IconName::LoaderCircle))
                     .with_size(px(16.))
                     .color(secondary)
                     .into_any_element(),
-                "Loading…".into(),
+                name,
             ),
-            Label::Error(reason) => (ui::icon(IconName::CircleAlert, 16., c.error).into_any_element(), reason),
+            Label::Error(name) => (ui::icon(IconName::CircleAlert, 16., c.error).into_any_element(), name),
         };
         let selected = self.selected == Selection::Workspace(id.clone());
         // Workspace focus mode (prefix + w) moves this cursor with the arrow keys.
@@ -721,9 +719,11 @@ struct RowData {
     label: Label,
 }
 
+/// A row's name and what its icon shows (`WorkspaceTreeItem`): a placeholder or failed
+/// workspace is named too; why it failed shows in the main pane.
 enum Label {
     Name(SharedString),
-    Loading,
+    Loading(SharedString),
     Error(SharedString),
 }
 
@@ -733,8 +733,8 @@ impl Label {
             WorkspaceEntry::Loaded(store) | WorkspaceEntry::OperationError { store, .. } => {
                 Label::Name(store.read(cx).file().display_name().to_owned().into())
             }
-            WorkspaceEntry::Loading { .. } => Label::Loading,
-            WorkspaceEntry::Error { error, .. } => Label::Error(error.clone().into()),
+            WorkspaceEntry::Loading { name, .. } => Label::Loading(name.clone().into()),
+            WorkspaceEntry::Error { name, .. } => Label::Error(name.clone().into()),
         }
     }
 }
