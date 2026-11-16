@@ -221,8 +221,9 @@ impl Render for TreeResize {
 pub struct FileBrowserView {
     model: Entity<FileBrowser>,
     layout: Layout,
-    /// The PDF or 3D model shown, and the webview showing it.
-    page: Option<(String, Entity<crate::browser_view::AssetPageView>)>,
+    /// The webview page showing a PDF, 3D model or AVIF image, and the read (its bytes) it
+    /// was built from. Dropped when anything else is shown ([`shows_page`]).
+    page: Option<(std::sync::Arc<Vec<u8>>, Entity<crate::browser_view::AssetPageView>)>,
     /// The markdown file showing its preview (`viewMode`); a file opens on its source.
     markdown_preview: Option<String>,
     preview_scroll: gpui_kit::ScrollHandle,
@@ -325,6 +326,23 @@ fn image_drawing(format: ImageFormat) -> ImageDrawing {
     }
 }
 
+/// Whether `view` shows the read `built` in a webview page: a PDF, a 3D model or an image
+/// GPUI cannot decode, from those very bytes.
+fn shows_page(view: &FileView, built: &std::sync::Arc<Vec<u8>>) -> bool {
+    match view {
+        FileView::Pdf { bytes, .. } | FileView::Model { bytes, .. } => std::sync::Arc::ptr_eq(bytes, built),
+        FileView::Image { bytes, format, .. } => {
+            image_drawing(*format) == ImageDrawing::Webview && std::sync::Arc::ptr_eq(bytes, built)
+        }
+        FileView::Nothing
+        | FileView::Loading(_)
+        | FileView::Text { .. }
+        | FileView::Binary { .. }
+        | FileView::TooLarge { .. }
+        | FileView::Failed { .. } => false,
+    }
+}
+
 /// `formatMegabytes`: `1.4MB`.
 fn format_megabytes(bytes: u64) -> String {
     format!("{:.1}MB", bytes as f64 / (1024. * 1024.))
@@ -398,36 +416,38 @@ impl FileBrowserView {
         Self { layout: Layout::Viewer, ..Self::new(model, workspace, cx) }
     }
 
-    /// Show the PDF / model / AVIF webview only while this tab is shown, such a file is the
-    /// current one, and no dialog covers it.
+    /// Show the PDF / model / AVIF webview only while this tab is shown and no dialog covers
+    /// it. A page the shown file no longer uses is dropped.
     pub fn set_shown(&mut self, shown: bool, cx: &mut Context<Self>) {
-        let in_webview = match self.model.read(cx).view() {
-            FileView::Pdf { .. } | FileView::Model { .. } => true,
-            FileView::Image { format, .. } => image_drawing(*format) == ImageDrawing::Webview,
-            FileView::Nothing
-            | FileView::Loading(_)
-            | FileView::Text { .. }
-            | FileView::Binary { .. }
-            | FileView::TooLarge { .. }
-            | FileView::Failed { .. } => false,
-        };
+        self.drop_stale_page(cx);
         if let Some((_, page)) = &self.page {
-            page.update(cx, |p, cx| p.set_shown(shown && in_webview, cx));
+            page.update(cx, |p, cx| p.set_shown(shown, cx));
         }
     }
 
-    /// The webview page for `path`, built when the shown file changes.
+    /// Drop the webview page once another file, or another read of the same file, is shown:
+    /// Electron unmounts its viewer then (the model stage and its WebGL context are
+    /// disposed), so coming back builds a fresh page from the bytes read now.
+    fn drop_stale_page(&mut self, cx: &App) {
+        if let Some((built, _)) = &self.page
+            && !shows_page(self.model.read(cx).view(), built)
+        {
+            self.page = None;
+        }
+    }
+
+    /// The webview page for the read of `bytes`, built when another read is shown.
     fn page_for(
         &mut self,
-        path: String,
+        bytes: &std::sync::Arc<Vec<u8>>,
         build: impl FnOnce() -> crate::browser_view::AssetPageView,
         cx: &mut Context<Self>,
     ) -> Entity<crate::browser_view::AssetPageView> {
         match &self.page {
-            Some((shown, view)) if *shown == path => view.clone(),
+            Some((built, view)) if std::sync::Arc::ptr_eq(built, bytes) => view.clone(),
             Some(_) | None => {
                 let view = cx.new(|_| build());
-                self.page = Some((path, view.clone()));
+                self.page = Some((bytes.clone(), view.clone()));
                 view
             }
         }
@@ -1204,6 +1224,7 @@ impl FileBrowserView {
         let c = colors(cx);
         let frame = v_flex().flex_1().min_h_0().min_w_0().overflow_hidden().bg(c.bg_primary);
         let view = self.model.read(cx).view().clone();
+        self.drop_stale_page(cx);
         // A markdown preview belongs to its file; another file opens on its source.
         if let Some(previewed) = &self.markdown_preview
             && !matches!(&view, FileView::Text { path, .. } if path == previewed)
@@ -1263,8 +1284,8 @@ impl FileBrowserView {
                     ImageDrawing::Webview => {
                         let alt = file_name(&path).to_owned();
                         let page = self.page_for(
-                            path.clone(),
-                            || crate::browser_view::AssetPageView::image(bytes, format.mime_type(), &alt),
+                            &bytes,
+                            || crate::browser_view::AssetPageView::image(bytes.clone(), format.mime_type(), &alt),
                             cx,
                         );
                         div().size_full().child(page).into_any_element()
@@ -1273,11 +1294,12 @@ impl FileBrowserView {
                 (path, "image".into(), body)
             }
             FileView::Pdf { path, bytes } => {
-                let page = self.page_for(path.clone(), || crate::browser_view::AssetPageView::pdf(bytes), cx);
+                let page = self.page_for(&bytes, || crate::browser_view::AssetPageView::pdf(bytes.clone()), cx);
                 (path, "pdf".into(), div().size_full().child(page).into_any_element())
             }
             FileView::Model { path, bytes, format } => {
-                let page = self.page_for(path.clone(), || crate::browser_view::AssetPageView::model(bytes, format.as_str()), cx);
+                let page =
+                    self.page_for(&bytes, || crate::browser_view::AssetPageView::model(bytes.clone(), format.as_str()), cx);
                 (path, format.as_str().into(), div().size_full().child(page).into_any_element())
             }
             FileView::Binary { path, .. } => {
@@ -1648,6 +1670,26 @@ mod tests {
         assert_eq!(image_drawing(ImageFormat::Jpeg), ImageDrawing::Gpui(gpui_kit::ImageFormat::Jpeg));
         assert_eq!(image_drawing(ImageFormat::Svg), ImageDrawing::Gpui(gpui_kit::ImageFormat::Svg));
         assert_eq!(image_drawing(ImageFormat::Avif), ImageDrawing::Webview);
+    }
+
+    #[test]
+    fn a_page_shows_only_the_read_it_was_built_from() {
+        use std::sync::Arc;
+        use treeterm_core::files::ModelFormat;
+        let built = Arc::new(b"solid".to_vec());
+        let path = String::from("/w/a.stl");
+        let model = |bytes: &Arc<Vec<u8>>| FileView::Model { path: path.clone(), bytes: bytes.clone(), format: ModelFormat::Stl };
+        assert!(shows_page(&model(&built), &built));
+        // The same file read again (its bytes may have changed on disk): a fresh page.
+        assert!(!shows_page(&model(&Arc::new(b"solid".to_vec())), &built));
+        assert!(shows_page(&FileView::Pdf { path: "/w/a.pdf".into(), bytes: built.clone() }, &built));
+        let image = |format| FileView::Image { path: "/w/a".into(), bytes: built.clone(), format };
+        assert!(shows_page(&image(ImageFormat::Avif), &built));
+        assert!(!shows_page(&image(ImageFormat::Png), &built));
+        // Another file shown, or the model being read again.
+        assert!(!shows_page(&FileView::Text { path: "/w/a.txt".into(), text: "a".into() }, &built));
+        assert!(!shows_page(&FileView::Loading(path.clone()), &built));
+        assert!(!shows_page(&FileView::Nothing, &built));
     }
 
     #[test]

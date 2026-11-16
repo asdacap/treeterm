@@ -302,6 +302,39 @@ fn icons_and_avif_files_show_as_images(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn a_model_shown_again_is_read_again(cx: &mut TestAppContext) {
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let repo = TempRepo::new(&h);
+    repo.write("a.txt", "a\n");
+    repo.write("part.stl", "solid one\nendsolid one\n");
+    repo.commit_all("files");
+    let (_store, _workspace, browser) = open_browser(cx, &h, &repo, "a.txt");
+    let (text, part) = (format!("{}/a.txt", repo.root()), format!("{}/part.stl", repo.root()));
+    let model_bytes = |browser: &Entity<FileBrowser>, cx: &mut TestAppContext| match browser.read_with(cx, |b, _| b.view().clone()) {
+        FileView::Model { bytes, .. } => bytes,
+        other => panic!("{other:?}"),
+    };
+
+    browser.update(cx, |b, cx| b.select_file(&part, cx));
+    wait_until(cx, &browser, |b| matches!(b.view(), FileView::Model { .. }));
+    let first = model_bytes(&browser, cx);
+    assert_eq!(first.as_slice(), b"solid one\nendsolid one\n");
+
+    // Another file, then the model again: its bytes as they are on disk now, in a new read
+    // (the viewer builds a fresh page for it, as Electron remounts its viewer).
+    repo.write("part.stl", "solid two\nendsolid two\n");
+    browser.update(cx, |b, cx| b.select_file(&text, cx));
+    wait_until(cx, &browser, |b| matches!(b.view(), FileView::Text { .. }));
+    browser.update(cx, |b, cx| b.select_file(&part, cx));
+    wait_until(cx, &browser, |b| matches!(b.view(), FileView::Model { .. }));
+    let second = model_bytes(&browser, cx);
+    assert_eq!(second.as_slice(), b"solid two\nendsolid two\n");
+    assert!(!std::sync::Arc::ptr_eq(&first, &second));
+}
+
+#[gpui_kit::test]
 fn a_folder_that_failed_to_load_loads_again_when_reopened(cx: &mut TestAppContext) {
     let _serial = serial();
     cx.executor().allow_parking();
