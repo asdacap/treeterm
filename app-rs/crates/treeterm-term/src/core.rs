@@ -29,8 +29,10 @@ pub const SCROLLBACK_LINES: usize = 50_000;
 pub const MAX_OSC52_BYTES: usize = 1024 * 1024;
 
 /// The characters that end a double-clicked word: xterm.js's default `wordSeparator`, so
-/// `src/main.rs:42`, `a|b`, `<tag>` and URLs select whole, as in Electron.
-pub const XTERM_WORD_SEPARATORS: &str = " ()[]{}',\"`";
+/// `src/main.rs:42`, `a|b`, `<tag>` and URLs select whole, as in Electron. Plus a tab:
+/// alacritty marks the first cell a tab skips with `'\t'`, where xterm.js leaves empty
+/// cells, which count as separators there (as alacritty's blank `' '` cells do here).
+pub const XTERM_WORD_SEPARATORS: &str = " ()[]{}',\"`\t";
 
 pub type SharedTerm = Arc<FairMutex<Term<Listener>>>;
 
@@ -575,6 +577,9 @@ mod tests {
         assert_eq!(double_clicked("a<b>c|d e", 2), "a<b>c|d");
         assert_eq!(double_clicked("call f(x) now", 5), "f", "stops at the paren");
         assert_eq!(double_clicked("say 'yo',\"hi\"", 5), "yo");
+        assert_eq!(double_clicked("4.0K\tfile", 1), "4.0K", "a tab ends a word, as in `du` output");
+        assert_eq!(double_clicked("abcdefg\tx", 0), "abcdefg", "a one-cell tab gap too");
+        assert_eq!(double_clicked("abcdefg\tx", 8), "x");
     }
 
     #[test]
