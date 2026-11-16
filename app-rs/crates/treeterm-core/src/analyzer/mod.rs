@@ -20,8 +20,8 @@
 //!   for requests the analyzer no longer awaits are ignored, so the owner may drop (cancel)
 //!   requests freely, e.g. on [`Analyzer::stop`].
 //! - Keep a timer for [`Analyzer::deadline`] and call [`Analyzer::on_timer`] when it fires.
-//! - Pass every settings change to [`Analyzer::set_settings`], typed input to
-//!   [`Analyzer::on_user_input`], and the PTY's exit to [`Analyzer::on_exit`].
+//! - Pass every settings change to [`Analyzer::set_settings`], the user's input (typed or
+//!   pasted) to [`Analyzer::on_user_input`], and the PTY's exit to [`Analyzer::on_exit`].
 //!
 //! Inputs that look at the screen take the current viewport text
 //! (`treeterm_term::view::snapshot_viewport`): a response is applied only if the screen it
@@ -592,7 +592,8 @@ impl Analyzer {
         out
     }
 
-    /// Typed input: the first Enter schedules the automatic title capture.
+    /// The user's input, typed or pasted: the first Enter schedules the automatic title
+    /// capture.
     pub fn on_user_input(&mut self, data: &str, now: Instant) {
         if self.title == TitleCapture::Waiting && data.contains('\r') {
             self.title = TitleCapture::Scheduled(now + TITLE_GENERATION_DELAY);

@@ -145,7 +145,8 @@ pub enum TerminalEvent {
     Bell,
     Activity(String),
     Idle(IdleEdge),
-    /// The user typed (text or encoded keys), for the AI-harness analyzer.
+    /// The user typed (text or encoded keys) or pasted, as written to the PTY, for the
+    /// AI-harness analyzer (xterm.js's `onData`).
     Input(String),
     /// The program exited (whether or not the tab closes).
     Exited(i32),
@@ -471,12 +472,14 @@ impl TerminalModel {
 
     /// Paste text, bracketed when the program asked for it. Not gated on focus: the context
     /// menu pastes into a terminal that may not hold keyboard focus. Claims the PTY's input
-    /// first, as the key press or right-click that pastes does in Electron.
+    /// first, as the key press or right-click that pastes does in Electron. The paste is
+    /// input like typing (a pasted line ending starts the analyzer's title capture).
     pub fn paste(&mut self, text: &str, cx: &mut Context<Self>) {
         self.claim_input();
         let mode = *self.attachment.term.lock().mode();
         let bytes = paste_bytes(text, mode);
         let write = self.attachment.input.write(&bytes);
+        cx.emit(TerminalEvent::Input(String::from_utf8_lossy(&bytes).into_owned()));
         cx.spawn(async move |this, cx| {
             if write.await.is_err() {
                 match this.update(cx, |model, cx| {

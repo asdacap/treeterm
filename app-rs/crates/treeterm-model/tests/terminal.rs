@@ -911,6 +911,32 @@ fn paste_claims_the_input_before_writing(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn a_paste_is_input_as_written_with_its_line_endings_as_enter(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    let pty = spawn_shell(&h);
+    let model = open(cx, &h, options(pty));
+    let (events, _subscription) = record(cx, &model);
+
+    // Unfocused, as from the context menu.
+    model.update(cx, |m, cx| m.paste("echo one\necho two", cx));
+    let inputs: Vec<String> = events
+        .borrow()
+        .iter()
+        .filter_map(|event| match event {
+            TerminalEvent::Input(data) => Some(data.clone()),
+            _ => None,
+        })
+        .collect();
+    let [input] = inputs.as_slice() else {
+        panic!("one input expected: {inputs:?}");
+    };
+    // Bracketed if the shell's line editor asked for it.
+    assert!(input.contains("echo one\recho two"), "{input:?}");
+    assert!(!input.contains('\n'), "{input:?}");
+}
+
+#[gpui_kit::test]
 fn refresh_claims_the_input_for_the_new_attachment_when_focused(cx: &mut TestAppContext) {
     cx.executor().allow_parking();
     let h = harness();

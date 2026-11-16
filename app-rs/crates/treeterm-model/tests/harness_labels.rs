@@ -109,11 +109,24 @@ fn open_workspace(
     store: &Entity<SessionStore>,
     app_states: Value,
 ) -> Entity<WorkspaceStore> {
+    open_workspace_with(cx, h, store, json!({ "appStates": app_states }))
+}
+
+/// [`open_workspace`] with `fields` set in its file.
+fn open_workspace_with(
+    cx: &mut TestAppContext,
+    h: &Harness,
+    store: &Entity<SessionStore>,
+    fields: Value,
+) -> Entity<WorkspaceStore> {
     let (id, dir) = workspace_dir(h);
-    let body = json!({
+    let mut body = json!({
         "name": "labels", "status": "active", "isGitRepo": false, "isWorktree": false,
-        "appStates": app_states, "metadata": {}, "createdAt": 1, "lastActivity": 1, "parentHash": ""
+        "appStates": {}, "metadata": {}, "createdAt": 1, "lastActivity": 1, "parentHash": ""
     });
+    for (key, value) in fields.as_object().unwrap() {
+        body[key] = value.clone();
+    }
     load_workspace(cx, h, store, &id, &dir, body)
 }
 
@@ -607,4 +620,32 @@ fn a_refresh_whose_harness_tab_closes_fails(cx: &mut TestAppContext) {
     assert_eq!(finish(cx, task), Err(REFRESH_ANALYZER_GONE.to_owned()));
     assert!(!is_refreshing(cx, &workspace, Refresh::TitleAndDescription));
     assert_eq!(metadata(cx, &workspace, "displayName"), None);
+}
+
+#[gpui_kit::test]
+fn a_pasted_line_starts_the_automatic_labelling_as_a_typed_enter_does(cx: &mut TestAppContext) {
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let (fake, llm) = titling(&h, suggestion("new-branch"));
+    let settings = bot_settings(r#"sh -c 'echo ready-$((40+2)); exec cat'"#, TITLE_MODEL);
+    let store = open_store(cx, &h, settings, llm);
+    // Only a child workspace is labelled automatically.
+    let workspace = open_workspace_with(cx, &h, &store, json!({ "parentId": "parent" }));
+    let (_, terminal) = add_harness(cx, &workspace, "ready-42");
+
+    terminal.update(cx, |t, cx| t.paste("pasted-line\n", cx));
+    wait_until(cx, &terminal, |t| {
+        t.screen_text().contains("pasted-line\npasted-line")
+    });
+    // The screen is read a second after the line was entered.
+    cx.executor().advance_clock(Duration::from_millis(1000));
+    wait_until_app(cx, &workspace, |w, _| {
+        w.file().metadata.contains_key("displayName")
+    });
+    assert_eq!(
+        metadata(cx, &workspace, "displayName").as_deref(),
+        Some("New Title")
+    );
+    assert!(screens_read(&fake)[0].contains("pasted-line"));
 }
