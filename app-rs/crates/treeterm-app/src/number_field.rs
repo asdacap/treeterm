@@ -1,7 +1,8 @@
-//! `<input type="number" class="settings-input" min max step>` as Chromium draws it: a text
-//! field that takes numbers, with spin buttons (shown while it is hovered or focused),
-//! ArrowUp/ArrowDown and, while it is focused, the wheel over it, which step its value as
-//! Chromium's do. Typed values are never clamped: `min` and `max` only bound the stepping.
+//! `<input type="number" min max step>` as Chromium draws it (Settings' `.settings-input`, or
+//! a field drawn as a [`ui::FieldStyle`]): a text field that takes numbers, with spin buttons
+//! (shown while it is hovered or focused), ArrowUp/ArrowDown and, while it is focused, the
+//! wheel over it, which step its value as Chromium's do. Typed values are never clamped: `min`
+//! and `max` only bound the stepping.
 
 use gpui_kit::assets::IconName;
 use gpui_kit::base::{Button, NumberInput, StepAction};
@@ -191,12 +192,23 @@ fn wheel_latch(state: Entity<InputState>, latch: Entity<WheelLatch>) -> impl Int
             });
         },
     )
-    // The field's border box: an absolute child is placed inside its parent's border.
+    // The field's border box: an absolute child is placed inside its parent's 1px border.
     .absolute()
     .top(px(-1.))
     .left(px(-1.))
-    .w(px(WIDTH))
-    .h(px(HEIGHT))
+    .right(px(-1.))
+    .bottom(px(-1.))
+}
+
+/// How the field is drawn.
+#[derive(Clone, Copy)]
+enum Frame {
+    /// `.settings-input`: 100px wide, bg-tertiary, a 1px border that turns accent on focus,
+    /// 4px radius, 8px 12px padding, 13px text.
+    Settings,
+    /// As `style` draws an `<input>`, its border turning accent on focus, as wide as the
+    /// layout around it makes it.
+    Field(ui::FieldStyle),
 }
 
 /// The field over `state`, stepping by `spec`.
@@ -204,20 +216,32 @@ fn wheel_latch(state: Entity<InputState>, latch: Entity<WheelLatch>) -> impl Int
 pub struct NumberField {
     state: Entity<InputState>,
     spec: NumberSpec,
+    frame: Frame,
 }
 
 impl NumberField {
+    /// Settings' `.settings-input`.
     pub fn new(state: &Entity<InputState>, spec: NumberSpec) -> Self {
         Self {
             state: state.clone(),
             spec,
+            frame: Frame::Settings,
+        }
+    }
+
+    /// A field drawn as `style`, as [`ui::field`] draws a text field.
+    pub fn field(state: &Entity<InputState>, spec: NumberSpec, style: ui::FieldStyle) -> Self {
+        Self {
+            state: state.clone(),
+            spec,
+            frame: Frame::Field(style),
         }
     }
 }
 
 impl RenderOnce for NumberField {
-    /// `.settings-input`: bg-tertiary, a 1px border that turns accent on focus, 4px radius,
-    /// 8px 12px padding, 13px text; the spin buttons sit inside the padding on the right.
+    /// The field as its [`Frame`] draws it; the spin buttons sit inside its padding on the
+    /// right.
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let latch = window.use_keyed_state(
             ("number-field-wheel", self.state.entity_id()),
@@ -225,6 +249,23 @@ impl RenderOnce for NumberField {
             |_, _| WheelLatch::default(),
         );
         let c = colors(cx);
+        // The spin buttons fill the field's height inside `spin_inset` above and below: 4px
+        // in `.settings-input`, the vertical padding (Chromium's content box) in a field.
+        let (style, spin_inset) = match self.frame {
+            Frame::Settings => (
+                ui::FieldStyle {
+                    bg: c.bg_tertiary,
+                    border: c.border,
+                    radius: 4.,
+                    pad: (8., 12.),
+                    size: ui::BODY,
+                    mono: false,
+                    height: HEIGHT,
+                },
+                4.,
+            ),
+            Frame::Field(style) => (style, style.pad.0),
+        };
         let focused = self.state.read(cx).focus_handle(cx).is_focused(window);
         let field: SharedString = format!("number-field-{}", self.state.entity_id()).into();
         let group = field.clone();
@@ -245,6 +286,18 @@ impl RenderOnce for NumberField {
                 .child(ui::icon(icon, 8., arrows))
         };
         let spin_up = spin_button.clone();
+        let input = Input::new(&self.state)
+            .appearance(false)
+            .h_full()
+            .px(px(0.))
+            .py(px(0.))
+            .text_size(px(style.size));
+        let input = match self.frame {
+            Frame::Settings => input,
+            Frame::Field(style) => input
+                .line_height(ui::normal_line(style.size))
+                .when(style.mono, |input| input.font_family(ui::MONO)),
+        };
         let wheel = self.state.clone();
         let wheel_latched = latch.clone();
         div()
@@ -261,28 +314,24 @@ impl RenderOnce for NumberField {
                     step(&wheel, action, spec, window, cx);
                 }
             })
-            .w(px(WIDTH))
-            .h(px(HEIGHT))
-            .px(px(12.))
-            .py(px(4.))
-            .rounded(px(4.))
+            .map(|d| match self.frame {
+                Frame::Settings => d.w(px(WIDTH)),
+                Frame::Field(_) => d.w_full(),
+            })
+            .h(px(style.height))
+            .px(px(style.pad.1))
+            .py(px(spin_inset))
+            .rounded(px(style.radius))
             .border_1()
-            .border_color(if focused { c.accent } else { c.border })
-            .bg(c.bg_tertiary)
+            .border_color(if focused { c.accent } else { style.border })
+            .bg(style.bg)
             .child(wheel_latch(self.state.clone(), latch))
             .child(
                 NumberInput::new(&self.state)
                     .controls_right()
                     .size_full()
                     .on_step(move |action, window, cx| step(&state, action, spec, window, cx))
-                    .input(
-                        Input::new(&self.state)
-                            .appearance(false)
-                            .h_full()
-                            .px(px(0.))
-                            .py(px(0.))
-                            .text_size(px(ui::BODY)),
-                    )
+                    .input(input)
                     .increment_button(move |button| spin_up(button, IconName::ChevronUp))
                     .decrement_button(move |button| spin_button(button, IconName::ChevronDown)),
             )
