@@ -4,7 +4,8 @@
 use std::path::{Path, PathBuf};
 
 use gpui_kit::{App, Context, Subscription, Task};
-use treeterm_core::connection::ConnectionTarget;
+use treeterm_core::connection::{ConnectionTarget, StatusKind};
+use treeterm_core::fs::FsClient;
 
 use crate::app_store::ConnState;
 use crate::web_app::RemoteHost;
@@ -27,8 +28,18 @@ pub enum UploadTarget {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LinkStatus {
     Connected,
-    /// Uploads wait until the connection is back.
-    Down(&'static str),
+    /// Uploads wait until the connection is back. Shown as Electron's status word.
+    Down(StatusKind),
+}
+
+/// The connection's state as the tab tells it.
+pub fn link_status(state: &ConnState) -> LinkStatus {
+    match state {
+        ConnState::Connected(_) => LinkStatus::Connected,
+        ConnState::Connecting(_) => LinkStatus::Down(StatusKind::Connecting),
+        ConnState::Reconnecting { .. } => LinkStatus::Down(StatusKind::Reconnecting),
+        ConnState::Failed { .. } => LinkStatus::Down(StatusKind::Error),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -93,13 +104,16 @@ impl SshUpload {
         let ConnectionTarget::Remote(config) = &slot.target else {
             return UploadTarget::Local;
         };
-        let status = match &slot.state {
-            ConnState::Connected(_) => LinkStatus::Connected,
-            ConnState::Connecting(_) => LinkStatus::Down("connecting"),
-            ConnState::Reconnecting { .. } => LinkStatus::Down("reconnecting"),
-            ConnState::Failed { .. } => LinkStatus::Down("disconnected"),
-        };
-        UploadTarget::Remote { name: config.display_name(), user: config.user.clone(), status }
+        UploadTarget::Remote { name: config.display_name(), user: config.user.clone(), status: link_status(&slot.state) }
+    }
+
+    /// The host's file system for "Browse...": the connected session's, none while the
+    /// connection is down.
+    pub fn fs(&self, cx: &App) -> Option<FsClient> {
+        let remote = self.remote.as_ref()?;
+        let app = remote.app.upgrade()?;
+        let session = app.read(cx).session_slot(&remote.connection)?.session()?;
+        Some(session.read(cx).connection().fs_client())
     }
 
     pub fn local_path(&self) -> Option<&Path> {
@@ -190,6 +204,18 @@ mod tests {
         assert_eq!(basename("dir/"), "dir");
         assert_eq!(destination(" /srv/drop/ ", Path::new("/tmp/a.tar")), "/srv/drop/a.tar");
         assert_eq!(destination("/", Path::new("/tmp/a.tar")), "/a.tar");
+    }
+
+    #[test]
+    fn a_connection_down_is_named_with_electrons_status_word() {
+        let down = |state: ConnState| match link_status(&state) {
+            LinkStatus::Down(kind) => kind.to_string(),
+            LinkStatus::Connected => panic!("not down"),
+        };
+        let connecting = ConnState::Connecting(treeterm_core::connection::ConnectPhase::Tunnel);
+        assert_eq!(down(connecting), "connecting");
+        assert_eq!(down(ConnState::Reconnecting { attempt: 2, error: "lost".to_owned() }), "reconnecting");
+        assert_eq!(down(ConnState::Failed { error: "refused".to_owned(), hash_mismatch: false }), "error");
     }
 
     #[test]

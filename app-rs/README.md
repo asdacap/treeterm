@@ -388,6 +388,9 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   too; Electron only recognised a `NOT_FOUND` error about the session. A Reconnect from the
   error waits for the session again, so it stops at the error once more instead of
   reconnecting in a loop.
+- SSH Upload's "Browse..." is disabled while the connection is down; the form keeps its file
+  and directory under "Connection is … — uploads are disabled until connected.", as in
+  Electron. Electron opened the browser, which could only show its failed listing.
 - Placeholders for refs another window removed are dropped with the ref.
 - A collapsed workspace stays collapsed until it gains a child or is expanded (Electron
   re-expanded every parent whenever any workspace changed).

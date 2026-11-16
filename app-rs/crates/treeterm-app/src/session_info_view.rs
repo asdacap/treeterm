@@ -389,16 +389,14 @@ impl SessionInfoView {
         div().flex_1().min_h_0().child(view).into_any_element()
     }
 
-    fn monitor_view(&mut self, state: Option<&ConnState>, cx: &mut Context<Self>) -> AnyElement {
-        let Some(ConnState::Connected(session)) = state else {
-            self.monitor = None;
-            return div().into_any_element();
-        };
+    /// Kept while the connection is down, as Electron keeps `SystemMonitor` mounted: it shows
+    /// why the metrics cannot be read, and reads them again once connected.
+    fn monitor_view(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let monitor = match &self.monitor {
             Some(monitor) => monitor.clone(),
             None => {
-                let exec = session.read(cx).connection().exec_client();
-                let monitor = cx.new(|cx| monitor::MonitorView::new(exec, cx));
+                let (app, id) = (self.app.clone(), self.connection(cx));
+                let monitor = cx.new(|cx| monitor::MonitorView::new(app, id, cx));
                 self.monitor = Some(monitor.clone());
                 monitor
             }
@@ -406,18 +404,15 @@ impl SessionInfoView {
         div().flex_1().min_h_0().flex().flex_col().child(monitor).into_any_element()
     }
 
-    fn upload_view(&mut self, state: Option<&ConnState>, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let Some(ConnState::Connected(session)) = state else {
-            self.upload = None;
-            return div().into_any_element();
-        };
+    /// Kept while the connection is down, as Electron keeps `SshUploadPane` mounted: the
+    /// chosen file, the directory and the last result stay, under the disabled notice.
+    fn upload_view(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let upload = match &self.upload {
             Some(upload) => upload.clone(),
             None => {
                 let remote = treeterm_model::web_app::RemoteHost { app: self.app.downgrade(), connection: self.connection(cx) };
                 let model = cx.new(|cx| treeterm_model::tool_tabs::ssh_upload::SshUpload::new(Some(remote), cx));
-                let session = session.clone();
-                let upload = cx.new(|cx| crate::tool_views::SshUploadView::new(model, session, window, cx));
+                let upload = cx.new(|cx| crate::tool_views::SshUploadView::new(model, window, cx));
                 self.upload = Some(upload.clone());
                 upload
             }
@@ -599,8 +594,8 @@ impl Render for SessionInfoView {
             Tab::Ssh => match self.ssh_tab {
                 SshTab::Log(kind) => self.log_view(kind, cx),
                 SshTab::Forwards => self.forwards_view(cx),
-                SshTab::Monitor => self.monitor_view(state.as_ref(), cx),
-                SshTab::Upload => self.upload_view(state.as_ref(), window, cx),
+                SshTab::Monitor => self.monitor_view(cx),
+                SshTab::Upload => self.upload_view(window, cx),
             },
         };
         let dialog = self.forward_dialog.clone().map(|dialog| {

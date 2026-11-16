@@ -9,9 +9,10 @@ use gpui_kit::{
     AnyElement, Bounds, Context, Entity, FontWeight, Hsla, PathBuilder, Pixels, SharedString, Subscription, Window,
     canvas, div, point, px, relative, rgb, rgba,
 };
-use treeterm_core::exec::ExecClient;
+use treeterm_core::connection::ConnectionId;
 use treeterm_core::system_monitor::utilization_color;
 use treeterm_core::traffic::format_bytes;
+use treeterm_model::app_store::AppStore;
 use treeterm_model::system_monitor::{Metrics, SystemMonitor};
 
 use crate::theme::colors;
@@ -23,8 +24,8 @@ pub struct MonitorView {
 }
 
 impl MonitorView {
-    pub fn new(exec: ExecClient, cx: &mut Context<Self>) -> Self {
-        let monitor = cx.new(|cx| SystemMonitor::new(exec, cx));
+    pub fn new(app: Entity<AppStore>, id: ConnectionId, cx: &mut Context<Self>) -> Self {
+        let monitor = cx.new(|cx| SystemMonitor::new(app, id, cx));
         let observe = cx.observe(&monitor, |_, _, cx| cx.notify());
         Self { monitor, _observe: observe }
     }

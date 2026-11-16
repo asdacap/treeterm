@@ -137,8 +137,7 @@ impl ToolViews {
                 )
             }
             TabContent::SshUpload(model) => {
-                let session = session.clone();
-                ToolView::SshUpload(cx.new(|cx| ssh_upload_view::SshUploadView::new(model, session, window, cx)))
+                ToolView::SshUpload(cx.new(|cx| ssh_upload_view::SshUploadView::new(model, window, cx)))
             }
             TabContent::Terminal(_)
             | TabContent::Files(_)

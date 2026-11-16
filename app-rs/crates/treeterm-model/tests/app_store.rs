@@ -21,7 +21,10 @@ use treeterm_model::app_store::{AppEvent, AppStore, ConnState, IdlePane, Session
 use treeterm_model::session_info::SessionInfo;
 use treeterm_model::session_store::{SessionState, SessionStore, WorkspaceEntry};
 use treeterm_model::settings_store::SettingsStore;
+use treeterm_model::system_monitor::{Metrics, POLL_INTERVAL, SystemMonitor};
+use treeterm_model::tool_tabs::ssh_upload::{LinkStatus, SshUpload, UploadTarget};
 use treeterm_model::traffic::{ConnectionTraffic, TrafficMeter};
+use treeterm_model::web_app::RemoteHost;
 use treeterm_proto::treeterm::WorkspaceRef;
 use treeterm_testkit::fake_ssh::{Proxy, fake_ssh_response, remote_config, ssh_env};
 
@@ -54,7 +57,8 @@ struct App {
     refuse: Arc<AtomicBool>,
     /// The ssh host's daemon socket, as its next bootstrap reports it.
     host_daemon: Arc<Mutex<PathBuf>>,
-    _tunnels: Arc<Mutex<Vec<Proxy>>>,
+    /// The ssh tunnels to the host's daemon: clearing them cuts the connection.
+    tunnels: Arc<Mutex<Vec<Proxy>>>,
     _dir: TempDir,
 }
 
@@ -106,7 +110,7 @@ fn app(cx: &mut TestAppContext, h: &Harness, local: Option<&Path>) -> App {
         _events: subscription,
         refuse,
         host_daemon,
-        _tunnels: tunnels,
+        tunnels,
         _dir: dir,
     }
 }
@@ -930,4 +934,146 @@ fn a_reconnect_attempt_starts_the_session_panes_logs_over_and_the_info_tab_shows
             .any(|line| line.starts_with("Error: SSH bootstrap failed")),
         "{lines:?}"
     );
+}
+
+/// The session pane's SSH > Monitor and SSH > Upload on the remote connection.
+fn monitor_and_upload(
+    cx: &mut TestAppContext,
+    app: &App,
+) -> (Entity<SystemMonitor>, Entity<SshUpload>) {
+    let monitor = cx.new(|cx| SystemMonitor::new(app.app.clone(), remote_id(), cx));
+    let remote = RemoteHost {
+        app: app.app.downgrade(),
+        connection: remote_id(),
+    };
+    let upload = cx.new(|cx| SshUpload::new(Some(remote), cx));
+    (monitor, upload)
+}
+
+fn link(cx: &mut TestAppContext, upload: &Entity<SshUpload>) -> LinkStatus {
+    match upload.read_with(cx, |u, cx| u.target(cx)) {
+        UploadTarget::Remote { status, .. } => status,
+        other => panic!("not a remote target: {other:?}"),
+    }
+}
+
+fn failed_with(monitor: &SystemMonitor, prefix: &str) -> bool {
+    matches!(monitor.metrics(), Metrics::Failed(why) if why.starts_with(prefix))
+}
+
+/// The next poll, and what it read.
+fn poll_again(
+    cx: &mut TestAppContext,
+    monitor: &Entity<SystemMonitor>,
+    done: impl Fn(&SystemMonitor) -> bool,
+) {
+    cx.executor().advance_clock(POLL_INTERVAL);
+    wait_until(cx, monitor, done);
+}
+
+#[gpui_kit::test]
+fn the_monitor_and_upload_keep_their_state_while_the_connection_is_down_and_work_again_after(
+    cx: &mut TestAppContext,
+) {
+    cx.executor().allow_parking();
+    isolated_home();
+    let h = harness();
+    let app = app(cx, &h, None);
+    app.connect(cx);
+    let first = app.restored(cx);
+    let (monitor, upload) = monitor_and_upload(cx, &app);
+    wait_until(cx, &monitor, |m| matches!(m.metrics(), Metrics::Loaded(_)));
+    assert_eq!(link(cx, &upload), LinkStatus::Connected);
+    assert!(upload.read_with(cx, |u, cx| u.fs(cx).is_some()));
+    upload.update(cx, |u, cx| {
+        u.set_local_path(PathBuf::from("/tmp/notes.txt"), cx);
+        u.set_remote_dir("/srv/drop", cx);
+    });
+
+    // The host goes away and stays away.
+    app.refuse.store(true, Ordering::SeqCst);
+    app.tunnels.lock().unwrap().clear();
+    wait_until(cx, &app.app, |a| {
+        matches!(
+            remote(a).map(|slot| &slot.state),
+            Some(ConnState::Reconnecting { .. })
+        )
+    });
+    // The monitor's next run fails with Electron's `getClient` error, keeping its history.
+    poll_again(cx, &monitor, |m| {
+        failed_with(m, "Connection remote-1 is reconnecting: ")
+    });
+    assert_eq!(
+        monitor.read_with(cx, |m, _| m.cpu_history().samples().count()),
+        1
+    );
+    // Retry shows "Collecting…", then why again.
+    monitor.update(cx, |m, cx| m.refresh(cx));
+    assert!(matches!(
+        monitor.read_with(cx, |m, _| m.metrics().clone()),
+        Metrics::Loading
+    ));
+    wait_until(cx, &monitor, |m| {
+        failed_with(m, "Connection remote-1 is reconnecting: ")
+    });
+    // Upload says why it waits, keeps the file and directory, and has no host to browse.
+    assert_eq!(
+        link(cx, &upload),
+        LinkStatus::Down(StatusKind::Reconnecting)
+    );
+    upload.read_with(cx, |u, cx| {
+        assert_eq!(u.local_path(), Some(Path::new("/tmp/notes.txt")));
+        assert_eq!(u.remote_dir(cx), "/srv/drop");
+        assert!(!u.can_upload(cx));
+        assert!(u.fs(cx).is_none());
+    });
+
+    // Back: both work on the new generation by themselves.
+    app.refuse.store(false, Ordering::SeqCst);
+    app.app.read_with(cx, |a, _| a.reconnect_now(&remote_id()));
+    wait_until_app(cx, &app.app, |a, cx| {
+        remote(a)
+            .and_then(SessionSlot::session)
+            .is_some_and(|s| *s != first && matches!(s.read(cx).state(), SessionState::Live))
+    });
+    poll_again(cx, &monitor, |m| matches!(m.metrics(), Metrics::Loaded(_)));
+    assert_eq!(
+        monitor.read_with(cx, |m, _| m.cpu_history().samples().count()),
+        2
+    );
+    assert_eq!(link(cx, &upload), LinkStatus::Connected);
+    upload.read_with(cx, |u, cx| {
+        assert_eq!(u.local_path(), Some(Path::new("/tmp/notes.txt")));
+        assert!(u.can_upload(cx));
+        assert!(u.fs(cx).is_some());
+    });
+}
+
+#[gpui_kit::test]
+fn a_failed_connection_reads_error_in_the_monitor_and_upload(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    isolated_home();
+    let h = harness();
+    let app = app(cx, &h, None);
+    app.refuse.store(true, Ordering::SeqCst);
+    app.connect(cx);
+    wait_until(cx, &app.app, |a| {
+        matches!(
+            remote(a).map(|slot| &slot.state),
+            Some(ConnState::Failed { .. })
+        )
+    });
+
+    let (monitor, upload) = monitor_and_upload(cx, &app);
+    wait_until(cx, &monitor, |m| {
+        failed_with(m, "Connection remote-1 is error: ")
+    });
+    assert_eq!(link(cx, &upload), LinkStatus::Down(StatusKind::Error));
+    assert!(upload.read_with(cx, |u, cx| u.fs(cx).is_none()));
+
+    // Removed: the connection is not found.
+    app.app.update(cx, |a, cx| a.disconnect(&remote_id(), cx));
+    poll_again(cx, &monitor, |m| {
+        failed_with(m, "Connection not found: remote-1")
+    });
 }

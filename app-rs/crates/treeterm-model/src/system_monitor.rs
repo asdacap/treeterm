@@ -1,14 +1,23 @@
 //! A connection's live system metrics (`SystemMonitor.tsx`): the core monitor script run on
 //! the daemon's host every few seconds, with CPU and memory histories, and killing a process.
+//!
+//! Each run takes the connection's daemon of the moment, as Electron's `exec:start` resolves
+//! the connection by id: while it is down a run fails with why (shown as the error), polling
+//! carries on, and the metrics come back by themselves once it is connected again.
 
 use std::collections::HashMap;
+use std::future::Future;
 use std::time::Duration;
 
-use gpui_kit::{Context, Task};
+use gpui_kit::{App, Context, Entity, Task};
+use treeterm_core::connection::{ClientError, ConnectionId};
 use treeterm_core::exec::{ExecClient, ExecRequest, ExecTimeout};
 use treeterm_core::system_monitor::{MONITOR_SCRIPT, SystemMetrics, UsageHistory, parse_metrics};
 
-const POLL_INTERVAL: Duration = Duration::from_secs(4);
+use crate::app_store::AppStore;
+
+/// The time between the end of a run and the start of the next.
+pub const POLL_INTERVAL: Duration = Duration::from_secs(4);
 
 #[derive(Debug, Clone)]
 pub enum Metrics {
@@ -18,7 +27,8 @@ pub enum Metrics {
 }
 
 pub struct SystemMonitor {
-    exec: ExecClient,
+    app: Entity<AppStore>,
+    id: ConnectionId,
     metrics: Metrics,
     cpu: UsageHistory,
     memory: UsageHistory,
@@ -38,16 +48,16 @@ fn request(command: &str, args: Vec<String>) -> ExecRequest {
 }
 
 impl SystemMonitor {
-    /// Starts polling; stops when dropped.
-    pub fn new(exec: ExecClient, cx: &mut Context<Self>) -> Self {
-        let poll = Self::poll(exec.clone(), cx);
+    /// Starts polling connection `id`; stops when dropped.
+    pub fn new(app: Entity<AppStore>, id: ConnectionId, cx: &mut Context<Self>) -> Self {
         Self {
-            exec,
+            app,
+            id,
             metrics: Metrics::Loading,
             cpu: UsageHistory::default(),
             memory: UsageHistory::default(),
             updated_at: None,
-            _poll: poll,
+            _poll: Self::poll(cx),
             _kill: None,
         }
     }
@@ -55,7 +65,7 @@ impl SystemMonitor {
     /// Back to "Collecting…" and poll again from now (Electron's Retry / refresh button).
     pub fn refresh(&mut self, cx: &mut Context<Self>) {
         self.metrics = Metrics::Loading;
-        self._poll = Self::poll(self.exec.clone(), cx);
+        self._poll = Self::poll(cx);
         cx.notify();
     }
 
@@ -64,15 +74,25 @@ impl SystemMonitor {
         self.updated_at
     }
 
-    fn poll(exec: ExecClient, cx: &mut Context<Self>) -> Task<()> {
+    /// The connection's daemon now (Main's `getClient`), or why it has none.
+    fn exec(&self, cx: &App) -> Result<ExecClient, ClientError> {
+        self.app.read(cx).manager().client(&self.id).map(|daemon| daemon.exec_client())
+    }
+
+    fn poll(cx: &mut Context<Self>) -> Task<()> {
         let executor = cx.background_executor().clone();
-        let poller = exec;
         cx.spawn(async move |this, cx| {
             loop {
-                let result = poller
-                    .run(request("sh", vec!["-c".to_owned(), MONITOR_SCRIPT.to_owned()]))
-                    .await
-                    .map_err(|e| e.to_string());
+                let Ok(exec) = this.update(cx, |monitor, cx| monitor.exec(cx)) else {
+                    return; // the monitor closed
+                };
+                let result = match exec {
+                    Ok(exec) => exec
+                        .run(request("sh", vec!["-c".to_owned(), MONITOR_SCRIPT.to_owned()]))
+                        .await
+                        .map_err(|e| e.to_string()),
+                    Err(down) => Err(down.to_string()),
+                };
                 let metrics = match result {
                     Ok(output) => Metrics::Loaded(parse_metrics(&String::from_utf8_lossy(&output.stdout))),
                     Err(error) => Metrics::Failed(error),
@@ -107,26 +127,34 @@ impl SystemMonitor {
         &self.memory
     }
 
+    /// `kill -<signal> <pid>` on the daemon's host now; a failure is logged.
+    fn send_signal(&self, pid: u32, signal: &str, cx: &App) -> impl Future<Output = ()> + use<> {
+        let run = self.exec(cx).map(|exec| exec.run(request("kill", vec![format!("-{signal}"), pid.to_string()])));
+        async move {
+            let result = match run {
+                Ok(run) => run.await.map_err(|e| e.to_string()),
+                Err(down) => Err(down.to_string()),
+            };
+            match result {
+                Ok(output) if output.exit_code == 0 => {}
+                Ok(output) => tracing::warn!(pid, stderr = %String::from_utf8_lossy(&output.stderr), "kill failed"),
+                Err(error) => tracing::warn!(pid, %error, "kill failed"),
+            }
+        }
+    }
+
     /// `kill -<signal> <pid>` on the daemon's host.
     pub fn kill(&mut self, pid: u32, signal: &str, cx: &mut Context<Self>) {
-        let run = self.exec.run(request("kill", vec![format!("-{signal}"), pid.to_string()]));
-        self._kill = Some(cx.spawn(async move |_, _| match run.await {
-            Ok(output) if output.exit_code == 0 => {}
-            Ok(output) => tracing::warn!(pid, stderr = %String::from_utf8_lossy(&output.stderr), "kill failed"),
-            Err(error) => tracing::warn!(pid, %error, "kill failed"),
-        }));
+        let send = self.send_signal(pid, signal, cx);
+        self._kill = Some(cx.spawn(async move |_, _| send.await));
     }
 
     /// The process list's Stop / Kill: signal `pid`, then collect again once it is done
     /// (`sendSignal` → `onRefresh`).
     pub fn signal(&mut self, pid: u32, signal: &str, cx: &mut Context<Self>) {
-        let run = self.exec.run(request("kill", vec![format!("-{signal}"), pid.to_string()]));
+        let send = self.send_signal(pid, signal, cx);
         self._kill = Some(cx.spawn(async move |this, cx| {
-            match run.await {
-                Ok(output) if output.exit_code == 0 => {}
-                Ok(output) => tracing::warn!(pid, stderr = %String::from_utf8_lossy(&output.stderr), "kill failed"),
-                Err(error) => tracing::warn!(pid, %error, "kill failed"),
-            }
+            send.await;
             match this.update(cx, |monitor, cx| monitor.refresh(cx)) {
                 Ok(()) | Err(_) => {} // Err: the monitor closed
             }

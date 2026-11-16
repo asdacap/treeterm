@@ -5,7 +5,6 @@ use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::{Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{App, Context, Entity, FontWeight, Subscription, Window, div, px, rgb};
-use treeterm_model::session_store::SessionStore;
 use treeterm_model::tool_tabs::ssh_upload::{LinkStatus, SshUpload, UploadState, UploadTarget};
 
 use crate::remote_dir_browser::{Inline, RemoteDirBrowserEvent};
@@ -14,8 +13,6 @@ use crate::ui::{DialogButton, FieldStyle, MONO, field, pane_dialog_button};
 
 pub struct SshUploadView {
     model: Entity<SshUpload>,
-    /// Browses the host's directories.
-    session: Entity<SessionStore>,
     /// The chosen file, read-only: it can be selected and scrolled, not typed into.
     local_path: Entity<InputState>,
     remote_dir: Entity<InputState>,
@@ -30,7 +27,7 @@ fn chosen_file(model: &Entity<SshUpload>, cx: &App) -> String {
 }
 
 impl SshUploadView {
-    pub fn new(model: Entity<SshUpload>, session: Entity<SessionStore>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(model: Entity<SshUpload>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let start = model.read(cx).remote_dir(cx);
         let chosen = chosen_file(&model, cx);
         let local_path = cx.new(|cx| InputState::new(window, cx).placeholder("No file selected").default_value(chosen));
@@ -48,7 +45,7 @@ impl SshUploadView {
             }
             cx.notify();
         });
-        Self { model, session, local_path, remote_dir, browser: Inline::Hidden, _subscriptions: vec![typed, observe] }
+        Self { model, local_path, remote_dir, browser: Inline::Hidden, _subscriptions: vec![typed, observe] }
     }
 
     /// "Choose file…": the native picker (local files), with its default "Open" button.
@@ -75,12 +72,14 @@ impl SshUploadView {
 
     /// "Browse…": the host's directories under the remote directory, from the typed one (else
     /// the home directory). Select sets the remote directory and hides the browser; while it
-    /// is shown, "Browse…" does nothing.
+    /// is shown, "Browse…" does nothing. It is disabled while the connection is down.
     fn browse(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         match self.browser {
             Inline::Shown { .. } => {}
             Inline::Hidden => {
-                let fs = self.session.read(cx).connection().fs_client();
+                let Some(fs) = self.model.read(cx).fs(cx) else {
+                    return;
+                };
                 let start = self.model.read(cx).browse_start(cx);
                 self.browser = Inline::show(fs, start, window, cx, |view: &mut Self, event, window, cx| {
                     if let RemoteDirBrowserEvent::Selected(path) = event {
@@ -121,6 +120,8 @@ impl Render for SshUploadView {
             UploadTarget::Remote { name, status, .. } => (name, status),
         };
         let uploading = upload == UploadState::Uploading;
+        // There is no host to browse while the connection is down.
+        let browsable = !uploading && status == LinkStatus::Connected;
         let banner = |text: String, color: gpui_kit::Hsla| h_flex().gap(px(6.)).text_color(color).child(text);
         let banner = match upload {
             UploadState::Idle => None,
@@ -180,8 +181,8 @@ impl Render for SshUploadView {
                             field(&self.remote_dir, style, window, cx).disabled(uploading),
                         ))
                         .child(
-                            pane_dialog_button("upload-browse", "Browse...", DialogButton::Plain, uploading, cx)
-                                .when(!uploading, |d| d.on_click(cx.listener(|view, _, window, cx| view.browse(window, cx)))),
+                            pane_dialog_button("upload-browse", "Browse...", DialogButton::Plain, !browsable, cx)
+                                .when(browsable, |d| d.on_click(cx.listener(|view, _, window, cx| view.browse(window, cx)))),
                         ),
                 ),
             )
