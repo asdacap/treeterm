@@ -9,8 +9,8 @@ use treeterm_core::settings::{
 };
 
 use super::widgets::{
-    divider, group, heading, hint, label, label_for, labelled, option_label, reset_button, section, select, select_from,
-    select_menu, toggle, unlabeled,
+    divider, group, heading, hint, hint_with_code, label, label_for, labelled, option_label, reset_button, section,
+    select, select_from, select_menu, toggle, unlabeled,
 };
 use super::{Recording, SettingsView, form};
 use crate::number_field::NumberField;
@@ -418,15 +418,15 @@ impl SettingsView {
             window,
             cx,
         );
+        let detect_hint = hint_with_code(
+            "When enabled, uses ",
+            "gh auth token",
+            " to get the GitHub token automatically. Requires the GitHub CLI to be installed and authenticated.",
+            window,
+            cx,
+        );
         section()
-            .child(unlabeled(
-                detect,
-                Some(
-                    "When enabled, uses gh auth token to get the GitHub token automatically. Requires the \
-                     GitHub CLI to be installed and authenticated.",
-                ),
-                cx,
-            ))
+            .child(unlabeled(detect, None, cx).child(detect_hint))
             .child(group(
                 "Personal Access Token",
                 ui::text_input(&self.inputs.github_pat, cx).disabled(autodetect),

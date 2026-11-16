@@ -3,7 +3,10 @@
 
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenu};
 use gpui_kit::prelude::*;
-use gpui_kit::{App, Context, Div, ElementId, FocusHandle, FontWeight, SharedString, Stateful, Window, div, px};
+use gpui_kit::{
+    App, Context, Div, ElementId, FocusHandle, Font, FontWeight, Hsla, SharedString, Stateful, StyledText, TextRun,
+    Window, div, px,
+};
 use treeterm_core::settings::Settings;
 
 use super::SettingsView;
@@ -67,12 +70,35 @@ pub fn unlabeled(control: impl IntoElement, hint: Option<&'static str>, cx: &App
 /// `.settings-hint`: 11px secondary text, 2px below what precedes it.
 pub fn hint(text: impl Into<SharedString>, cx: &App) -> Div {
     let text: SharedString = text.into();
-    div()
-        .mt(px(2.))
-        .text_size(px(ui::SMALL))
-        .line_height(px(13.))
-        .text_color(colors(cx).text_secondary)
-        .child(text)
+    hint_box(cx).child(text)
+}
+
+/// A `.settings-hint` with a `<code>` in it: `code` between `before` and `after`, in
+/// Chromium's `monospace` (Menlo) at the hint's size.
+pub fn hint_with_code(before: &str, code: &str, after: &str, window: &Window, cx: &App) -> Div {
+    let lens = [before.len(), code.len(), after.len()];
+    let runs = code_runs(lens, window.text_style().font(), colors(cx).text_secondary);
+    hint_box(cx).child(StyledText::new(format!("{before}{code}{after}")).with_runs(runs))
+}
+
+/// The runs of text `lens` bytes long around a `<code>` (the middle one): `font`, the code
+/// in [`ui::MONO`].
+fn code_runs(lens: [usize; 3], font: Font, color: Hsla) -> Vec<TextRun> {
+    let code = Font { family: ui::MONO.into(), ..font.clone() };
+    let run = |len: usize, font: Font| TextRun {
+        len,
+        font,
+        color,
+        background_color: None,
+        underline: None,
+        strikethrough: None,
+    };
+    vec![run(lens[0], font.clone()), run(lens[1], code), run(lens[2], font)]
+}
+
+/// The box of a [`hint`].
+fn hint_box(cx: &App) -> Div {
+    div().mt(px(2.)).text_size(px(ui::SMALL)).line_height(px(13.)).text_color(colors(cx).text_secondary)
 }
 
 /// `.settings-hint.webapp-error`: a problem with an instance, in #f44336.
@@ -192,4 +218,27 @@ pub fn select_from<T: Copy + PartialEq + 'static>(
 /// A select box opening `build`'s menu, at least as wide as Electron's popup.
 pub fn select_menu(boxed: Stateful<Div>, build: impl Fn(PopupMenu) -> PopupMenu + 'static) -> impl IntoElement {
     ui::Trigger::new(boxed).dropdown_menu(move |menu, _, _| build(menu.min_w(px(200.))))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A hint's `<code>` is set in Menlo, the text around it in the hint's font and weight.
+    #[test]
+    fn the_code_in_a_hint_is_menlo_and_the_rest_the_hint_font() {
+        let font = Font { weight: FontWeight::MEDIUM, ..gpui_kit::font("Helvetica") };
+        let color = gpui_kit::black();
+        let runs = code_runs([19, 13, 4], font, color);
+        let shown: Vec<_> = runs.iter().map(|run| (run.len, run.font.family.to_string(), run.font.weight)).collect();
+        assert_eq!(
+            shown,
+            [
+                (19, "Helvetica".to_owned(), FontWeight::MEDIUM),
+                (13, "Menlo".to_owned(), FontWeight::MEDIUM),
+                (4, "Helvetica".to_owned(), FontWeight::MEDIUM),
+            ]
+        );
+        assert!(runs.iter().all(|run| run.color == color && run.background_color.is_none()));
+    }
 }
