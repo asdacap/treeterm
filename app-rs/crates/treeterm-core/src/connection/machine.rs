@@ -151,7 +151,7 @@ enum State<C> {
 
 /// Whether the daemon's session loaded since the user last asked to connect.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SessionLoad {
+pub enum SessionLoad {
     /// Not yet: a session watch failing now ends the connect with an error.
     Awaited,
     /// A session watch delivered: later failures are losses, reconnected.
@@ -257,6 +257,13 @@ impl<C: Clone> ConnectionMachine<C> {
             target: self.target.clone(),
             status: self.status(),
         }
+    }
+
+    /// Whether the session loaded since the user last asked to connect, for tests that cut
+    /// the connection: a loaded one reconnects, one still loading fails.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn session_load(&self) -> SessionLoad {
+        self.session
     }
 
     // --- attempts ----------------------------------------------------------------------------

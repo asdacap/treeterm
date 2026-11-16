@@ -228,6 +228,17 @@ impl<D: Dialer> ConnectionManager<D> {
             .map(|entry| entry.shared.read(ConnectionMachine::info))
     }
 
+    /// Whether `id`'s session loaded (its heartbeat watch delivered) since the user last
+    /// asked to connect, for tests that cut the connection: a loaded one reconnects, one
+    /// still loading fails.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn session_load(
+        &self,
+        id: &ConnectionId,
+    ) -> Result<super::machine::SessionLoad, ConnectionNotFound> {
+        Ok(self.entry(id)?.shared.read(ConnectionMachine::session_load))
+    }
+
     /// Scrollback of one of the connection's logs, then its new lines and
     /// [`LogEvent::Cleared`] when a new tunnel starts it over. The stream ends when the
     /// connection is removed or replaced ([`Self::connect_remote`]).

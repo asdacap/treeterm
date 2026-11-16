@@ -11,6 +11,7 @@ use std::time::Duration;
 
 use futures::StreamExt;
 use treeterm_core::connection::dialer::{Dialer, GrpcDialer};
+use treeterm_core::connection::machine::SessionLoad;
 use treeterm_core::connection::output::Updates;
 use treeterm_core::connection::process::TokioSpawner;
 use treeterm_core::connection::{
@@ -316,6 +317,15 @@ async fn remote_connection_reaches_the_daemon_through_its_tunnel_and_rebuilds_it
         daemon_log,
         vec!["Connecting to daemon via gRPC...", "Connected to daemon"]
     );
+    // The connect is done once the session loads: cut before, it would fail instead of
+    // reconnecting, as Electron's `ssh:connect` does.
+    for _ in 0..500 {
+        if manager.session_load(&info.id).unwrap() == SessionLoad::Loaded {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(manager.session_load(&info.id).unwrap(), SessionLoad::Loaded);
 
     // The tunnel dies: the connection notices without waiting for the heartbeat timeout.
     tunnels.lock().unwrap().clear();

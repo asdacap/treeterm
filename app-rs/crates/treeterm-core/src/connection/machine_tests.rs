@@ -376,6 +376,26 @@ fn a_retry_from_the_error_awaits_the_session_again_but_reconnects_do_not() {
 }
 
 #[test]
+fn the_session_loads_with_the_first_heartbeat_until_the_user_retries() {
+    let t0 = Instant::now();
+    let mut machine = connected_awaiting_session(remote(OutdatedDaemon::Report), t0);
+    assert_eq!(machine.session_load(), SessionLoad::Awaited);
+    machine.heartbeat(t0);
+    assert_eq!(machine.session_load(), SessionLoad::Loaded);
+
+    // Lost: it stays loaded while it reconnects, and after the user stops reconnecting.
+    machine.heartbeat_failed(lost("gone"), t0);
+    assert_eq!(machine.session_load(), SessionLoad::Loaded);
+    machine.cancel_reconnect();
+    assert_eq!(machine.status().kind(), StatusKind::Error);
+    assert_eq!(machine.session_load(), SessionLoad::Loaded);
+
+    // A retry is a connect the user asked for: it awaits the session again.
+    machine.reconnect(t0);
+    assert_eq!(machine.session_load(), SessionLoad::Awaited);
+}
+
+#[test]
 fn a_silent_or_cut_connection_before_the_session_loads_still_reconnects() {
     let t0 = Instant::now();
     let mut machine = connected_awaiting_session(local(), t0);
