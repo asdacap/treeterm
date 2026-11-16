@@ -272,6 +272,36 @@ fn picking_the_file_shown_leaves_it_as_it_is(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn icons_and_avif_files_show_as_images(cx: &mut TestAppContext) {
+    use treeterm_core::files::ImageFormat;
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let repo = TempRepo::new(&h);
+    repo.write("a.txt", "a\n");
+    // Both headers hold NUL bytes, which would make them binary files if read as text.
+    let ico = b"\0\0\x01\0\x01\0\x10\x10\0\0\x01\0\x20\0".to_vec();
+    let avif = b"\0\0\0\x1cftypavif\0\0\0\0avifmif1miaf".to_vec();
+    std::fs::write(repo.path.join("favicon.ICO"), &ico).unwrap();
+    std::fs::write(repo.path.join("photo.avif"), &avif).unwrap();
+    repo.commit_all("files");
+    let (_store, _workspace, browser) = open_browser(cx, &h, &repo, "a.txt");
+
+    for (name, bytes, expected) in [("favicon.ICO", &ico, ImageFormat::Ico), ("photo.avif", &avif, ImageFormat::Avif)] {
+        let path = format!("{}/{name}", repo.root());
+        browser.update(cx, |b, cx| b.select_file(&path, cx));
+        wait_until(cx, &browser, |b| !matches!(b.view(), FileView::Loading(_)));
+        match browser.read_with(cx, |b, _| b.view().clone()) {
+            FileView::Image { path: shown, bytes: read, format } => {
+                assert_eq!((shown, format), (path, expected));
+                assert_eq!(*read, *bytes);
+            }
+            other => panic!("{name}: {other:?}"),
+        }
+    }
+}
+
+#[gpui_kit::test]
 fn a_folder_that_failed_to_load_loads_again_when_reopened(cx: &mut TestAppContext) {
     let _serial = serial();
     cx.executor().allow_parking();

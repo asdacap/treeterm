@@ -7,9 +7,9 @@ pub mod language;
 pub mod limits;
 
 pub use content_kind::{
-    IMAGE_LANGUAGE, MODEL_LANGUAGE, ModelFormat, NotAModel, PDF_LANGUAGE, image_mime_type,
-    is_binary_content, is_image_path, is_model_path, is_pdf_path, is_raw_bytes_path, model_format,
-    read_language,
+    IMAGE_LANGUAGE, ImageFormat, MODEL_LANGUAGE, ModelFormat, NotAModel, NotAnImage, PDF_LANGUAGE,
+    image_format, image_mime_type, is_binary_content, is_image_path, is_model_path, is_pdf_path,
+    is_raw_bytes_path, model_format, read_language,
 };
 pub use favourites::{
     FavouriteFile, FavouritesError, favourite_file_name, normalize_favourite_path,

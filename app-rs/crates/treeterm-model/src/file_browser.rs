@@ -71,7 +71,7 @@ pub enum FileView {
     Loading(String),
     Text { path: String, text: String },
     /// Shown as an image (by extension).
-    Image { path: String, bytes: std::sync::Arc<Vec<u8>>, kind: ImageKind },
+    Image { path: String, bytes: std::sync::Arc<Vec<u8>>, format: treeterm_core::files::ImageFormat },
     /// Shown in a PDF viewer.
     Pdf { path: String, bytes: std::sync::Arc<Vec<u8>> },
     /// Shown in the 3D model viewer.
@@ -86,39 +86,25 @@ pub enum FileView {
     Failed { path: String, error: String },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ImageKind {
-    Png,
-    Jpeg,
-    Gif,
-    Webp,
-    Svg,
-    Bmp,
-}
-
-/// How a file is shown, by extension (`isImagePath` / PDF detection in Electron).
+/// How a file is shown, by extension (`readLanguage` in Electron).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Presentation {
     Text,
-    Image(ImageKind),
+    Image(treeterm_core::files::ImageFormat),
     Pdf,
-    Model(treeterm_core::files::content_kind::ModelFormat),
+    Model(treeterm_core::files::ModelFormat),
 }
 
 fn presentation_of(path: &str) -> Presentation {
-    let ext = path.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
-    match ext.as_str() {
-        "png" => Presentation::Image(ImageKind::Png),
-        "jpg" | "jpeg" => Presentation::Image(ImageKind::Jpeg),
-        "gif" => Presentation::Image(ImageKind::Gif),
-        "webp" => Presentation::Image(ImageKind::Webp),
-        "svg" => Presentation::Image(ImageKind::Svg),
-        "bmp" => Presentation::Image(ImageKind::Bmp),
-        "pdf" => Presentation::Pdf,
-        _ => match treeterm_core::files::content_kind::model_format(path) {
-            Ok(format) => Presentation::Model(format),
-            Err(_not_a_model) => Presentation::Text,
-        },
+    use treeterm_core::files::{image_format, is_pdf_path, model_format};
+    if let Ok(format) = image_format(path) {
+        Presentation::Image(format)
+    } else if let Ok(format) = model_format(path) {
+        Presentation::Model(format)
+    } else if is_pdf_path(path) {
+        Presentation::Pdf
+    } else {
+        Presentation::Text
     }
 }
 
@@ -672,10 +658,10 @@ impl FileBrowser {
         self._read = Some(cx.spawn(async move |this, cx| {
             let view = match fs_outcome(read.await) {
                 Ok(ReadOutcome::Read(file)) => match presentation {
-                    Presentation::Image(kind) => FileView::Image {
+                    Presentation::Image(format) => FileView::Image {
                         path: owned.clone(),
                         bytes: std::sync::Arc::new(file.content),
-                        kind,
+                        format,
                     },
                     Presentation::Pdf => FileView::Pdf {
                         path: owned.clone(),
@@ -1185,13 +1171,18 @@ mod tests {
 
     #[test]
     fn files_are_presented_by_extension() {
-        assert_eq!(presentation_of("/w/a.PNG"), Presentation::Image(ImageKind::Png));
+        use treeterm_core::files::ImageFormat;
+        assert_eq!(presentation_of("/w/a.PNG"), Presentation::Image(ImageFormat::Png));
+        assert_eq!(presentation_of("/w/a.svg"), Presentation::Image(ImageFormat::Svg));
+        assert_eq!(presentation_of("/w/favicon.ICO"), Presentation::Image(ImageFormat::Ico));
+        assert_eq!(presentation_of("/w/photo.avif"), Presentation::Image(ImageFormat::Avif));
         assert_eq!(presentation_of("/w/doc.pdf"), Presentation::Pdf);
         assert_eq!(
             presentation_of("/w/parts/Bracket.STL"),
-            Presentation::Model(treeterm_core::files::content_kind::ModelFormat::Stl)
+            Presentation::Model(treeterm_core::files::ModelFormat::Stl)
         );
         assert_eq!(presentation_of("/w/main.rs"), Presentation::Text);
+        assert_eq!(presentation_of("/w/Makefile"), Presentation::Text);
     }
 
     #[test]

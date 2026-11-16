@@ -34,6 +34,7 @@ gpui_kit::assets::icon_assets!(
         GitBranch,
         GitFork,
         Github,
+        ImageOff,
         LoaderCircle,
         LockOpen,
         MessageSquare,

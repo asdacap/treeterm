@@ -30,7 +30,7 @@ use gpui_kit::{
     MouseUpEvent, Pixels, Point, SharedString, Subscription, Window, actions, div, px, relative, rgb, rgba,
 };
 use treeterm_core::review::{Freshness, MetadataError, ReviewComment};
-use treeterm_core::files::{detect_monaco_language, favourite_file_name, max_read_bytes_for};
+use treeterm_core::files::{ImageFormat, detect_monaco_language, favourite_file_name, max_read_bytes_for};
 use treeterm_model::file_browser::{
     DefinitionLookup, Favourites, FileBrowser, FileView, LineDraft, Listing, NameResults, SearchPanel, Star,
 };
@@ -304,6 +304,27 @@ pub fn language_for(path: &str) -> &'static str {
     }
 }
 
+/// Who draws an image the viewer shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ImageDrawing {
+    Gpui(gpui_kit::ImageFormat),
+    /// GPUI has no AVIF decoder: WebKit draws it ([`crate::browser_view::AssetPageView::image`]).
+    Webview,
+}
+
+fn image_drawing(format: ImageFormat) -> ImageDrawing {
+    match format {
+        ImageFormat::Png => ImageDrawing::Gpui(gpui_kit::ImageFormat::Png),
+        ImageFormat::Jpeg => ImageDrawing::Gpui(gpui_kit::ImageFormat::Jpeg),
+        ImageFormat::Gif => ImageDrawing::Gpui(gpui_kit::ImageFormat::Gif),
+        ImageFormat::Webp => ImageDrawing::Gpui(gpui_kit::ImageFormat::Webp),
+        ImageFormat::Bmp => ImageDrawing::Gpui(gpui_kit::ImageFormat::Bmp),
+        ImageFormat::Ico => ImageDrawing::Gpui(gpui_kit::ImageFormat::Ico),
+        ImageFormat::Svg => ImageDrawing::Gpui(gpui_kit::ImageFormat::Svg),
+        ImageFormat::Avif => ImageDrawing::Webview,
+    }
+}
+
 /// `formatMegabytes`: `1.4MB`.
 fn format_megabytes(bytes: u64) -> String {
     format!("{:.1}MB", bytes as f64 / (1024. * 1024.))
@@ -377,10 +398,19 @@ impl FileBrowserView {
         Self { layout: Layout::Viewer, ..Self::new(model, workspace, cx) }
     }
 
-    /// Show the PDF / model webview only while this tab is shown, such a file is the current
-    /// one, and no dialog covers it.
+    /// Show the PDF / model / AVIF webview only while this tab is shown, such a file is the
+    /// current one, and no dialog covers it.
     pub fn set_shown(&mut self, shown: bool, cx: &mut Context<Self>) {
-        let in_webview = matches!(self.model.read(cx).view(), FileView::Pdf { .. } | FileView::Model { .. });
+        let in_webview = match self.model.read(cx).view() {
+            FileView::Pdf { .. } | FileView::Model { .. } => true,
+            FileView::Image { format, .. } => image_drawing(*format) == ImageDrawing::Webview,
+            FileView::Nothing
+            | FileView::Loading(_)
+            | FileView::Text { .. }
+            | FileView::Binary { .. }
+            | FileView::TooLarge { .. }
+            | FileView::Failed { .. } => false,
+        };
         if let Some((_, page)) = &self.page {
             page.update(cx, |p, cx| p.set_shown(shown && in_webview, cx));
         }
@@ -1202,25 +1232,44 @@ impl FileBrowserView {
                     .on_click(cx.listener(move |view, _, _, cx| view.model.update(cx, |model, cx| model.open(&path, true, cx))));
                 return frame.child(ui::viewer_error(div().child(message)).child(button)).into_any_element();
             }
-            FileView::Image { path, bytes, kind } => {
-                use treeterm_model::file_browser::ImageKind;
-                let format = match kind {
-                    ImageKind::Png => gpui_kit::ImageFormat::Png,
-                    ImageKind::Jpeg => gpui_kit::ImageFormat::Jpeg,
-                    ImageKind::Gif => gpui_kit::ImageFormat::Gif,
-                    ImageKind::Webp => gpui_kit::ImageFormat::Webp,
-                    ImageKind::Svg => gpui_kit::ImageFormat::Svg,
-                    ImageKind::Bmp => gpui_kit::ImageFormat::Bmp,
+            FileView::Image { path, bytes, format } => {
+                let body = match image_drawing(format) {
+                    ImageDrawing::Gpui(gpui_format) => {
+                        let image = std::sync::Arc::new(gpui_kit::Image::from_bytes(gpui_format, (*bytes).clone()));
+                        // Chromium's broken-image icon and the `alt` text when it cannot decode.
+                        let (name, icon_color, text_color) = (file_name(&path).to_owned(), c.text_secondary, c.text_primary);
+                        let broken = move || {
+                            h_flex()
+                                .gap(px(4.))
+                                .child(ui::icon(IconName::ImageOff, 16., icon_color))
+                                .child(div().text_size(px(16.)).text_color(text_color).child(name.clone()))
+                                .into_any_element()
+                        };
+                        div()
+                            .size_full()
+                            .p(px(16.))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(
+                                gpui_kit::img(image)
+                                    .max_w_full()
+                                    .max_h_full()
+                                    .object_fit(gpui_kit::ObjectFit::Contain)
+                                    .with_fallback(broken),
+                            )
+                            .into_any_element()
+                    }
+                    ImageDrawing::Webview => {
+                        let alt = file_name(&path).to_owned();
+                        let page = self.page_for(
+                            path.clone(),
+                            || crate::browser_view::AssetPageView::image(bytes, format.mime_type(), &alt),
+                            cx,
+                        );
+                        div().size_full().child(page).into_any_element()
+                    }
                 };
-                let image = std::sync::Arc::new(gpui_kit::Image::from_bytes(format, (*bytes).clone()));
-                let body = div()
-                    .size_full()
-                    .p(px(16.))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .child(gpui_kit::img(image).max_w_full().max_h_full().object_fit(gpui_kit::ObjectFit::Contain))
-                    .into_any_element();
                 (path, "image".into(), body)
             }
             FileView::Pdf { path, bytes } => {
@@ -1591,6 +1640,14 @@ mod tests {
         assert_eq!(language_for("/w/App.tsx"), "tsx");
         assert_eq!(language_for("/w/Makefile"), "make");
         assert_eq!(language_for("/w/README"), "text");
+    }
+
+    #[test]
+    fn gpui_draws_every_image_but_avif() {
+        assert_eq!(image_drawing(ImageFormat::Ico), ImageDrawing::Gpui(gpui_kit::ImageFormat::Ico));
+        assert_eq!(image_drawing(ImageFormat::Jpeg), ImageDrawing::Gpui(gpui_kit::ImageFormat::Jpeg));
+        assert_eq!(image_drawing(ImageFormat::Svg), ImageDrawing::Gpui(gpui_kit::ImageFormat::Svg));
+        assert_eq!(image_drawing(ImageFormat::Avif), ImageDrawing::Webview);
     }
 
     #[test]

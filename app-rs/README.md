@@ -212,6 +212,8 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   dialogs so that it stays usable while one is open, as GTK's is.
 - With the sidebar collapsed the header keeps clear of the macOS window buttons (Electron's
   title runs under them).
+- GPUI cannot decode AVIF, so the Files viewer shows `.avif` images in a webview (WebKit
+  draws them, centred and scaled down as Electron's `<img>`).
 - Review's find: GPUI Kit's diff does not report the word under the pointer or the file at
   the top of the scroll, so the right-click menu needs a selection (double-click a word) and
   "In this file" is the file last under the pointer (else the one last selected).

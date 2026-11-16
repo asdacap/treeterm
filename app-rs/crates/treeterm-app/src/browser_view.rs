@@ -583,6 +583,35 @@ enum Asset {
 const MODEL_VIEWER_HTML: &[u8] = include_bytes!("../assets/model-viewer/index.html");
 const MODEL_VIEWER_JS: &[u8] = include_bytes!("../assets/model-viewer/viewer.js");
 
+/// The page [`AssetPageView::image`] serves: `.file-viewer-image-container` around
+/// `<img alt>`. It reports `ready <width>×<height>` or `error …` for the log, as the model
+/// viewer does.
+fn image_page_html(alt: &str) -> String {
+    let alt: String = alt
+        .chars()
+        .map(|c| match c {
+            '&' => "&amp;".to_owned(),
+            '<' => "&lt;".to_owned(),
+            '>' => "&gt;".to_owned(),
+            '"' => "&quot;".to_owned(),
+            '\'' => "&#39;".to_owned(),
+            c => c.to_string(),
+        })
+        .collect();
+    format!(
+        "<!doctype html><html><head><meta charset=\"utf-8\"><style>\
+         html, body {{ margin: 0; height: 100%; background: #1e1e1e; color: #cccccc; \
+         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }} \
+         body {{ display: flex; align-items: center; justify-content: center; padding: 16px; \
+         box-sizing: border-box; overflow: auto; }} \
+         img {{ max-width: 100%; max-height: 100%; object-fit: contain; }}\
+         </style><script>function report(message) {{ if (window.ipc) window.ipc.postMessage(message) }}</script>\
+         </head><body><img src=\"image\" alt=\"{alt}\" \
+         onload=\"report('ready ' + this.naturalWidth + '\u{d7}' + this.naturalHeight)\" \
+         onerror=\"report('error The image could not be decoded')\"></body></html>"
+    )
+}
+
 /// A page served from memory to a webview: a PDF (WKWebView renders PDFs itself) or the 3D
 /// model viewer with the model's bytes. Each page gets its own URL scheme, so pages never
 /// share a registration (webkitgtk registers schemes per web context).
@@ -610,6 +639,18 @@ impl AssetPageView {
             ("model".to_owned(), ("application/octet-stream", Asset::Shared(bytes))),
         ];
         Self::new(files.into_iter().collect(), format!("index.html?format={format}"), "the 3D model")
+    }
+
+    /// An image GPUI cannot decode (AVIF), drawn by WebKit as `FileViewer` draws images:
+    /// centred in 16px of padding and scaled down to fit. One WebKit cannot decode shows its
+    /// broken-image icon and `alt`, as Chromium's `<img alt>` does.
+    pub fn image(bytes: std::sync::Arc<Vec<u8>>, mime: &'static str, alt: &str) -> Self {
+        let page = image_page_html(alt).into_bytes();
+        let files = [
+            ("index.html".to_owned(), ("text/html; charset=utf-8", Asset::Shared(std::sync::Arc::new(page)))),
+            ("image".to_owned(), (mime, Asset::Shared(bytes))),
+        ];
+        Self::new(files.into_iter().collect(), "index.html".to_owned(), "the image")
     }
 
     fn new(files: std::collections::HashMap<String, (&'static str, Asset)>, entry: String, what: &'static str) -> Self {
@@ -661,7 +702,7 @@ impl AssetPageView {
                     wry::PageLoadEvent::Started => {}
                 }
             })
-            // The model viewer reports `ready …` / `error …`.
+            // The model viewer and the image page report `ready …` / `error …`.
             .with_ipc_handler({
                 let what = self.what;
                 move |request| tracing::info!(page = what, message = %request.body(), "asset page")
@@ -688,5 +729,20 @@ impl Render for AssetPageView {
             Page::Failed(message) => div().p_4().text_color(colors(cx).error).child(message.clone()).into_any_element(),
             Page::Live(webview) => div().size_full().child(webview.clone()).into_any_element(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_image_page_names_its_file_escaped() {
+        let page = image_page_html("a \"b\" <c> & d's.avif");
+        assert!(
+            page.contains("<img src=\"image\" alt=\"a &quot;b&quot; &lt;c&gt; &amp; d&#39;s.avif\" "),
+            "{page}"
+        );
+        assert!(page.contains("padding: 16px"), "{page}");
     }
 }

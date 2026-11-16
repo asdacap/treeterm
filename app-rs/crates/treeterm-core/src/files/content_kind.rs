@@ -32,9 +32,43 @@ impl ModelFormat {
     }
 }
 
+/// The image formats `IMAGE_MIME_TYPES` lists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ImageFormat {
+    Png,
+    Jpeg,
+    Gif,
+    Webp,
+    Bmp,
+    Ico,
+    Avif,
+    Svg,
+}
+
+impl ImageFormat {
+    pub fn mime_type(self) -> &'static str {
+        match self {
+            ImageFormat::Png => "image/png",
+            ImageFormat::Jpeg => "image/jpeg",
+            ImageFormat::Gif => "image/gif",
+            ImageFormat::Webp => "image/webp",
+            ImageFormat::Bmp => "image/bmp",
+            ImageFormat::Ico => "image/x-icon",
+            ImageFormat::Avif => "image/avif",
+            ImageFormat::Svg => "image/svg+xml",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("Not a 3D model file: {path}")]
 pub struct NotAModel {
+    pub path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("Not an image file: {path}")]
+pub struct NotAnImage {
     pub path: String,
 }
 
@@ -47,16 +81,16 @@ fn extension_of(file_path: &str) -> String {
         .to_lowercase()
 }
 
-fn image_mime(extension: &str) -> Option<&'static str> {
+fn image(extension: &str) -> Option<ImageFormat> {
     match extension {
-        "png" => Some("image/png"),
-        "jpg" | "jpeg" => Some("image/jpeg"),
-        "gif" => Some("image/gif"),
-        "webp" => Some("image/webp"),
-        "bmp" => Some("image/bmp"),
-        "ico" => Some("image/x-icon"),
-        "avif" => Some("image/avif"),
-        "svg" => Some("image/svg+xml"),
+        "png" => Some(ImageFormat::Png),
+        "jpg" | "jpeg" => Some(ImageFormat::Jpeg),
+        "gif" => Some(ImageFormat::Gif),
+        "webp" => Some(ImageFormat::Webp),
+        "bmp" => Some(ImageFormat::Bmp),
+        "ico" => Some(ImageFormat::Ico),
+        "avif" => Some(ImageFormat::Avif),
+        "svg" => Some(ImageFormat::Svg),
         _ => None,
     }
 }
@@ -74,12 +108,21 @@ fn model(extension: &str) -> Option<ModelFormat> {
 }
 
 pub fn is_image_path(file_path: &str) -> bool {
-    image_mime(&extension_of(file_path)).is_some()
+    image(&extension_of(file_path)).is_some()
 }
 
 /// Only meaningful for a path that passed [`is_image_path`].
 pub fn image_mime_type(file_path: &str) -> &'static str {
-    image_mime(&extension_of(file_path)).unwrap_or("application/octet-stream")
+    match image(&extension_of(file_path)) {
+        Some(format) => format.mime_type(),
+        None => "application/octet-stream",
+    }
+}
+
+pub fn image_format(file_path: &str) -> Result<ImageFormat, NotAnImage> {
+    image(&extension_of(file_path)).ok_or_else(|| NotAnImage {
+        path: file_path.to_owned(),
+    })
 }
 
 pub fn is_model_path(file_path: &str) -> bool {
@@ -143,7 +186,33 @@ mod tests {
         fn maps_image_extensions_to_mime_types() {
             assert_eq!(image_mime_type("photo.jpg"), "image/jpeg");
             assert_eq!(image_mime_type("icon.svg"), "image/svg+xml");
+            assert_eq!(image_mime_type("favicon.ICO"), "image/x-icon");
+            assert_eq!(image_mime_type("photo.avif"), "image/avif");
             assert_eq!(image_mime_type("data.bin"), "application/octet-stream");
+        }
+
+        #[test]
+        fn maps_an_image_path_to_its_format_and_refuses_any_other_path() {
+            let formats = [
+                ("a.png", ImageFormat::Png),
+                ("a.jpg", ImageFormat::Jpeg),
+                ("a.JPEG", ImageFormat::Jpeg),
+                ("a.gif", ImageFormat::Gif),
+                ("a.webp", ImageFormat::Webp),
+                ("a.bmp", ImageFormat::Bmp),
+                ("favicon.ico", ImageFormat::Ico),
+                ("a.avif", ImageFormat::Avif),
+                ("a.svg", ImageFormat::Svg),
+            ];
+            for (path, format) in formats {
+                assert!(is_image_path(path), "{path}");
+                assert_eq!(image_format(path), Ok(format), "{path}");
+                assert_eq!(image_mime_type(path), format.mime_type(), "{path}");
+            }
+            assert_eq!(
+                image_format("notes.txt").unwrap_err().to_string(),
+                "Not an image file: notes.txt"
+            );
         }
 
         #[test]
