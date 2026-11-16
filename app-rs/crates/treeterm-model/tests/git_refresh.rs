@@ -285,7 +285,7 @@ fn review_refresh_stage_unstage_and_commit_refresh_the_git_status(cx: &mut TestA
         panic!("not a review tab");
     };
     wait_until(cx, &review, |r| {
-        !r.is_refreshing() && r.overview().uncommitted == 1
+        !r.is_loading() && r.overview().uncommitted == 1
     });
     let events = Events::default();
     let seen = events.clone();
@@ -303,9 +303,10 @@ fn review_refresh_stage_unstage_and_commit_refresh_the_git_status(cx: &mut TestA
                     r.unstage(target, cx);
                 }
             });
-            // And the reload after it: its `git status` would race the next stage for the index lock.
+            // And the reload after it (only `refresh` spins): its `git status` would race the
+            // next stage for the index lock.
             wait_until(cx, review, |r| {
-                *r.staging() != GitOp::Running && !r.is_refreshing()
+                *r.staging() != GitOp::Running && !r.is_loading()
             });
         };
 
@@ -336,7 +337,7 @@ fn review_refresh_stage_unstage_and_commit_refresh_the_git_status(cx: &mut TestA
     stage(cx, &review, true, StageTarget::All);
     cool_down(cx);
     settle(cx, &store, &[&id]);
-    wait_until(cx, &review, |r| !r.is_refreshing());
+    wait_until(cx, &review, |r| !r.is_loading());
     assert_eq!(status(cx, &store, &id).working_tree, WorkingTree::Dirty);
 
     // Committed: the header's "Uncommitted" goes without reselecting the workspace.

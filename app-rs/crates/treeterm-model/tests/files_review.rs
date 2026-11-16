@@ -70,6 +70,17 @@ impl TempRepo {
     fn root(&self) -> String {
         self.path.to_string_lossy().into_owned()
     }
+
+    /// A worktree beside the repo with `branch` checked out, for a workspace whose branch
+    /// must stay what it records: every workspace re-reads its branch from git when its
+    /// status refreshes (on load, and after a Review refresh), so two workspaces on one
+    /// checkout would both end up on its branch.
+    fn worktree(&self, branch: &str) -> String {
+        let name = self.path.file_name().unwrap().to_string_lossy();
+        let path = self.path.with_file_name(format!("{name}-{branch}"));
+        self.git(&["worktree", "add", "-q", &path.to_string_lossy(), branch]);
+        path.to_string_lossy().into_owned()
+    }
 }
 
 impl Drop for TempRepo {
@@ -1327,8 +1338,10 @@ fn the_parents_branch_changing_keeps_the_review_and_moves_its_default_base(cx: &
     repo.commit_all("on feature");
     // `dev` already has the feature's commit.
     repo.git(&["branch", "dev"]);
+    repo.git(&["checkout", "-q", "main"]);
+    let child_dir = repo.worktree("feature");
     let store = open_store(cx, &h);
-    // A parent on `main` and a child on `feature`, both on the repo.
+    // A parent on `main` (the repo) and a child on `feature` (a worktree of it).
     let (parent_id, child_id) = (format!("ws-{}", uuid::Uuid::new_v4().simple()), format!("ws-{}", uuid::Uuid::new_v4().simple()));
     let body = |branch: &str, parent: Option<&str>| {
         let mut body = serde_json::json!({
@@ -1344,7 +1357,7 @@ fn the_parents_branch_changing_keeps_the_review_and_moves_its_default_base(cx: &
     std::fs::write(h.daemon.workspaces_dir().join(format!("{child_id}.json")), body("feature", Some(&parent_id))).unwrap();
     let refs = vec![
         WorkspaceRef { id: parent_id.clone(), path: repo.root() },
-        WorkspaceRef { id: child_id.clone(), path: repo.root() },
+        WorkspaceRef { id: child_id.clone(), path: child_dir },
     ];
     futures::executor::block_on(h.conn.update_session(refs, None, "test-writer")).unwrap().unwrap();
     let loaded = |s: &SessionStore, id: &str| matches!(s.entry(id), Some(WorkspaceEntry::Loaded(_)));
@@ -1362,6 +1375,7 @@ fn the_parents_branch_changing_keeps_the_review_and_moves_its_default_base(cx: &
 
     // The parent moves to `dev`: the tab following it compares against `dev` (nothing left
     // to review), as the same model; the tab with an override keeps comparing with `main`.
+    repo.git(&["checkout", "-q", "dev"]);
     parent.update(cx, |w, cx| w.set_git_branch("dev", cx));
     wait_until_app(cx, &child, |w, _| w.parent_branch() == Some("dev"));
     assert_eq!(follows.read_with(cx, |r, _| r.base().clone()), ReviewBase::Branch("dev".into()));
@@ -1378,16 +1392,18 @@ fn the_parents_branch_changing_keeps_the_review_and_moves_its_default_base(cx: &
     assert_eq!(pinned.read_with(cx, |r, _| r.overview().committed), 1);
 }
 
-/// A parent workspace on `main` and its child on `feature` (with `tabs` as its `appStates`),
-/// both on the repo, and their refs. Only the child joins the session: its Review tabs are
-/// made while its parent's branch is unknown, as when the child's body loads first at
-/// start-up. The parent joins with [`add_parent`].
+/// A parent workspace on `main` (the repo, checked out on `main` here) and its child on
+/// `feature` (a worktree of it, with `tabs` as its `appStates`), and their refs. Only the
+/// child joins the session: its Review tabs are made while its parent's branch is unknown,
+/// as when the child's body loads first at start-up. The parent joins with [`add_parent`].
 fn child_before_parent(
     cx: &mut TestAppContext,
     h: &Harness,
     repo: &TempRepo,
     tabs: serde_json::Value,
 ) -> (Entity<SessionStore>, Entity<WorkspaceStore>, Vec<WorkspaceRef>) {
+    repo.git(&["checkout", "-q", "main"]);
+    let child_dir = repo.worktree("feature");
     let store = open_store(cx, h);
     let (parent_id, child_id) = (format!("ws-{}", uuid::Uuid::new_v4().simple()), format!("ws-{}", uuid::Uuid::new_v4().simple()));
     let body = |branch: &str, tabs: serde_json::Value| {
@@ -1401,7 +1417,7 @@ fn child_before_parent(
     let parent_body = body("main", serde_json::json!({}));
     std::fs::write(h.daemon.workspaces_dir().join(format!("{parent_id}.json")), parent_body.to_string()).unwrap();
     std::fs::write(h.daemon.workspaces_dir().join(format!("{child_id}.json")), child_body.to_string()).unwrap();
-    let child_ref = WorkspaceRef { id: child_id.clone(), path: repo.root() };
+    let child_ref = WorkspaceRef { id: child_id.clone(), path: child_dir };
     futures::executor::block_on(h.conn.update_session(vec![child_ref.clone()], None, "test-writer")).unwrap().unwrap();
     let loaded = |s: &SessionStore| matches!(s.entry(&child_id), Some(WorkspaceEntry::Loaded(_)));
     wait_until(cx, &store, |s| matches!(s.state(), SessionState::Live) && loaded(s));
