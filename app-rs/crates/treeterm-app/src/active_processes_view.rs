@@ -194,15 +194,31 @@ impl Render for ActiveProcessesView {
     }
 }
 
-pub fn open(session: &Entity<SessionStore>, settings: treeterm_core::settings::TerminalSettings, window: &mut Window, cx: &mut App) {
+/// Open the dialog in `window`. Only the dialog keeps the view: it is released on close.
+pub fn open(
+    session: &Entity<SessionStore>,
+    settings: treeterm_core::settings::TerminalSettings,
+    window: &mut Window,
+    cx: &mut App,
+) -> Entity<ActiveProcessesView> {
     let view = cx.new(|cx| ActiveProcessesView::new(session, settings, cx));
     // `width: 90%; max-width: 1000px`.
     let width = (f32::from(window.viewport_size().width) * 0.9).min(1000.);
-    window.open_dialog(cx, move |dialog, _window, cx| ui::dialog_frame(dialog, width, cx).child(view.clone()));
+    window.open_dialog(cx, {
+        let view = view.clone();
+        move |dialog, _window, cx| ui::dialog_frame(dialog, width, cx).child(view.clone())
+    });
+    view
 }
 
+/// The unmerged child workspaces a close asks about, as `(name, branch)`.
+pub type Unmerged = Vec<(String, Option<String>)>;
+
 /// Ask before closing when child workspaces are still unmerged (`CloseConfirmDialog.tsx`).
-pub fn confirm_close(unmerged: Vec<(String, Option<String>)>, window: &mut Window, cx: &mut App) {
+/// Only the dialog keeps the list, so the handle returned upgrades while it is open.
+pub fn confirm_close(unmerged: Unmerged, window: &mut Window, cx: &mut App) -> std::rc::Weak<Unmerged> {
+    let unmerged = std::rc::Rc::new(unmerged);
+    let open = std::rc::Rc::downgrade(&unmerged);
     window.open_dialog(cx, move |dialog, _, cx| {
         let c = colors(cx);
         // `.close-confirm-list`: bg-tertiary, 4px radius, 8px 12px padding, at most 200px.
@@ -216,7 +232,7 @@ pub fn confirm_close(unmerged: Vec<(String, Option<String>)>, window: &mut Windo
             .py(px(8.))
             .rounded(px(4.))
             .bg(c.bg_tertiary);
-        for (name, branch) in &unmerged {
+        for (name, branch) in unmerged.iter() {
             list = list.child(
                 div()
                     .flex()
@@ -272,4 +288,5 @@ pub fn confirm_close(unmerged: Vec<(String, Option<String>)>, window: &mut Windo
                 .child(actions),
         )
     });
+    open
 }

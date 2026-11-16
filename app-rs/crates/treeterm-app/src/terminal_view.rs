@@ -65,7 +65,44 @@ pub fn bind_keys(cx: &mut App) {
             KeyBinding::new("ctrl-shift-v", Paste, Some(CONTEXT)),
             KeyBinding::new("ctrl-shift-a", SelectAll, Some(CONTEXT)),
         ]);
+        // The menu shortcuts and GPUI Kit Root's Ctrl+C (copy) would take Ctrl+Q (XON),
+        // Ctrl+W, Ctrl+M (CR), F11 and Ctrl+C (SIGINT) from the PTY: xterm.js consumed them
+        // before Electron's menu saw them.
+        let accelerators = crate::menus::ACCELERATORS.iter().copied().chain(["ctrl-c"]);
+        cx.bind_keys(
+            terminal_shadowed(accelerators, KeyOptions::for_host())
+                .into_iter()
+                .map(|keys| KeyBinding::new(keys, NoAction, Some(CONTEXT))),
+        );
     }
+}
+
+/// The app shortcuts a focused terminal keeps for its PTY: those it encodes. Ctrl+Shift+
+/// letter is not among them, as xterm.js leaves it to the app (Exit and Kill Daemon's
+/// Ctrl+Shift+Q works from a terminal).
+fn terminal_shadowed(accelerators: impl IntoIterator<Item = &'static str>, options: KeyOptions) -> Vec<&'static str> {
+    accelerators
+        .into_iter()
+        .filter(|keys| {
+            let keystroke = match gpui_kit::Keystroke::parse(keys) {
+                Ok(keystroke) => keystroke,
+                Err(error) => panic!("invalid shortcut {keys:?}: {error}"),
+            };
+            let m = keystroke.modifiers;
+            let ctrl_shift_letter = m.control && m.shift && keystroke.key.chars().all(|c| c.is_ascii_alphabetic());
+            let modifiers = Modifiers {
+                control: m.control,
+                alt: m.alt,
+                shift: m.shift,
+                platform: m.platform,
+            };
+            let input = KeyInput {
+                key: &keystroke.key,
+                modifiers,
+            };
+            !ctrl_shift_letter && encode_key(input, Default::default(), options).is_some()
+        })
+        .collect()
 }
 
 pub struct TerminalView {
@@ -819,6 +856,20 @@ impl gpui_kit::EntityInputHandler for TerminalView {
 #[cfg(test)]
 mod tests {
     use super::url_at;
+
+    #[test]
+    fn a_terminal_keeps_the_shortcuts_it_encodes_off_macos() {
+        let linux = treeterm_term::keys::KeyOptions {
+            alt_sends_escape: true,
+            mac_word_motion: false,
+        };
+        let accelerators = crate::menus::ACCELERATORS.iter().copied().chain(["ctrl-c", "cmd-w", "ctrl-cmd-f"]);
+        assert_eq!(
+            super::terminal_shadowed(accelerators, linux),
+            ["ctrl-q", "ctrl-m", "ctrl-w", "f11", "ctrl-c"],
+            "Ctrl+, and Ctrl+Shift+Q stay app shortcuts; Cmd never reaches the PTY"
+        );
+    }
 
     #[test]
     fn finds_the_url_under_a_column() {

@@ -304,3 +304,35 @@ fn a_terminal_works_after_the_daemon_dies() {
     app.wait_for("output from the new daemon's shell", |state| screen(state).contains("after-42"));
     app.quit();
 }
+
+#[test]
+#[ignore = "opens the app window; run with --ignored"]
+fn close_window_quits_the_app_and_leaves_the_daemon() {
+    let sandbox = Sandbox::new();
+    let mut app = sandbox.launch();
+    let daemon = sandbox.daemon_pid().expect("the app started a daemon");
+    // Nothing is unmerged, so the window closes without asking; it was the last one.
+    app.command("action treeterm::CloseWindow");
+    let deadline = Instant::now() + WAIT;
+    while app.child.try_wait().expect("the app's status").is_none() {
+        assert!(Instant::now() < deadline, "the app did not quit");
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    assert!(alive(daemon), "the daemon outlives the window");
+}
+
+#[test]
+#[ignore = "opens the app window; run with --ignored"]
+fn reset_input_gives_the_terminal_focus_back() {
+    let sandbox = Sandbox::new();
+    let app = sandbox.launch();
+    // With focus reporting on, `cat -v` shows the focus-in report the terminal sends when it
+    // gets focus back (and claims the PTY's input again).
+    app.run(r#"printf '\e[?1004h'; echo rea""dy; cat -v"#);
+    app.wait_for("cat to start", |state| screen(state).contains("ready"));
+    app.command("action treeterm::ResetInput");
+    app.wait_for("the focus-in report", |state| screen(state).contains("^[[I"));
+    app.run("still-typing");
+    app.wait_for("typed text after Reset Input", |state| screen(state).matches("still-typing").count() == 2);
+    app.quit();
+}

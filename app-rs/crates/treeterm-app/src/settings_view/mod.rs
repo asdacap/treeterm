@@ -430,8 +430,12 @@ impl Render for SettingsView {
     }
 }
 
-/// Open the dialog in `window`.
-pub fn open(store: Entity<SettingsStore>, window: &mut Window, cx: &mut App) {
+/// Open the dialog in `window`. Only the dialog keeps the view: it is released on close.
+pub fn open(store: Entity<SettingsStore>, window: &mut Window, cx: &mut App) -> Entity<SettingsView> {
     let view = cx.new(|cx| SettingsView::new(store, window, cx));
-    window.open_dialog(cx, move |dialog, _window, cx| ui::dialog_frame(dialog, 600., cx).child(view.clone()));
+    window.open_dialog(cx, {
+        let view = view.clone();
+        move |dialog, _window, cx| ui::dialog_frame(dialog, 600., cx).child(view.clone())
+    });
+    view
 }

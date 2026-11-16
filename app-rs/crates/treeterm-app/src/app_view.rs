@@ -46,6 +46,34 @@ pub struct AppView {
     sidebar_width: f32,
     /// Where a session being dragged in the sidebar would land.
     session_drop_hint: Option<(ConnectionId, Side)>,
+    /// The Settings dialog while it is open: Settings again does not stack a second one
+    /// (Electron's `isSettingsOpen`).
+    settings_dialog: WeakEntity<crate::settings_view::SettingsView>,
+    /// Window > Active Processes (Electron's `isActiveProcessesOpen`).
+    processes_dialog: ProcessesDialog,
+    /// The unmerged-workspaces confirmation while it is up: Quit or Close again does not
+    /// stack a second one.
+    close_confirm: std::rc::Weak<crate::active_processes_view::Unmerged>,
+    menu_bar: MenuBar,
+}
+
+/// Window > Active Processes.
+enum ProcessesDialog {
+    Closed,
+    /// Asked for while no session is current: it opens once one is, as Electron renders it
+    /// once there is an active session store.
+    Pending,
+    /// Closing the dialog drops the view.
+    Open(WeakEntity<crate::active_processes_view::ActiveProcessesView>),
+}
+
+/// Where the application menu shows.
+enum MenuBar {
+    /// macOS: the system menu bar.
+    System,
+    /// Elsewhere GPUI only stores the menus, so the window draws them, as Electron's Linux
+    /// window shows its menu bar.
+    InWindow(Entity<gpui_kit::component::menu::AppMenuBar>),
 }
 
 /// Dragging the sidebar divider.
@@ -161,6 +189,14 @@ impl AppView {
             sidebar_collapsed: false,
             sidebar_width: 250.,
             session_drop_hint: None,
+            settings_dialog: WeakEntity::new_invalid(),
+            processes_dialog: ProcessesDialog::Closed,
+            close_confirm: std::rc::Weak::new(),
+            menu_bar: if cfg!(target_os = "macos") {
+                MenuBar::System
+            } else {
+                MenuBar::InWindow(gpui_kit::component::menu::AppMenuBar::new(cx))
+            },
         };
         view.sync(&store, cx);
         view
@@ -789,32 +825,41 @@ impl Render for AppView {
         if window.focused(cx).is_none() {
             window.focus(&self.focus, cx);
         }
+        if matches!(self.processes_dialog, ProcessesDialog::Pending) && self.current().is_some() {
+            cx.defer_in(window, |view, window, cx| view.open_active_processes(window, cx));
+        }
+        let menu_bar = match &self.menu_bar {
+            MenuBar::System => None,
+            MenuBar::InWindow(bar) => Some(menu_bar_row(bar, cx)),
+        };
         div()
             .size_full()
+            .flex()
+            .flex_col()
             .track_focus(&self.focus)
             .bg(bg)
             .text_color(fg)
             // Chromium's `line-height: normal` for the system font: text boxes as tall as
             // Electron's (GPUI's default is about 1.6).
             .line_height(gpui_kit::relative(1.2))
-            .on_action(|_: &crate::menus::Minimize, window, _| window.minimize_window())
-            .on_action(cx.listener(|view, _: &crate::menus::OpenSettings, window, cx| {
-                crate::settings_view::open(view.settings.clone(), window, cx);
-            }))
-            .on_action(cx.listener(|view, _: &crate::menus::ActiveProcesses, window, cx| {
-                if let Some(connected) = view.current() {
-                    let settings = view.settings.read(cx).settings().terminal.clone();
-                    crate::active_processes_view::open(&connected.session, settings, window, cx);
-                }
-            }))
-            .on_action(cx.listener(|view, _: &crate::menus::Quit, window, cx| {
-                if view.request_close(window, cx) {
-                    cx.quit();
-                }
-            }))
-            .child(content)
+            .children(menu_bar)
+            .child(div().flex().flex_1().min_h_0().child(content))
             .children(crate::keybinding_overlay::render(&self.keybindings, window, cx))
     }
+}
+
+/// The in-window menu bar: a row above everything else.
+fn menu_bar_row(bar: &Entity<gpui_kit::component::menu::AppMenuBar>, cx: &App) -> AnyElement {
+    let c = colors(cx);
+    div()
+        .flex_shrink_0()
+        .h(px(28.))
+        .px_1()
+        .bg(c.bg_secondary)
+        .border_b_1()
+        .border_color(c.border)
+        .child(bar.clone())
+        .into_any_element()
 }
 
 impl AppView {
@@ -829,8 +874,67 @@ impl AppView {
         if unmerged.is_empty() {
             return true;
         }
-        crate::active_processes_view::confirm_close(unmerged, window, cx);
+        if self.close_confirm.strong_count() == 0 {
+            self.close_confirm = crate::active_processes_view::confirm_close(unmerged, window, cx);
+        }
         false
+    }
+
+    /// Quit (Cmd+Q): Electron's `app.quit()` closes the window, which asks first.
+    pub fn quit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.request_close(window, cx) {
+            cx.quit();
+        }
+    }
+
+    /// Close Window (Cmd+W, Ctrl+W): as the window's close button. Closing the last window
+    /// quits (`main`), as Electron's `window-all-closed`.
+    pub fn close_window(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.request_close(window, cx) {
+            window.remove_window();
+        }
+    }
+
+    /// Settings (Cmd+, / Ctrl+,), unless it is already open.
+    pub fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.settings_dialog.upgrade().is_none() {
+            self.settings_dialog = crate::settings_view::open(self.settings.clone(), window, cx).downgrade();
+        }
+    }
+
+    /// Window > Active Processes for the current session, unless it is already open; with
+    /// no session yet, once there is one.
+    pub fn open_active_processes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let ProcessesDialog::Open(view) = &self.processes_dialog
+            && view.upgrade().is_some()
+        {
+            return;
+        }
+        self.processes_dialog = match self.current() {
+            Some(connected) => {
+                let settings = self.settings.read(cx).settings().terminal.clone();
+                let view = crate::active_processes_view::open(&connected.session, settings, window, cx);
+                ProcessesDialog::Open(view.downgrade())
+            }
+            None => ProcessesDialog::Pending,
+        };
+        cx.notify();
+    }
+
+    /// View > Reset Input: Electron blurs and focuses the window so its focus handlers run
+    /// again (a terminal claims its PTY's input back). Here focus leaves for one frame and
+    /// returns, which runs the views' blur and focus handlers.
+    pub fn reset_input(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let focused = window.focused(cx);
+        window.blur(cx);
+        // Focus handlers run when a drawn frame's focus differs from the last one's, and
+        // next-frame callbacks run before that frame is drawn: return after the next frame.
+        cx.on_next_frame(window, move |_, window, cx| {
+            cx.on_next_frame(window, move |view, window, cx| match focused {
+                Some(handle) => window.focus(&handle, cx),
+                None => view.focus_active_tab(cx),
+            });
+        });
     }
 
     /// Edit the active workspace's name or description in place; Enter or blur saves.
@@ -1000,9 +1104,7 @@ impl AppView {
                     tracing::error!(%error, "workspace focus");
                 }
             }
-            Action::Prefix(PrefixAction::OpenSettings) => {
-                crate::settings_view::open(self.settings.clone(), window, cx);
-            }
+            Action::Prefix(PrefixAction::OpenSettings) => self.open_settings(window, cx),
         }
     }
 }

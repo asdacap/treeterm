@@ -17,6 +17,8 @@ mod daemon_binary;
 mod file_browser_view;
 mod json_view;
 mod keybinding_overlay;
+#[cfg(target_os = "macos")]
+mod macos;
 mod menus;
 mod review_view;
 mod search_panel;
@@ -171,6 +173,9 @@ fn main() {
 
     #[cfg(feature = "automation")]
     let rt_for_automation = rt.clone();
+    // Before AppKit finishes launching, as Electron does it.
+    #[cfg(target_os = "macos")]
+    macos::disable_auto_full_screen_item();
     gpui_kit::application().with_assets(assets::AppAssets).run(move |cx| {
         gpui_kit::init(cx);
         theme::install(cx);
@@ -221,6 +226,7 @@ fn main() {
         })
         .expect("open the main window");
         intercept_shortcuts(keybindings, view.clone(), cx);
+        menus::route_to_window(window, view.downgrade(), cx);
         if let Some(path) = initial_workspace {
             view.update(cx, |v, cx| v.open_on_start(path.to_string_lossy().into_owned(), cx));
         }
