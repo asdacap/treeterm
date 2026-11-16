@@ -7,11 +7,12 @@
 
 use std::collections::HashMap;
 use std::future::Future;
-use std::time::Duration;
+use std::sync::Arc;
+use std::time::{Duration, SystemTime};
 
-use gpui_kit::{App, Context, Entity, Task};
-use treeterm_core::connection::{ClientError, ConnectionId};
-use treeterm_core::exec::{ExecClient, ExecRequest, ExecTimeout};
+use gpui_kit::{App, Context, Entity, Global, Task};
+use treeterm_core::connection::ConnectionId;
+use treeterm_core::exec::{ExecApi, ExecRequest, ExecTimeout, collect_output};
 use treeterm_core::system_monitor::{MONITOR_SCRIPT, SystemMetrics, UsageHistory, parse_metrics};
 
 use crate::app_store::AppStore;
@@ -26,13 +27,29 @@ pub enum Metrics {
     Failed(String),
 }
 
-pub struct SystemMonitor {
-    app: Entity<AppStore>,
-    id: ConnectionId,
-    metrics: Metrics,
+/// Where a command of the monitor runs: the connection's daemon when it starts, or why it
+/// has none.
+type ExecSource = Box<dyn Fn(&App) -> Result<Arc<dyn ExecApi>, String>>;
+
+/// Every connection's CPU and memory samples for as long as the app runs, as Electron's
+/// module-level `cpuHistory` / `memoryHistory` maps: leaving the Monitor sub-tab, closing the
+/// session pane or reconnecting keeps a connection's graphs.
+#[derive(Default)]
+struct Histories(HashMap<ConnectionId, Usage>);
+
+impl Global for Histories {}
+
+#[derive(Default)]
+struct Usage {
     cpu: UsageHistory,
     memory: UsageHistory,
-    updated_at: Option<std::time::SystemTime>,
+}
+
+pub struct SystemMonitor {
+    connection: ConnectionId,
+    exec: ExecSource,
+    metrics: Metrics,
+    updated_at: Option<SystemTime>,
     _poll: Task<()>,
     _kill: Option<Task<()>>,
 }
@@ -48,14 +65,28 @@ fn request(command: &str, args: Vec<String>) -> ExecRequest {
 }
 
 impl SystemMonitor {
-    /// Starts polling connection `id`; stops when dropped.
+    /// Starts polling connection `id`, on its daemon of the moment (Main's `getClient`); stops
+    /// when dropped.
     pub fn new(app: Entity<AppStore>, id: ConnectionId, cx: &mut Context<Self>) -> Self {
+        let connection = id.clone();
+        let exec = move |cx: &App| match app.read(cx).manager().client(&connection) {
+            Ok(daemon) => Ok(Arc::new(daemon.exec_client()) as Arc<dyn ExecApi>),
+            Err(down) => Err(down.to_string()),
+        };
+        Self::with_exec(id, exec, cx)
+    }
+
+    /// Starts polling `connection`, whose commands run where `exec` says when they start;
+    /// stops when dropped.
+    pub fn with_exec(
+        connection: ConnectionId,
+        exec: impl Fn(&App) -> Result<Arc<dyn ExecApi>, String> + 'static,
+        cx: &mut Context<Self>,
+    ) -> Self {
         Self {
-            app,
-            id,
+            connection,
+            exec: Box::new(exec),
             metrics: Metrics::Loading,
-            cpu: UsageHistory::default(),
-            memory: UsageHistory::default(),
             updated_at: None,
             _poll: Self::poll(cx),
             _kill: None,
@@ -70,28 +101,23 @@ impl SystemMonitor {
     }
 
     /// When the shown metrics were collected.
-    pub fn updated_at(&self) -> Option<std::time::SystemTime> {
+    pub fn updated_at(&self) -> Option<SystemTime> {
         self.updated_at
-    }
-
-    /// The connection's daemon now (Main's `getClient`), or why it has none.
-    fn exec(&self, cx: &App) -> Result<ExecClient, ClientError> {
-        self.app.read(cx).manager().client(&self.id).map(|daemon| daemon.exec_client())
     }
 
     fn poll(cx: &mut Context<Self>) -> Task<()> {
         let executor = cx.background_executor().clone();
         cx.spawn(async move |this, cx| {
             loop {
-                let Ok(exec) = this.update(cx, |monitor, cx| monitor.exec(cx)) else {
+                let Ok(exec) = this.update(cx, |monitor, cx| (monitor.exec)(cx)) else {
                     return; // the monitor closed
                 };
                 let result = match exec {
-                    Ok(exec) => exec
-                        .run(request("sh", vec!["-c".to_owned(), MONITOR_SCRIPT.to_owned()]))
-                        .await
-                        .map_err(|e| e.to_string()),
-                    Err(down) => Err(down.to_string()),
+                    Ok(exec) => {
+                        let script = request("sh", vec!["-c".to_owned(), MONITOR_SCRIPT.to_owned()]);
+                        collect_output(exec.start(script)).await.map_err(|e| e.to_string())
+                    }
+                    Err(down) => Err(down),
                 };
                 let metrics = match result {
                     Ok(output) => Metrics::Loaded(parse_metrics(&String::from_utf8_lossy(&output.stdout))),
@@ -107,9 +133,10 @@ impl SystemMonitor {
 
     fn record(&mut self, metrics: Metrics, cx: &mut Context<Self>) {
         if let Metrics::Loaded(m) = &metrics {
-            self.updated_at = Some(std::time::SystemTime::now());
-            self.cpu.push(m.cpu.usage_percent);
-            self.memory.push(m.memory.usage_percent);
+            self.updated_at = Some(SystemTime::now());
+            let usage = cx.default_global::<Histories>().0.entry(self.connection.clone()).or_default();
+            usage.cpu.push(m.cpu.usage_percent);
+            usage.memory.push(m.memory.usage_percent);
         }
         self.metrics = metrics;
         cx.notify();
@@ -119,21 +146,29 @@ impl SystemMonitor {
         &self.metrics
     }
 
-    pub fn cpu_history(&self) -> &UsageHistory {
-        &self.cpu
+    fn usage<'a>(&self, cx: &'a App) -> Option<&'a Usage> {
+        cx.try_global::<Histories>().and_then(|histories| histories.0.get(&self.connection))
     }
 
-    pub fn memory_history(&self) -> &UsageHistory {
-        &self.memory
+    /// The connection's CPU usage over its last runs, oldest first, also those of earlier
+    /// monitors of it.
+    pub fn cpu_samples(&self, cx: &App) -> Vec<f64> {
+        self.usage(cx).map(|usage| usage.cpu.samples().collect()).unwrap_or_default()
+    }
+
+    /// The connection's memory usage over its last runs, as [`Self::cpu_samples`].
+    pub fn memory_samples(&self, cx: &App) -> Vec<f64> {
+        self.usage(cx).map(|usage| usage.memory.samples().collect()).unwrap_or_default()
     }
 
     /// `kill -<signal> <pid>` on the daemon's host now; a failure is logged.
     fn send_signal(&self, pid: u32, signal: &str, cx: &App) -> impl Future<Output = ()> + use<> {
-        let run = self.exec(cx).map(|exec| exec.run(request("kill", vec![format!("-{signal}"), pid.to_string()])));
+        let kill = request("kill", vec![format!("-{signal}"), pid.to_string()]);
+        let run = (self.exec)(cx).map(|exec| collect_output(exec.start(kill)));
         async move {
             let result = match run {
                 Ok(run) => run.await.map_err(|e| e.to_string()),
-                Err(down) => Err(down.to_string()),
+                Err(down) => Err(down),
             };
             match result {
                 Ok(output) if output.exit_code == 0 => {}

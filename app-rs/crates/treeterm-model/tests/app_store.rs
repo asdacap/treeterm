@@ -1096,7 +1096,7 @@ fn the_monitor_and_upload_keep_their_state_while_the_connection_is_down_and_work
         failed_with(m, "Connection remote-1 is reconnecting: ")
     });
     assert_eq!(
-        monitor.read_with(cx, |m, _| m.cpu_history().samples().count()),
+        monitor.read_with(cx, |m, cx| m.cpu_samples(cx).len()),
         1
     );
     // Retry shows "Collecting…", then why again.
@@ -1130,7 +1130,7 @@ fn the_monitor_and_upload_keep_their_state_while_the_connection_is_down_and_work
     });
     poll_again(cx, &monitor, |m| matches!(m.metrics(), Metrics::Loaded(_)));
     assert_eq!(
-        monitor.read_with(cx, |m, _| m.cpu_history().samples().count()),
+        monitor.read_with(cx, |m, cx| m.cpu_samples(cx).len()),
         2
     );
     assert_eq!(link(cx, &upload), LinkStatus::Connected);

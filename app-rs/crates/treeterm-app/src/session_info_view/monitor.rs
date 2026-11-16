@@ -195,8 +195,8 @@ impl Render for MonitorView {
             let m = self.monitor.read(cx);
             (
                 m.metrics().clone(),
-                m.cpu_history().samples().collect::<Vec<f64>>(),
-                m.memory_history().samples().collect::<Vec<f64>>(),
+                m.cpu_samples(cx),
+                m.memory_samples(cx),
                 m.updated_at(),
             )
         };
