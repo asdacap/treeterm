@@ -88,13 +88,11 @@ impl Insert {
 /// `text`, best matches first: CSS, SCSS and Less property names; HTML elements, end tags,
 /// attributes, attribute values and character entities; JSON keys and values. `None` where it
 /// offers none, and in other languages: Monaco's word suggestions are offered there
-/// ([`crate::words::suggestions`]). Where what was typed matches none of the HTML or JSON
-/// worker's proposals the list is empty: Monaco asks no other provider then.
+/// ([`crate::words::suggestions`]). Where what was typed matches none of the worker's
+/// proposals the list is empty: Monaco asks no other provider then.
 pub fn completions(language: &str, text: &str, offset: usize, trigger: Trigger) -> Option<Vec<Completion>> {
     match language {
-        "css" | "scss" | "less" => {
-            css::property_completions(language, text, offset, trigger).filter(|found| !found.is_empty())
-        }
+        "css" | "scss" | "less" => css::property_completions(language, text, offset, trigger),
         "html" => html::completions(text, offset, trigger),
         "json" => json::completions(text, offset, trigger),
         _ => None,
@@ -410,6 +408,8 @@ mod tests {
         assert_eq!(completions("rust", "fn colo", 7, Trigger::Typing), None);
         // Where the worker has nothing, none: word suggestions take over.
         assert_eq!(completions("css", "a { color: r }", 12, Trigger::Typing), None);
+        // Where it has proposals but none matches what was typed, an empty list: no words.
+        assert_eq!(completions("css", "a { qqq }", 7, Trigger::Typing), Some(Vec::new()));
     }
 
     #[test]

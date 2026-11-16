@@ -717,10 +717,29 @@ fn statement_at(reader: &Reader, offset: usize) -> Option<(usize, Block)> {
     }
 }
 
+/// Whether the declaration whose property name ends at byte `end` has its `;`, as the CSS
+/// worker's parser reads it: with a colon, the statement ends with one; without, the parser
+/// skips to the first colon or semicolon, and a semicolon there, or right after that colon,
+/// is the declaration's.
+fn has_semicolon(reader: &Reader, end: usize, colon: bool) -> bool {
+    if colon {
+        return reader.bytes.get(reader.statement_end(end)) == Some(&b';');
+    }
+    let rest = &reader.text[end..];
+    match rest.find([':', ';']) {
+        Some(at) if rest.as_bytes()[at] == b';' => true,
+        Some(at) => reader.bytes.get(reader.skip_trivia(end + at + 1)) == Some(&b';'),
+        None => false,
+    }
+}
+
 /// The property names the CSS worker completes at byte `offset` of `text`, a style sheet of
 /// Monaco's `language`: inside a rule, where a property name is being typed (or asked for
-/// with nothing typed, but not right after a `;`). `None` elsewhere, where Monaco's word
-/// suggestions take over.
+/// with nothing typed, but not right after a `;`), filtered and ranked as the suggest widget
+/// does. Each is inserted as the worker writes it (`getPropertyProposals`): `name: ` where no
+/// colon follows, and `$0;` after it (the cursor before the `;`) where the declaration has no
+/// `;` and the cursor is at the end of the name, or there is none. `None` elsewhere, where
+/// Monaco's word suggestions take over.
 pub fn property_completions(language: &str, text: &str, offset: usize, trigger: Trigger) -> Option<Vec<Completion>> {
     let dialect = Dialect::of(language)?;
     let reader = Reader { text, bytes: text.as_bytes(), dialect };
@@ -734,7 +753,11 @@ pub fn property_completions(language: &str, text: &str, offset: usize, trigger: 
         return None;
     }
     let colon_follows = text[end..].trim_start_matches([' ', '\t']).starts_with(':');
-    let suffix = if colon_follows { "" } else { ": " };
+    let mut suffix = if colon_follows { "" } else { ": " }.to_owned();
+    let declared = start < end;
+    if !declared || (!has_semicolon(&reader, end, colon_follows) && offset >= end) {
+        suffix.push_str("$0;");
+    }
     let mut ranked: Vec<(i32, String, &str)> = CSS_PROPERTIES
         .iter()
         .filter_map(|(name, relevance)| {
@@ -752,7 +775,7 @@ pub fn property_completions(language: &str, text: &str, offset: usize, trigger: 
         .map(|(_, _, name)| Completion {
             label: name.to_owned(),
             replace: start..end,
-            insert: Insert::Text(format!("{name}{suffix}")),
+            insert: Insert::Snippet(format!("{name}{suffix}")),
             then: Then::Done,
         })
         .collect();
@@ -895,6 +918,23 @@ mod tests {
         let all = property_completions("css", "a {  }", 4, Trigger::Invoked).expect("properties");
         assert_eq!(all.len(), CSS_PROPERTIES.len());
         assert!(all.last().is_some_and(|item| item.label.starts_with('-')));
+    }
+
+    /// As Monaco's CSS worker inserts them (checked against vscode-css-languageservice).
+    #[test]
+    fn a_property_is_inserted_with_a_colon_and_a_semicolon_where_the_declaration_has_none() {
+        let insert = |text: &str, trigger: Trigger| offered("css", text, trigger).expect("properties").2[0].clone();
+        assert_eq!(insert("a { colo| }", Trigger::Typing), "color: $0;");
+        assert_eq!(insert("a { colo|", Trigger::Typing), "color: $0;");
+        assert_eq!(insert("a { | }", Trigger::Invoked), "display: $0;");
+        assert_eq!(insert("a { colo|\n  margin: 0; }", Trigger::Typing), "color: $0;");
+        // The colon or the semicolon already there is kept.
+        assert_eq!(insert("a { colo|: red }", Trigger::Typing), "color$0;");
+        assert_eq!(insert("a { colo|: red; }", Trigger::Typing), "color");
+        assert_eq!(insert("a { color: red; colo|; }", Trigger::Typing), "color: ");
+        assert_eq!(insert("a { colo| ; }", Trigger::Typing), "color: ");
+        // In the middle of the name, no semicolon.
+        assert_eq!(insert("a { colo|r }", Trigger::Typing), "color: ");
     }
 
     #[test]

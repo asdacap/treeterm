@@ -468,15 +468,15 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   more than 512 deep, and style sheets whose blocks do, get no marks or colours (Monaco's
   workers give up only where JavaScript's stack runs out, a few thousand and about a
   thousand levels deep). Colours are painted behind their text, not as a swatch before it,
-  and have no colour picker. A completed CSS property is inserted as `name: ` with the
-  cursor after it (Monaco's snippet puts it between `:` and `;`). A picked snippet leaves the
-  cursor at its first tab stop, but Tab does not go on to its later ones, as Monaco's
-  snippet session does: after `data-` (`data-$1="$2"`) Tab indents there instead of moving
-  between the quotes, and inside an attribute's quotes (`name="$1"`) it indents instead of
-  moving past the closing one. Other suggestions are the words of the file and of the
-  Editor tabs and Files viewers of the workspace with a file of its language open; what is
-  a comment or a string, where typing suggests nothing, is read from GPUI Kit's tree-sitter
-  grammars, not Monaco's tokenizers. The Editor tab's right-click menu has Format Document
+  and have no colour picker. A picked CSS property leaves the cursor before its `;` without
+  asking for its values, as there is no CSS value completion (Monaco lists them there). A
+  picked snippet leaves the cursor at its first tab stop, but Tab does not go on to its
+  later ones, as Monaco's snippet session does: after `data-` (`data-$1="$2"`) Tab indents
+  there instead of moving between the quotes, and inside an attribute's quotes
+  (`name="$1"`) it indents instead of moving past the closing one. Other suggestions are the
+  words of the file and of the Editor tabs and Files viewers of the workspace with a file of
+  its language open; what is a comment or a string, where typing suggests nothing, is read
+  from GPUI Kit's tree-sitter grammars, not Monaco's tokenizers. The Editor tab's right-click menu has Format Document
   and Format Selection for JSON only, and no Go to References, Peek References, Rename
   Symbol or Command Palette.
 - Peek Definition (Alt+F12, Ctrl+Shift+F10 on Linux, or the right-click menu's Peek

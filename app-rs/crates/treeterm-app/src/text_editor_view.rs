@@ -1053,7 +1053,8 @@ food");
         cx.run_until_parked();
         assert_eq!(cx.update(|_, cx| editor.read(cx).value().to_string()), "<ul>\n</ul>");
 
-        // CSS: property names in a rule, inserted with a colon.
+        // CSS: property names in a rule, inserted with a colon and a semicolon, the cursor
+        // between them.
         cx.update(|window, cx| {
             editor.update(cx, |editor, cx| editor.set_value("a { }", window, cx));
             install(&host, "/w/a.css", "css", no_others(), cx);
@@ -1064,6 +1065,10 @@ food");
         assert_eq!(labels(&editor, cx).map(|labels| labels[0].clone()), Some("color".to_owned()));
         cx.simulate_keystrokes("enter");
         cx.run_until_parked();
-        assert_eq!(cx.update(|_, cx| editor.read(cx).value().to_string()), "a { color: }");
+        let value_at = "a { color: ".len();
+        assert_eq!(
+            cx.update(|_, cx| (editor.read(cx).value().to_string(), editor.read(cx).selected_range())),
+            ("a { color: ;}".to_owned(), value_at..value_at)
+        );
     }
 }
