@@ -161,7 +161,8 @@ impl TreePane {
         .detach();
     }
 
-    /// "+": type or pick a directory and open it as a root workspace (`OpenWorkspaceDialog`).
+    /// "+": type or pick a directory and open it as a root workspace with the chosen default
+    /// application (`OpenWorkspaceDialog`, `handleOpenWorkspaceSubmit`).
     pub fn open_workspace(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let pane = cx.entity().downgrade();
         let location = if self.remote {
@@ -170,15 +171,17 @@ impl TreePane {
             crate::open_workspace_dialog::Location::Local
         };
         let recent = self.names.read(cx).recent_directories(&self.target).to_vec();
+        let choices = treeterm_model::tool_tabs::workspace_settings::default_app_choices(self.session.read(cx).registry());
         crate::open_workspace_dialog::open(
             location,
             recent,
-            std::rc::Rc::new(move |path, _window, cx| {
+            choices,
+            std::rc::Rc::new(move |path, settings, _window, cx| {
                 match pane.update(cx, |pane, cx| {
                     // `handleOpen`: remembered for this connection's next Open Workspace.
                     let target = pane.target.clone();
                     pane.names.update(cx, |names, cx| names.add_recent_directory(&target, &path, cx));
-                    let id = pane.session.update(cx, |s, cx| s.open_workspace(path, cx));
+                    let id = pane.session.update(cx, |s, cx| s.open_workspace(path, settings, cx));
                     pane.select(id, cx);
                 }) {
                     Ok(()) | Err(_) => {} // Err: the pane closed

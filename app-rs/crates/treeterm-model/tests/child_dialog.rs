@@ -16,7 +16,7 @@ use treeterm_core::exec::{ExecApi, ExecClient, ExecError, ExecEvent, ExecRequest
 use treeterm_core::git::WorktreeInfo;
 use treeterm_core::github::{GitHubApi, GitHubError, HeadRepo, PostCommentsOutcome, PrListItem, PrLookup};
 use treeterm_core::review::ReviewComment;
-use treeterm_core::wire::workspace_file::WorkspaceFile;
+use treeterm_core::wire::workspace_file::{WorkspaceFile, WorktreeSettings};
 use treeterm_core::worktree_registry::WorktreeRegistry;
 use treeterm_model::child_dialog::{
     AppChoice, ChildDialogEvent, ChildDialogModel, ChildRow, ChildTab, FORK_TOOLTIP, IN_WORKTREE_TOOLTIP, Listing,
@@ -127,7 +127,7 @@ impl Fixture {
         git(&repo, &["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init"]);
         wait_until(cx, &self.store, |s| matches!(s.state(), SessionState::Live));
         let path = repo.to_string_lossy().into_owned();
-        let id = self.store.update(cx, |s, cx| s.open_workspace(path, cx));
+        let id = self.store.update(cx, |s, cx| s.open_workspace(path, WorktreeSettings::default(), cx));
         wait_until(cx, &self.store, |s| matches!(s.entry(&id), Some(WorkspaceEntry::Loaded(_))));
         (repo, id)
     }

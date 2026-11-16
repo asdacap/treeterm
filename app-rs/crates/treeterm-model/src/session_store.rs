@@ -32,7 +32,7 @@ use treeterm_core::daemon::{ApiError, DaemonConnection};
 use crate::settings_store::{SettingsEvent, SettingsStore};
 use treeterm_core::tree::{self, TreeNode, TreeRow};
 use treeterm_core::wire::stable_json::{self, sha256_hex};
-use treeterm_core::wire::workspace_file::{WorkspaceFile, WorkspaceStatus, parse_workspace_file, stored_json};
+use treeterm_core::wire::workspace_file::{WorkspaceFile, WorkspaceStatus, WorktreeSettings, parse_workspace_file, stored_json};
 use treeterm_core::workspace_io::{BodyWrite, Expected};
 use treeterm_proto::treeterm::file_watch_event::State as FileState;
 use treeterm_proto::treeterm::{FileWatchEvent, Session, SessionLock, SessionWatchEvent, WorkspaceRef};
@@ -1611,7 +1611,11 @@ impl SessionStore {
 
     /// Open a directory as a new root workspace (`addWorkspace`): a placeholder at once, made
     /// active, then git info, the default tab, its body and its ref. Returns the new id.
-    pub fn open_workspace(&mut self, path: String, cx: &mut Context<Self>) -> String {
+    ///
+    /// `settings` are the workspace's own (the Open Workspace dialog's "Default
+    /// Application"): its first tab is that application when it is registered, else the
+    /// global default; they are saved either way, so its children inherit them.
+    pub fn open_workspace(&mut self, path: String, settings: WorktreeSettings, cx: &mut Context<Self>) -> String {
         let id = new_workspace_id();
         let name = name_from_path(&path);
         self.entries.insert(
@@ -1628,7 +1632,7 @@ impl SessionStore {
         let owned = id.clone();
         cx.spawn(async move |this, cx| {
             let info = git.get_info(&path).await;
-            match this.update(cx, |session, cx| session.finish_open_workspace(owned, name, path, info, cx)) {
+            match this.update(cx, |session, cx| session.finish_open_workspace(owned, name, path, info, settings, cx)) {
                 Ok(()) | Err(_) => {} // Err: store dropped
             }
         })
@@ -1642,10 +1646,11 @@ impl SessionStore {
         name: String,
         path: String,
         info: treeterm_core::git::GitInfo,
+        settings: WorktreeSettings,
         cx: &mut Context<Self>,
     ) {
         use treeterm_core::git::GitInfo;
-        use treeterm_core::wire::workspace_file::{AppState, WorkspaceStatus, WorktreeSettings};
+        use treeterm_core::wire::workspace_file::{AppState, WorkspaceStatus};
         // Dismissed while git info was loading.
         if !matches!(self.entries.get(&id), Some(WorkspaceEntry::Loading { .. })) {
             return;
@@ -1653,7 +1658,8 @@ impl SessionStore {
         let global_default = self.settings.read(cx).settings().global_default_application_id.clone();
         let mut app_states = IndexMap::new();
         let mut active_tab_id = None;
-        if let Some(app) = self.registry.default_for_workspace([], &global_default) {
+        let own_default = Some(settings.default_application_id.as_str()).filter(|id| !id.is_empty());
+        if let Some(app) = self.registry.default_for_workspace(own_default, &global_default) {
             let tab_id = crate::workspace_store::new_tab_id();
             app_states.insert(
                 tab_id.clone(),
@@ -1682,7 +1688,7 @@ impl SessionStore {
             app_states,
             active_tab_id,
             metadata: [("sortOrder".to_owned(), self.next_sort_order(None, cx))].into(),
-            settings: WorktreeSettings::default(),
+            settings,
             favourite_paths: Vec::new(),
             created_at: now,
             last_activity: now,

@@ -8,6 +8,7 @@ use gpui_kit::{AnyElement, App, Context, Entity, EntityId, SharedString, Subscri
 use treeterm_core::keybinding::{Action, PrefixAction};
 use indexmap::IndexMap;
 use treeterm_core::connection::ConnectionId;
+use treeterm_core::wire::workspace_file::WorktreeSettings;
 use treeterm_model::app_store::{AppStore, ConnState};
 use treeterm_model::keybinding_store::KeybindingStore;
 use treeterm_model::navigation::AfterDisconnect;
@@ -367,7 +368,7 @@ impl AppView {
         let (session, tree) = (connected.session.clone(), connected.tree.clone());
         let id = match existing {
             Some(id) => id,
-            None => session.update(cx, |s, cx| s.open_workspace(path, cx)),
+            None => session.update(cx, |s, cx| s.open_workspace(path, WorktreeSettings::default(), cx)),
         };
         tree.update(cx, |tree, cx| tree.select(id, cx));
     }
@@ -2933,7 +2934,7 @@ impl AppView {
 
     pub fn automation_open_workspace(&mut self, path: String, cx: &mut Context<Self>) -> Option<String> {
         let connected = self.current()?;
-        let id = connected.session.update(cx, |s, cx| s.open_workspace(path, cx));
+        let id = connected.session.update(cx, |s, cx| s.open_workspace(path, WorktreeSettings::default(), cx));
         connected.tree.update(cx, |tree, cx| tree.select(id.clone(), cx));
         Some(id)
     }

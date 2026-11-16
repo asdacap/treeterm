@@ -86,7 +86,7 @@ fn loaded(s: &SessionStore, id: &str) -> bool {
 
 fn open(cx: &mut TestAppContext, store: &Entity<SessionStore>, path: &Path) -> String {
     let id = store.update(cx, |s, cx| {
-        s.open_workspace(path.to_string_lossy().into_owned(), cx)
+        s.open_workspace(path.to_string_lossy().into_owned(), Default::default(), cx)
     });
     wait_until(cx, store, |s| loaded(s, &id));
     id

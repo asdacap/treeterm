@@ -553,7 +553,7 @@ fn opening_a_directory_adds_a_root_workspace_with_git_info_and_a_terminal(cx: &m
     let second = open_store(cx, &h, "client-b");
     wait_until(cx, &first, |s| matches!(s.state(), SessionState::Live));
     let path = repo.to_string_lossy().into_owned();
-    let id = first.update(cx, |s, cx| s.open_workspace(path.clone(), cx));
+    let id = first.update(cx, |s, cx| s.open_workspace(path.clone(), WorktreeSettings::default(), cx));
     assert!(first.read_with(cx, |s, _| matches!(s.entry(&id), Some(WorkspaceEntry::Loading { .. }))));
 
     wait_until_app(cx, &second, |s, cx| s.workspace_store(&id).is_some_and(|w| w.read(cx).file().name == "repo"));
@@ -561,6 +561,8 @@ fn opening_a_directory_adds_a_root_workspace_with_git_info_and_a_terminal(cx: &m
     assert_eq!(disk["isGitRepo"], true);
     assert_eq!(disk["gitBranch"], "main");
     assert_eq!(disk["metadata"]["sortOrder"], "0");
+    // "Use Global Default": Electron's `defaultWorktreeSettings`.
+    assert_eq!(disk["settings"], serde_json::json!({ "defaultApplicationId": "" }));
     let tab = disk["activeTabId"].as_str().unwrap().to_owned();
     assert_eq!(disk["appStates"][&tab]["applicationId"], "terminal");
     wait_for_disk(cx, || file_on_disk(&h, &id)["appStates"][&tab]["state"]["ptyId"].is_string());
@@ -597,7 +599,7 @@ fn a_child_workspace_is_a_new_worktree_from_the_parent_branch(cx: &mut TestAppCo
     let store = open_store(cx, &h, "client-a");
     wait_until(cx, &store, |s| matches!(s.state(), SessionState::Live));
     let path = repo.to_string_lossy().into_owned();
-    let root = store.update(cx, |s, cx| s.open_workspace(path, cx));
+    let root = store.update(cx, |s, cx| s.open_workspace(path, WorktreeSettings::default(), cx));
     wait_until(cx, &store, |s| loaded(s, &root));
     let root_store = store.read_with(cx, |s, _| s.workspace_store(&root).unwrap().clone());
     root_store.update(cx, |w, cx| w.add_favourite_path("README.md", cx));
@@ -667,7 +669,8 @@ fn a_child_whose_worktree_git_has_forgotten_still_closes(cx: &mut TestAppContext
 
     let store = open_store(cx, &h, "client-a");
     wait_until(cx, &store, |s| matches!(s.state(), SessionState::Live));
-    let root = store.update(cx, |s, cx| s.open_workspace(repo.to_string_lossy().into_owned(), cx));
+    let path = repo.to_string_lossy().into_owned();
+    let root = store.update(cx, |s, cx| s.open_workspace(path, WorktreeSettings::default(), cx));
     wait_until(cx, &store, |s| loaded(s, &root));
     let child = store.update(cx, |s, cx| s.add_child_workspace(&root, "gone".into(), false, None, cx)).unwrap();
     wait_until(cx, &store, |s| loaded(s, &child));
@@ -720,7 +723,8 @@ fn merging_a_child_brings_its_commits_into_the_parent_and_removes_it(cx: &mut Te
 
     let store = open_store(cx, &h, "client-a");
     wait_until(cx, &store, |s| matches!(s.state(), SessionState::Live));
-    let root = store.update(cx, |s, cx| s.open_workspace(repo.to_string_lossy().into_owned(), cx));
+    let path = repo.to_string_lossy().into_owned();
+    let root = store.update(cx, |s, cx| s.open_workspace(path, WorktreeSettings::default(), cx));
     wait_until(cx, &store, |s| loaded(s, &root));
     let child = store.update(cx, |s, cx| s.add_child_workspace(&root, "feat-merge".into(), false, None, cx)).unwrap();
     wait_until(cx, &store, |s| loaded(s, &child));
@@ -1277,7 +1281,7 @@ impl Drop for TempRepo {
 fn open_repo_workspace(cx: &mut TestAppContext, store: &Entity<SessionStore>, repo: &TempRepo) -> String {
     wait_until(cx, store, |s| matches!(s.state(), SessionState::Live));
     let path = repo.path.to_string_lossy().into_owned();
-    let id = store.update(cx, |s, cx| s.open_workspace(path, cx));
+    let id = store.update(cx, |s, cx| s.open_workspace(path, WorktreeSettings::default(), cx));
     wait_until(cx, store, |s| loaded(s, &id));
     id
 }
@@ -1535,6 +1539,50 @@ fn an_adopted_worktree_opens_and_passes_on_the_chosen_default_application(cx: &m
     let file = file_of(cx, &store, &grandchild);
     assert_eq!(file.settings.default_application_id, "");
     assert_eq!(first_app(&file), "filesystem");
+}
+
+/// Open Workspace's "Default Application" (`addWorkspace` with `settings`): the workspace's
+/// only tab is that application, it is saved as the workspace's own, and its children
+/// inherit it. One this app does not have opens the global default but is saved all the
+/// same, as in Electron.
+#[gpui_kit::test]
+fn opening_with_a_default_application_starts_it_and_its_children_inherit_it(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    publish(&h, &[]);
+    let repo = TempRepo::new(&h);
+    let side = h.daemon.root().join("files-wt");
+    repo.git(&["worktree", "add", "-q", "-b", "side", side.to_str().unwrap()]);
+    let store = open_store(cx, &h, "client-a");
+    wait_until(cx, &store, |s| matches!(s.state(), SessionState::Live));
+    let open = |cx: &mut TestAppContext, path: &std::path::Path, app: &str| {
+        let path = path.to_string_lossy().into_owned();
+        let settings = WorktreeSettings { default_application_id: app.to_owned() };
+        let id = store.update(cx, |s, cx| s.open_workspace(path, settings, cx));
+        wait_until(cx, &store, |s| loaded(s, &id));
+        id
+    };
+
+    let root = open(cx, &repo.path, "filesystem");
+    let file = file_of(cx, &store, &root);
+    assert_eq!(file.settings.default_application_id, "filesystem");
+    assert_eq!(file.app_states.len(), 1);
+    assert_eq!(first_app(&file), "filesystem");
+    assert_eq!(file.app_states[file.active_tab_id.as_deref().unwrap()].title, "Files");
+    wait_for_disk(cx, || h.daemon.workspaces_dir().join(format!("{root}.json")).exists());
+    assert_eq!(file_on_disk(&h, &root)["settings"]["defaultApplicationId"], "filesystem");
+
+    let worktree = treeterm_core::git::WorktreeInfo { path: side.to_string_lossy().into_owned(), branch: "side".into() };
+    let opened = adopt(cx, &store, &root, &worktree, AdoptOptions::default());
+    let child = recv(cx, opened).unwrap();
+    assert_eq!(first_app(&file_of(cx, &store, &child)), "filesystem");
+
+    let plain = h.daemon.root().join("plain");
+    std::fs::create_dir_all(&plain).unwrap();
+    let unknown = open(cx, &plain, "webapp-gone");
+    let file = file_of(cx, &store, &unknown);
+    assert_eq!(first_app(&file), "terminal");
+    assert_eq!(file.settings.default_application_id, "webapp-gone");
 }
 
 #[gpui_kit::test]

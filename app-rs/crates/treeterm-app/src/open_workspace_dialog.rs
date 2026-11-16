@@ -1,21 +1,25 @@
 //! "Open Workspace": `OpenWorkspaceDialog.tsx`. A path is typed, picked from the recent
 //! directories, or "Browse..." picks one: the native folder picker on this machine,
 //! `RemoteDirectoryBrowser.tsx` on a remote host (the native picker only sees this machine).
+//! The workspace opens with the "Default Application" chosen below the folder.
 
 use std::rc::Rc;
 
 use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::input::{InputEvent, InputState};
+use gpui_kit::component::menu::DropdownMenu as _;
 use gpui_kit::prelude::*;
-use gpui_kit::{App, Context, Entity, FontWeight, SharedString, Subscription, Window, div, px};
+use gpui_kit::{App, Context, Div, Entity, FontWeight, Hsla, SharedString, Subscription, Window, div, px};
+use treeterm_core::wire::workspace_file::WorktreeSettings;
 use treeterm_model::session_store::SessionStore;
+use treeterm_model::tool_tabs::workspace_settings::{DefaultAppChoice, default_app_label};
 
 use crate::remote_dir_browser::{Inline, RemoteDirBrowserEvent};
 use crate::theme::colors;
 use crate::ui;
 
-/// Called with the chosen directory.
-pub type OnPicked = Rc<dyn Fn(String, &mut Window, &mut App)>;
+/// Called with the chosen directory and the new workspace's settings (`onOpen`).
+pub type OnOpen = Rc<dyn Fn(String, WorktreeSettings, &mut Window, &mut App)>;
 
 /// Where the directory lives.
 pub enum Location {
@@ -36,8 +40,19 @@ pub struct OpenWorkspaceDialog {
     /// "Recent Directories", most recent first; the section is hidden when empty.
     recent: Vec<String>,
     picker: Picker,
-    on_picked: OnPicked,
+    /// "Default Application": "Use Global Default", then the new-tab menu's applications
+    /// (`availableApps`).
+    choices: Vec<DefaultAppChoice>,
+    /// The workspace's own settings: the chosen application (`selectedAppId`), empty for
+    /// the global default.
+    settings: WorktreeSettings,
+    on_open: OnOpen,
     _subscriptions: Vec<Subscription>,
+}
+
+/// `.open-workspace-field label`: 12px, medium, secondary.
+fn field_label(text: &'static str, color: Hsla) -> Div {
+    div().text_size(px(12.)).font_weight(FontWeight::MEDIUM).text_color(color).child(text)
 }
 
 /// `getFolderName`: the last path segment, else the path itself.
@@ -52,7 +67,8 @@ impl OpenWorkspaceDialog {
     fn new(
         location: Location,
         recent: Vec<String>,
-        on_picked: OnPicked,
+        choices: Vec<DefaultAppChoice>,
+        on_open: OnOpen,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -69,7 +85,15 @@ impl OpenWorkspaceDialog {
             InputEvent::Change => cx.notify(),
             InputEvent::Focus | InputEvent::Blur => {}
         });
-        Self { folder, recent, picker, on_picked, _subscriptions: vec![subscription] }
+        Self {
+            folder,
+            recent,
+            picker,
+            choices,
+            settings: WorktreeSettings::default(),
+            on_open,
+            _subscriptions: vec![subscription],
+        }
     }
 
     fn selected(&self, cx: &App) -> String {
@@ -81,13 +105,14 @@ impl OpenWorkspaceDialog {
         matches!(self.picker, Picker::Native { picking: true })
     }
 
+    /// `handleOpen`: the workspace opens with the chosen default application as its own.
     fn open_selected(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let path = self.selected(cx);
         if path.is_empty() || self.picking() {
             return;
         }
         window.close_dialog(cx);
-        (self.on_picked)(path, window, cx);
+        (self.on_open)(path, self.settings.clone(), window, cx);
     }
 
     fn browse(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -201,14 +226,51 @@ impl OpenWorkspaceDialog {
             .flex()
             .flex_col()
             .gap(px(6.))
-            .child(
-                div()
-                    .text_size(px(12.))
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(secondary)
-                    .child("Recent Directories"),
-            )
+            .child(field_label("Recent Directories", secondary))
             .child(list)
+            .into_any_element()
+    }
+
+    /// "Default Application": a full-width `.settings-select` whose menu has a separator
+    /// after "Use Global Default" (Electron's disabled "──────────" option), then the hint.
+    fn render_default_app(&self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
+        let secondary = colors(cx).text_secondary;
+        let selected = self.settings.default_application_id.clone();
+        let current = default_app_label(&self.choices, &selected);
+        let (choices, dialog) = (self.choices.clone(), cx.entity().downgrade());
+        let select = ui::Trigger::new(ui::select_box("open-default-app", current, cx).w_full()).dropdown_menu(
+            move |mut menu, _, _| {
+                for (index, choice) in choices.iter().enumerate() {
+                    if index == 1 {
+                        menu = menu.separator();
+                    }
+                    let (dialog, id) = (dialog.clone(), choice.id.clone());
+                    menu = menu.item(ui::menu_item(choice.label.clone()).checked(choice.id == selected).on_click(
+                        move |_, _, cx| {
+                            if let Err(error) = dialog.update(cx, |dialog, cx| {
+                                dialog.settings.default_application_id = id.clone();
+                                cx.notify();
+                            }) {
+                                tracing::debug!(%error, "open workspace dialog closed");
+                            }
+                        },
+                    ));
+                }
+                menu.min_w(px(200.))
+            },
+        );
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(6.))
+            .child(field_label("Default Application", secondary))
+            .child(select)
+            .child(
+                // `.settings-hint`: 11px, 2px below the select.
+                div().mt(px(2.)).text_size(px(ui::SMALL)).line_height(px(13.)).text_color(secondary).child(
+                    "The application to open by default in this workspace. Child worktrees will inherit this setting.",
+                ),
+            )
             .into_any_element()
     }
 }
@@ -247,6 +309,7 @@ impl Render for OpenWorkspaceDialog {
             Picker::Native { .. } => None,
         };
         let recent = (!self.recent.is_empty()).then(|| self.render_recent(cx));
+        let default_app = self.render_default_app(cx);
         let disabled = self.selected(cx).is_empty() || picking;
         let open = ui::dialog_button("open-submit", "Open", ui::ButtonKind::Primary, disabled, cx)
             .when(!disabled, |b| b.on_click(cx.listener(|dialog, _, window, cx| dialog.open_selected(window, cx))));
@@ -265,9 +328,7 @@ impl Render for OpenWorkspaceDialog {
                             .flex()
                             .flex_col()
                             .gap(px(6.))
-                            .child(
-                                div().text_size(px(12.)).font_weight(FontWeight::MEDIUM).text_color(secondary).child("Folder"),
-                            )
+                            .child(field_label("Folder", secondary))
                             .child(
                                 div()
                                     .flex()
@@ -276,7 +337,8 @@ impl Render for OpenWorkspaceDialog {
                                     .child(browse),
                             ),
                     )
-                    .children(browser),
+                    .children(browser)
+                    .child(default_app),
             )
             .child(
                 ui::dialog_actions(cx)
@@ -290,8 +352,17 @@ impl Render for OpenWorkspaceDialog {
 }
 
 /// `recent`: the "Recent Directories" to offer, most recent first (none hides the section).
-pub fn open(location: Location, recent: Vec<String>, on_picked: OnPicked, window: &mut Window, cx: &mut App) {
-    let view = cx.new(|cx| OpenWorkspaceDialog::new(location, recent, on_picked, window, cx));
+/// `choices`: the "Default Application" choices, "Use Global Default" first
+/// (`default_app_choices`).
+pub fn open(
+    location: Location,
+    recent: Vec<String>,
+    choices: Vec<DefaultAppChoice>,
+    on_open: OnOpen,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let view = cx.new(|cx| OpenWorkspaceDialog::new(location, recent, choices, on_open, window, cx));
     // `autoFocus` on the folder, once the dialog has taken the focus.
     let folder = view.read(cx).folder.clone();
     window.defer(cx, move |window, cx| folder.update(cx, |input, cx| input.focus(window, cx)));
