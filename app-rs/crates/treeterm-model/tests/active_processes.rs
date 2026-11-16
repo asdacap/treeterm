@@ -166,6 +166,33 @@ fn a_viewer_whose_attach_fails_says_why(cx: &mut TestAppContext) {
     wait_until_app(cx, &model, |m, cx| status(m, cx) == Some(failed.clone()));
 }
 
+#[gpui_kit::test]
+fn a_viewer_logs_no_raw_characters_and_draws_no_debug_badge(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let logs = treeterm_testkit::logs::capture();
+    let h = harness();
+    let a = spawn_shell(&h);
+    let conn = h.conn.clone();
+    let raw = TerminalSettings {
+        show_raw_chars: true,
+        ..TerminalSettings::default()
+    };
+    let model = cx.new(|cx| ActiveProcesses::new(conn, raw, cx));
+    model.update(cx, |m, cx| m.select(&a, cx));
+    wait_until_app(cx, &model, |m, cx| {
+        m.selected()
+            .is_some_and(|(_, t)| !t.read(cx).screen_text().trim().is_empty())
+    });
+
+    // `PtyViewer` is no `BaseTerminal`.
+    let (raw_chars, badge) = model.read_with(cx, |m, cx| {
+        let terminal = m.selected().unwrap().1.read(cx);
+        (terminal.options().settings.show_raw_chars, terminal.show_debug_badge())
+    });
+    assert_eq!((raw_chars, badge), (false, false));
+    assert!(!logs.text().contains("[RAW]"), "{}", logs.text());
+}
+
 /// A session member: `id`'s body is named `name`, its ref points at `<root>/<id>`.
 fn member(h: &Harness, id: &str, name: &str) -> (WorkspaceRef, String) {
     let path = h.daemon.root().join(id);

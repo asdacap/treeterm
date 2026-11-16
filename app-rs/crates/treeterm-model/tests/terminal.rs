@@ -65,6 +65,7 @@ fn options(pty_id: String) -> TerminalOptions {
         selection_copy: SelectionCopy::OnCopy,
         idle_timeout: None,
         traffic: treeterm_core::traffic::ByteCounter::default(),
+        show_debug_badge: false,
     }
 }
 
@@ -283,6 +284,54 @@ fn a_settings_change_or_a_refresh_fits_again(cx: &mut TestAppContext) {
     wait_until(cx, &b, |m| *m.overlay() == Overlay::Hidden && m.grid_size() == A_SIZE);
     b.update(cx, |m, _| m.fit(B_SIZE));
     wait_until(cx, &a, |m| m.grid_size() == B_SIZE);
+}
+
+#[gpui_kit::test]
+fn show_raw_characters_logs_the_last_output_escaped_while_on(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let logs = treeterm_testkit::logs::capture();
+    let raw_lines = || logs.text().lines().filter(|line| line.contains("[RAW] ")).count();
+    let h = harness();
+    let pty = spawn_shell(&h);
+    let on = TerminalSettings { show_raw_chars: true, ..TerminalSettings::default() };
+    let model = open(cx, &h, TerminalOptions { settings: on.clone(), ..options(pty) });
+    assert!(raw_lines() > 0, "the replayed prompt is logged: {}", logs.text());
+
+    // The echoed command line has a backslash and a `t`; only printf's output has the tab.
+    // The sleep keeps the next prompt out of the output's chunk, whose line then ends with it
+    // (the shell's prompt redraw alone is longer than the tail).
+    model.update(cx, |m, cx| m.set_focused(true, cx));
+    type_line(cx, &model, "printf 'raw\\tchars-%d' $((40+2)); sleep 0.5");
+    wait_until(cx, &model, |m| m.screen_text().contains("chars-42"));
+    let line = logs.line("raw\\tchars-42").unwrap_or_else(|| panic!("{}", logs.text()));
+    assert!(line.contains("INFO") && line.contains("[RAW] "), "{line}");
+
+    // Turned off: nothing more is logged.
+    model.update(cx, |m, cx| m.apply_settings(TerminalSettings::default(), cx));
+    let before = raw_lines();
+    type_line(cx, &model, "echo off-$((1+2))");
+    wait_until(cx, &model, |m| m.screen_text().contains("off-3"));
+    assert_eq!(raw_lines(), before, "{}", logs.text());
+
+    // On again: from the new output only.
+    model.update(cx, |m, cx| m.apply_settings(on, cx));
+    type_line(cx, &model, "echo on-$((2+3))");
+    wait_until(cx, &model, |m| m.screen_text().contains("on-5"));
+    assert!(raw_lines() > before, "{}", logs.text());
+    assert!(logs.text().lines().filter(|line| line.contains("[RAW] ")).all(|line| !line.contains("off-3")));
+}
+
+#[gpui_kit::test]
+fn the_debug_badge_follows_its_setting(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let (_daemon, conn) = refusing_daemon(tonic::Status::unavailable("Connection refused"));
+    let shown = TerminalOptions { show_debug_badge: true, ..options("p1".into()) };
+    let model = cx.new(|cx| TerminalModel::new(conn, shown, cx));
+    assert!(model.read_with(cx, |m, _| m.show_debug_badge()));
+    model.update(cx, |m, cx| m.set_debug_badge(false, cx));
+    assert!(!model.read_with(cx, |m, _| m.show_debug_badge()));
+    model.update(cx, |m, cx| m.set_debug_badge(true, cx));
+    assert!(model.read_with(cx, |m, _| m.show_debug_badge()));
 }
 
 #[gpui_kit::test]

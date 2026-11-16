@@ -172,6 +172,7 @@ fn viewer(cx: &mut TestAppContext, h: &Harness, pty_id: &str) -> Entity<Terminal
         selection_copy: SelectionCopy::OnCopy,
         idle_timeout: None,
         traffic: treeterm_core::traffic::ByteCounter::default(),
+        show_debug_badge: false,
     };
     let conn = h.conn.clone();
     let model = cx.new(|cx| TerminalModel::new(conn, options, cx));

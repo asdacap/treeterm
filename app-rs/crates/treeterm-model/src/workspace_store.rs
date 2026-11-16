@@ -993,11 +993,13 @@ impl WorkspaceStore {
                 | TabRef::Tool(_) => None,
             })
             .collect();
+        let debug_badge = self.settings.debug.show_badge;
         for (model, width_limit, scrollbar, background) in terminals {
             model.update(cx, |model, cx| {
                 model.set_width_limit(width_limit, cx);
                 model.set_scrollbar(scrollbar, cx);
                 model.set_background(background, cx);
+                model.set_debug_badge(debug_badge, cx);
             });
         }
     }
@@ -1277,6 +1279,7 @@ impl WorkspaceStore {
             // fires, so turning it off still lets a pending Idle land.
             idle_timeout: Some(self.idle_timeout()),
             traffic: self.traffic_counter.clone(),
+            show_debug_badge: settings.debug.show_badge,
         }
     }
 
@@ -2262,8 +2265,8 @@ impl WorkspaceStore {
     }
 
     /// New settings: the registry decides which tabs are native and how new ones start;
-    /// live terminals take the emulator and font settings and their application's Disable
-    /// Scrollbar and background.
+    /// live terminals take the emulator and font settings, the DEBUG badge and their
+    /// application's Disable Scrollbar and background.
     pub fn apply_settings(&mut self, registry: Rc<AppRegistry>, settings: Rc<Settings>, cx: &mut Context<Self>) {
         self.registry = registry;
         self.settings = settings;

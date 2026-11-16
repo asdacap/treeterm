@@ -85,10 +85,11 @@ impl ActiveProcesses {
         if self.selected.as_ref().is_some_and(|(shown, _)| shown == id) {
             return;
         }
+        // `PtyViewer` is no `BaseTerminal`: it logs no `[RAW]` lines and draws no DEBUG badge.
         let options = TerminalOptions {
             pty_id: id.to_owned(),
             background: DEFAULT_BACKGROUND,
-            settings: self.settings.clone(),
+            settings: TerminalSettings { show_raw_chars: false, ..self.settings.clone() },
             role: TerminalRole::Viewer,
             width_limit: WidthLimit::Off,
             scrollbar: ScrollbarVisibility::Shown,
@@ -96,6 +97,7 @@ impl ActiveProcesses {
             idle_timeout: None,
             // A viewer, not a workspace: nobody meters it.
             traffic: treeterm_core::traffic::ByteCounter::default(),
+            show_debug_badge: false,
         };
         let conn = self.conn.clone();
         let terminal = cx.new(|cx| TerminalModel::new(conn, options, cx));

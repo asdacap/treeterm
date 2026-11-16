@@ -890,6 +890,45 @@ fn an_ai_harness_set_to_disable_scrollbar_draws_none(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn the_debug_settings_reach_every_live_terminal(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    std::fs::write(h.daemon.workspaces_dir().join("a.json"), body("a", None)).unwrap();
+    publish(&h, &["a"]);
+    let settings = treeterm_core::settings::from_value(serde_json::json!({
+        "terminal": { "showRawChars": true },
+        "aiHarness": { "instances": [{
+            "id": "bot", "name": "Bot", "icon": "B", "command": "sleep 60",
+            "isDefault": false, "enableSandbox": false, "allowNetwork": false,
+            "backgroundColor": "#1a1a24", "disableScrollbar": false, "keepOnExit": true
+        }]},
+        "debug": { "showBadge": true }
+    }))
+    .unwrap();
+    let settings = cx.new(|_| SettingsStore::in_memory(settings));
+    let conn = h.conn.clone();
+    let store = cx.new(|cx| SessionStore::new(conn, "client-a".into(), settings.clone(), None, cx.new(ConnectionTraffic::new), cx));
+    wait_until(cx, &store, |s| loaded(s, "a"));
+    let workspace = store.read_with(cx, |s, _| ws(s, "a"));
+    let bot = workspace.update(cx, |w, cx| w.add_tab("aiharness-bot", cx)).unwrap();
+    let shell = workspace.update(cx, |w, cx| w.add_tab("terminal", cx)).unwrap();
+    wait_until(cx, &workspace, |w| terminal_of(w, &bot).is_some() && terminal_of(w, &shell).is_some());
+    let terminals = workspace.read_with(cx, |w, _| [terminal_of(w, &bot).unwrap(), terminal_of(w, &shell).unwrap()]);
+    let debug = |t: &treeterm_model::terminal::TerminalModel| (t.show_debug_badge(), t.options().settings.show_raw_chars);
+    for terminal in &terminals {
+        assert_eq!(terminal.read_with(cx, |t, _| debug(t)), (true, true));
+    }
+
+    // Turned off in the settings: the live terminals follow.
+    settings.update(cx, |s, cx| {
+        s.update(|settings| (settings.debug.show_badge, settings.terminal.show_raw_chars) = (false, false), cx)
+    });
+    for terminal in &terminals {
+        wait_until(cx, terminal, |t| debug(t) == (false, false));
+    }
+}
+
+#[gpui_kit::test]
 fn an_ai_harness_draws_on_its_css_background_whether_sandboxed_or_not(cx: &mut TestAppContext) {
     use treeterm_term::alacritty_terminal::vte::ansi::Rgb;
     use treeterm_term::palette::SANDBOX_BACKGROUND;

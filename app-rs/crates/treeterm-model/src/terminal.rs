@@ -36,6 +36,7 @@ use treeterm_term::links::{self, Link, LinkKind};
 use treeterm_term::mouse;
 use treeterm_term::move_to_cell::move_to_cell;
 use treeterm_term::palette::Palette;
+use treeterm_term::raw_chars::RawLog;
 use treeterm_term::view::{self, ScrollPosition};
 
 /// A non-zero exit this soon after attaching means the program failed to start: the
@@ -71,6 +72,9 @@ pub struct TerminalOptions {
     pub idle_timeout: Option<Duration>,
     /// Output bytes are added here (the workspace's download meter).
     pub traffic: ByteCounter,
+    /// Settings > Debug > Show Debug Badge: a purple DEBUG badge on the terminal. A
+    /// viewer never shows it (`PtyViewer` is no `BaseTerminal`).
+    pub show_debug_badge: bool,
 }
 
 /// What the terminal is shown as, which decides what a program's exit does and what the
@@ -280,11 +284,43 @@ enum AttachStatus {
     Failed,
 }
 
+/// Settings > Terminal > Show Raw Characters for one attachment: while it is on, the
+/// parser thread logs each chunk of output as a `[RAW]` line, as Electron's `BaseTerminal`
+/// logs it to its console.
+#[derive(Clone)]
+struct RawOutput {
+    pty_id: String,
+    log: Arc<Mutex<RawLog>>,
+}
+
+impl RawOutput {
+    fn new(pty_id: &str, on: bool) -> Self {
+        Self {
+            pty_id: pty_id.to_owned(),
+            log: Arc::new(Mutex::new(RawLog::new(on))),
+        }
+    }
+
+    /// On or off from now on, starting from no output (Electron mounts its terminals again
+    /// on a settings change, which empties its `rawChars`).
+    fn set(&self, on: bool) {
+        *self.log.lock().expect("raw output log poisoned") = RawLog::new(on);
+    }
+
+    fn data(&self, bytes: &[u8]) {
+        let line = self.log.lock().expect("raw output log poisoned").output(bytes);
+        if let Some(escaped) = line {
+            tracing::info!(pty = %self.pty_id, "[RAW] {escaped}");
+        }
+    }
+}
+
 /// One attachment generation. Refreshing the stream replaces it whole.
 struct Attachment {
     term: SharedTerm,
     gate: Arc<Gate>,
     input: PtyInputHandle,
+    raw_output: RawOutput,
     status: AttachStatus,
     connected_at: Instant,
     _parser: Task<()>,
@@ -386,6 +422,7 @@ impl TerminalModel {
         );
         let term = core.term().clone();
         let gate = core.gate().clone();
+        let raw_output = RawOutput::new(&options.pty_id, options.settings.show_raw_chars);
 
         let inbox = Arc::new(Mutex::new(Batch::default()));
         // Capacity 1 with try_send: at most one wake-up is ever pending, however fast
@@ -396,6 +433,7 @@ impl TerminalModel {
             core,
             attachment.events,
             options.traffic.clone(),
+            raw_output.clone(),
             inbox.clone(),
             wake_tx,
             executor,
@@ -412,6 +450,7 @@ impl TerminalModel {
             term,
             gate,
             input,
+            raw_output,
             status: AttachStatus::Open,
             connected_at: cx.background_executor().now(),
             _parser: parser,
@@ -446,6 +485,11 @@ impl TerminalModel {
 
     pub fn title(&self) -> Option<&str> {
         self.title.as_deref()
+    }
+
+    /// Whether the purple DEBUG badge shows (Settings > Debug > Show Debug Badge).
+    pub fn show_debug_badge(&self) -> bool {
+        self.options.show_debug_badge
     }
 
     pub fn size_mismatch(&self) -> Option<SizeMismatch> {
@@ -719,6 +763,15 @@ impl TerminalModel {
             return;
         }
         self.options.background = background;
+        cx.notify();
+    }
+
+    /// Settings > Debug > Show Debug Badge changed.
+    pub fn set_debug_badge(&mut self, shown: bool, cx: &mut Context<Self>) {
+        if self.options.show_debug_badge == shown {
+            return;
+        }
+        self.options.show_debug_badge = shown;
         cx.notify();
     }
 
@@ -1090,6 +1143,7 @@ impl TerminalModel {
         if let WidthLimit::Capped(_) = self.options.width_limit {
             self.options.width_limit = WidthLimit::Capped(settings.max_cols);
         }
+        self.attachment.raw_output.set(settings.show_raw_chars);
         self.options.settings = settings;
         // Electron mounts its terminals again on a settings change, which fits them again.
         self.fit.reset();
@@ -1321,6 +1375,7 @@ async fn drive(
     mut core: TermCore,
     mut events: Sub<Result<PtyEvent, ApiError>>,
     received: ByteCounter,
+    raw_output: RawOutput,
     inbox: Arc<Mutex<Batch>>,
     mut wake: mpsc::Sender<()>,
     executor: BackgroundExecutor,
@@ -1351,7 +1406,7 @@ async fn drive(
                     match item {
                         Some(Ok(event)) => {
                             opened = true;
-                            apply(&mut core, event, &received, &mut batch);
+                            apply(&mut core, event, &received, &raw_output, &mut batch);
                         }
                         Some(Err(error)) => {
                             let message = error.to_string();
@@ -1393,13 +1448,21 @@ async fn drive(
     }
 }
 
-fn apply(core: &mut TermCore, event: PtyEvent, received: &ByteCounter, batch: &mut Batch) {
+fn apply(
+    core: &mut TermCore,
+    event: PtyEvent,
+    received: &ByteCounter,
+    raw_output: &RawOutput,
+    batch: &mut Batch,
+) {
     batch.received = true;
     match event {
         PtyEvent::Data(bytes) => {
             received.add(bytes.len() as u64);
             batch.data = true;
             batch.notices.extend(core.feed(&bytes));
+            // Replayed output too, as in Electron.
+            raw_output.data(&bytes);
         }
         PtyEvent::Resize { cols, rows } => {
             let size = GridSize { cols, rows };

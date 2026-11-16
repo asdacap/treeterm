@@ -1,6 +1,6 @@
 //! The view of one terminal tab. Port of the view half of `BaseTerminal.tsx`: keyboard,
 //! IME, mouse (selection or reporting), wheel, context menu, and the chrome around the
-//! grid (scroll badge, ALT SCREEN, size mismatch, overlay, floating buttons).
+//! grid (scroll badge, ALT SCREEN, size mismatch, DEBUG badge, overlay, floating buttons).
 //!
 //! All terminal state lives in [`TerminalModel`]; dropping this view only stops drawing.
 
@@ -678,6 +678,7 @@ impl Render for TerminalView {
         let overlay = model.banner();
         let alternate = model.is_alternate_screen();
         let mismatch = model.size_mismatch();
+        let debug_badge = model.show_debug_badge();
         let hovered_link = model.hovered_link();
         // xterm.js's `xterm-cursor-pointer` over a hovered link.
         let pointer_cursor = hovered_link.is_some();
@@ -768,6 +769,20 @@ impl Render for TerminalView {
             );
         }
 
+        if debug_badge {
+            // `.debug-badge`: after the overlay, which it draws over (both are at z-index 10).
+            root = root.child(
+                badge(
+                    "debug-badge",
+                    "DEBUG",
+                    rgba(0x8c28b4b3).into(),
+                    gpui_kit::rgb(0x8c28b4).into(),
+                    gpui_kit::rgb(0xe0a0ff).into(),
+                )
+                .right(px(300.))
+                .opacity(0.8),
+            );
+        }
         root = root.child(self.scroll_badge(cx));
         if alternate {
             root = root.child(

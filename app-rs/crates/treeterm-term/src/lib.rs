@@ -13,6 +13,7 @@ pub mod links;
 pub mod mouse;
 pub mod move_to_cell;
 pub mod palette;
+pub mod raw_chars;
 pub mod view;
 
 pub use alacritty_terminal;

@@ -118,7 +118,12 @@ impl SettingsView {
             .child(group("Cursor Style", cursor, None, cx))
             .child(unlabeled(blink, None, cx))
             .child(unlabeled(osc52, Some("Lets local or remote terminal programs copy text to your system clipboard"), cx))
-            .child(unlabeled(raw, Some("Log the last 50 raw terminal characters to the console (DevTools)"), cx))
+            // Electron's hint names the DevTools console, which the app does not have.
+            .child(unlabeled(
+                raw,
+                Some("Log the last 50 raw terminal characters to the app log (stdout, as [RAW] lines)"),
+                cx,
+            ))
             .into_any_element()
     }
 
