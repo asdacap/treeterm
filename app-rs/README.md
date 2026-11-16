@@ -126,8 +126,9 @@ Done (tested against a real in-process daemon unless noted):
   the tab's own URL scheme, which fetches it and serves it as text.
 - **Workspace pane:** header with git status, PR link, Pull, ▶ Run (npm/make/just/Taskfile/
   VS Code tasks, custom runners), Review & Merge / Abandon; AI-harness Prompt Commit /
-  Prompt Rebase; activity glyphs on tabs. A failed operation (merge, removal) shows
-  "Operation failed" with Force Unlock and Cancel in place of the tabs.
+  Prompt Rebase; activity glyphs on tabs. A workspace being created shows git's output
+  once there is some; one that failed shows why, with Dismiss. A failed operation (merge,
+  removal) shows "Operation failed" with Force Unlock and Cancel in place of the tabs.
 - **Tree and sidebar:** sessions (dragged into order, kept in `ui-state.json`), favourites,
   drag and drop (reorder / reparent), unread markers, PR badges, collapsible rail,
   title/branch refresh, Auto Open All Recent Worktrees (worktree registry shared with

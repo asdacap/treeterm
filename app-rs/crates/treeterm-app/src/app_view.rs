@@ -174,6 +174,35 @@ impl LoadingOutput {
     }
 }
 
+/// `.workspace-loading`: workspace `workspace` is being created. The message by a spinner,
+/// over all of git's output once there is some.
+fn loading_pane(workspace: &str, message: &str, output: &[String], loading: &mut LoadingOutput, cx: &App) -> AnyElement {
+    let secondary = colors(cx).text_secondary;
+    loading.follow(workspace, output.len());
+    v_flex()
+        .flex_1()
+        .h_full()
+        .p(px(16.))
+        .pt(px(38.))
+        .child(
+            h_flex()
+                .gap(px(8.))
+                .mb(px(12.))
+                .items_center()
+                .text_size(px(13.))
+                .text_color(secondary)
+                .child(
+                    Spinner::new()
+                        .icon(gpui_kit::component::Icon::new(IconName::LoaderCircle))
+                        .with_size(px(16.))
+                        .color(secondary),
+                )
+                .child(message.to_owned()),
+        )
+        .when(!output.is_empty(), |d| d.child(loading_output(output.to_vec(), &loading.scroll, cx)))
+        .into_any_element()
+}
+
 /// `.workspace-loading-output`: the lines in a scrolling monospace box.
 fn loading_output(lines: Vec<String>, scroll: &gpui_kit::ScrollHandle, cx: &App) -> AnyElement {
     let c = colors(cx);
@@ -1931,6 +1960,29 @@ fn hide_tab_views(connected: &Connected, cx: &mut Context<AppView>) {
     }
 }
 
+/// `.workspace-empty`: no workspace is shown.
+fn workspace_empty(cx: &App) -> AnyElement {
+    let c = colors(cx);
+    centered(
+        v_flex()
+            .items_center()
+            .child(
+                div()
+                    .mb(px(8.))
+                    .text_size(px(18.))
+                    .font_weight(gpui_kit::FontWeight::MEDIUM)
+                    .text_color(c.text_primary)
+                    .child("No workspace selected"),
+            )
+            .child(
+                div()
+                    .text_size(px(13.))
+                    .text_color(c.text_secondary)
+                    .child("Select a workspace from the sidebar or add a new one to get started."),
+            ),
+    )
+}
+
 /// `.workspace-load-error`: the workspace's last operation failed. "Operation failed" and
 /// the message, with Force Unlock (`forceUnlock`, which leaves the error) and Cancel
 /// (`clearWorkspaceError`, which brings the tabs back).
@@ -2003,50 +2055,33 @@ fn workspace_pane(
     let previous_terminals = std::mem::take(&mut connected.shown_terminals);
     let Some(id) = connected.session.read(cx).active_workspace().map(str::to_owned) else {
         hide_tab_views(connected, cx);
-        // `.workspace-empty`.
-        return centered(
-            v_flex()
-                .items_center()
-                .child(div().mb(px(8.)).text_size(px(18.)).font_weight(gpui_kit::FontWeight::MEDIUM).text_color(colors(cx).text_primary).child("No workspace selected"))
-                .child(div().text_size(px(13.)).text_color(secondary).child("Select a workspace from the sidebar or add a new one to get started.")),
-        );
+        return workspace_empty(cx);
     };
     // `.workspace-terminal` shows only for a Loaded entry.
     if !matches!(connected.session.read(cx).entry(&id), Some(WorkspaceEntry::Loaded(_))) {
         hide_tab_views(connected, cx);
     }
     let workspace = match connected.session.read(cx).entry(&id) {
-        // The selection can outlive its workspace when another window removes it.
-        None => return centered(div().text_color(secondary).child("Workspace was removed")),
+        // An active workspace with no entry is shown as none (`!activeWorkspace`).
+        None => return workspace_empty(cx),
         Some(WorkspaceEntry::Loading { message, output, .. }) => {
-            // `.workspace-loading`: git's output while a worktree is being created.
-            connected.loading_output.follow(&id, output.len());
-            let tail: Vec<String> = output.iter().rev().take(200).rev().cloned().collect();
-            return v_flex()
-                .flex_1()
-                .h_full()
-                .p(px(16.))
-                .pt(px(38.))
-                .child(
-                    h_flex()
-                        .gap(px(8.))
-                        .mb(px(12.))
-                        .items_center()
-                        .text_size(px(13.))
-                        .text_color(secondary)
-                        .child(
-                            Spinner::new()
-                                .icon(gpui_kit::component::Icon::new(IconName::LoaderCircle))
-                                .with_size(px(16.))
-                                .color(secondary),
-                        )
-                        .child(message.clone()),
-                )
-                .child(loading_output(tail, &connected.loading_output.scroll, cx))
-                .into_any_element();
+            return loading_pane(&id, message, output, &mut connected.loading_output, cx);
         }
+        // The reason, and Dismiss (`dismissWorkspace`).
         Some(WorkspaceEntry::Error { error: reason, .. }) => {
-            return centered(div().text_color(error).child(reason.clone()));
+            let (session, dismissed) = (connected.session.clone(), id.clone());
+            return centered(
+                v_flex()
+                    .max_w(px(500.))
+                    .items_center()
+                    .gap(px(16.))
+                    .child(div().text_center().text_color(error).child(reason.clone()))
+                    .child(
+                        crate::ui::action_button("workspace-dismiss", cx)
+                            .child("Dismiss")
+                            .on_click(move |_, _, cx| session.update(cx, |s, cx| s.dismiss_workspace(&dismissed, cx))),
+                    ),
+            );
         }
         Some(WorkspaceEntry::Loaded(store) | WorkspaceEntry::OperationError { store, .. }) => store.clone(),
     };
@@ -3139,6 +3174,43 @@ mod tests {
         draw(cx);
         let (offset, max) = scrolled(&view, cx);
         assert_eq!(offset, max);
+    }
+
+    /// A loading workspace's pane with `lines` lines of git output so far.
+    struct LoadingPane {
+        lines: usize,
+        output: LoadingOutput,
+    }
+
+    impl Render for LoadingPane {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            let lines: Vec<String> = (0..self.lines).map(|ix| format!("line {ix}")).collect();
+            v_flex().h(px(300.)).child(loading_pane("a", "Creating worktree...", &lines, &mut self.output, cx))
+        }
+    }
+
+    /// `AutoScrollPre` is drawn only once there is output, and shows all of it.
+    #[gpui_kit::test]
+    fn the_loading_pane_shows_all_of_gits_output_once_there_is_some(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        cx.update(crate::theme::install);
+        let (view, cx) = cx.add_window_view(|_, _| LoadingPane { lines: 0, output: LoadingOutput::default() });
+        draw(cx);
+        // The box's scroll handle sees each line it lays out.
+        let box_lines = |cx: &mut VisualTestContext| {
+            cx.update(|_, cx| {
+                let scroll = &view.read(cx).output.scroll;
+                (scroll.bounds().size.height > px(0.)).then(|| scroll.children_count())
+            })
+        };
+        assert_eq!(box_lines(cx), None, "no box before output");
+
+        view.update(cx, |view, cx| {
+            view.lines = 300;
+            cx.notify();
+        });
+        draw(cx);
+        assert_eq!(box_lines(cx), Some(300));
     }
 
     #[gpui_kit::test]
