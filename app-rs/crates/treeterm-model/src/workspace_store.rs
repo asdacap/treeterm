@@ -921,21 +921,23 @@ impl WorkspaceStore {
         }
     }
 
-    /// System Prompt Debuggers follow their tab's `bufferText` (SystemPromptDebugger re-reads
-    /// it on every store change).
-    fn sync_prompt_debuggers(&mut self, cx: &mut Context<Self>) {
-        let debuggers: Vec<(Entity<crate::tool_tabs::prompt_debugger::PromptDebugger>, Value)> = self
-            .tabs
-            .iter()
-            .filter_map(|(tab_id, tab)| {
-                let TabRef::Tool(crate::tool_tabs::ToolTab::PromptDebugger { model, .. }) = tab else {
-                    return None;
-                };
-                Some((model.clone(), self.workspace.file.app_states[tab_id].state.clone()))
-            })
-            .collect();
-        for (model, state) in debuggers {
-            model.update(cx, |model, cx| model.follow_state(&state, cx));
+    /// Tabs whose components read their state live in Electron follow it as another writer
+    /// left it: the Files tab (`FilesystemBrowser`) and System Prompt Debuggers (`bufferText`,
+    /// which SystemPromptDebugger re-reads on every store change).
+    fn follow_tab_states(&self, cx: &mut Context<Self>) {
+        for (tab_id, tab) in &self.tabs {
+            let state = &self.workspace.file.app_states[tab_id].state;
+            match tab {
+                TabRef::Files { model, .. } => model.update(cx, |model, cx| model.follow_state(state, cx)),
+                TabRef::Tool(crate::tool_tabs::ToolTab::PromptDebugger { model, .. }) => {
+                    model.update(cx, |model, cx| model.follow_state(state, cx));
+                }
+                TabRef::Terminal(_)
+                | TabRef::Editor { .. }
+                | TabRef::Review { .. }
+                | TabRef::Browser { .. }
+                | TabRef::Tool(_) => {}
+            }
         }
     }
 
@@ -1026,8 +1028,14 @@ impl WorkspaceStore {
                 let model = cx.new(|cx| self.file_browser(&workspace, &state, cx));
                 let owned_tab = tab_id.to_owned();
                 let events = cx.subscribe(&model, move |store, _, event: &crate::file_browser::FileBrowserEvent, cx| {
-                    let crate::file_browser::FileBrowserEvent::StateChanged(next) = event;
-                    store.merge_tab_state(&owned_tab, next.clone(), cx);
+                    match event {
+                        crate::file_browser::FileBrowserEvent::StateChanged(next) => {
+                            store.merge_tab_state(&owned_tab, next.clone(), cx);
+                        }
+                        crate::file_browser::FileBrowserEvent::StateRemoved(key) => {
+                            store.remove_tab_state_key(&owned_tab, key, cx);
+                        }
+                    }
                 });
                 self.tabs.insert(tab_id.to_owned(), TabRef::Files { model, _events: events });
             }
@@ -1060,15 +1068,7 @@ impl WorkspaceStore {
                         crate::review::ReviewEvent::StateChanged(next) => {
                             store.merge_tab_state(&owned_tab, next.clone(), cx);
                         }
-                        crate::review::ReviewEvent::StateRemoved(key) => store.update_tab_state(
-                            &owned_tab,
-                            |state| {
-                                if let Value::Object(state) = state {
-                                    state.remove(*key);
-                                }
-                            },
-                            cx,
-                        ),
+                        crate::review::ReviewEvent::StateRemoved(key) => store.remove_tab_state_key(&owned_tab, key, cx),
                         crate::review::ReviewEvent::Committed | crate::review::ReviewEvent::GitChanged => {
                             cx.emit(WorkspaceEvent::GitRefreshRequested);
                         }
@@ -1461,19 +1461,35 @@ impl WorkspaceStore {
         state
     }
 
-    /// Merge `next`'s keys over the tab's state (keys the other app wrote survive).
+    /// Merge `next`'s keys over the tab's state (keys the other app wrote survive). A state
+    /// that already says it all is not written again.
     fn merge_tab_state(&mut self, tab_id: &str, next: Value, cx: &mut Context<Self>) {
-        self.update_tab_state(
-            tab_id,
-            |state| {
-                if let (Value::Object(state), Value::Object(next)) = (state, next) {
-                    for (key, value) in next {
-                        state.insert(key, value);
-                    }
-                }
-            },
-            cx,
-        );
+        let Some(AppState { state: Value::Object(state), .. }) = self.workspace.file.app_states.get_mut(tab_id) else {
+            return;
+        };
+        let Value::Object(next) = next else {
+            return;
+        };
+        let mut changed = false;
+        for (key, value) in next {
+            if state.get(&key) != Some(&value) {
+                state.insert(key, value);
+                changed = true;
+            }
+        }
+        if changed {
+            self.changed(cx);
+        }
+    }
+
+    /// Drop `key` from the tab's state (`key: undefined`), if it has it.
+    fn remove_tab_state_key(&mut self, tab_id: &str, key: &str, cx: &mut Context<Self>) {
+        let Some(AppState { state: Value::Object(state), .. }) = self.workspace.file.app_states.get_mut(tab_id) else {
+            return;
+        };
+        if state.remove(key).is_some() {
+            self.changed(cx);
+        }
     }
 
     /// The Files tab's model on this workspace (`workspace`), from a `FilesystemState`.
@@ -2028,8 +2044,8 @@ impl WorkspaceStore {
 
     /// A body written elsewhere, with hash `sha`, replaces ours (`applyWorkspaceFile`): tabs
     /// it dropped are detached, new tabs initialised, a terminal whose tab now names
-    /// another PTY re-attaches, the others take their tab's width limit, and debuggers
-    /// their tab's `bufferText`. Emits no change: the body is already on disk.
+    /// another PTY re-attaches, the others take their tab's width limit, and Files and
+    /// debugger tabs follow their tab's state. Emits no change: the body is already on disk.
     pub fn apply_external(&mut self, mut file: WorkspaceFile, sha: &str, cx: &mut Context<Self>) {
         let removed: Vec<String> = self
             .workspace
@@ -2074,7 +2090,7 @@ impl WorkspaceStore {
             self.init_tab(&tab_id, cx);
         }
         self.sync_terminal_options(cx);
-        self.sync_prompt_debuggers(cx);
+        self.follow_tab_states(cx);
         let rewrite = self.attention.has_pending() && self.reapply_attention();
         self.observe_attention(false, cx);
         self.sync_idle_timeouts(cx);

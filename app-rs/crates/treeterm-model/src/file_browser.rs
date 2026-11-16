@@ -5,6 +5,8 @@
 //! Tab state stays compatible with Electron's `FilesystemState`: `selectedPath` (absolute)
 //! and `expandedDirs` (absolute directory paths, in the order they were opened). A
 //! `scrollToLine` another app wrote (Electron's "open in file browser") is honoured on load.
+//! The tab follows its state as other windows and Electron change it
+//! ([`FileBrowser::follow_state`]), as Electron's components read it live.
 //!
 //! The search panel searches the open file ([`search::find_in_text`]) and the whole
 //! worktree ([`search::repo_search`]); go to definition greps for a definition of the word
@@ -251,6 +253,8 @@ pub enum Host {
 pub enum FileBrowserEvent {
     /// Selection or expansion changed: persist it in the tab state.
     StateChanged(Value),
+    /// This key of the tab state was used up: remove it (`scrollToLine: undefined`).
+    StateRemoved(&'static str),
 }
 
 impl EventEmitter<FileBrowserEvent> for FileBrowser {}
@@ -272,6 +276,9 @@ pub struct FileBrowser {
     search: SearchPanel,
     definition: DefinitionLookup,
     reveal: Option<Reveal>,
+    /// The tab state's `scrollToLine` as last read, until used: another one arriving is
+    /// revealed.
+    scroll_to_line: Option<usize>,
     /// The workspace whose favourite paths the tree stars.
     workspace: WeakEntity<WorkspaceStore>,
     /// The favourite paths `favourites` was resolved from, the ancestors' included.
@@ -374,6 +381,20 @@ pub fn line_range(text: &str, line_number: usize, column: usize, len: usize) -> 
     Some(start + from..start + to)
 }
 
+/// A `FilesystemState`'s `expandedDirs`.
+fn expanded_dirs_of(state: &Value) -> Vec<String> {
+    state
+        .get("expandedDirs")
+        .and_then(Value::as_array)
+        .map(|dirs| dirs.iter().filter_map(Value::as_str).map(str::to_owned).collect())
+        .unwrap_or_default()
+}
+
+/// A `FilesystemState`'s `scrollToLine` (1-based).
+fn scroll_to_line_of(state: &Value) -> Option<usize> {
+    state.get("scrollToLine").and_then(Value::as_u64).map(|line| line as usize)
+}
+
 impl FileBrowser {
     /// `state` is the tab's persisted `FilesystemState`; `favourite_paths` and `in_repo`
     /// (`isGitRepo`) the workspace's (it may be mid-update, so it is not read here).
@@ -389,13 +410,6 @@ impl FileBrowser {
         favourite_paths: Vec<String>,
         cx: &mut Context<Self>,
     ) -> Self {
-        let expanded: Vec<String> = state
-            .get("expandedDirs")
-            .and_then(Value::as_array)
-            .map(|dirs| dirs.iter().filter_map(Value::as_str).map(str::to_owned).collect())
-            .unwrap_or_default();
-        let selected = state.get("selectedPath").and_then(Value::as_str).map(str::to_owned);
-        let scroll_to_line = state.get("scrollToLine").and_then(Value::as_u64);
         let observe = cx.observe(workspace, |browser, workspace, cx| {
             let paths = workspace.read(cx).all_favourite_paths();
             browser.sync_favourites(paths, cx);
@@ -407,13 +421,14 @@ impl FileBrowser {
             host: Host::FilesTab,
             root: root.clone(),
             listings: HashMap::new(),
-            expanded: expanded.clone(),
+            expanded: Vec::new(),
             selected: None,
             view: FileView::Nothing,
             reads: 0,
             search: SearchPanel::Closed,
             definition: DefinitionLookup::Idle,
             reveal: None,
+            scroll_to_line: scroll_to_line_of(state),
             workspace: workspace.downgrade(),
             favourite_paths,
             favourites: Favourites::Empty,
@@ -435,16 +450,55 @@ impl FileBrowser {
         browser.refresh_anchor(cx);
         browser.resolve_favourites(cx);
         browser.load(root, cx);
-        for dir in expanded {
-            browser.load(dir, cx);
-        }
-        if let Some(path) = selected {
-            browser.open(&path, false, cx);
-            if let Some(line) = scroll_to_line {
-                browser.reveal_at(&path, line as usize, 1, 0);
+        browser.expand(expanded_dirs_of(state), cx);
+        if let Some(path) = state.get("selectedPath").and_then(Value::as_str) {
+            browser.show(path, false, cx);
+            if let Some(line) = browser.scroll_to_line {
+                browser.reveal_at(path, line, 1, 0);
             }
         }
         browser
+    }
+
+    /// The tab's state as another window or Electron left it (`FilesystemBrowser` reads it
+    /// live): its expanded directories show, the newly expanded ones loaded; another selected
+    /// file shows, the comment being written going with the one shown before; and a new
+    /// `scrollToLine` is revealed in the file then removed (`handleScrollToLineUsed`). What
+    /// the state already says is not written back.
+    pub fn follow_state(&mut self, state: &Value, cx: &mut Context<Self>) {
+        let expanded = expanded_dirs_of(state);
+        if expanded != self.expanded {
+            self.expand(expanded, cx);
+        }
+        // Nothing deselects a file once one was picked (`setSelectedPath` gets a path).
+        if let Some(path) = state.get("selectedPath").and_then(Value::as_str)
+            && self.selected.as_deref() != Some(path)
+        {
+            self.show(path, false, cx);
+        }
+        let line = scroll_to_line_of(state);
+        if line != self.scroll_to_line {
+            self.scroll_to_line = line;
+            if let (Some(line), Some(path)) = (line, self.selected.clone()) {
+                self.reveal_at(&path, line, 1, 0);
+                // Used up: the same line asked for again is new again.
+                self.scroll_to_line = None;
+                cx.emit(FileBrowserEvent::StateRemoved("scrollToLine"));
+                cx.notify();
+            }
+        }
+    }
+
+    /// Show `dirs` expanded, loading those not loaded or loading yet (a `DirectoryLoader` per
+    /// expanded directory).
+    fn expand(&mut self, dirs: Vec<String>, cx: &mut Context<Self>) {
+        for dir in &dirs {
+            if !matches!(self.listings.get(dir), Some(Listing::Loaded(_) | Listing::Loading)) {
+                self.load(dir.clone(), cx);
+            }
+        }
+        self.expanded = dirs;
+        cx.notify();
     }
 
     /// Shown inside another tab ([`Host::Embedded`]).
@@ -651,6 +705,12 @@ impl FileBrowser {
     /// Read a file and show it, even the one shown (Review's Refresh). `allow_large` reads
     /// past [`MAX_VIEW_BYTES`] ("Open anyway").
     pub fn open(&mut self, path: &str, allow_large: bool, cx: &mut Context<Self>) {
+        self.show(path, allow_large, cx);
+        self.persist(cx);
+    }
+
+    /// [`Self::open`] without saving the selection in the tab state.
+    fn show(&mut self, path: &str, allow_large: bool, cx: &mut Context<Self>) {
         self.drop_draft_unless(path);
         self.selected = Some(path.to_owned());
         self.view = FileView::Loading(path.to_owned());
@@ -700,7 +760,6 @@ impl FileBrowser {
                 Ok(()) | Err(_) => {}
             }
         }));
-        self.persist(cx);
         cx.notify();
     }
 
