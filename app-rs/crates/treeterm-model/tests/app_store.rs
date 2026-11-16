@@ -17,7 +17,7 @@ use treeterm_core::connection::{ConnectionId, OutdatedDaemon, OutputKind, Status
 use treeterm_core::local_daemon::LocalDaemonSpec;
 use treeterm_core::settings::{Extra, PortForwardSpec, SshConnectionConfig};
 use treeterm_core::traffic::TrafficRate;
-use treeterm_model::app_store::{AppEvent, AppStore, ConnState, SessionSlot};
+use treeterm_model::app_store::{AppEvent, AppStore, ConnState, IdlePane, SessionSlot};
 use treeterm_model::session_info::SessionInfo;
 use treeterm_model::session_store::{SessionState, SessionStore, WorkspaceEntry};
 use treeterm_model::settings_store::SettingsStore;
@@ -26,7 +26,7 @@ use treeterm_proto::treeterm::WorkspaceRef;
 use treeterm_testkit::fake_ssh::{Proxy, fake_ssh_response, remote_config, ssh_env};
 
 mod common;
-use common::{Harness, harness, refusing_daemon, wait_until, wait_until_app};
+use common::{Harness, Proxy as DaemonProxy, harness, refusing_daemon, wait_until, wait_until_app};
 
 /// The daemon (in this process) runs `echo $HOME` with this process's environment: point
 /// `HOME` at an empty directory, so the remote home workspace and the worktree registry
@@ -451,6 +451,89 @@ fn a_local_session_without_workspaces_lands_nowhere(cx: &mut TestAppContext) {
         workspaces(cx, &session).is_empty(),
         "no home workspace for a local session"
     );
+}
+
+fn idle(cx: &mut TestAppContext, app: &App) -> IdlePane {
+    app.app.read_with(cx, |a, cx| a.idle_pane(cx))
+}
+
+fn local_state(cx: &mut TestAppContext, app: &App) -> ConnState {
+    app.app.read_with(cx, |a, _| {
+        a.sessions()
+            .find(|slot| slot.is_local())
+            .unwrap()
+            .state
+            .clone()
+    })
+}
+
+fn wait_for_local(cx: &mut TestAppContext, app: &App, state: impl Fn(&ConnState) -> bool) {
+    wait_until(cx, &app.app, |a| {
+        a.sessions()
+            .any(|slot| slot.is_local() && state(&slot.state))
+    });
+}
+
+/// With no session shown, the window shows the local connection's start-up until its session
+/// has loaded: the splash while it connects and loads its session, then why it failed, or
+/// that it is retrying. Then App.tsx's "Select a workspace to get started", also while the
+/// loaded session is kept over a lost or stopped connection, and once every connection is
+/// disconnected.
+#[gpui_kit::test]
+fn with_no_session_shown_the_window_shows_the_start_up_until_the_local_session_loads(
+    cx: &mut TestAppContext,
+) {
+    cx.executor().allow_parking();
+    isolated_home();
+    let h = harness();
+    // The app reaches the daemon through a proxy, so the test can hold or take it away.
+    let dir = tempfile::Builder::new()
+        .prefix("tt")
+        .tempdir_in("/tmp")
+        .unwrap();
+    let socket = dir.path().join("p.sock");
+    let silent = DaemonProxy::silent(&socket, h.daemon.socket_path());
+    let app = app(cx, &h, Some(&socket));
+    let id = local_id(cx, &app.app);
+    assert_eq!(idle(cx, &app), IdlePane::Splash, "connecting");
+
+    // Connected, its daemon does not answer: the session waits.
+    wait_until(cx, &app.app, |a| a.local_session().is_some());
+    assert_eq!(idle(cx, &app), IdlePane::Splash, "loading the session");
+
+    // Lost before the session loaded: the connect stops at its error.
+    drop(silent);
+    wait_for_local(cx, &app, |state| matches!(state, ConnState::Failed { .. }));
+    let ConnState::Failed { error, .. } = local_state(cx, &app) else {
+        unreachable!("waited for it")
+    };
+    assert_eq!(idle(cx, &app), IdlePane::Failed { error });
+
+    // Retried while no daemon is reachable.
+    app.app.read_with(cx, |a, _| a.reconnect(&id));
+    wait_for_local(cx, &app, |state| matches!(state, ConnState::Reconnecting { .. }));
+    let ConnState::Reconnecting { attempt, error } = local_state(cx, &app) else {
+        unreachable!("waited for it")
+    };
+    assert_eq!(idle(cx, &app), IdlePane::Reconnecting { attempt, error });
+
+    let proxy = DaemonProxy::start(&socket, h.daemon.socket_path());
+    wait_until_app(cx, &app.app, |a, cx| {
+        a.local_session()
+            .is_some_and(|s| matches!(s.read(cx).state(), SessionState::Live))
+    });
+    assert_eq!(idle(cx, &app), IdlePane::SelectWorkspace, "loaded");
+
+    // The daemon goes away: the loaded session is kept, reconnecting and once stopped.
+    drop(proxy);
+    wait_for_local(cx, &app, |state| matches!(state, ConnState::Reconnecting { .. }));
+    assert_eq!(idle(cx, &app), IdlePane::SelectWorkspace, "kept while reconnecting");
+    app.app.read_with(cx, |a, _| a.cancel_reconnect(&id));
+    wait_for_local(cx, &app, |state| matches!(state, ConnState::Failed { .. }));
+    assert_eq!(idle(cx, &app), IdlePane::SelectWorkspace, "kept once stopped");
+
+    app.app.update(cx, |a, cx| a.disconnect(&id, cx));
+    assert_eq!(idle(cx, &app), IdlePane::SelectWorkspace, "no connection left");
 }
 
 /// [`remote_config`] with a saved port forward.

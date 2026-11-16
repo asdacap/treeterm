@@ -168,7 +168,9 @@ Done (tested against a real in-process daemon unless noted):
   monitor, the session as JSON and its TTYs. Each session has an active workspace (its first
   one once loaded, a new or forked one at once): the window opens on it at start-up and
   after a remote connect, and disconnecting the shown session shows the next one's (or its
-  session pane when it has none). A connect from the SSH picker shows the session pane while
+  session pane when it has none). Until a workspace is shown (a local session without any
+  at start-up) or once every session is disconnected, the window reads "Select a workspace
+  to get started". A connect from the SSH picker shows the session pane while
   it connects; a remote session without workspaces gets one at the remote `$HOME`
   (`/home/<user>` if that cannot be read).
 - **Tool tabs:** GitHub PR details (reviews, checks, unresolved threads), review comments
@@ -348,6 +350,12 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   image of its section: a chip with the session's name follows the pointer instead.
 
 ## Known differences from Electron (deliberate)
+
+- There is no separate splash window: the main window opens at once and shows Electron's
+  splash ("TreeTerm", the spinner and "Connecting to daemon...") in its pane until the local
+  session has loaded. Electron showed it in a small always-on-top window while it started the
+  daemon, then opened the main window on "Select a workspace to get started" while it
+  connected.
 
 - Review comments made in the Files tab are saved with the workspace-relative path, as the
   Review tab saves them (Electron's Files tab saves the absolute path), so they also show in

@@ -289,6 +289,52 @@ pub fn attention_saving(color: impl Into<Hsla>) -> gpui_kit::AnyElement {
         .into_any_element()
 }
 
+/// A CSS border spinner (`loading.html`'s `.spinner`): a `size`px ring, 2px wide, in `track`,
+/// its top quarter in `arc`, turning once every 0.8 s at a steady speed.
+pub fn ring_spinner(id: impl Into<ElementId>, size: f32, track: Hsla, arc: Hsla) -> gpui_kit::AnyElement {
+    use gpui_kit::{Animation, AnimationExt as _, PathBuilder, point};
+    use std::f32::consts::{FRAC_PI_4, PI, TAU};
+    // The middle of the 2px border, where both strokes run. Both are paths: a div's border
+    // is painted over its children.
+    let radius = size / 2. - 1.;
+    div().size(px(size)).flex_shrink_0().with_animation(
+        id,
+        Animation::new(std::time::Duration::from_millis(800)).repeat(),
+        move |spinner, turn| {
+            spinner.child(
+                gpui_kit::canvas(
+                    |_, _, _| {},
+                    move |bounds, (), window, _| {
+                        // An angle clockwise from the top, as `rotate()` turns.
+                        let center = bounds.center();
+                        let at = |angle: f32| {
+                            point(center.x + px(radius * angle.sin()), center.y - px(radius * angle.cos()))
+                        };
+                        let radii = point(px(radius), px(radius));
+                        let mut paint = |path: PathBuilder, color: Hsla| match path.build() {
+                            Ok(path) => window.paint_path(path, color),
+                            Err(error) => tracing::error!(%error, "cannot draw the spinner"),
+                        };
+                        let mut ring = PathBuilder::stroke(px(2.));
+                        ring.move_to(at(0.));
+                        ring.arc_to(radii, px(0.), false, true, at(PI));
+                        ring.arc_to(radii, px(0.), false, true, at(TAU));
+                        paint(ring, track);
+                        // The top quarter, turned by `turn` of a full circle.
+                        let middle = turn * TAU;
+                        let mut quarter = PathBuilder::stroke(px(2.));
+                        quarter.move_to(at(middle - FRAC_PI_4));
+                        quarter.arc_to(radii, px(0.), false, true, at(middle + FRAC_PI_4));
+                        paint(quarter, arc);
+                    },
+                )
+                .size_full(),
+            )
+        },
+    )
+    .into_any_element()
+}
+
 // --- dialogs ---
 // Electron's modal dialogs (`.dialog-overlay` around `.settings-dialog`,
 // `.create-child-dialog`, …) and their form controls, measured from its computed styles.

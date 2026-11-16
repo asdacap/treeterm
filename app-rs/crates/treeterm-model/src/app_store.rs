@@ -16,7 +16,7 @@
 use std::sync::Arc;
 
 use futures::StreamExt as _;
-use gpui_kit::{AppContext as _, Context, Entity, Subscription, Task};
+use gpui_kit::{App, AppContext as _, Context, Entity, Subscription, Task};
 use indexmap::IndexMap;
 use treeterm_core::connection::dialer::GrpcDialer;
 use treeterm_core::connection::process::{ProcessSpawner, TokioSpawner};
@@ -126,13 +126,44 @@ impl SessionSlot {
     /// The session store the window shows: the connected one, else the last generation's
     /// while the connection is down (dimmed and inert).
     pub fn shown_session(&self) -> Option<&Entity<SessionStore>> {
-        self.session().or(match &self.previous {
+        self.session().or(self.previous_session())
+    }
+
+    /// The last generation's store, kept while the connection is down or being replaced.
+    fn previous_session(&self) -> Option<&Entity<SessionStore>> {
+        match &self.previous {
             Previous::Nothing => None,
             Previous::Kept(session) | Previous::HandingOver { session, .. } | Previous::Replacing(session) => {
                 Some(session)
             }
-        })
+        }
     }
+
+    /// The connection's session has loaded: the connected generation's, or the last one's,
+    /// kept while the connection is down or until its replacement has loaded.
+    fn has_loaded(&self, cx: &App) -> bool {
+        self.session()
+            .into_iter()
+            .chain(self.previous_session())
+            .any(|session| matches!(session.read(cx).state(), SessionState::Live))
+    }
+}
+
+/// What the right side shows while the window shows no session: Electron's `activeView` is
+/// null (nothing picked yet, or the session it named was disconnected). Until the first
+/// connection's session has loaded, that connection's start-up; then App.tsx's empty state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IdlePane {
+    /// The splash (`loading.html`: "TreeTerm", a spinner, "Connecting to daemon..."): the
+    /// first connection (the local daemon, at start-up) is connecting or loading its session.
+    Splash,
+    /// That connection was lost before its session loaded; the manager retries.
+    Reconnecting { attempt: u32, error: String },
+    /// That connection failed before its session loaded.
+    Failed { error: String },
+    /// "Select a workspace to get started": no connection is left, or the first one's session
+    /// has loaded and nothing is picked.
+    SelectWorkspace,
 }
 
 /// Something the windows should react to.
@@ -251,6 +282,23 @@ impl AppStore {
 
     pub fn session_slot(&self, id: &ConnectionId) -> Option<&SessionSlot> {
         self.sessions.get(id)
+    }
+
+    /// What the right side shows while the window shows no session.
+    pub fn idle_pane(&self, cx: &App) -> IdlePane {
+        let Some(slot) = self.sessions.values().next() else {
+            return IdlePane::SelectWorkspace; // every connection was disconnected
+        };
+        if slot.has_loaded(cx) {
+            return IdlePane::SelectWorkspace;
+        }
+        match &slot.state {
+            ConnState::Connecting(_) | ConnState::Connected(_) => IdlePane::Splash,
+            ConnState::Reconnecting { attempt, error } => {
+                IdlePane::Reconnecting { attempt: *attempt, error: error.clone() }
+            }
+            ConnState::Failed { error, .. } => IdlePane::Failed { error: error.clone() },
+        }
     }
 
     /// The local connection's session store, when connected.

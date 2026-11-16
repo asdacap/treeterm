@@ -10,7 +10,7 @@ use treeterm_core::layout::{DropTarget, LayoutTabSet, NodePath};
 use indexmap::IndexMap;
 use treeterm_core::connection::ConnectionId;
 use treeterm_core::wire::workspace_file::WorktreeSettings;
-use treeterm_model::app_store::{AppStore, ConnState};
+use treeterm_model::app_store::{AppStore, IdlePane};
 use treeterm_model::keybinding_store::KeybindingStore;
 use treeterm_model::navigation::AfterDisconnect;
 use treeterm_model::session_names::Side;
@@ -38,7 +38,10 @@ pub struct AppView {
     trees: HashMap<ConnectionId, SessionTree>,
     /// Each shown session's views, in sidebar order.
     sessions: IndexMap<ConnectionId, Connected>,
-    /// The session whose workspace the right side shows.
+    /// The session whose workspace the right side shows (Electron's `activeView`). None
+    /// until one is picked (a session restored with workspaces, a row clicked, the CLI's
+    /// directory), and once the shown one is disconnected with none left: the right side then
+    /// shows the [`IdlePane`].
     active: Option<ConnectionId>,
     /// The session pane, shown instead of a workspace after clicking a session's name.
     info: Option<Entity<crate::session_info_view::SessionInfoView>>,
@@ -462,9 +465,6 @@ impl AppView {
                 }
                 AfterDisconnect::Nothing => None,
             };
-        }
-        if self.active.as_ref().is_none_or(|id| !self.sessions.contains_key(id)) {
-            self.active = self.sessions.keys().next().cloned();
         }
         self.apply_shown(cx);
         self.open_pending_workspace(cx);
@@ -1124,39 +1124,34 @@ impl Render for AppView {
             (None, current) => match current {
             // macOS traffic lights sit over the header's left end once the sidebar is a rail.
             Some(connected) => workspace_pane(connected, if collapsed { px(72.) } else { px(16.) }, window, cx),
-            None => {
-                let starting = self.store.read(cx).sessions().next().map(|slot| slot.state.clone());
-                match starting {
-                    Some(ConnState::Failed { error: reason, .. }) => centered(
-                        v_flex()
-                            .gap_2()
-                            .max_w(px(600.))
-                            .child(div().text_color(error).child("Cannot reach the TreeTerm daemon"))
-                            .child(div().text_sm().text_color(secondary).child(reason)),
-                    ),
-                    Some(ConnState::Reconnecting { attempt, error: reason }) => centered(
-                        v_flex()
-                            .gap_2()
-                            .max_w(px(600.))
-                            .items_center()
-                            .child(
-                                h_flex()
-                                    .gap_2()
-                                    .text_color(secondary)
-                                    .child(Spinner::new())
-                                    .child(format!("Reconnecting to the TreeTerm daemon (attempt {attempt})…")),
-                            )
-                            .child(div().text_sm().text_color(secondary).child(reason)),
-                    ),
-                    Some(ConnState::Connecting(_) | ConnState::Connected(_)) | None => centered(
-                        h_flex()
-                            .gap_2()
-                            .text_color(secondary)
-                            .child(Spinner::new())
-                            .child("Starting TreeTerm daemon…"),
-                    ),
-                }
-            }
+            None => match self.store.read(cx).idle_pane(cx) {
+                IdlePane::Splash => splash(cx),
+                IdlePane::Failed { error: reason } => centered(
+                    v_flex()
+                        .gap_2()
+                        .max_w(px(600.))
+                        .child(div().text_color(error).child("Cannot reach the TreeTerm daemon"))
+                        .child(div().text_sm().text_color(secondary).child(reason)),
+                ),
+                IdlePane::Reconnecting { attempt, error: reason } => centered(
+                    v_flex()
+                        .gap_2()
+                        .max_w(px(600.))
+                        .items_center()
+                        .child(
+                            h_flex()
+                                .gap_2()
+                                .text_color(secondary)
+                                .child(Spinner::new())
+                                .child(format!("Reconnecting to the TreeTerm daemon (attempt {attempt})…")),
+                        )
+                        .child(div().text_sm().text_color(secondary).child(reason)),
+                ),
+                // App.tsx with no active session store: the text at the default 16px.
+                IdlePane::SelectWorkspace => centered(
+                    div().text_size(px(16.)).text_color(secondary).child("Select a workspace to get started"),
+                ),
+            },
             },
         };
         let pane = div().relative().flex().flex_1().h_full().min_w_0().child(pane);
@@ -1865,6 +1860,26 @@ fn centered(child: impl IntoElement) -> AnyElement {
         .justify_center()
         .child(child)
         .into_any_element()
+}
+
+/// `loading.html`, Electron's splash window while the daemon starts, in the pane: "TreeTerm",
+/// the spinner and "Connecting to daemon...", centred.
+fn splash(cx: &App) -> AnyElement {
+    let c = colors(cx);
+    centered(
+        v_flex()
+            .items_center()
+            .child(
+                div()
+                    .mb(px(24.))
+                    .text_size(px(18.))
+                    .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                    .text_color(c.text_primary)
+                    .child("TreeTerm"),
+            )
+            .child(div().mb(px(16.)).child(crate::ui::ring_spinner("splash-spinner", 24., c.border, c.accent)))
+            .child(div().text_size(px(13.)).text_color(c.text_secondary).child("Connecting to daemon...")),
+    )
 }
 
 /// The active workspace: header, tab strip and the active tab. Terminal tabs are live;
@@ -3103,6 +3118,7 @@ impl AppView {
     /// A JSON snapshot of what this window shows, for automation.
     pub fn automation_state(&self, window: &Window, cx: &gpui_kit::App) -> serde_json::Value {
         use serde_json::json;
+        use treeterm_model::app_store::ConnState;
         let sessions: Vec<_> = self
             .store
             .read(cx)
@@ -3133,7 +3149,10 @@ impl AppView {
                 "closeConfirm": self.close_confirm.strong_count() > 0,
             })
         };
-        match self.current() {
+        // Whether the window shows the session described (else the idle pane, or a session
+        // pane).
+        let shown = self.info.is_none() && self.current().is_some();
+        match self.automation_target().and_then(|id| self.sessions.get(&id)) {
             None => json!({ "body": "starting", "sessions": sessions, "dialogs": dialogs }),
             Some(connected) => {
                 let session = connected.session.read(cx);
@@ -3184,6 +3203,7 @@ impl AppView {
                     "version": session.version(),
                     "workspaces": workspaces,
                     "active": active,
+                    "shown": shown,
                     "terminals": terminals,
                     "dialogs": dialogs,
                 })
@@ -3191,20 +3211,30 @@ impl AppView {
         }
     }
 
+    /// The session automation acts on: the one shown, else (nothing picked yet) the first in
+    /// the sidebar, as Electron's `getInitialWorkspace` falls back to the first session.
+    fn automation_target(&self) -> Option<ConnectionId> {
+        self.active
+            .clone()
+            .filter(|id| self.sessions.contains_key(id))
+            .or_else(|| self.sessions.keys().next().cloned())
+    }
+
     pub fn automation_select_workspace(&mut self, id: &str, cx: &mut Context<Self>) {
-        if let Some(connection) = self.active.clone() {
+        if let Some(connection) = self.automation_target() {
             self.select_workspace(&connection, id.to_owned(), cx);
         }
     }
 
-    /// The current session's sidebar section.
-    fn current_tree(&self) -> Option<Entity<TreePane>> {
-        let id = self.active.as_ref().filter(|id| self.sessions.contains_key(*id))?;
-        self.trees.get(id).map(|tree| tree.pane.clone())
+    /// The automation target's sidebar section.
+    fn automation_tree(&self) -> Option<Entity<TreePane>> {
+        let id = self.automation_target()?;
+        self.trees.get(&id).map(|tree| tree.pane.clone())
     }
 
     pub fn automation_select_tab(&mut self, workspace: &str, tab: &str, cx: &mut Context<Self>) {
-        if let Some(connected) = self.current_mut() {
+        let target = self.automation_target();
+        if let Some(connected) = target.and_then(|id| self.sessions.get_mut(&id)) {
             if let Some(store) = connected.session.read(cx).workspace_store(workspace).cloned() {
                 store.update(cx, |w, cx| w.set_active_tab(tab, cx));
             }
@@ -3214,7 +3244,8 @@ impl AppView {
     }
 
     pub fn automation_new_tab(&mut self, workspace: &str, app: &str, cx: &mut Context<Self>) -> Option<String> {
-        let connected = self.current_mut()?;
+        let target = self.automation_target()?;
+        let connected = self.sessions.get_mut(&target)?;
         let store = connected.session.read(cx).workspace_store(workspace).cloned()?;
         let app = if app.is_empty() {
             connected.session.read(cx).registry().default_app()?.id.clone()
@@ -3225,9 +3256,9 @@ impl AppView {
         store.update(cx, |w, cx| w.add_tab(&app, cx))
     }
 
-    /// The current session's tree forks `id` (its Fork button, past the upstream warning).
+    /// The automation target's tree forks `id` (its Fork button, past the upstream warning).
     pub fn automation_fork(&mut self, id: &str, cx: &mut Context<Self>) -> bool {
-        let Some(tree) = self.current_tree() else {
+        let Some(tree) = self.automation_tree() else {
             return false;
         };
         tree.update(cx, |tree, cx| tree.quick_fork(id, cx));
@@ -3235,12 +3266,13 @@ impl AppView {
     }
 
     pub fn automation_session(&self) -> Option<Entity<SessionStore>> {
-        self.current().map(|connected| connected.session.clone())
+        let target = self.automation_target()?;
+        self.sessions.get(&target).map(|connected| connected.session.clone())
     }
 
-    /// "+" on the current session: the Open Workspace dialog.
+    /// "+" on the automation target: the Open Workspace dialog.
     pub fn automation_open_workspace_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
-        let Some(tree) = self.current_tree() else {
+        let Some(tree) = self.automation_tree() else {
             return false;
         };
         tree.update(cx, |tree, cx| tree.open_workspace(window, cx));
@@ -3248,8 +3280,8 @@ impl AppView {
     }
 
     pub fn automation_open_workspace(&mut self, path: String, cx: &mut Context<Self>) -> Option<String> {
-        let connection = self.active.clone()?;
-        let session = self.current()?.session.clone();
+        let connection = self.automation_target()?;
+        let session = self.sessions.get(&connection)?.session.clone();
         let id = session.update(cx, |s, cx| s.open_workspace(path, WorktreeSettings::default(), cx));
         self.select_workspace(&connection, id.clone(), cx);
         Some(id)
@@ -3271,7 +3303,7 @@ impl AppView {
     }
 
     pub fn automation_close_tab(&mut self, workspace: &str, tab: &str, cx: &mut Context<Self>) {
-        if let Some(connected) = self.current()
+        if let Some(connected) = self.automation_target().and_then(|id| self.sessions.get(&id))
             && let Some(store) = connected.session.read(cx).workspace_store(workspace).cloned()
         {
             store.update(cx, |w, cx| w.remove_tab(tab, cx));
