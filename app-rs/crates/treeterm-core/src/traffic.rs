@@ -66,17 +66,22 @@ impl RateWindow {
     }
 }
 
-/// `formatBytes.ts`.
+/// `formatBytes.ts`. Its `toFixed(1)` rounds an exact half up (1280 B is "1.3 KB") where
+/// `{:.1}` rounds it to even, so the tenths are rounded in integers: a byte count over a
+/// power of 1024 is exact, as it is in JavaScript.
 pub fn format_bytes(bytes: u64) -> String {
     const KB: u64 = 1024;
     const MB: u64 = KB * 1024;
     const GB: u64 = MB * 1024;
-    match bytes {
-        b if b < KB => format!("{b} B"),
-        b if b < MB => format!("{:.1} KB", b as f64 / KB as f64),
-        b if b < GB => format!("{:.1} MB", b as f64 / MB as f64),
-        b => format!("{:.1} GB", b as f64 / GB as f64),
-    }
+    let (unit, name) = match bytes {
+        b if b < KB => return format!("{b} B"),
+        b if b < MB => (KB, "KB"),
+        b if b < GB => (MB, "MB"),
+        _ => (GB, "GB"),
+    };
+    let unit = u128::from(unit);
+    let tenths = (u128::from(bytes) * 20 + unit) / (2 * unit);
+    format!("{}.{} {name}", tenths / 10, tenths % 10)
 }
 
 /// A rate is an average, so whole bytes are rounded before formatting.
@@ -441,6 +446,22 @@ mod tests {
         assert_eq!(format_bytes(3 * 1024 * 1024 * 1024), "3.0 GB");
         assert_eq!(format_rate(1023.6), "1.0 KB/s");
         assert_eq!(format_rate(12.4), "12 B/s");
+    }
+
+    #[test]
+    fn an_exact_half_rounds_up_as_to_fixed_does() {
+        // Each checked against `formatBytes` in node.
+        assert_eq!(format_bytes(1229), "1.2 KB");
+        assert_eq!(format_bytes(1280), "1.3 KB");
+        assert_eq!(format_bytes(2304), "2.3 KB");
+        assert_eq!(format_bytes(1_048_524), "1023.9 KB");
+        assert_eq!(format_bytes(1_048_575), "1024.0 KB");
+        assert_eq!(format_bytes(1_310_720), "1.3 MB");
+        assert_eq!(format_bytes(1_073_741_823), "1024.0 MB");
+        assert_eq!(format_bytes(1_342_177_280), "1.3 GB");
+        assert_eq!(format_bytes(3_758_096_384), "3.5 GB");
+        assert_eq!(format_bytes(5_497_826_574_336), "5120.3 GB");
+        assert_eq!(format_rate(1279.5), "1.3 KB/s");
     }
 
     const SETTINGS: u8 = 0x4;
