@@ -115,11 +115,14 @@ fn ptys_move_under_their_workspace_once_it_loads(cx: &mut TestAppContext) {
     let app = app_on(cx, &h, h.daemon.socket_path(), dir.path());
     let id = local_id(cx, &app);
 
-    // Shown before the connection is up.
-    let list = cx.new(|cx| SessionTtyList::new(&app, id, cx));
-    assert_eq!(
-        list.read_with(cx, |l, cx| l.body(cx)),
-        TtyListBody::NotConnected
+    // Shown before the connection is up: it fails with why, as Electron's `getClient` does,
+    // or, connected with the session still loading, waits for it.
+    let list = cx.new(|cx| SessionTtyList::new(&app, id.clone(), cx));
+    let body = list.read_with(cx, |l, cx| l.body(cx));
+    assert!(
+        body == TtyListBody::Failed(format!("Connection {id} is connecting"))
+            || body == TtyListBody::Loading,
+        "{body:?}"
     );
 
     // Connected, with no workspace yet: the shell is under "Unknown".
@@ -150,7 +153,7 @@ fn after_a_reconnect_the_list_refreshes_and_kills_on_the_new_connection(cx: &mut
     let proxy = Proxy::start(&socket, h.daemon.socket_path());
     let app = app_on(cx, &h, &socket, dir.path());
     let id = local_id(cx, &app);
-    let list = cx.new(|cx| SessionTtyList::new(&app, id, cx));
+    let list = cx.new(|cx| SessionTtyList::new(&app, id.clone(), cx));
     wait_until_app(cx, &list, |l, cx| {
         groups(l, cx) == Some(vec![group("Alpha", &[&pty])])
     });
@@ -159,16 +162,17 @@ fn after_a_reconnect_the_list_refreshes_and_kills_on_the_new_connection(cx: &mut
         l.selected(cx).is_some_and(|(shown, _)| shown == pty)
     }));
 
-    // The connection drops: nothing to list, and the viewer closes.
+    // The connection drops: listing fails with Electron's `getClient` error, and the viewer
+    // closes.
     drop(proxy);
-    wait_until_app(cx, &list, |l, cx| l.body(cx) == TtyListBody::NotConnected);
+    let reconnecting = format!("Connection {id} is reconnecting: ");
+    let down = |l: &SessionTtyList, cx: &gpui_kit::App| matches!(l.body(cx), TtyListBody::Failed(why) if why.starts_with(&reconnecting));
+    wait_until_app(cx, &list, down);
     assert!(list.read_with(cx, |l, cx| l.selected(cx).is_none()));
     // Acting on it meanwhile does nothing.
     list.update(cx, |l, cx| l.kill(&pty, cx));
-    assert_eq!(
-        list.read_with(cx, |l, cx| l.body(cx)),
-        TtyListBody::NotConnected
-    );
+    list.update(cx, |l, cx| l.reload(cx));
+    assert!(list.read_with(cx, down));
 
     // The next generation lists by itself; Refresh, Kill and Open use its connection.
     let _proxy = Proxy::start(&socket, h.daemon.socket_path());

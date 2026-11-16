@@ -4,7 +4,8 @@
 //! Electron resolves the connection's current daemon client by id on every list, kill and
 //! attach, so they keep working across a reconnect. Here each connection generation has its
 //! own `DaemonConnection` and a retired one cannot redial, so the list follows the
-//! connection's session: a new generation gets a new process list on its connection.
+//! connection's session: a new generation gets a new process list on its connection. Without
+//! one, the list fails as Electron's does, with `getClient`'s reason.
 
 use gpui_kit::{App, AppContext as _, Context, Entity, Subscription};
 use treeterm_core::connection::ConnectionId;
@@ -17,6 +18,7 @@ use crate::session_store::SessionStore;
 use crate::terminal::TerminalModel;
 
 pub struct SessionTtyList {
+    app: Entity<AppStore>,
     id: ConnectionId,
     shown: Shown,
     _app: Subscription,
@@ -37,9 +39,8 @@ enum Shown {
 /// What the tab's body shows.
 #[derive(Debug, Clone, PartialEq)]
 pub enum TtyListBody {
-    /// "Not connected".
-    NotConnected,
     Loading,
+    /// "Failed to load TTY sessions", and why; also while the connection is down.
     Failed(String),
     /// The PTYs by workspace; empty when the daemon runs none ("No TTY sessions").
     Loaded(Vec<PtyGroup>),
@@ -49,6 +50,7 @@ impl SessionTtyList {
     pub fn new(app: &Entity<AppStore>, id: ConnectionId, cx: &mut Context<Self>) -> Self {
         let observe = cx.observe(app, |list, app, cx| list.follow(&app, cx));
         let mut list = Self {
+            app: app.clone(),
             id,
             shown: Shown::NotConnected,
             _app: observe,
@@ -66,7 +68,8 @@ impl SessionTtyList {
             .cloned();
         match (&self.shown, session) {
             (Shown::Session { session: shown, .. }, Some(session)) if *shown == session => {}
-            (Shown::NotConnected, None) => {}
+            // Why it is down may have changed.
+            (Shown::NotConnected, None) => cx.notify(),
             (Shown::Session { .. }, None) => {
                 self.shown = Shown::NotConnected;
                 cx.notify();
@@ -94,7 +97,13 @@ impl SessionTtyList {
             session, processes, ..
         } = &self.shown
         else {
-            return TtyListBody::NotConnected;
+            // Electron lists through `getClient`, which says why the connection has no
+            // daemon (`Connection <id> is reconnecting: …`).
+            return match self.app.read(cx).manager().client(&self.id) {
+                Err(down) => TtyListBody::Failed(down.to_string()),
+                // Connected again, its session still loading: listed once it has.
+                Ok(_) => TtyListBody::Loading,
+            };
         };
         match processes.read(cx).list() {
             ProcessList::Loading => TtyListBody::Loading,
@@ -141,7 +150,7 @@ impl SessionTtyList {
     ) {
         match &self.shown {
             Shown::Session { processes, .. } => processes.update(cx, f),
-            // The tab shows "Not connected": there is nothing to act on.
+            // The tab shows why it cannot list: there is nothing to act on.
             Shown::NotConnected => {}
         }
     }

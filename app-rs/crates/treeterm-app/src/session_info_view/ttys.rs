@@ -81,13 +81,6 @@ impl SessionTtys {
                 .into_any_element()
         };
         let groups = match body {
-            // Without the toolbar: there is nothing to refresh.
-            TtyListBody::NotConnected => {
-                return super::SessionInfoView::output("session-ttys")
-                    .size_full()
-                    .child(div().text_color(secondary).child("Not connected"))
-                    .into_any_element();
-            }
             TtyListBody::Loading => return centered(div().child("Loading TTY sessions…").into_any_element()),
             TtyListBody::Failed(message) => {
                 return centered(
@@ -227,10 +220,6 @@ impl Render for SessionTtys {
         if !matches!(body, TtyListBody::Loaded(_)) {
             // `.tty-list-rows` is not mounted: listed again, it starts at the top.
             self.scroll = ScrollHandle::new();
-        }
-        if body == TtyListBody::NotConnected {
-            self.viewer = None;
-            return self.body(body, cx);
         }
         let viewer = self.viewer(window, cx);
         if viewer.is_none() {
