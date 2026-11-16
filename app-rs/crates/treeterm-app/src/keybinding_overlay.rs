@@ -8,7 +8,7 @@ use gpui_kit::{
     linear_gradient, point, px, relative,
     rgb, rgba,
 };
-use treeterm_core::keybinding::{Os, PrefixMode};
+use treeterm_core::keybinding::{Os, PrefixMode, format_accelerator};
 use treeterm_model::keybinding_store::KeybindingStore;
 
 use crate::theme::colors;
@@ -26,7 +26,6 @@ pub fn render(store: &Entity<KeybindingStore>, window: &mut Window, cx: &App) ->
     // The progress bar drains continuously while the overlay is up.
     window.request_animation_frame();
     let c = colors(cx);
-    let os = Os::host();
     let remaining = machine.remaining_fraction(std::time::Instant::now());
     let (header, items): (Vec<AnyElement>, Vec<(String, String)>) = match mode {
         PrefixMode::WorkspaceFocus => (
@@ -38,15 +37,13 @@ pub fn render(store: &Entity<KeybindingStore>, window: &mut Window, cx: &App) ->
             ],
         ),
         PrefixMode::Active | PrefixMode::Idle => {
-            let mut items: Vec<(String, String)> = machine
+            let items: Vec<(String, String)> = machine
                 .settings()
                 .actions
-                .overlay_items(os)
+                .overlay_items()
                 .into_iter()
-                .map(|item| (item.key_label.to_uppercase(), item.action.label().to_owned()))
+                .map(|item| (item.key_label, item.action.label().to_owned()))
                 .collect();
-            // Electron sorts the upper-cased keys.
-            items.sort_by(|a, b| a.0.cmp(&b.0));
             let prefix = div()
                 .px(px(8.))
                 .py(px(3.))
@@ -55,7 +52,7 @@ pub fn render(store: &Entity<KeybindingStore>, window: &mut Window, cx: &App) ->
                 .font_family(MONO)
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(gpui_kit::white())
-                .child(machine.settings().prefix_key.label(os))
+                .child(format_accelerator(machine.settings().prefix_key.text(), Os::host()))
                 .into_any_element();
             (vec![prefix, title("Prefix Mode", cx), hint("Press a key or Esc to cancel", cx)], items)
         }

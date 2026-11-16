@@ -69,19 +69,6 @@ impl ModifierKey {
             ModifierKey::Function => "function",
         }
     }
-
-    fn label(self, os: Os) -> &'static str {
-        match self {
-            ModifierKey::Control => "Ctrl",
-            ModifierKey::Alt => "Alt",
-            ModifierKey::Shift => "Shift",
-            ModifierKey::Platform => match os {
-                Os::MacOs => "Cmd",
-                Os::Linux => "Super",
-            },
-            ModifierKey::Function => "Fn",
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -243,31 +230,6 @@ impl Key {
             Key::Right => "right",
             Key::F(n) => return Cow::Owned(format!("f{n}")),
             Key::Modifier(modifier) => modifier.gpui_name(),
-            Key::Other(name) => name,
-        })
-    }
-
-    /// How the overlay and settings show the key: `B`, `,`, `Enter`, `F5`.
-    pub fn label(&self, os: Os) -> Cow<'_, str> {
-        Cow::Borrowed(match self {
-            Key::Char(c) => return Cow::Owned(c.to_uppercase().collect()),
-            Key::Space => "Space",
-            Key::Enter => "Enter",
-            Key::Tab => "Tab",
-            Key::Escape => "Escape",
-            Key::Backspace => "Backspace",
-            Key::Delete => "Delete",
-            Key::Insert => "Insert",
-            Key::Home => "Home",
-            Key::End => "End",
-            Key::PageUp => "PageUp",
-            Key::PageDown => "PageDown",
-            Key::Up => "Up",
-            Key::Down => "Down",
-            Key::Left => "Left",
-            Key::Right => "Right",
-            Key::F(n) => return Cow::Owned(format!("F{n}")),
-            Key::Modifier(modifier) => modifier.label(os),
             Key::Other(name) => name,
         })
     }
@@ -457,25 +419,19 @@ impl Shortcut {
         out.push_str(&self.key.gpui_name());
         out
     }
+}
 
-    /// How the overlay shows the shortcut: `Ctrl + B`, `Cmd + Shift + K`.
-    pub fn label(&self, os: Os) -> String {
-        let m = self.modifiers;
-        let modifiers = [
-            (m.function, ModifierKey::Function),
-            (m.control, ModifierKey::Control),
-            (m.platform, ModifierKey::Platform),
-            (m.alt, ModifierKey::Alt),
-            (m.shift, ModifierKey::Shift),
-        ];
-        let mut parts: Vec<Cow<'_, str>> = modifiers
-            .iter()
-            .filter(|(on, _)| *on)
-            .map(|(_, modifier)| Cow::Borrowed(modifier.label(os)))
-            .collect();
-        parts.push(self.key.label(os));
-        parts.join(" + ")
-    }
+/// An accelerator as written in `settings.json`, as the overlay's prefix badge and the
+/// settings' prefix key button show it (`formatPrefixKey`): the first `CommandOrControl`
+/// becomes `Cmd` or `Ctrl`, the first `Control` becomes `Ctrl`, and every `+` is spaced out.
+/// Anything else stays as written: `Control+B` is `Ctrl + B`, `Shift+Alt+x` stays in that
+/// order and case.
+pub fn format_accelerator(text: &str, os: Os) -> String {
+    let command = match os {
+        Os::MacOs => "Cmd",
+        Os::Linux => "Ctrl",
+    };
+    text.replacen("CommandOrControl", command, 1).replacen("Control", "Ctrl", 1).replace('+', " + ")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -703,15 +659,17 @@ mod tests {
         assert_eq!(Key::parse("f"), Ok(Key::Char('f')));
     }
 
+    /// `formatPrefixKey` in `KeybindingOverlay.tsx`: the text as written, only the first
+    /// `CommandOrControl` and `Control` renamed.
     #[test]
-    fn labels_follow_the_overlay_wording() {
-        assert_eq!(parse("Control+B", Os::MacOs).label(Os::MacOs), "Ctrl + B");
-        assert_eq!(parse("CommandOrControl+B", Os::MacOs).label(Os::MacOs), "Cmd + B");
-        assert_eq!(parse("CommandOrControl+B", Os::Linux).label(Os::Linux), "Ctrl + B");
-        assert_eq!(parse("Meta+Shift+Alt+F5", Os::Linux).label(Os::Linux), "Super + Alt + Shift + F5");
-        assert_eq!(parse("Alt+PageUp", Os::Linux).label(Os::Linux), "Alt + PageUp");
-        assert_eq!(Key::Modifier(ModifierKey::Platform).label(Os::MacOs), "Cmd");
-        assert_eq!(Key::Other("menu".to_owned()).label(Os::Linux), "menu");
+    fn accelerators_are_formatted_as_written() {
+        assert_eq!(format_accelerator("Control+B", Os::MacOs), "Ctrl + B");
+        assert_eq!(format_accelerator("CommandOrControl+Shift+K", Os::MacOs), "Cmd + Shift + K");
+        assert_eq!(format_accelerator("CommandOrControl+Shift+K", Os::Linux), "Ctrl + Shift + K");
+        assert_eq!(format_accelerator("Shift+Meta+alt+f5", Os::Linux), "Shift + Meta + alt + f5");
+        assert_eq!(format_accelerator("Control+A Control+B", Os::Linux), "Ctrl + A Control + B");
+        assert_eq!(format_accelerator("ctrl+b", Os::Linux), "ctrl + b");
+        assert_eq!(format_accelerator("", Os::MacOs), "");
     }
 
     #[test]

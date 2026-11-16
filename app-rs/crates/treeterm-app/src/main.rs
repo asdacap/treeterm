@@ -40,7 +40,9 @@ use gpui_kit::{
     App, AppContext as _, Bounds, Entity, TitlebarOptions, WindowBounds, WindowOptions, point, px,
     size,
 };
-use treeterm_core::keybinding::{KeyOutcome, KeyPress, KeybindingSettings, Modifiers, Os};
+use treeterm_core::keybinding::{
+    KeyOutcome, KeyPress, KeybindingSettings, KeybindingSettingsError, Modifiers, Os, ParseError,
+};
 use treeterm_model::keybinding_store::KeybindingStore;
 use treeterm_model::settings_store::{SettingsEvent, SettingsStore};
 use treeterm_core::local_daemon::LocalDaemonSpec;
@@ -60,17 +62,18 @@ fn automation_enabled() -> bool {
     std::env::var_os("TREETERM_AUTOMATION_SOCKET").is_some()
 }
 
-/// Prefix-mode settings from the loaded settings. A value that does not parse falls back
-/// to the defaults, loudly.
+/// Prefix-mode settings from the loaded settings. A key that can match no key press does
+/// nothing, as in Electron, and is logged; the other keys keep working.
 fn keybinding_settings(settings: &treeterm_core::settings::Settings) -> KeybindingSettings {
-    let raw = serde_json::to_value(settings).unwrap_or(serde_json::Value::Null);
-    match KeybindingSettings::from_settings_json(&raw, Os::host()) {
-        Ok(settings) => settings,
-        Err(error) => {
-            tracing::error!(%error, "invalid keybinding settings; using defaults");
-            KeybindingSettings::default()
+    let keys = KeybindingSettings::from_settings(settings, Os::host());
+    for problem in keys.problems() {
+        match problem {
+            // An empty prefix key is how Electron's settings turn prefix mode off.
+            KeybindingSettingsError::PrefixKey(ParseError::Empty) => tracing::info!("no prefix key; prefix mode is off"),
+            problem => tracing::error!(%problem, "key binding matches no key press; it does nothing"),
         }
     }
+    keys
 }
 
 /// Every keystroke passes the shortcut machine before the focused view (a terminal) sees

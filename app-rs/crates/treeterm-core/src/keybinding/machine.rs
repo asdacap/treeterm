@@ -234,7 +234,7 @@ impl Keybindings {
         // A key can beat a late timer; an expired mode must not take it.
         self.on_timeout(now);
 
-        if self.settings.prefix_key.matches(press) {
+        if matches!(self.settings.prefix_key.parsed(), Ok(prefix) if prefix.matches(press)) {
             return match self.state {
                 PrefixState::Idle => {
                     self.activate(now);
@@ -320,7 +320,8 @@ fn direct_shortcut(press: &KeyPress) -> KeyOutcome {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::keybinding::key::{Modifiers, Os, Shortcut};
+    use crate::keybinding::Binding;
+    use crate::keybinding::key::{Modifiers, Os};
 
     const CTRL: Modifiers = Modifiers { control: true, ..Modifiers::NONE };
     const META: Modifiers = Modifiers { platform: true, ..Modifiers::NONE };
@@ -639,7 +640,7 @@ mod tests {
                     let mut kb = machine();
                     kb.set_settings(KeybindingSettings {
                         actions: crate::keybinding::ActionKeys {
-                            open_settings: Key::Char('?'),
+                            open_settings: Binding::action("?"),
                             ..Default::default()
                         },
                         ..KeybindingSettings::default()
@@ -777,13 +778,48 @@ mod tests {
                 let t0 = Instant::now();
                 let mut kb = machine();
                 kb.set_settings(KeybindingSettings {
-                    prefix_key: Shortcut::parse("CommandOrControl+A", Os::MacOs).unwrap(),
+                    prefix_key: Binding::prefix("CommandOrControl+A", Os::MacOs),
                     ..KeybindingSettings::default()
                 });
                 assert_eq!(kb.handle_key(&ctrl_b(), t0), KeyOutcome::PassThrough);
                 let cmd_a = KeyPress::from_gpui("a", None, META);
                 assert_eq!(kb.handle_key(&cmd_a, t0), KeyOutcome::Consumed);
                 assert_eq!(kb.mode(), PrefixMode::Active);
+            }
+
+            /// `matchesKeybinding` never matches an empty key: with no prefix key, prefix
+            /// mode is off and Cmd/Ctrl+1–9 still switch tabs.
+            #[test]
+            fn an_empty_prefix_key_turns_prefix_mode_off() {
+                let t0 = Instant::now();
+                let mut kb = machine();
+                kb.set_settings(KeybindingSettings {
+                    prefix_key: Binding::prefix("", Os::Linux),
+                    ..KeybindingSettings::default()
+                });
+                assert_eq!(kb.handle_key(&ctrl_b(), t0), KeyOutcome::PassThrough);
+                assert_eq!(kb.handle_key(&key("c"), t0), KeyOutcome::PassThrough);
+                assert_eq!(kb.state(), &PrefixState::Idle);
+                let ctrl_1 = KeyPress::from_gpui("1", None, CTRL);
+                assert_eq!(kb.handle_key(&ctrl_1, t0), KeyOutcome::Perform(Action::SwitchToTab { index: 0 }));
+            }
+
+            #[test]
+            fn an_unusable_action_key_leaves_prefix_mode_like_any_other_key() {
+                let t0 = Instant::now();
+                let mut kb = machine();
+                kb.set_settings(KeybindingSettings {
+                    actions: crate::keybinding::ActionKeys {
+                        new_tab: Binding::action("CapsLock"),
+                        ..Default::default()
+                    },
+                    ..KeybindingSettings::default()
+                });
+                assert_eq!(kb.handle_key(&ctrl_b(), t0), KeyOutcome::Consumed);
+                assert_eq!(kb.handle_key(&key("c"), t0), KeyOutcome::PassThrough);
+                assert_eq!(kb.state(), &PrefixState::Idle);
+                assert_eq!(kb.handle_key(&ctrl_b(), t0), KeyOutcome::Consumed);
+                assert_eq!(kb.handle_key(&key("x"), t0), KeyOutcome::Perform(Action::Prefix(PrefixAction::CloseTab)));
             }
         }
 

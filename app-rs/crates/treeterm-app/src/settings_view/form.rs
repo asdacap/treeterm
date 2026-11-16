@@ -7,7 +7,7 @@ use std::path::Path;
 use std::str::FromStr;
 use std::time::Duration;
 
-use treeterm_core::keybinding::{Key, Os, PrefixAction, Shortcut};
+use treeterm_core::keybinding::{Key, Os, PrefixAction, Shortcut, format_accelerator};
 use treeterm_core::settings::{
     AiHarnessInstance, AppearanceSettings, BrowserInstance, ClassifiedState, ClassifierCriteria,
     CustomRunnerInstance, DebugSettings, GithubSettings, Instances, Keybindings, LlmSettings,
@@ -137,7 +137,7 @@ impl Texts {
             idle_debounce_unread: analyzer.idle_debounce_unread.as_millis().to_string(),
             prefix_key: settings.prefix_mode.prefix_key.clone(),
             prefix_timeout: settings.prefix_mode.timeout.as_millis().to_string(),
-            action_keys: PrefixAction::ALL.map(|action| action_key(&settings.keybindings, action).to_owned()),
+            action_keys: PrefixAction::ALL.map(|action| action.stored_key(&settings.keybindings).to_owned()),
             github_pat: settings.github.pat.clone(),
         }
     }
@@ -211,17 +211,6 @@ fn whole_number<T: FromStr + PartialOrd>(text: &str, min: T) -> Option<T> {
 /// Electron's safe-paths field: comma-separated, trimmed, empty entries dropped.
 pub fn parse_safe_paths(text: &str) -> Vec<String> {
     text.split(',').map(str::trim).filter(|path| !path.is_empty()).map(str::to_owned).collect()
-}
-
-pub fn action_key(keybindings: &Keybindings, action: PrefixAction) -> &str {
-    match action {
-        PrefixAction::NewTab => &keybindings.new_tab,
-        PrefixAction::CloseTab => &keybindings.close_tab,
-        PrefixAction::NextTab => &keybindings.next_tab,
-        PrefixAction::PrevTab => &keybindings.prev_tab,
-        PrefixAction::OpenSettings => &keybindings.open_settings,
-        PrefixAction::WorkspaceFocus => &keybindings.workspace_focus,
-    }
 }
 
 fn action_key_mut(keybindings: &mut Keybindings, action: PrefixAction) -> &mut String {
@@ -523,11 +512,7 @@ pub fn format_prefix_key(binding: &str, os: Os) -> String {
     if binding.is_empty() {
         return "(none)".to_owned();
     }
-    let command = match os {
-        Os::MacOs => "Cmd",
-        Os::Linux => "Ctrl",
-    };
-    binding.replacen("CommandOrControl", command, 1).replacen("Control", "Ctrl", 1).replace('+', " + ")
+    format_accelerator(binding, os)
 }
 
 pub fn new_id(prefix: &str, now_ms: u128, taken: impl Fn(&str) -> bool) -> String {

@@ -15,20 +15,21 @@
 //! its one timer with [`Keybindings::deadline`], which calls [`Keybindings::on_timeout`].
 //!
 //! The overlay reads [`Keybindings::state`] (or [`Keybindings::mode`]),
-//! [`Keybindings::remaining_fraction`] for the progress bar, [`Shortcut::label`] of the
-//! prefix key and [`ActionKeys::overlay_items`]. The tree highlights
+//! [`Keybindings::remaining_fraction`] for the progress bar, the prefix key's text through
+//! [`format_accelerator`] and [`ActionKeys::overlay_items`]. The tree highlights
 //! [`Keybindings::focused_workspace`].
 //!
-//! Settings come from [`KeybindingSettings::from_settings_json`]; [`Shortcut::to_gpui`]
-//! turns an Electron accelerator into a GPUI keybinding string.
+//! Settings come from [`KeybindingSettings::from_settings`]: each key is a [`Binding`] that
+//! keeps its text and, as in Electron, only disables itself when it can match no key press.
+//! [`Shortcut::to_gpui`] turns an Electron accelerator into a GPUI keybinding string.
 
 mod key;
 mod machine;
 mod settings;
 
-pub use key::{Key, KeyPress, ModifierKey, Modifiers, Os, ParseError, Shortcut};
+pub use key::{Key, KeyPress, ModifierKey, Modifiers, Os, ParseError, Shortcut, format_accelerator};
 pub use machine::{
     Action, Deadline, FocusDirection, FocusIndexOutOfRange, KeyOutcome, Keybindings, PrefixMode, PrefixState,
     WorkspaceCursor,
 };
-pub use settings::{ActionKeys, KeybindingSettings, KeybindingSettingsError, OverlayItem, PrefixAction};
+pub use settings::{ActionKeys, Binding, KeybindingSettings, KeybindingSettingsError, OverlayItem, PrefixAction};
