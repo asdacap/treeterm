@@ -3,7 +3,7 @@
 //! header with the file name and its unsaved mark, the markdown Edit/Preview toggle, Save
 //! and the language, over the editor or the markdown preview.
 
-use gpui_kit::component::input::{Editor, EditorState, InputEvent};
+use gpui_kit::component::input::{Editor, EditorState, InputEvent, Replace};
 use gpui_kit::component::v_flex;
 use gpui_kit::component::h_flex;
 use gpui_kit::prelude::*;
@@ -18,9 +18,14 @@ actions!(text_editor, [Save]);
 
 const CONTEXT: &str = "TextEditor";
 
+/// Cmd/Ctrl+S saves. Monaco's replace is Cmd+Alt+F on macOS (GPUI Kit's Cmd+Shift+F
+/// stays); elsewhere it is Ctrl+H, as in the Kit.
 pub fn bind_keys(cx: &mut gpui_kit::App) {
     let key = if cfg!(target_os = "macos") { "cmd-s" } else { "ctrl-s" };
     cx.bind_keys([KeyBinding::new(key, Save, Some(CONTEXT))]);
+    if cfg!(target_os = "macos") {
+        cx.bind_keys([KeyBinding::new("cmd-alt-f", Replace, Some(CONTEXT))]);
+    }
 }
 
 pub struct TextEditorView {
@@ -201,5 +206,41 @@ impl Render for TextEditorView {
             )
             .child(div().flex_1().min_h_0().overflow_hidden().child(body))
             .into_any_element()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A code editor in the Editor tab's key context.
+    struct Host {
+        editor: Entity<EditorState>,
+    }
+
+    impl Render for Host {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().key_context(CONTEXT).w(px(400.)).h(px(300.)).child(Editor::new(&self.editor).h_full())
+        }
+    }
+
+    #[gpui_kit::test]
+    fn monacos_replace_key_opens_find_and_replace(cx: &mut gpui_kit::TestAppContext) {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            bind_keys(cx);
+        });
+        let (host, cx) = cx.add_window_view(|window, cx| Host {
+            editor: cx.new(|cx| EditorState::new(window, cx).language("rust").default_value("fn main() {}\n")),
+        });
+        let editor = cx.update(|_, cx| host.read(cx).editor.clone());
+        cx.update(|window, cx| editor.update(cx, |editor, cx| editor.focus(window, cx)));
+        cx.run_until_parked();
+        cx.simulate_keystrokes(if cfg!(target_os = "macos") { "cmd-alt-f" } else { "ctrl-h" });
+        let (open, replace) = cx.update(|_, cx| {
+            let search = editor.read(cx).search_session();
+            (search.open, search.replace_mode)
+        });
+        assert!(open && replace, "open {open}, replace {replace}");
     }
 }
