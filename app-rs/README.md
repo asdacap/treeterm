@@ -102,7 +102,8 @@ Done (tested against a real in-process daemon unless noted):
   saved connections, remote directory browser, session pane with logs and port forwards.
   While a connection is down its session stays in the sidebar, dimmed under the connection's
   banner, and its workspace stays open; workspace changes whose writes were deferred or failed
-  meanwhile are written on the new connection before the session is rebuilt from it. A
+  meanwhile are written on the new connection before the session is rebuilt from it; until
+  the rebuilt session has loaded, a connection lost again brings back the session as it was. A
   connect whose session does not load stops at its error ("Remote daemon is outdated. Retry
   with 'Refresh remote daemon' checked. …" or "Connected but failed to load session: …"),
   without a session; saved port forwards start once the session has loaded.

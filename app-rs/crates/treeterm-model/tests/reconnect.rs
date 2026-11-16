@@ -414,3 +414,80 @@ fn a_reconnect_keeps_the_active_workspace_or_falls_back_to_the_first(cx: &mut Te
     let (_proxy, third) = reconnect(cx, &app, proxy, &socket, &h, || publish_refs(&h, &["a"]));
     assert_eq!(active(cx, &third).as_deref(), Some("a"));
 }
+
+#[gpui_kit::test]
+fn a_generation_lost_before_its_session_loads_leaves_the_last_session_as_it_was(
+    cx: &mut TestAppContext,
+) {
+    cx.executor().allow_parking();
+    let h = harness();
+    publish_refs(&h, &["a", "b"]);
+    let dir = tempfile::Builder::new()
+        .prefix("tt")
+        .tempdir_in("/tmp")
+        .unwrap();
+    let socket = dir.path().join("p.sock");
+    let proxy = Proxy::start(&socket, h.daemon.socket_path());
+    let spec = LocalDaemonSpec {
+        socket_path: socket.clone(),
+        binary: dir.path().join("never-spawned"),
+        log_path: dir.path().join("daemon.log"),
+        pid_file: dir.path().join("daemon.pid"),
+    };
+    let settings = cx.new(|_| SettingsStore::in_memory(Default::default()));
+    let rt = h.rt.clone();
+    let app = cx.new(|cx| AppStore::new(rt, spec, settings, cx));
+    wait_until_app(cx, &app, |a, cx| {
+        local(a).session().is_some_and(|s| {
+            let s = s.read(cx);
+            s.workspace_store("a").is_some() && s.workspace_store("b").is_some()
+        })
+    });
+    let first = app.read_with(cx, |a, _| local(a).session().unwrap().clone());
+    first.update(cx, |s, cx| s.set_active_workspace("b".to_owned(), cx));
+    drop(proxy);
+    wait_until(cx, &app, |a| {
+        matches!(local(a).state, ConnState::Reconnecting { .. })
+    });
+
+    // The next generation connects, but its daemon does not answer: its store waits for
+    // the session.
+    let silent = Proxy::silent(&socket, h.daemon.socket_path());
+    wait_until(cx, &app, |a| local(a).session().is_some());
+    let unloaded = app.read_with(cx, |a, _| local(a).session().unwrap().clone());
+    assert_ne!(unloaded, first);
+    assert!(unloaded.read_with(cx, |s, _| matches!(s.state(), SessionState::Waiting)));
+
+    // That generation is lost too: the last session is shown again, dimmed, with its
+    // workspaces and the one it had active.
+    drop(silent);
+    wait_until(cx, &app, |a| {
+        matches!(local(a).state, ConnState::Reconnecting { .. })
+    });
+    app.read_with(cx, |a, cx| {
+        assert!(local(a).session().is_none());
+        assert_eq!(local(a).shown_session(), Some(&first));
+        assert_eq!(first.read(cx).tree_rows(&HashSet::new(), cx).len(), 2);
+    });
+    assert_eq!(active(cx, &first).as_deref(), Some("b"));
+
+    // The daemon is back: the next store keeps `b` active; once it has loaded, the last one
+    // is gone and an edit to it is never written.
+    let _proxy = Proxy::start(&socket, h.daemon.socket_path());
+    wait_until_app(cx, &app, |a, cx| {
+        local(a).session().is_some_and(|s| {
+            *s != unloaded && matches!(s.read(cx).state(), SessionState::Live)
+        })
+    });
+    let next = app.read_with(cx, |a, _| local(a).session().unwrap().clone());
+    assert_eq!(active(cx, &next).as_deref(), Some("b"));
+    assert_eq!(
+        app.read_with(cx, |a, _| local(a).shown_session().cloned()),
+        Some(next.clone())
+    );
+    let old = first.read_with(cx, |s, _| ws(s));
+    old.update(cx, |w, cx| w.update_metadata("displayName", "Ghost", cx));
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    cx.run_until_parked();
+    assert_eq!(display_name_on_disk(&h), None);
+}

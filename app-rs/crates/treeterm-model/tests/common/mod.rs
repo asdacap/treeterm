@@ -49,6 +49,16 @@ pub struct Proxy {
 
 impl Proxy {
     pub fn start(listen: &std::path::Path, target: &std::path::Path) -> Self {
+        Self::bind(listen, target, Hold::Never)
+    }
+
+    /// A proxy that accepts connections and never answers them, as a tunnel whose daemon
+    /// is suspended would: a client connects, and its calls wait.
+    pub fn silent(listen: &std::path::Path, target: &std::path::Path) -> Self {
+        Self::bind(listen, target, Hold::Forever)
+    }
+
+    fn bind(listen: &std::path::Path, target: &std::path::Path, hold: Hold) -> Self {
         match std::fs::remove_file(listen) {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -67,6 +77,11 @@ impl Proxy {
                 let (mut inbound, _) = listener.accept().await.expect("proxy accept");
                 let target = target.clone();
                 connections.spawn(async move {
+                    match hold {
+                        Hold::Never => {}
+                        // Holds the connection open, unread, until the proxy is dropped.
+                        Hold::Forever => std::future::pending::<()>().await,
+                    }
                     let mut outbound = tokio::net::UnixStream::connect(&target)
                         .await
                         .expect("proxy dial");
@@ -80,6 +95,13 @@ impl Proxy {
         });
         Self { task }
     }
+}
+
+/// Whether a [`Proxy`] forwards what it accepts.
+#[derive(Clone, Copy)]
+enum Hold {
+    Never,
+    Forever,
 }
 
 impl Drop for Proxy {

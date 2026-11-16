@@ -6,8 +6,9 @@
 //! new connection generation; its session store is built on it. When a connection is lost
 //! the store is kept, told it is disconnected: it is shown dimmed and defers its body
 //! writes. When the next generation connects, the kept store writes those bodies on it
-//! (`handleReconnected`'s flush) and is then disposed explicitly — a ghost store left alive
-//! keeps writing the same files as its replacement — before a fresh one is built.
+//! (`handleReconnected`'s flush) and a fresh one is built. Once that one has loaded its
+//! session, the kept store is disposed explicitly (a ghost store left alive keeps writing the
+//! same files as its replacement); if the generation is lost before, it is kept again.
 //!
 //! Where the window lands once a connection's session is restored is decided here too
 //! (`local:connect`, `addRemoteSession`): see [`AppEvent::ShowSession`].
@@ -88,8 +89,14 @@ enum Previous {
     /// Disconnected: shown dimmed and inert; its body writes are deferred.
     Kept(Entity<SessionStore>),
     /// The next generation is up: the store writes its deferred bodies on it
-    /// ([`SessionStore::hand_over`]), then it is disposed and replaced.
+    /// ([`SessionStore::hand_over`]), then a fresh store is built on it.
     HandingOver { session: Entity<SessionStore>, task: Task<()> },
+    /// The fresh store is loading its session. The last one, its bodies written and its
+    /// writes deferred again, is disposed once that store is restored; if the generation is
+    /// lost first, it is kept again, with its workspaces and the one it had active. (Electron
+    /// replaces the store only once the new connection's session has loaded:
+    /// `connection:reconnected` follows `watch.initial`.)
+    Replacing(Entity<SessionStore>),
 }
 
 impl SessionSlot {
@@ -121,7 +128,9 @@ impl SessionSlot {
     pub fn shown_session(&self) -> Option<&Entity<SessionStore>> {
         self.session().or(match &self.previous {
             Previous::Nothing => None,
-            Previous::Kept(session) | Previous::HandingOver { session, .. } => Some(session),
+            Previous::Kept(session) | Previous::HandingOver { session, .. } | Previous::Replacing(session) => {
+                Some(session)
+            }
         })
     }
 }
@@ -338,7 +347,7 @@ impl AppStore {
         }
         match slot.previous {
             Previous::Nothing => {}
-            Previous::Kept(session) | Previous::HandingOver { session, .. } => {
+            Previous::Kept(session) | Previous::HandingOver { session, .. } | Previous::Replacing(session) => {
                 session.update(cx, |session, cx| session.dispose(cx));
             }
         }
@@ -346,19 +355,27 @@ impl AppStore {
 
     /// The connected generation, if any, is gone: keep its store, told it is disconnected
     /// (`handleConnectionStatusChange`). A hand-over in progress stops (its task is
-    /// dropped); the store defers its writes again until the next generation. The caller
-    /// sets the state the new status carries.
+    /// dropped); the store defers its writes again until the next generation. A store that
+    /// had not loaded its session yet is disposed, and the one it was replacing is kept. The
+    /// caller sets the state the new status carries.
     fn keep_previous(slot: &mut SessionSlot, cx: &mut Context<Self>) {
-        let kept = match std::mem::replace(&mut slot.previous, Previous::Nothing) {
-            Previous::Nothing => None,
-            Previous::Kept(session) | Previous::HandingOver { session, .. } => Some(session),
-        };
-        let kept = match &slot.state {
+        let connected = match &slot.state {
             ConnState::Connected(session) => {
                 slot._events = None;
                 Some(session.clone())
             }
-            ConnState::Connecting(_) | ConnState::Reconnecting { .. } | ConnState::Failed { .. } => kept,
+            ConnState::Connecting(_) | ConnState::Reconnecting { .. } | ConnState::Failed { .. } => None,
+        };
+        let kept = match (std::mem::replace(&mut slot.previous, Previous::Nothing), connected) {
+            (Previous::Replacing(session), Some(unloaded)) => {
+                unloaded.update(cx, |s, cx| s.dispose(cx));
+                Some(session)
+            }
+            (Previous::Nothing | Previous::Kept(_) | Previous::HandingOver { .. }, Some(session)) => Some(session),
+            (Previous::Kept(session) | Previous::HandingOver { session, .. } | Previous::Replacing(session), None) => {
+                Some(session)
+            }
+            (Previous::Nothing, None) => None,
         };
         if let Some(session) = kept {
             session.update(cx, |s, cx| s.set_connection_status(SessionConnection::Disconnected, cx));
@@ -401,7 +418,7 @@ impl AppStore {
                         }
                         self.connect_session(&id, daemon, Restore::FirstRef, cx);
                     }
-                    Previous::Kept(session) | Previous::HandingOver { session, .. } => {
+                    Previous::Kept(session) | Previous::HandingOver { session, .. } | Previous::Replacing(session) => {
                         self.hand_over(&id, session, daemon, cx);
                     }
                 }
@@ -470,7 +487,8 @@ impl AppStore {
 
     /// The next generation is up while the last one's store is kept (`handleReconnected`):
     /// the kept store writes its deferred bodies on the new connection, then a fresh store
-    /// replaces it. Until then the slot keeps the state the connection was lost with.
+    /// is built to replace it. Until then the slot keeps the state the connection was lost
+    /// with.
     fn hand_over(&mut self, id: &ConnectionId, session: Entity<SessionStore>, daemon: DaemonConnection, cx: &mut Context<Self>) {
         let flush = session.update(cx, |s, cx| s.hand_over(daemon.clone(), cx));
         let owned = id.clone();
@@ -499,8 +517,12 @@ impl AppStore {
             Some(workspace) => Restore::Workspace(workspace.to_owned()),
             None => Restore::FirstRef,
         };
-        session.update(cx, |session, cx| session.dispose(cx));
+        // Its bodies are written; it writes nothing more unless it is kept again.
+        session.update(cx, |s, cx| s.set_connection_status(SessionConnection::Disconnected, cx));
         self.connect_session(id, daemon, restore, cx);
+        if let Some(slot) = self.sessions.get_mut(id) {
+            slot.previous = Previous::Replacing(session);
+        }
         cx.notify();
     }
 
@@ -510,6 +532,11 @@ impl AppStore {
         let Some(slot) = self.sessions.get_mut(id).filter(|slot| slot.session() == Some(session)) else {
             return;
         };
+        // The store it replaces is done with (`handleReconnected` disposes it).
+        match std::mem::replace(&mut slot.previous, Previous::Nothing) {
+            Previous::Replacing(replaced) => replaced.update(cx, |s, cx| s.dispose(cx)),
+            other => slot.previous = other,
+        }
         // `autoStartPortForwards`: once, after the first connect's session loaded.
         if !slot.forwards_started && !slot.is_local() {
             slot.forwards_started = true;
