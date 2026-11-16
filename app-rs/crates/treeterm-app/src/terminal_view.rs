@@ -14,11 +14,13 @@ use gpui_kit::component::v_flex;
 use gpui_kit::prelude::*;
 use gpui_kit::{
     App, Bounds, ClipboardItem, Context, Entity, FocusHandle, KeyBinding, KeyDownEvent,
-    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, NoAction, Pixels, Point,
-    ScrollDelta, ScrollEvent, SharedString, Subscription, Task, UTF16Selection, Window, actions,
-    div, px, rgba,
+    ModifiersChangedEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, NoAction,
+    Pixels, Point, ScrollDelta, ScrollEvent, SharedString, Subscription, Task, UTF16Selection,
+    Window, actions, div, px, rgba,
 };
-use treeterm_model::terminal::{CellPoint, Overlay, SelectionKind, TerminalEvent, TerminalModel};
+use treeterm_model::terminal::{
+    CellPoint, LinkPress, Overlay, Pointer, SelectionKind, TerminalEvent, TerminalModel,
+};
 use treeterm_term::alacritty_terminal::vte::ansi::Rgb;
 use treeterm_term::fit::WidthLimit;
 use treeterm_term::keys::{KeyInput, KeyOptions, Modifiers, encode_key};
@@ -292,6 +294,23 @@ impl TerminalView {
         })
     }
 
+    /// The cell under `position` only when it is over the grid: a link is under the pointer
+    /// there alone, as xterm.js's linkifier listens on its screen and not on the padding.
+    fn grid_cell_at(&self, position: Point<Pixels>) -> Option<CellPoint> {
+        let geometry = self.geometry.get()?;
+        if !geometry.contains(position) {
+            return None;
+        }
+        self.cell_at(position)
+    }
+
+    fn pointer_at(&self, position: Point<Pixels>, modifiers: gpui_kit::Modifiers, cx: &App) -> Option<Pointer> {
+        Some(Pointer {
+            at: self.grid_cell_at(position)?,
+            secondary: modifiers.secondary(cx),
+        })
+    }
+
     fn report_mouse(&mut self, action: MouseAction, position: Point<Pixels>, m: gpui_kit::Modifiers, cx: &mut Context<Self>) -> bool {
         let mode = *self.model.read(cx).term().lock().mode();
         // Shift bypasses mouse reporting so text can still be selected, as in xterm.js.
@@ -347,18 +366,18 @@ impl TerminalView {
             MouseButton::Middle => mouse::MouseButton::Middle,
             MouseButton::Right | MouseButton::Navigate(_) => return,
         };
+        if button == mouse::MouseButton::Left {
+            let pointer = self.pointer_at(event.position, event.modifiers, cx);
+            match self.model.update(cx, |model, _| model.press_link(pointer)) {
+                LinkPress::Taken => return,
+                LinkPress::Shared => {}
+            }
+        }
         if self.report_mouse(MouseAction::Press(button), event.position, event.modifiers, cx) {
             self.reported_button = Some(button);
             return;
         }
         if button != mouse::MouseButton::Left {
-            return;
-        }
-        // Cmd/Ctrl+click opens a link under the pointer.
-        if (event.modifiers.platform || (cfg!(not(target_os = "macos")) && event.modifiers.control))
-            && let Some(url) = self.link_at(event.position, cx)
-        {
-            cx.open_url(&url);
             return;
         }
         let Some(at) = self.cell_at(event.position) else {
@@ -379,6 +398,8 @@ impl TerminalView {
     }
 
     fn on_mouse_move(&mut self, event: &MouseMoveEvent, _window: &mut Window, cx: &mut Context<Self>) {
+        let pointer = self.pointer_at(event.position, event.modifiers, cx);
+        self.model.update(cx, |model, cx| model.hover(pointer, cx));
         if let Some(grab) = self.scrollbar_grab {
             if let Some(scrollbar) = self.geometry.get().and_then(|g| g.scrollbar) {
                 let ratio = scrollbar.ratio_at(event.position.y, grab);
@@ -408,6 +429,10 @@ impl TerminalView {
         if self.scrollbar_grab.take().is_some() {
             return;
         }
+        if event.button == MouseButton::Left {
+            let at = self.grid_cell_at(event.position);
+            self.model.update(cx, |model, cx| model.release_link(at, cx));
+        }
         if let Some(button) = self.reported_button.take() {
             self.report_mouse(MouseAction::Release(button), event.position, event.modifiers, cx);
             return;
@@ -419,6 +444,23 @@ impl TerminalView {
                 self.model.update(cx, |model, cx| model.clear_selection(cx));
             }
         }
+    }
+
+    /// A left release off the terminal opens no link.
+    fn on_mouse_up_out(&mut self, _: &MouseUpEvent, _window: &mut Window, cx: &mut Context<Self>) {
+        self.model.update(cx, |model, cx| model.release_link(None, cx));
+    }
+
+    fn on_hover(&mut self, hovered: &bool, _window: &mut Window, cx: &mut Context<Self>) {
+        if !hovered {
+            self.model.update(cx, |model, cx| model.hover(None, cx));
+        }
+    }
+
+    /// Cmd/Ctrl going down over a URL in the text makes it a link, and going up, text again.
+    fn on_modifiers_changed(&mut self, event: &ModifiersChangedEvent, _window: &mut Window, cx: &mut Context<Self>) {
+        let secondary = event.modifiers.secondary(cx);
+        self.model.update(cx, |model, cx| model.hover_secondary(secondary, cx));
     }
 
     fn on_scroll(&mut self, event: &ScrollEvent, _window: &mut Window, cx: &mut Context<Self>) {
@@ -455,22 +497,6 @@ impl TerminalView {
             return;
         }
         self.model.update(cx, |model, cx| model.scroll_lines(whole, cx));
-    }
-
-    /// An OSC 8 hyperlink or a URL in the text under `position`.
-    fn link_at(&self, position: Point<Pixels>, cx: &App) -> Option<String> {
-        use treeterm_term::alacritty_terminal::index::{Column, Line, Point as GridPoint};
-        let at = self.cell_at(position)?;
-        let model = self.model.read(cx);
-        let term = model.term().lock();
-        let offset = term.grid().display_offset() as i32;
-        let line = Line(at.line as i32 - offset);
-        let cell = &term.grid()[GridPoint::new(line, Column(at.column))];
-        if let Some(link) = cell.hyperlink() {
-            return Some(link.uri().to_owned());
-        }
-        let text = treeterm_term::view::line_text(&*term, line);
-        url_at(&text, at.column)
     }
 
     // ---- actions -----------------------------------------------------------------------
@@ -610,28 +636,6 @@ fn default_mono_family() -> &'static str {
     if cfg!(target_os = "macos") { "Menlo" } else { "DejaVu Sans Mono" }
 }
 
-/// The URL around `column` in `line`, if any.
-pub fn url_at(line: &str, column: usize) -> Option<String> {
-    const SCHEMES: [&str; 3] = ["https://", "http://", "file://"];
-    let chars: Vec<char> = line.chars().collect();
-    if column >= chars.len() {
-        return None;
-    }
-    let is_url_char = |c: char| !c.is_whitespace() && !matches!(c, '"' | '\'' | '<' | '>' | '`' | '|');
-    let mut start = column;
-    while start > 0 && is_url_char(chars[start - 1]) {
-        start -= 1;
-    }
-    let mut end = column;
-    while end < chars.len() && is_url_char(chars[end]) {
-        end += 1;
-    }
-    let word: String = chars[start..end].iter().collect();
-    let found = SCHEMES.iter().filter_map(|scheme| word.find(scheme)).min()?;
-    let url = word[found..].trim_end_matches(['.', ',', ';', ':', ')', ']', '}', '!', '?']);
-    (url.len() > "https://".len()).then(|| url.to_owned())
-}
-
 fn rgb_hsla(color: Rgb) -> gpui_kit::Hsla {
     gpui_kit::rgb((u32::from(color.r) << 16) | (u32::from(color.g) << 8) | u32::from(color.b)).into()
 }
@@ -644,6 +648,9 @@ impl Render for TerminalView {
         let overlay = model.overlay().clone();
         let alternate = model.is_alternate_screen();
         let mismatch = model.size_mismatch();
+        let hovered_link = model.hovered_link();
+        // xterm.js's `xterm-cursor-pointer` over a hovered link.
+        let pointer_cursor = hovered_link.is_some();
         let focused = self.focus.is_focused(window) && crate::window_counts_as_active(window);
         // Focus listeners only fire on focus *changes* seen between frames; a view focused
         // in the frame that created it can miss its own. Reconcile after rendering instead.
@@ -660,6 +667,7 @@ impl Render for TerminalView {
             self.cursor_on,
             focused,
             self.marked_text.clone(),
+            hovered_link,
         );
 
         let mut root = div()
@@ -684,9 +692,12 @@ impl Render for TerminalView {
             .on_mouse_move(cx.listener(Self::on_mouse_move))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
             .on_mouse_up(MouseButton::Middle, cx.listener(Self::on_mouse_up))
+            .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up_out))
+            .on_hover(cx.listener(Self::on_hover))
+            .on_modifiers_changed(cx.listener(Self::on_modifiers_changed))
             .on_scroll(cx.listener(Self::on_scroll))
-            .cursor_text()
             .child(element);
+        root = if pointer_cursor { root.cursor_pointer() } else { root.cursor_text() };
 
         if let Some(message) = overlay.message() {
             let c = colors(cx);
@@ -889,8 +900,6 @@ impl gpui_kit::EntityInputHandler for TerminalView {
 
 #[cfg(test)]
 mod tests {
-    use super::url_at;
-
     #[test]
     fn a_terminal_keeps_the_shortcuts_it_encodes_off_macos() {
         let linux = treeterm_term::keys::KeyOptions {
@@ -903,13 +912,5 @@ mod tests {
             ["ctrl-q", "ctrl-m", "ctrl-w", "f11", "ctrl-c"],
             "Ctrl+, and Ctrl+Shift+Q stay app shortcuts; Cmd never reaches the PTY"
         );
-    }
-
-    #[test]
-    fn finds_the_url_under_a_column() {
-        let line = "see https://example.com/a?b=1. for details";
-        assert_eq!(url_at(line, 10).as_deref(), Some("https://example.com/a?b=1"));
-        assert_eq!(url_at(line, 1), None);
-        assert_eq!(url_at("(http://x.io/y)", 3).as_deref(), Some("http://x.io/y"));
     }
 }

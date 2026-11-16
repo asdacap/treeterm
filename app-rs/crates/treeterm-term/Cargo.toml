@@ -8,8 +8,11 @@ description = "Terminal emulation core (alacritty_terminal) without any UI: pars
 
 [dependencies]
 alacritty_terminal = "=0.26.0"
+regex = "1"
 thiserror.workspace = true
 tracing.workspace = true
+# OSC 8 hyperlinks are links only when they parse as http(s) URLs, as `new URL` reads them.
+url = "2"
 
 [lints]
 workspace = true

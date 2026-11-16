@@ -72,9 +72,11 @@ Done (tested against a real in-process daemon unless noted):
   channels), Electron-compatible socket path, local daemon autostart.
 - **Terminal (M1):** `alacritty_terminal` core fed from `PtyStream` (replay-aware query gating,
   OSC 52 rules), GPUI renderer (grid-forced shaping, wide chars, cursor, selection, IME
-  preedit, width-limit strip, scrollbar), xterm.js-compatible keys/mouse/paste, links, scroll
-  badge/pin, ALT SCREEN, size mismatch, overlays, refresh, status bar (activity, idle detector,
-  col limit). 200k lines render in ~0.4 s.
+  preedit, width-limit strip, scrollbar), xterm.js-compatible keys/mouse/paste, links (an OSC 8
+  `http(s)` hyperlink opens in the browser on a click, a URL in the text on Cmd/Ctrl+click;
+  underlined, with a pointer cursor, under the pointer), scroll badge/pin, ALT SCREEN, size
+  mismatch, overlays, refresh, status bar (activity, idle detector, col limit). 200k lines
+  render in ~0.4 s.
 - **Session/workspace sync (M2):** full write side of `createSessionStore` (ref CAS with
   retry, body CAS with parentHash chain, echo suppression, conflict rewrite, watch reopen,
   lock ops), tabs (add/close/activate/state, PTY creation keyed by `ptyHandle`, close-on-exit,
@@ -425,6 +427,12 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   `disable-scrollbar` rule targets `.xterm-viewport`, which no longer holds the scrollbar
   since xterm.js 6, so the bar still shows there. In both apps the wheel scrolls the
   scrollback (or goes to a program that asked for mouse events).
+- URLs in a terminal's text are links in every terminal tab, with the schemes ghostty-web
+  links (`http(s)`, `mailto`, `ftp`, `ssh`, `git`, `tel`, `magnet`, `gemini`, `gopher`,
+  `news`): Cmd/Ctrl+click opens one, and it is underlined only while Cmd/Ctrl is held, so a
+  plain click still selects its text. Electron's terminals (xterm.js) linked only OSC 8
+  hyperlinks; its Ghostty tabs opened URLs on a plain click. An OSC 8 hyperlink is a link
+  only to an `http(s)` URI, as in xterm.js, also where Electron's Ghostty tabs opened any.
 - The attention ding is the system bell (Electron synthesised an 880 Hz tone).
 - The analyzer reads the tab's own terminal; Electron attached a second, headless one.
 - A Prompt Description that sends nothing (no harness running yet, or the write failed)

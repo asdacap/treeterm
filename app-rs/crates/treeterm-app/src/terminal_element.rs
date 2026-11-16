@@ -22,6 +22,7 @@ use treeterm_term::alacritty_terminal::term::cell::Flags;
 use treeterm_term::alacritty_terminal::vte::ansi::{Color, CursorShape, NamedColor, Rgb};
 use treeterm_term::core::GridSize;
 use treeterm_term::fit::propose_dimensions;
+use treeterm_term::links::Link;
 use treeterm_term::palette::{Palette, SELECTION_BACKGROUND};
 
 use crate::terminal_view::TerminalView;
@@ -94,6 +95,13 @@ impl Geometry {
         (line, column, x.fract() >= 0.5)
     }
 
+    /// Whether `position` is over a cell: not the padding, the scrollbar or the strip the
+    /// column limit leaves unused.
+    pub fn contains(&self, position: Point<Pixels>) -> bool {
+        let grid = size(self.cell.width * self.cols as f32, self.cell.height * self.rows as f32);
+        Bounds::new(self.origin, grid).contains(&position)
+    }
+
     pub fn cell_bounds(&self, line: usize, column: usize) -> Bounds<Pixels> {
         Bounds::new(
             point(
@@ -158,6 +166,8 @@ pub struct TerminalElement {
     cursor_on: bool,
     focused: bool,
     marked_text: Option<String>,
+    /// The link under the pointer, underlined as xterm.js underlines a hovered link.
+    hovered_link: Option<Link>,
 }
 
 impl TerminalElement {
@@ -172,6 +182,7 @@ impl TerminalElement {
         cursor_on: bool,
         focused: bool,
         marked_text: Option<String>,
+        hovered_link: Option<Link>,
     ) -> Self {
         Self {
             model,
@@ -183,6 +194,7 @@ impl TerminalElement {
             cursor_on,
             focused,
             marked_text,
+            hovered_link,
         }
     }
 }
@@ -339,6 +351,11 @@ impl Element for TerminalElement {
         for row in 0..rows {
             let line = Line(row as i32 - display_offset as i32);
             let grid_row = &term.grid()[line];
+            let link_columns = self
+                .hovered_link
+                .as_ref()
+                .filter(|link| link.line == line)
+                .map(|link| &link.columns);
             let y = inner.origin.y + cell.height * row as f32;
             let mut segments: Vec<Segment> = Vec::new();
             let mut bg_run: Option<(usize, Rgb)> = None;
@@ -393,7 +410,8 @@ impl Element for TerminalElement {
                 if flags.intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER) {
                     continue;
                 }
-                let underline = flags.intersects(Flags::ALL_UNDERLINES).then(|| UnderlineStyle {
+                let on_link = link_columns.is_some_and(|columns| columns.contains(&column));
+                let underline = (on_link || flags.intersects(Flags::ALL_UNDERLINES)).then(|| UnderlineStyle {
                     thickness: px(1.),
                     color: Some(hsla(fg)),
                     wavy: flags.contains(Flags::UNDERCURL),
@@ -449,7 +467,36 @@ impl Element for TerminalElement {
             }
             flush_bg(&mut rects, bg_run, cols);
 
-            for segment in segments {
+            for mut segment in segments {
+                // GPUI ends an underline or strikethrough still open at the end of the text at
+                // the text's natural width, not at the cells its glyphs take (a link at the end
+                // of its line was underlined into the blanks after it, and one over a wide
+                // character stopped short of its second cell). A blank in the next cell ends
+                // it there instead.
+                let blank = segment
+                    .runs
+                    .last()
+                    .filter(|last| last.underline.is_some() || last.strike)
+                    .map(|last| Run {
+                        len: 1,
+                        color: last.color,
+                        bold: false,
+                        italic: false,
+                        underline: None,
+                        strike: false,
+                    });
+                let decorated = blank.is_some();
+                if let Some(blank) = blank {
+                    segment.text.push(' ');
+                    segment.runs.push(blank);
+                }
+                let force_width = match (segment.force, decorated) {
+                    (true, _) => Some(cell.width),
+                    // A wide character's segment is its one glyph: the blank goes in the cell
+                    // after its two.
+                    (false, true) => Some(cell.width * segment.cells as f32),
+                    (false, false) => None,
+                };
                 let runs: Vec<TextRun> = segment
                     .runs
                     .iter()
@@ -469,7 +516,7 @@ impl Element for TerminalElement {
                     segment.text.into(),
                     self.font.size,
                     &runs,
-                    segment.force.then_some(cell.width),
+                    force_width,
                 );
                 let x = inner.origin.x + cell.width * segment.column as f32;
                 lines.push((point(x, y), shaped));

@@ -9,6 +9,7 @@ pub mod core;
 pub mod fit;
 pub mod idle;
 pub mod keys;
+pub mod links;
 pub mod mouse;
 pub mod palette;
 pub mod view;

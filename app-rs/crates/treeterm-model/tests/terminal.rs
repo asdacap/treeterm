@@ -9,10 +9,12 @@ use gpui_kit::{AppContext as _, Entity, Subscription, TestAppContext};
 use treeterm_core::pty::CreatePty;
 use treeterm_core::settings::TerminalSettings;
 use treeterm_model::terminal::{
-    BADGE_DOUBLE_CLICK, Overlay, ScrollbarVisibility, TerminalEvent, TerminalModel, TerminalOptions,
+    BADGE_DOUBLE_CLICK, LinkPress, Overlay, Pointer, ScrollbarVisibility, TerminalEvent, TerminalModel,
+    TerminalOptions,
 };
 use treeterm_term::core::GridSize;
 use treeterm_term::fit::WidthLimit;
+use treeterm_term::links::{Link, LinkKind};
 use treeterm_term::palette::DEFAULT_BACKGROUND;
 use treeterm_term::view::ScrollPosition;
 
@@ -354,6 +356,120 @@ fn selection_copies_the_selected_text(cx: &mut TestAppContext) {
         m.clear_selection(cx);
         assert_eq!(m.selection_text(), None);
     });
+}
+
+const HYPERLINK: &str = "https://example.com/osc";
+const URL: &str = "https://plain.example/y";
+
+/// A focused shell with scrollback whose last output line is `open-42 or <URL>`, `open-42`
+/// being an OSC 8 hyperlink to [`HYPERLINK`]. Returns the line's row in the viewport.
+fn with_links(cx: &mut TestAppContext, h: &Harness) -> (Entity<TerminalModel>, usize) {
+    let pty = spawn_shell(h);
+    let model = open(cx, h, options(pty));
+    model.update(cx, |m, cx| m.set_focused(true, cx));
+    type_line(
+        cx,
+        &model,
+        &format!(r"seq 1 30; printf '\033]8;;{HYPERLINK}\033\\open-%s\033]8;;\033\\ or {URL}\n' $((40+2))"),
+    );
+    let row = |m: &TerminalModel| m.screen_text().lines().position(|l| l == format!("open-42 or {URL}"));
+    wait_until(cx, &model, |m| row(m).is_some());
+    let row = model.read_with(cx, |m, _| row(m)).unwrap();
+    (model, row)
+}
+
+fn cell(line: usize, column: usize) -> treeterm_model::terminal::CellPoint {
+    treeterm_model::terminal::CellPoint { line, column, right_half: false }
+}
+
+fn pointer(line: usize, column: usize, secondary: bool) -> Pointer {
+    Pointer { at: cell(line, column), secondary }
+}
+
+fn uri_and_kind(link: Option<Link>) -> Option<(String, LinkKind)> {
+    link.map(|link| (link.uri, link.kind))
+}
+
+#[gpui_kit::test]
+fn finds_hyperlinks_and_urls_where_the_viewport_shows_them(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    let (model, row) = with_links(cx, &h);
+    let hyperlink = model.read_with(cx, |m, _| m.link_at(cell(row, 3))).expect("the hyperlink");
+    assert_eq!((hyperlink.uri.as_str(), hyperlink.kind, hyperlink.columns.clone()), (HYPERLINK, LinkKind::Hyperlink, 0..7));
+    let url = model.read_with(cx, |m, _| m.link_at(cell(row, 12))).expect("the URL");
+    assert_eq!((url.uri.as_str(), url.kind, url.columns), (URL, LinkKind::Url, 11..34));
+    assert_eq!(model.read_with(cx, |m, _| m.link_at(cell(row, 8))), None);
+
+    // Scrolled up a line, the viewport shows it a row lower.
+    model.update(cx, |m, cx| m.scroll_lines(1, cx));
+    assert_eq!(model.read_with(cx, |m, _| m.link_at(cell(row + 1, 3))), Some(hyperlink));
+    assert_eq!(model.read_with(cx, |m, _| m.link_at(cell(row, 3))), None, "`30` is there now");
+}
+
+#[gpui_kit::test]
+fn the_hovered_link_is_one_a_click_opens(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    let (model, row) = with_links(cx, &h);
+    let hovered = |cx: &mut TestAppContext| uri_and_kind(model.read_with(cx, |m, _| m.hovered_link()));
+    assert_eq!(hovered(cx), None, "no pointer yet");
+
+    model.update(cx, |m, cx| m.hover(Some(pointer(row, 3, false)), cx));
+    assert_eq!(hovered(cx), Some((HYPERLINK.to_owned(), LinkKind::Hyperlink)));
+    // A URL in the text is a link only while Cmd/Ctrl is held.
+    model.update(cx, |m, cx| m.hover(Some(pointer(row, 12, false)), cx));
+    assert_eq!(hovered(cx), None);
+    model.update(cx, |m, cx| m.hover_secondary(true, cx));
+    assert_eq!(hovered(cx), Some((URL.to_owned(), LinkKind::Url)));
+    model.update(cx, |m, cx| m.hover_secondary(false, cx));
+    assert_eq!(hovered(cx), None);
+    model.update(cx, |m, cx| m.hover(Some(pointer(row, 3, true)), cx));
+    assert_eq!(hovered(cx), Some((HYPERLINK.to_owned(), LinkKind::Hyperlink)), "Cmd/Ctrl changes nothing for a hyperlink");
+
+    // Off the grid nothing is hovered, and Cmd/Ctrl going down there changes nothing.
+    model.update(cx, |m, cx| m.hover(None, cx));
+    assert_eq!(hovered(cx), None);
+    model.update(cx, |m, cx| m.hover_secondary(true, cx));
+    assert_eq!(hovered(cx), None);
+
+    // The hovered link follows the viewport under a pointer that stays.
+    model.update(cx, |m, cx| m.hover(Some(pointer(row + 1, 3, false)), cx));
+    assert_eq!(hovered(cx), None);
+    model.update(cx, |m, cx| m.scroll_lines(1, cx));
+    assert_eq!(hovered(cx), Some((HYPERLINK.to_owned(), LinkKind::Hyperlink)));
+}
+
+#[gpui_kit::test]
+fn a_link_opens_when_released_where_it_was_pressed(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    let (model, row) = with_links(cx, &h);
+    let click = |cx: &mut TestAppContext, down: Option<Pointer>, up: Option<usize>| {
+        model.update(cx, |m, cx| {
+            let press = m.press_link(down);
+            m.release_link(up.map(|column| cell(row, column)), cx);
+            press
+        })
+    };
+
+    // A press on a hyperlink leaves the terminal to select or report it too; dragged off the
+    // link, or off the terminal, it opens nothing.
+    assert_eq!(click(cx, Some(pointer(row, 3, false)), Some(8)), LinkPress::Shared);
+    assert_eq!(click(cx, Some(pointer(row, 3, false)), None), LinkPress::Shared);
+    // A plain press on a URL in the text is no link press; nor is one off the grid.
+    assert_eq!(click(cx, Some(pointer(row, 12, false)), Some(12)), LinkPress::Shared);
+    assert_eq!(click(cx, None, Some(3)), LinkPress::Shared);
+    // A release on a link that was not pressed opens nothing.
+    assert_eq!(click(cx, Some(pointer(row, 8, false)), Some(3)), LinkPress::Shared);
+    assert_eq!(cx.opened_url(), None);
+
+    // A plain click on a hyperlink opens it, released anywhere on it.
+    assert_eq!(click(cx, Some(pointer(row, 0, false)), Some(6)), LinkPress::Shared);
+    assert_eq!(cx.opened_url().as_deref(), Some(HYPERLINK));
+    // A Cmd/Ctrl+press on a URL is the link's alone; the release opens it.
+    assert_eq!(click(cx, Some(pointer(row, 12, true)), Some(30)), LinkPress::Taken);
+    assert_eq!(cx.opened_url().as_deref(), Some(URL));
 }
 
 /// A focused shell with 300 lines of scrollback, viewport at the bottom.

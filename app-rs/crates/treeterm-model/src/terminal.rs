@@ -30,6 +30,7 @@ use treeterm_term::core::{
 use treeterm_term::fit::{FitState, WidthLimit};
 use treeterm_term::idle::{IdleDetector, IdleEdge, IdleOutput};
 use treeterm_term::keys::paste_bytes;
+use treeterm_term::links::{self, Link, LinkKind};
 use treeterm_term::palette::Palette;
 use treeterm_term::view::{self, ScrollPosition};
 
@@ -147,6 +148,24 @@ pub struct CellPoint {
     pub right_half: bool,
 }
 
+/// The pointer over the grid, for the link under it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Pointer {
+    pub at: CellPoint,
+    /// Cmd (macOS) or Ctrl (other OSes) is held: URLs in the text open then.
+    pub secondary: bool,
+}
+
+/// What a left press leaves to the terminal's own handling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LinkPress {
+    /// It goes on to select text, or to a program reporting the mouse: there is no link under
+    /// it, or an OSC 8 hyperlink, whose click xterm.js's linkifier sees beside them.
+    Shared,
+    /// It is the press of a URL in the text under Cmd/Ctrl, which selects nothing.
+    Taken,
+}
+
 /// Everything the parser thread has to tell the UI thread, merged until the UI takes it.
 #[derive(Debug, Default)]
 struct Batch {
@@ -192,6 +211,10 @@ pub struct TerminalModel {
     idle_timer: Option<Task<()>>,
     /// A scroll badge click waiting [`BADGE_DOUBLE_CLICK`] for a second one.
     badge_click: Option<Task<()>>,
+    /// The pointer over the grid; `None` when it is elsewhere.
+    pointer: Option<Pointer>,
+    /// The link a left press went down on, opened if the release comes on it too.
+    pressed_link: Option<Link>,
 }
 
 /// Where a single click on the scroll badge goes, decided when it is clicked.
@@ -237,6 +260,8 @@ impl TerminalModel {
             idle,
             idle_timer: None,
             badge_click: None,
+            pointer: None,
+            pressed_link: None,
         }
     }
 
@@ -670,6 +695,63 @@ impl TerminalModel {
             .lock()
             .selection_to_string()
             .filter(|text| !text.is_empty())
+    }
+
+    // ---- links -------------------------------------------------------------------------
+
+    /// The link at a cell: an OSC 8 `http(s)` hyperlink, or a URL in the text (see
+    /// [`links`]).
+    pub fn link_at(&self, at: CellPoint) -> Option<Link> {
+        let (point, _) = self.grid_point(at);
+        links::link_at(&*self.attachment.term.lock(), point)
+    }
+
+    /// The link under the pointer that a click there opens: underlined, with a pointer
+    /// cursor, as xterm.js shows a hovered link. A URL in the text is one only while Cmd/Ctrl
+    /// is held.
+    pub fn hovered_link(&self) -> Option<Link> {
+        self.link_to_open(self.pointer?)
+    }
+
+    /// The link a click at `pointer` opens.
+    fn link_to_open(&self, pointer: Pointer) -> Option<Link> {
+        self.link_at(pointer.at).filter(|link| link.opens(pointer.secondary))
+    }
+
+    /// The pointer moved, onto the grid or off it (`None`).
+    pub fn hover(&mut self, pointer: Option<Pointer>, cx: &mut Context<Self>) {
+        let before = self.hovered_link();
+        self.pointer = pointer;
+        if self.hovered_link() != before {
+            cx.notify();
+        }
+    }
+
+    /// Cmd/Ctrl went down or up with the pointer where it was.
+    pub fn hover_secondary(&mut self, secondary: bool, cx: &mut Context<Self>) {
+        let pointer = self.pointer.map(|pointer| Pointer { secondary, ..pointer });
+        self.hover(pointer, cx);
+    }
+
+    /// A left press, on the grid or off it (`None`): the link a click there opens is held
+    /// until the release, as xterm.js's linkifier holds its mouse-down link.
+    pub fn press_link(&mut self, pointer: Option<Pointer>) -> LinkPress {
+        self.pressed_link = pointer.and_then(|pointer| self.link_to_open(pointer));
+        match self.pressed_link.as_ref().map(|link| link.kind) {
+            Some(LinkKind::Url) => LinkPress::Taken,
+            Some(LinkKind::Hyperlink) | None => LinkPress::Shared,
+        }
+    }
+
+    /// The left button came up, on the grid or off it (`None`). A release on the link it
+    /// went down on opens it in the browser, as xterm.js activates a link on mouse-up; one
+    /// dragged off it opens nothing.
+    pub fn release_link(&mut self, at: Option<CellPoint>, cx: &mut Context<Self>) {
+        if let Some(link) = self.pressed_link.take()
+            && at.and_then(|at| self.link_at(at)).as_ref() == Some(&link)
+        {
+            cx.open_url(&link.uri);
+        }
     }
 
     // ---- lifecycle ---------------------------------------------------------------------
