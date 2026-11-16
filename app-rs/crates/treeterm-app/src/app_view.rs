@@ -1052,6 +1052,13 @@ impl Render for AppView {
         }
         let sidebar = self.sidebar(window, cx);
         let info = self.info.clone();
+        // Electron mounts the keybinding overlay in the workspace pane, which is hidden while
+        // a session pane is shown and absent with no session.
+        let overlay = if info.is_none() && self.current().is_some() {
+            crate::keybinding_overlay::render(&self.keybindings, window, cx)
+        } else {
+            None
+        };
         let collapsed = self.sidebar_collapsed && cfg!(target_os = "macos");
         // Native webviews draw above GPUI: hide those of every workspace pane not on screen
         // (the shown one manages its own in `workspace_pane`).
@@ -1153,7 +1160,7 @@ impl Render for AppView {
             .children(menu_bar)
             .child(div().flex().flex_1().min_h_0().child(content))
             .children(self.sound_status(cx))
-            .children(crate::keybinding_overlay::render(&self.keybindings, window, cx))
+            .children(overlay)
     }
 }
 

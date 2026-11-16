@@ -277,7 +277,8 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   the editor has no minimap and cannot open space between lines, so the Files viewer lists
   its file's review comments (and the comment box) in a panel under the editor instead of
   Monaco's view zones; selects open a Kit menu, not the native popup; textareas have no
-  resize grip. Off macOS the menu bar is GPUI Kit's, drawn in the window (not GTK's), above
+  resize grip; GPUI has no backdrop filter, so the prefix-mode overlay does not blur what
+  is behind it. Off macOS the menu bar is GPUI Kit's, drawn in the window (not GTK's), above
   dialogs so that it stays usable while one is open, as GTK's is.
 - The code editors (Files viewer, Editor tab), through GPUI Kit: Tab inserts a whole indent
   step, not spaces up to the next tab stop; 8px of padding stays under the last line; the
