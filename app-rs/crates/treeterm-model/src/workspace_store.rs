@@ -1438,12 +1438,12 @@ impl WorkspaceStore {
         Some(tab_id)
     }
 
-    /// A new tab's state. A child's Review tab names its parent (`parentWorkspaceId`), which
-    /// Electron's Review reads to compare and merge against it.
+    /// A new tab's state. The Review tab of a workspace with a parent, a worktree or not,
+    /// names it (`parentWorkspaceId: parentId ?? undefined`), which Review reads to compare
+    /// and merge against it.
     fn initial_tab_state(&self, app: &crate::apps::AppDef) -> Value {
         let mut state = app.initial_state();
-        let file = &self.workspace.file;
-        let parent = file.parent_id.as_deref().filter(|id| !id.is_empty() && file.is_worktree);
+        let parent = self.workspace.file.parent_id.as_deref().filter(|id| !id.is_empty());
         if let (AppKind::Review, Some(parent), Value::Object(state)) = (&app.kind, parent, &mut state) {
             state.entry("parentWorkspaceId").or_insert_with(|| Value::String(parent.to_owned()));
         }

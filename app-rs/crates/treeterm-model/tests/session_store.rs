@@ -428,6 +428,41 @@ fn adding_a_tab_creates_its_pty_and_persists_it(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn a_review_tab_names_the_parent_of_any_child_workspace(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    let write = |id: &str, body: String| std::fs::write(h.daemon.workspaces_dir().join(format!("{id}.json")), body).unwrap();
+    // "worktree" is a worktree child of "root"; "plain" has "root" as its parent without
+    // being a worktree.
+    let mut plain: serde_json::Value = serde_json::from_str(&body("plain", Some("root"))).unwrap();
+    plain["isWorktree"] = false.into();
+    write("root", body("root", None));
+    write("worktree", body("worktree", Some("root")));
+    write("plain", plain.to_string());
+    publish(&h, &["root", "worktree", "plain"]);
+    let store = open_store(cx, &h, "client-a");
+    wait_until(cx, &store, |s| ["root", "worktree", "plain"].iter().all(|id| loaded(s, id)));
+
+    // The header's Review button (`openOrFocusTab('review', { parentWorkspaceId: parentId ?? undefined })`).
+    let review_of = |cx: &mut TestAppContext, id: &str| {
+        let workspace = store.read_with(cx, |s, _| ws(s, id));
+        let tab = workspace.update(cx, |w, cx| w.open_or_focus_tab("review", cx)).unwrap();
+        (tab.clone(), workspace.read_with(cx, |w, _| w.file().app_states[&tab].state.clone()))
+    };
+    let (_, worktree) = review_of(cx, "worktree");
+    assert_eq!(worktree["parentWorkspaceId"], "root");
+    let (plain_tab, plain) = review_of(cx, "plain");
+    assert_eq!(plain["parentWorkspaceId"], "root");
+    let (root_tab, root) = review_of(cx, "root");
+    assert!(root.get("parentWorkspaceId").is_none(), "{root}");
+
+    // On disk for Electron: the parent's id, and no null for a top-level workspace.
+    wait_for_disk(cx, || file_on_disk(&h, "plain")["appStates"][&plain_tab]["state"]["parentWorkspaceId"] == "root");
+    wait_for_disk(cx, || file_on_disk(&h, "root")["appStates"].get(&root_tab).is_some());
+    assert!(file_on_disk(&h, "root")["appStates"][&root_tab]["state"].get("parentWorkspaceId").is_none());
+}
+
+#[gpui_kit::test]
 fn a_tab_whose_program_exits_is_closed(cx: &mut TestAppContext) {
     cx.executor().allow_parking();
     let h = harness();
