@@ -3677,6 +3677,8 @@ mod tests {
     /// Anyway stops the daemon too, and a Quit after that leaves it so.
     #[gpui_kit::test]
     fn exit_and_kill_daemon_while_the_close_confirmation_is_open_makes_it_stop_the_daemon(cx: &mut TestAppContext) {
+        // The store's connection is driven on tokio, which wakes its status task from there.
+        cx.executor().allow_parking();
         let cx = window(cx);
         let dir = tempfile::tempdir().expect("temp dir");
         let store = app_store(cx, dir.path());
