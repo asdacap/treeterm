@@ -7,7 +7,7 @@ use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, LazyLock, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use gpui_kit::{AppContext as _, Entity, Subscription, TestAppContext};
 use tempfile::TempDir;
@@ -38,17 +38,32 @@ use common::{Harness, Proxy as DaemonProxy, harness, refusing_daemon, wait_until
 /// `HOME` at an empty directory, so the remote home workspace and the worktree registry
 /// never reach the real home. Every test calls this before anything starts.
 fn isolated_home() -> &'static Path {
-    static HOME: LazyLock<TempDir> = LazyLock::new(|| {
+    ISOLATED_HOME.get_or_init(|| {
+        // Kept (not a TempDir): a static is never dropped, so `remove_isolated_home` removes
+        // the directory when the test binary exits instead.
         let home = tempfile::Builder::new()
             .prefix("tt-home")
             .tempdir_in("/tmp")
-            .unwrap();
+            .unwrap()
+            .keep();
         // SAFETY: set once, before this test binary starts a daemon, a runtime or any other
         // thread that reads the environment.
-        unsafe { std::env::set_var("HOME", home.path()) };
+        unsafe { std::env::set_var("HOME", &home) };
+        // SAFETY: registers a plain `extern "C" fn` that captures nothing.
+        let registered = unsafe { libc::atexit(remove_isolated_home) };
+        assert_eq!(registered, 0, "atexit failed; {home:?} would be left behind");
         home
-    });
-    HOME.path()
+    })
+}
+
+static ISOLATED_HOME: OnceLock<PathBuf> = OnceLock::new();
+
+/// Runs at exit (libtest exits the process once the tests are done).
+extern "C" fn remove_isolated_home() {
+    let Some(home) = ISOLATED_HOME.get() else { return };
+    if let Err(error) = std::fs::remove_dir_all(home) {
+        eprintln!("cannot remove the isolated HOME {home:?}: {error}");
+    }
 }
 
 /// An app whose ssh host is `h`'s daemon and whose local daemon is `local` (or none).

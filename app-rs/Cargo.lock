@@ -9503,6 +9503,7 @@ dependencies = [
  "futures",
  "gpui-kit",
  "indexmap",
+ "libc",
  "regex",
  "serde",
  "serde_json",

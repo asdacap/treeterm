@@ -37,6 +37,8 @@ treeterm-core = { workspace = true, features = ["test-support"] }
 dirs = "6"
 uuid = { version = "1", features = ["v4"] }
 tempfile.workspace = true
+# `atexit`, to remove the app_store tests' isolated HOME (a static is never dropped).
+libc.workspace = true
 gpui-kit = { workspace = true, features = ["test-support"] }
 treeterm-testkit.workspace = true
 tokio.workspace = true
