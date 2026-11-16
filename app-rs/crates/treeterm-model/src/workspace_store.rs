@@ -2312,10 +2312,14 @@ impl WorkspaceStore {
         }
     }
 
-    /// The workspace leaves the session: detach every terminal and writer, and cancel the
-    /// creations of PTYs not yet there (their handles get the same PTYs back). PTYs keep
-    /// running.
-    pub fn dispose(&mut self) {
+    /// The workspace leaves the session: detach every terminal and writer, cancel the
+    /// creations of PTYs not yet there (their handles get the same PTYs back), and stop
+    /// every Web App's start-up. PTYs and forwards keep running.
+    pub fn dispose(&mut self, cx: &mut Context<Self>) {
+        for web_app in self.web_apps.values() {
+            web_app.model.update(cx, |app, _| app.dispose());
+        }
+        self.web_apps.clear();
         self.tabs.clear();
         self.writers.clear();
     }

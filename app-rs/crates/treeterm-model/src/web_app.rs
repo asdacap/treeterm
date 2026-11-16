@@ -106,6 +106,15 @@ pub struct WebAppModel {
     /// The start-up waiting for its server's terminal: the PTY's error, if it failed.
     pty_waiter: Option<oneshot::Sender<Result<(), String>>>,
     _run: Option<Task<()>>,
+    lifecycle: Lifecycle,
+}
+
+/// Whether start-ups still run (`isCancelled`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Lifecycle {
+    Live,
+    /// Its workspace left the session: no start-up runs any more.
+    Disposed,
 }
 
 /// The curl run for `http://localhost:<port>/` (`createHttpProbe`): curl gives up after 2s,
@@ -148,6 +157,7 @@ impl WebAppModel {
             mount: 0,
             pty_waiter: None,
             _run: None,
+            lifecycle: Lifecycle::Live,
         };
         model.start(cx);
         model
@@ -201,6 +211,15 @@ impl WebAppModel {
         }
     }
 
+    /// Its workspace left the session (`dispose`): the start-up stops where it is, and Retry
+    /// starts none. Unlike [`close`](Self::close), the server and the forward are left
+    /// running.
+    pub fn dispose(&mut self) {
+        self.lifecycle = Lifecycle::Disposed;
+        self._run = None;
+        self.pty_waiter = None;
+    }
+
     /// The tab closed: drop its forward.
     pub fn close(&mut self, cx: &mut Context<Self>) {
         self._run = None;
@@ -228,6 +247,9 @@ impl WebAppModel {
     /// then (on an ssh session) the forward. Finding a free port lasts until the port and
     /// the terminal are both there, on every start.
     fn start(&mut self, cx: &mut Context<Self>) {
+        if self.lifecycle == Lifecycle::Disposed {
+            return;
+        }
         self.pty_waiter = None;
         self.set_phase(WebAppPhase::AllocatingPort, cx);
         let (exec, known_port, remote, tab_id) =

@@ -551,7 +551,7 @@ fn removing_a_workspace_while_a_tabs_pty_starts_kills_the_pty(cx: &mut TestAppCo
         w.close_all_tabs(cx);
         // Until the store goes, the tab still says its terminal is starting.
         assert!(matches!(w.tab_content(&tab), Some(TabContent::StartingTerminal)));
-        w.dispose();
+        w.dispose(cx);
     });
     closed_tabs_ptys_start_then_are_killed(cx, &h, 1);
 }
@@ -577,7 +577,7 @@ fn a_tab_unloaded_while_its_pty_starts_gets_that_pty_when_it_loads_again(cx: &mu
 
     // Unloaded (`dispose`: the window's connection replaced, say) as soon as it loads, with
     // the creation of its tab's PTY in flight. Unmount is not close.
-    let unload = cx.update(|cx| cx.observe_new::<WorkspaceStore>(|w, _, _| w.dispose()));
+    let unload = cx.update(|cx| cx.observe_new::<WorkspaceStore>(|w, _, cx| w.dispose(cx)));
     let first = open_store(cx, &h, "client-a");
     wait_until(cx, &first, |s| loaded(s, "a"));
     drop(unload);
@@ -3300,6 +3300,36 @@ fn a_web_app_closed_while_its_server_terminal_starts_kills_it_once_it_exists(cx:
     cx.run_until_parked();
     assert_eq!(server_terminal(cx, &workspace, &tab), "gone");
     closed_tabs_ptys_start_then_are_killed(cx, &h, 1);
+}
+
+#[gpui_kit::test]
+fn disposing_the_session_stops_a_web_app_starting_up(cx: &mut TestAppContext) {
+    use treeterm_model::web_app::{WebAppModel, WebAppPhase};
+    cx.executor().allow_parking();
+    let h = harness();
+    let (session, workspace) = web_app_workspace(cx, &h, h.conn.clone(), "sleep 300");
+    // Opened, and looking for a free port, when the window's connection is replaced
+    // (`handleReconnected`), say. The page (a view) still holds it.
+    let tab = workspace.update(cx, |w, cx| w.add_tab("webapp-py", cx)).unwrap();
+    let Some(TabContent::WebApp { app, .. }) = workspace.read_with(cx, |w, _| w.tab_content(&tab)) else {
+        panic!("not a web app tab");
+    };
+    session.update(cx, |s, cx| s.dispose(cx));
+    // Its Retry starts nothing either.
+    app.update(cx, |a, cx| a.retry(cx));
+
+    // By the time a start-up still going has found its free port, and a while after.
+    let exec = h.conn.exec_client();
+    let live = cx.new(|cx| WebAppModel::new(exec, "live".to_owned(), None, None, None, cx));
+    wait_until(cx, &live, |a| a.port().is_some());
+    for _ in 0..30 {
+        cx.run_until_parked();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert_eq!(app.read_with(cx, |a, _| (a.phase().clone(), a.port())), (WebAppPhase::AllocatingPort, None));
+    let state = workspace.read_with(cx, |w, _| w.file().app_states[&tab].state.clone());
+    assert_eq!(state["port"], serde_json::json!({ "status": "unassigned" }));
+    assert!(pty_ids(&h).is_empty(), "no server was started");
 }
 
 #[gpui_kit::test]
