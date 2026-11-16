@@ -2705,11 +2705,9 @@ fn tab_content(
             let view = connected.tool_views.render(&session, workspace, id, tab_id, tool, window, cx);
             div().size_full().child(view).into_any_element()
         }
-        Some(TabContent::StartingTerminal) => {
-            centered(div().text_color(secondary).child("Starting terminal…"))
-        }
-        Some(TabContent::StartingHarness) => harness_message(0x888888, "Starting AI harness..."),
-        Some(TabContent::InvalidHarnessState) => harness_message(0xf44747, "Error: Invalid AI harness state"),
+        Some(TabContent::StartingTerminal) => placeholder_message(0x888888, "Creating terminal..."),
+        Some(TabContent::StartingHarness) => placeholder_message(0x888888, "Starting AI harness..."),
+        Some(TabContent::InvalidHarnessState) => placeholder_message(0xf44747, "Error: Invalid AI harness state"),
         Some(TabContent::Failed(message)) => centered(div().text_color(error).child(message)),
         Some(TabContent::NotPorted(app)) => centered(
             div()
@@ -2720,9 +2718,9 @@ fn tab_content(
     }
 }
 
-/// `AiHarness`'s messages in place of its terminal: top-left with 16px padding, in the
-/// body's 16px text.
-fn harness_message(color: u32, text: &'static str) -> AnyElement {
+/// `Terminal`'s, `GhosttyTerminal`'s and `AiHarness`'s messages in place of their terminal:
+/// top-left with 16px padding, in the body's 16px text.
+fn placeholder_message(color: u32, text: &'static str) -> AnyElement {
     div()
         .size_full()
         .p(px(16.))

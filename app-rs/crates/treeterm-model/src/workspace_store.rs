@@ -167,7 +167,7 @@ pub enum TabContent {
         page: Entity<crate::browser_page::BrowserPageModel>,
         forward: PageHost,
     },
-    /// The tab's PTY is being created.
+    /// The tab's PTY is being created (`Terminal`: "Creating terminal...").
     StartingTerminal,
     /// An AI-harness tab's PTY is being created (`AiHarness`: "Starting AI harness...").
     StartingHarness,
