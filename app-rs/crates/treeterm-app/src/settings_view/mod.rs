@@ -266,6 +266,12 @@ impl SettingsView {
         self.saving = Saving::Waiting { _wait: wait };
     }
 
+    /// The error shown above the buttons.
+    #[cfg(test)]
+    pub(crate) fn error(&self) -> Option<&SharedString> {
+        self.error.as_ref()
+    }
+
     /// Start (or, clicked again, stop) recording a keybinding button's key. While recording,
     /// every keystroke goes to the recorder first (before key bindings such as Tab's focus
     /// move or Escape's close), as Electron's `preventDefault` + `stopPropagation` do.

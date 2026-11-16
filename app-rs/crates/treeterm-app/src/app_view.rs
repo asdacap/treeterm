@@ -2984,6 +2984,93 @@ mod tests {
         assert!(settings.upgrade().is_none(), "closed with Escape");
     }
 
+    /// A store over `dir` and the Settings dialog on it.
+    fn open_settings(
+        cx: &mut VisualTestContext,
+        dir: &std::path::Path,
+    ) -> (Entity<SettingsStore>, Entity<crate::settings_view::SettingsView>) {
+        let dir = dir.to_owned();
+        let store = cx.update(|_, cx| cx.new(|cx| SettingsStore::new(Some(dir), cx)));
+        let view = cx.update(|window, cx| crate::settings_view::open(store.clone(), window, cx));
+        cx.run_until_parked();
+        (store, view)
+    }
+
+    fn click_save(cx: &mut VisualTestContext, view: &Entity<crate::settings_view::SettingsView>) {
+        cx.update(|window, cx| view.update(cx, |view, cx| view.save(window, cx)));
+    }
+
+    /// `handleSave`: the dialog closes only once its write landed. A failed write keeps it
+    /// open with that write's error and the settings as they were; Save again writes again.
+    #[gpui_kit::test]
+    fn settings_save_closes_once_written_and_stays_open_on_failure(cx: &mut TestAppContext) {
+        use treeterm_core::settings::{self, Settings};
+        let cx = window(cx);
+        let dir = tempfile::tempdir().expect("temp dir");
+        let mut stored = Settings::default();
+        stored.terminal.max_cols = 120;
+        settings::save(dir.path(), &stored).expect("write settings.json");
+        let (store, view) = open_settings(cx, dir.path());
+
+        // settings.json becomes a directory, so every write to it fails (even as root).
+        let path = settings::settings_path(dir.path());
+        std::fs::remove_file(&path).expect("remove settings.json");
+        std::fs::create_dir(&path).expect("block settings.json");
+        click_save(cx, &view);
+        cx.run_until_parked();
+        assert!(cx.update(|window, cx| window.has_active_dialog(cx)), "stays open");
+        let error = cx.update(|_, cx| view.read(cx).error().cloned()).expect("says why");
+        assert!(error.starts_with("Could not save settings: cannot write"), "{error}");
+        assert_eq!(*cx.update(|_, cx| store.read(cx).settings().clone()), stored);
+
+        std::fs::remove_dir(&path).expect("unblock settings.json");
+        click_save(cx, &view);
+        cx.run_until_parked();
+        assert!(!cx.update(|window, cx| window.has_active_dialog(cx)), "closed once written");
+        assert_eq!(settings::load(dir.path()).expect("written"), stored, "the form's values");
+    }
+
+    /// Save with no edits writes even when nothing changed, as Electron's `settings:save`
+    /// does, so a file that could not be loaded is replaced and the dialog closes, rather
+    /// than showing the load's error.
+    #[gpui_kit::test]
+    fn settings_save_without_edits_replaces_an_unloadable_file(cx: &mut TestAppContext) {
+        use treeterm_core::settings::{self, Settings};
+        let cx = window(cx);
+        let dir = tempfile::tempdir().expect("temp dir");
+        std::fs::write(settings::settings_path(dir.path()), "{ not json").expect("write settings.json");
+        let (store, view) = open_settings(cx, dir.path());
+        assert!(cx.update(|_, cx| store.read(cx).error().is_some()), "the load failed");
+
+        click_save(cx, &view);
+        cx.run_until_parked();
+        assert!(!cx.update(|window, cx| window.has_active_dialog(cx)), "closed once written");
+        assert_eq!(settings::load(dir.path()).expect("written"), Settings::default());
+    }
+
+    /// Save clicked again while its write runs is ignored: one write, and the dialog closes
+    /// once, leaving the dialog under Settings open.
+    #[gpui_kit::test]
+    fn settings_save_is_ignored_while_one_is_written(cx: &mut TestAppContext) {
+        let cx = window(cx);
+        let unmerged = vec![("child".to_owned(), Some("child".to_owned()))];
+        let below = cx.update(|window, cx| crate::active_processes_view::confirm_close(unmerged, window, cx));
+        let dir = tempfile::tempdir().expect("temp dir");
+        let (store, view) = open_settings(cx, dir.path());
+        assert_eq!(cx.update(|window, cx| window.active_dialog_count(cx)), 2);
+        // The store notifies once per finished write.
+        let writes = std::rc::Rc::new(std::cell::Cell::new(0));
+        let counted = writes.clone();
+        cx.update(|_, cx| cx.observe(&store, move |_, _| counted.set(counted.get() + 1)).detach());
+
+        click_save(cx, &view);
+        click_save(cx, &view);
+        cx.run_until_parked();
+        assert_eq!(writes.get(), 1, "written once");
+        assert_eq!(cx.update(|window, cx| window.active_dialog_count(cx)), 1, "Settings closed once");
+        assert_eq!(below.strong_count(), 1, "the confirmation stays");
+    }
+
     #[gpui_kit::test]
     fn the_close_confirmation_handle_lives_while_its_dialog_is_open(cx: &mut TestAppContext) {
         let cx = window(cx);
