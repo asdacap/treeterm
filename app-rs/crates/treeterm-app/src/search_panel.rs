@@ -11,7 +11,7 @@ use gpui_kit::prelude::*;
 use gpui_kit::{AnyElement, App, Entity, Focusable as _, FontWeight, ListAlignment, ListState, Window, div, list, px, relative, rgb};
 use treeterm_core::review::Side;
 use treeterm_core::search::RepoHit;
-use treeterm_model::search_panel::SearchRow;
+use treeterm_model::search_panel::{SearchRow, expand_tabs};
 
 use crate::theme::colors;
 use crate::ui;
@@ -86,7 +86,7 @@ fn row(row: SearchRow, index: usize, actions: &PanelActions, cx: &App) -> AnyEle
             .when(is_active, |d| d.bg(active))
             .when(!is_active, |d| d.hover(move |d| d.bg(hover).text_color(primary)))
             .child(div().flex_shrink_0().min_w(px(32.)).flex().justify_end().child(label))
-            .child(div().min_w_0().truncate().child(preview.replace('\t', "    ")))
+            .child(div().min_w_0().truncate().child(expand_tabs(&preview)))
     };
     match row {
         SearchRow::Section(title) => div()

@@ -81,6 +81,27 @@ pub enum SearchRow {
     Error(String),
 }
 
+/// Chromium's tab stops (`tab-size: 8`).
+const TAB_SIZE: usize = 8;
+
+/// A hit's preview as `.search-panel-hit-preview` draws it (`white-space: pre`): each tab runs
+/// to the next multiple of 8 columns from the start of the preview.
+pub fn expand_tabs(preview: &str) -> String {
+    let mut expanded = String::with_capacity(preview.len());
+    let mut column = 0;
+    for ch in preview.chars() {
+        if ch == '\t' {
+            let width = TAB_SIZE - column % TAB_SIZE;
+            expanded.extend(std::iter::repeat_n(' ', width));
+            column += width;
+        } else {
+            expanded.push(ch);
+            column += 1;
+        }
+    }
+    expanded
+}
+
 /// `countLabel`: the panel's match counter (`3/12`, `12 found`, `Searching…`).
 pub fn count_label(query: &str, active: Option<usize>, total: usize, pending: bool) -> String {
     if query.is_empty() {
@@ -196,6 +217,17 @@ mod tests {
         let mut rows = Vec::new();
         push_repo_section(&mut rows, &RepoResults::Searching { hits: vec![] }, |_| true);
         assert_eq!(rows[1], SearchRow::Note("Searching repo…".to_owned()));
+    }
+
+    #[test]
+    fn tabs_run_to_the_next_eighth_column_as_in_chromium() {
+        assert_eq!(expand_tabs("\tx"), format!("{}x", " ".repeat(8)));
+        assert_eq!(expand_tabs("ab\tc"), format!("ab{}c", " ".repeat(6)));
+        assert_eq!(expand_tabs("12345678\ty"), format!("12345678{}y", " ".repeat(8)));
+        assert_eq!(expand_tabs("1234567\t\tz"), format!("1234567{}z", " ".repeat(9)));
+        assert_eq!(expand_tabs("é\tx"), format!("é{}x", " ".repeat(7)), "a character is one column, whatever its bytes");
+        assert_eq!(expand_tabs("no tabs  here"), "no tabs  here");
+        assert_eq!(expand_tabs(""), "");
     }
 
     #[test]
