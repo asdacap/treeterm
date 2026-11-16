@@ -717,6 +717,8 @@ impl ReviewView {
             .header_visible(false)
             .line_number(true)
             .syntax_highlight(true)
+            // Pierre's `treeterm-dark` theme, not the code editors' `vs-dark`.
+            .highlight_theme(super::dark_plus::theme())
             .soft_wrap(true)
             .change_background(false)
             .change_indicator(DiffChangeIndicator::None)

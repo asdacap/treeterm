@@ -37,6 +37,7 @@ use crate::{
     ActiveTheme as _, Icon, IconName, Sizable as _, StyledExt as _,
     button::{Button, ButtonVariants as _},
     h_flex,
+    highlighter::HighlightTheme,
     input::{Copy, SelectAll},
     scroll::{ScrollableMask, Scrollbar},
     v_flex,
@@ -245,6 +246,8 @@ pub struct Diff {
     on_line_hover: Option<HoverHandler>,
     // TreeTerm patch: see `render_sticky_header`.
     sticky_header: Option<FileRenderer>,
+    // TreeTerm patch: see `highlight_theme`.
+    highlight_theme: Option<Arc<HighlightTheme>>,
 }
 
 fn file_renderer<F, E>(render: F) -> FileRenderer
@@ -278,6 +281,7 @@ impl Diff {
             on_line_click: None,
             on_line_hover: None,
             sticky_header: None,
+            highlight_theme: None,
         }
     }
     /// Shows the original and modified line-number lanes. Default is true.
@@ -432,6 +436,13 @@ impl Diff {
         E: IntoElement,
     {
         self.sticky_header = Some(file_renderer(render));
+        self
+    }
+    /// TreeTerm patch: paints the code in `theme`'s syntax colours and editor foreground
+    /// instead of the app theme's [`crate::Theme::highlight_theme`] and foreground, so a
+    /// diff can be coloured unlike the app's code editors.
+    pub fn highlight_theme(mut self, theme: Arc<HighlightTheme>) -> Self {
+        self.highlight_theme = Some(theme);
         self
     }
     /// Compatibility alias for [`Self::render_annotation`].
@@ -614,6 +625,7 @@ fn render_diff(
         selected: state.selected_span(),
         geometry: state.geometry().clone(),
         state: cx.entity(),
+        highlight_theme: props.highlight_theme,
     });
     let rows = state.rows().clone();
     let scrollbar = state.list().clone();
@@ -878,6 +890,8 @@ struct CodePresentation {
     selected: Option<SelectedLines>,
     geometry: Rc<std::cell::RefCell<selection::SelectionGeometry>>,
     state: Entity<DiffState>,
+    /// TreeTerm patch: see [`Diff::highlight_theme`].
+    highlight_theme: Option<Arc<HighlightTheme>>,
 }
 
 impl CodePresentation {
@@ -1602,9 +1616,14 @@ fn line_highlights(
 ) -> Vec<(std::ops::Range<usize>, HighlightStyle)> {
     let line = &code.files[file].lines(side)[ix];
     let presentation = code.presentations.get(file).and_then(Option::as_ref);
+    // TreeTerm patch: the diff's own theme, when it has one.
+    let theme = code
+        .highlight_theme
+        .as_ref()
+        .unwrap_or(&cx.theme().highlight_theme);
     let mut highlights = match presentation {
         Some(presentation) if code.syntax_highlight => {
-            presentation.syntax_highlights(line, side, ix, cx.theme().highlight_theme.as_ref())
+            presentation.syntax_highlights(line, side, ix, theme.as_ref())
         }
         _ => Vec::new(),
     };
@@ -1754,6 +1773,13 @@ fn code_line(
                 this.flex().flex_row().flex_shrink_0()
             }
         })
+        // TreeTerm patch: the diff's own theme colours the text no capture colours.
+        .when_some(
+            code.highlight_theme
+                .as_ref()
+                .and_then(|theme| theme.style.editor_foreground),
+            |this, color| this.text_color(color),
+        )
         .children(ranges.into_iter().enumerate().map(|(chunk_ix, range)| {
             CodeText::new(
                 ("code", chunk_ix).into(),

@@ -72,8 +72,10 @@
 ; Literals
 ;---------
 
-(this) @variable.builtin
-(super) @variable.builtin
+; TreeTerm patch: `this` and `super` are keywords, as Monaco's and VS Code's Dark+ colour
+; them (`@variable.builtin` falls back to `@variable`).
+(this) @variable.special
+(super) @variable.special
 
 [
   (true)

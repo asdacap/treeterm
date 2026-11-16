@@ -58,8 +58,12 @@
   function: (field_expression
     field: (field_identifier) @function.method))
 
+; TreeTerm patch: one rule for the name, one for the `!`, so the name's match completes at
+; the name, ahead of the `(identifier) @variable` rule at the end (of two captures of one
+; range, the first match's wins).
 (macro_invocation
-  macro: (identifier) @function.macro
+  macro: (identifier) @function.macro)
+(macro_invocation
   "!" @function.macro)
 
 ; Function definitions
@@ -145,17 +149,22 @@
 (scoped_identifier (self) @keyword)
 (super) @keyword
 
-(self) @variable.builtin
+; TreeTerm patch: `self` is a keyword, as Monaco's Rust grammar and VS Code's Dark+ colour it
+; (`@variable.builtin` falls back to `@variable`).
+(self) @variable.special
 
 (char_literal) @string
 (string_literal) @string
 (raw_string_literal) @string
 
 (boolean_literal) @constant.builtin
-(integer_literal) @constant.builtin
-(float_literal) @constant.builtin
+; TreeTerm patch: numbers are `@number` and escapes `@string.escape`, as Monaco's Rust
+; grammar and VS Code's tokenise them (`@constant.builtin` is `true`'s colour, and no theme
+; colours `@escape`).
+(integer_literal) @number
+(float_literal) @number
 
-(escape_sequence) @escape
+(escape_sequence) @string.escape
 
 (attribute_item) @attribute
 (inner_attribute_item) @attribute
@@ -163,3 +172,9 @@
 "*" @operator
 "&" @operator
 "'" @operator
+
+; TreeTerm patch: the identifiers no rule above captured are variables, as VS Code's Dark+
+; colours them. Last, so that the other rules' captures of an identifier win: a match that
+; completes at the identifier comes before this one, and of two captures of one range the
+; first match's wins.
+(identifier) @variable

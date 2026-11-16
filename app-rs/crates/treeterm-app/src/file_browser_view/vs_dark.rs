@@ -153,6 +153,19 @@ mod tests {
         }
     }
 
+    /// Monaco's Rust grammar tokenises numbers as numbers and `self` as a keyword, and its
+    /// TypeScript grammar `this` and `super` as keywords.
+    #[test]
+    fn numbers_self_and_this_are_coloured_as_in_monaco() {
+        let rust = "fn f(&self) -> f64 { self.x * 2.5 + 1 as f64 }\n";
+        assert_eq!(token_color("a.rs", rust, "self"), Some(rgb(0x569cd6).into()));
+        assert_eq!(token_color("a.rs", rust, "2.5"), Some(rgb(0xb5cea8).into()));
+        assert_eq!(token_color("a.rs", rust, "1"), Some(rgb(0xb5cea8).into()));
+        let ts = "class A extends B { m() { return this.x + super.y } }\n";
+        assert_eq!(token_color("a.ts", ts, "this"), Some(rgb(0x569cd6).into()));
+        assert_eq!(token_color("a.ts", ts, "super"), Some(rgb(0x569cd6).into()));
+    }
+
     /// Every language the viewer maps paints a comment, a keyword and a string as `vs-dark`
     /// does. GPUI Kit shipped C#, Swift, Protobuf, GraphQL and CMake without a highlight
     /// query, C++ with only its additions to C's, and Scala's comments uncoloured.

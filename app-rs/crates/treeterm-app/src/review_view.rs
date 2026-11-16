@@ -4,6 +4,7 @@
 //! (`StackedDiffList` / `FileDiffSection`, here GPUI Kit's virtualized `Diff`) and the
 //! commit box. Sizes and colours are `index.css`'s.
 
+mod dark_plus;
 mod files;
 mod find;
 mod parts;
