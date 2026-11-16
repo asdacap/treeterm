@@ -108,11 +108,11 @@ Done (tested against a real in-process daemon unless noted):
   `zoom.json` and restored at the next start, as Electron's), Toggle Full Screen, Reset Input, Minimize, Zoom,
   Bring All to Front, Help; its commands also work while a dialog has focus;
   off macOS the window draws the menu bar, and a focused terminal keeps the keys it encodes,
-  as with xterm.js), Exit and Kill Daemon; all 13 Settings sections, whose controls Tab reaches
-  as Electron's native ones (Space or Enter presses a button, Space toggles a checkbox, Space or
-  an arrow opens a select, Tab leaves a textarea, a linked label focuses its control); live
-  reload when Electron edits `settings.json`; close confirmation for unmerged workspaces;
-  Window → Active Processes.
+  as with xterm.js), Exit and Kill Daemon; all 13 Settings sections (reopened on the one shown
+  last), whose controls Tab reaches as Electron's native ones (Space or Enter presses a
+  button, Space toggles a checkbox, Space or an arrow opens a select, Tab leaves a textarea,
+  a linked label focuses its control); live reload when Electron edits `settings.json`; close
+  confirmation for unmerged workspaces; Window → Active Processes.
 - **Connections (M4):** local + SSH sessions on the core connection manager (bootstrap,
   tunnel, reconnect with backoff, outdated-daemon refresh/accept), SSH connection picker with
   saved connections, remote directory browser, session pane with logs and port forwards.

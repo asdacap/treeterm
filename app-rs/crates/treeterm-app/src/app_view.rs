@@ -56,9 +56,9 @@ pub struct AppView {
     sidebar_width: f32,
     /// A session being dragged in the sidebar or the rail (`dragState`).
     session_drag: SessionDrag,
-    /// The Settings dialog while it is open: Settings again does not stack a second one
-    /// (Electron's `isSettingsOpen`).
-    settings_dialog: WeakEntity<crate::settings_view::SettingsView>,
+    /// The Settings dialog: Settings again does not stack a second one (Electron's
+    /// `isSettingsOpen`), and it reopens on the section shown last.
+    settings_dialog: crate::settings_view::SettingsDialog,
     /// "SSH Connections": kept while closed, as Electron's stays mounted, so it reopens as
     /// it was left.
     connection_picker: Entity<crate::connection_picker::ConnectionPicker>,
@@ -383,7 +383,7 @@ impl AppView {
             sidebar_collapsed: false,
             sidebar_width: 250.,
             session_drag: SessionDrag::Idle,
-            settings_dialog: WeakEntity::new_invalid(),
+            settings_dialog: crate::settings_view::SettingsDialog::default(),
             connection_picker: cx.new(|cx| crate::connection_picker::ConnectionPicker::new(store.clone(), window, cx)),
             processes_dialog: ProcessesDialog::Closed,
             close_confirm: std::rc::Weak::new(),
@@ -1248,10 +1248,8 @@ impl AppView {
 
     /// Settings (Cmd+, / Ctrl+,), unless it is already open.
     pub fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.settings_dialog.upgrade().is_none() {
-            let (settings, keybindings) = (self.settings.clone(), self.keybindings.clone());
-            self.settings_dialog = crate::settings_view::open(settings, keybindings, window, cx).downgrade();
-        }
+        let (settings, keybindings) = (self.settings.clone(), self.keybindings.clone());
+        self.settings_dialog.open(settings, keybindings, window, cx);
     }
 
     /// Window > Active Processes for the current session, unless it is already open; with
@@ -3231,7 +3229,7 @@ impl AppView {
             };
             json!({
                 "open": window.active_dialog_count(cx),
-                "settings": self.settings_dialog.upgrade().is_some(),
+                "settings": self.settings_dialog.is_open(),
                 "activeProcesses": active_processes,
                 "closeConfirm": self.close_confirm.strong_count() > 0,
             })
@@ -3427,23 +3425,6 @@ mod tests {
         cx.update(|_, cx| cx.new(|_| KeybindingStore::new(treeterm_core::keybinding::KeybindingSettings::default())))
     }
 
-    /// `AppView` opens Settings, and the close confirmation, only while its handle to the
-    /// last one is dead: the handle must live exactly as long as the dialog.
-    #[gpui_kit::test]
-    fn the_settings_handle_lives_while_its_dialog_is_open(cx: &mut TestAppContext) {
-        let cx = window(cx);
-        let store = cx.update(|_, cx| cx.new(|_| SettingsStore::in_memory(Default::default())));
-        let keybindings = keybinding_store(cx);
-        let settings = cx.update(|window, cx| crate::settings_view::open(store, keybindings, window, cx).downgrade());
-        cx.run_until_parked();
-        assert!(settings.upgrade().is_some(), "open");
-
-        cx.simulate_keystrokes("escape");
-        cx.run_until_parked();
-        assert!(!cx.update(|window, cx| window.has_active_dialog(cx)));
-        assert!(settings.upgrade().is_none(), "closed with Escape");
-    }
-
     /// A store over `dir` and the Settings dialog on it.
     fn open_settings(
         cx: &mut VisualTestContext,
@@ -3452,9 +3433,10 @@ mod tests {
         let dir = dir.to_owned();
         let store = cx.update(|_, cx| cx.new(|cx| SettingsStore::new(Some(dir), cx)));
         let keybindings = keybinding_store(cx);
-        let view = cx.update(|window, cx| crate::settings_view::open(store.clone(), keybindings, window, cx));
+        let mut dialog = crate::settings_view::SettingsDialog::default();
+        cx.update(|window, cx| dialog.open(store.clone(), keybindings, window, cx));
         cx.run_until_parked();
-        (store, view)
+        (store, dialog.view().expect("Settings is open"))
     }
 
     fn click_save(cx: &mut VisualTestContext, view: &Entity<crate::settings_view::SettingsView>) {

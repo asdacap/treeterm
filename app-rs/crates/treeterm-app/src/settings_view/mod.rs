@@ -12,10 +12,15 @@ mod instance_list;
 mod sections;
 mod widgets;
 
+use std::cell::Cell;
+use std::rc::Rc;
+
 use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::input::{InputEvent, InputState, TextareaState};
 use gpui_kit::prelude::*;
-use gpui_kit::{App, Context, Entity, FocusHandle, SharedString, Subscription, Task, Window, canvas, div, px};
+use gpui_kit::{
+    App, Context, Entity, FocusHandle, SharedString, Subscription, Task, WeakEntity, Window, canvas, div, px,
+};
 use treeterm_core::keybinding::Os;
 use treeterm_core::settings::{
     AiHarnessInstance, BrowserInstance, CustomRunnerInstance, Settings, TerminalInstance, WebAppInstance,
@@ -52,7 +57,9 @@ pub struct SettingsView {
     store: Entity<SettingsStore>,
     /// The shortcuts, which take some keys before the recorder sees them.
     keybindings: Entity<KeybindingStore>,
-    section: Section,
+    /// The section shown, shared with the window's [`SettingsDialog`] so that it outlives
+    /// the view (Electron's `activeTab`).
+    section: Rc<Cell<Section>>,
     /// The toggles and choices as edited (Electron's `localSettings`). Its instance lists are
     /// empty: they live in the lists below, and the free text in `inputs`; both are read on
     /// save.
@@ -212,6 +219,7 @@ impl SettingsView {
     pub fn new(
         store: Entity<SettingsStore>,
         keybindings: Entity<KeybindingStore>,
+        section: Rc<Cell<Section>>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -225,8 +233,7 @@ impl SettingsView {
         Self {
             store,
             keybindings,
-            // Electron opens on Terminal too.
-            section: Section::Terminal,
+            section,
             draft,
             sandbox: SandboxSupport::detect(Os::host(), std::env::var_os("PATH").as_deref()),
             inputs,
@@ -269,7 +276,7 @@ impl SettingsView {
         let edited = match form::build(&self.draft, &texts, lists) {
             Ok(edited) => edited,
             Err(error) => {
-                self.section = error.section;
+                self.section.set(error.section);
                 self.error = Some(error.message.into());
                 cx.notify();
                 return;
@@ -359,7 +366,7 @@ impl SettingsView {
             .border_r_1()
             .border_color(c.border);
         for section in Section::ALL {
-            let active = section == self.section;
+            let active = section == self.section.get();
             list = list.child(
                 ui::key_button(section.label(), 0., window, cx)
                     .justify_start()
@@ -372,7 +379,7 @@ impl SettingsView {
                     .when(!active, |item| item.text_color(secondary).hover(move |s| s.bg(hover_bg).text_color(primary)))
                     .child(section.label())
                     .on_click(cx.listener(move |view, _, _, cx| {
-                        view.section = section;
+                        view.section.set(section);
                         cx.notify();
                     })),
             );
@@ -383,7 +390,7 @@ impl SettingsView {
 
 impl Render for SettingsView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let body = match self.section {
+        let body = match self.section.get() {
             Section::General => self.render_general(window, cx),
             Section::Terminal => self.render_terminal(window, cx),
             Section::TerminalProfiles => {
@@ -482,19 +489,50 @@ impl Render for SettingsView {
     }
 }
 
-/// Open the dialog in `window`. Only the dialog keeps the view: it is released on close.
-pub fn open(
-    store: Entity<SettingsStore>,
-    keybindings: Entity<KeybindingStore>,
-    window: &mut Window,
-    cx: &mut App,
-) -> Entity<SettingsView> {
-    let view = cx.new(|cx| SettingsView::new(store, keybindings, window, cx));
-    window.open_dialog(cx, {
-        let view = view.clone();
-        move |dialog, _window, cx| ui::dialog_frame(dialog, 600., cx).child(view.clone())
-    });
-    view
+/// A window's Settings dialog. Electron's stays mounted for the window's life: asked for
+/// while open it stays as it is (`isSettingsOpen`), and it reopens on the section shown last
+/// (`activeTab`), its edits read afresh.
+pub struct SettingsDialog {
+    /// The dialog while it is open. Only the dialog keeps the view, so this dies on close.
+    open: WeakEntity<SettingsView>,
+    /// The section shown, kept while the dialog is closed.
+    section: Rc<Cell<Section>>,
+}
+
+impl Default for SettingsDialog {
+    fn default() -> Self {
+        // Electron's first opens on Terminal.
+        Self { open: WeakEntity::new_invalid(), section: Rc::new(Cell::new(Section::Terminal)) }
+    }
+}
+
+impl SettingsDialog {
+    pub fn is_open(&self) -> bool {
+        self.open.upgrade().is_some()
+    }
+
+    /// Open the dialog in `window`, unless it is open: then its edits stay as they are.
+    pub fn open(
+        &mut self,
+        store: Entity<SettingsStore>,
+        keybindings: Entity<KeybindingStore>,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        if self.is_open() {
+            return;
+        }
+        let section = self.section.clone();
+        let view = cx.new(|cx| SettingsView::new(store, keybindings, section, window, cx));
+        self.open = view.downgrade();
+        window.open_dialog(cx, move |dialog, _window, cx| ui::dialog_frame(dialog, 600., cx).child(view.clone()));
+    }
+
+    /// The dialog's view while it is open.
+    #[cfg(test)]
+    pub(crate) fn view(&self) -> Option<Entity<SettingsView>> {
+        self.open.upgrade()
+    }
 }
 
 #[cfg(test)]
@@ -524,6 +562,18 @@ mod tests {
         options: WindowOptions,
         cx: &mut TestAppContext,
     ) -> (&mut VisualTestContext, Entity<KeybindingStore>, Entity<SettingsView>) {
+        let (cx, store, keybindings) = settings_window(options, cx);
+        let mut dialog = SettingsDialog::default();
+        let view = open(&mut dialog, &store, &keybindings, cx);
+        (cx, keybindings, view)
+    }
+
+    /// A window opened with `options` whose keystrokes pass the shortcuts first, as `main`
+    /// sets up, with the app's key bindings, and the settings for its dialog.
+    fn settings_window(
+        options: WindowOptions,
+        cx: &mut TestAppContext,
+    ) -> (&mut VisualTestContext, Entity<SettingsStore>, Entity<KeybindingStore>) {
         let window = cx.update(|cx| {
             gpui_kit::init(cx);
             crate::theme::install(cx);
@@ -543,9 +593,19 @@ mod tests {
             .detach();
         });
         let store = cx.update(|_, cx| cx.new(|_| SettingsStore::in_memory(Default::default())));
-        let view = cx.update(|window, cx| open(store, keybindings.clone(), window, cx));
+        (cx, store, keybindings)
+    }
+
+    /// Ask `dialog` to open, and the view it then shows.
+    fn open(
+        dialog: &mut SettingsDialog,
+        store: &Entity<SettingsStore>,
+        keybindings: &Entity<KeybindingStore>,
+        cx: &mut VisualTestContext,
+    ) -> Entity<SettingsView> {
+        cx.update(|window, cx| dialog.open(store.clone(), keybindings.clone(), window, cx));
         cx.run_until_parked();
-        (cx, keybindings, view)
+        dialog.view().expect("Settings is open")
     }
 
     fn texts(cx: &mut VisualTestContext, view: &Entity<SettingsView>) -> Texts {
@@ -585,7 +645,7 @@ mod tests {
         let (cx, _, view) = dialog(cx);
         cx.update(|_, cx| {
             view.update(cx, |view, cx| {
-                view.section = Section::Keybindings;
+                view.section.set(Section::Keybindings);
                 cx.notify();
             })
         });
@@ -657,7 +717,7 @@ mod tests {
 
         cx.update(|_, cx| {
             view.update(cx, |view, cx| {
-                view.section = Section::Llm;
+                view.section.set(Section::Llm);
                 cx.notify();
             })
         });
@@ -691,7 +751,7 @@ mod tests {
     fn show(section: Section, cx: &mut VisualTestContext, view: &Entity<SettingsView>) {
         cx.update(|_, cx| {
             view.update(cx, |view, cx| {
-                view.section = section;
+                view.section.set(section);
                 cx.notify();
             })
         });
@@ -813,7 +873,7 @@ mod tests {
     #[gpui_kit::test]
     fn space_or_enter_presses_a_focused_button(cx: &mut TestAppContext) {
         let (cx, _, view) = dialog(cx);
-        let section = |cx: &mut VisualTestContext| cx.update(|_, cx| view.read(cx).section);
+        let section = |cx: &mut VisualTestContext| cx.update(|_, cx| view.read(cx).section.get());
         tab_to("LLM", cx);
         press("space", cx);
         assert_eq!(section(cx), Section::Llm);
@@ -947,5 +1007,69 @@ mod tests {
             provider.write_a11y_info(&mut node);
             assert_eq!(node.label(), Some("Classifier Provider"));
         });
+    }
+
+    /// Click Cancel.
+    fn cancel(cx: &mut VisualTestContext) {
+        tab_to("cancel-settings", cx);
+        press("enter", cx);
+        cx.run_until_parked();
+    }
+
+    fn shown(view: &Entity<SettingsView>, cx: &mut VisualTestContext) -> Section {
+        cx.update(|_, cx| view.read(cx).section.get())
+    }
+
+    /// Settings asked for while open stays as it is, its edits kept (Electron's
+    /// `isSettingsOpen`); once closed its view goes, and it opens with the settings afresh.
+    #[gpui_kit::test]
+    fn settings_opens_once_until_it_is_closed(cx: &mut TestAppContext) {
+        let (cx, store, keybindings) = settings_window(WindowOptions::default(), cx);
+        let mut dialog = SettingsDialog::default();
+        assert!(!dialog.is_open());
+        let view = open(&mut dialog, &store, &keybindings, cx);
+        let font_size = cx.update(|_, cx| view.read(cx).inputs.font_size.clone());
+        cx.update(|window, cx| font_size.update(cx, |input, cx| input.set_value("20", window, cx)));
+
+        assert!(open(&mut dialog, &store, &keybindings, cx) == view, "the open dialog");
+        assert_eq!(cx.update(|window, cx| window.active_dialog_count(cx)), 1);
+        assert_eq!(texts(cx, &view).font_size, "20", "with its edits");
+
+        let closed = view.downgrade();
+        drop(view);
+        cancel(cx);
+        assert!(!dialog.is_open());
+        assert!(closed.upgrade().is_none(), "released with its dialog");
+        let view = open(&mut dialog, &store, &keybindings, cx);
+        assert_eq!(cx.update(|window, cx| window.active_dialog_count(cx)), 1);
+        assert_eq!(texts(cx, &view).font_size, Texts::from_settings(&Settings::default()).font_size);
+    }
+
+    /// Settings first opens on Terminal, then on the section shown last, as Electron's
+    /// `activeTab` lives as long as the window: one picked in the sidebar, or the one Save
+    /// opened for a field to fix.
+    #[gpui_kit::test]
+    fn settings_reopens_on_the_section_shown_last(cx: &mut TestAppContext) {
+        let (cx, store, keybindings) = settings_window(WindowOptions::default(), cx);
+        let mut dialog = SettingsDialog::default();
+        let view = open(&mut dialog, &store, &keybindings, cx);
+        assert_eq!(shown(&view, cx), Section::Terminal);
+        tab_to("General", cx);
+        press("space", cx);
+        drop(view);
+        cancel(cx);
+
+        let view = open(&mut dialog, &store, &keybindings, cx);
+        assert_eq!(shown(&view, cx), Section::General);
+        let buffer_lines = cx.update(|_, cx| view.read(cx).inputs.buffer_lines.clone());
+        cx.update(|window, cx| buffer_lines.update(cx, |input, cx| input.set_value("", window, cx)));
+        cx.update(|window, cx| view.update(cx, |view, cx| view.save(window, cx)));
+        assert_eq!(shown(&view, cx), Section::Llm, "the field to fix");
+        drop(view);
+        cancel(cx);
+
+        let view = open(&mut dialog, &store, &keybindings, cx);
+        assert_eq!(shown(&view, cx), Section::Llm);
+        assert_eq!(cx.update(|_, cx| view.read(cx).error().cloned()), None, "the error went with the dialog");
     }
 }
