@@ -470,6 +470,14 @@ impl Render for BrowserView {
             .flex_1()
             .min_w_0()
             .mx(px(4.))
+            // Escape drops what was typed and leaves the bar, also when nothing was.
+            .on_key_down(cx.listener(|view, event: &gpui_kit::KeyDownEvent, window, cx| {
+                if event.keystroke.key == "escape" {
+                    view.draft = Draft::Idle;
+                    window.blur(cx);
+                    cx.notify();
+                }
+            }))
             .child(
                 crate::ui::field(
                     &address,
@@ -543,13 +551,6 @@ impl Render for BrowserView {
                     focus_address.update(cx, |input, cx| input.focus(window, cx));
                 }
             })
-            .on_key_down(cx.listener(|view, event: &gpui_kit::KeyDownEvent, window, cx| {
-                if event.keystroke.key == "escape" && matches!(view.draft, Draft::Editing { .. }) {
-                    view.draft = Draft::Idle;
-                    window.blur(cx);
-                    cx.notify();
-                }
-            }))
             .child(toolbar)
             .child(div().flex_1().min_h_0().child(body))
     }
