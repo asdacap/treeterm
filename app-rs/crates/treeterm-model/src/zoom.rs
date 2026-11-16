@@ -9,8 +9,8 @@
 //! change. The file is the native app's own: Chromium rewrites `Preferences` whole, so a second
 //! writer's level would not last, and the two apps each keep their own level.
 //!
-//! GPUI has no page zoom (its scale factor is the display's, and the views size themselves
-//! in absolute pixels), so the app scales only terminal text by [`Zoom::factor`].
+//! The app zooms each window by [`Zoom::factor`] (GPUI's window zoom, a TreeTerm patch), as
+//! Chromium zooms the whole page.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -56,7 +56,7 @@ impl Zoom {
         self.steps = 0;
     }
 
-    /// How many times its size text is drawn: 1.2^level, within Chromium's limits.
+    /// How many times its size the window is drawn: 1.2^level, within Chromium's limits.
     pub fn factor(&self) -> f32 {
         1.2f32
             .powf(self.steps as f32 / 2.)

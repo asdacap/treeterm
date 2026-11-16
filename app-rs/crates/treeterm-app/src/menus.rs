@@ -277,13 +277,28 @@ pub fn install(zoom: ZoomStore, cx: &mut App) {
     crate::macos::register_help_menu();
 }
 
-/// View > Actual Size, Zoom In and Zoom Out: one level for every window, which terminals
-/// draw their text at, saved at every change (see `treeterm_model::zoom`).
+/// View > Actual Size, Zoom In and Zoom Out: one level for every window, which zooms the
+/// whole window as Electron's page zoom does, saved at every change (see
+/// `treeterm_model::zoom`).
 fn install_zoom(zoom: ZoomStore, cx: &mut App) {
     cx.set_global(zoom);
     cx.on_action(|_: &ResetZoom, cx| cx.update_global::<ZoomStore, _>(|zoom, _| zoom.reset()));
     cx.on_action(|_: &ZoomIn, cx| cx.update_global::<ZoomStore, _>(|zoom, _| zoom.zoom_in()));
     cx.on_action(|_: &ZoomOut, cx| cx.update_global::<ZoomStore, _>(|zoom, _| zoom.zoom_out()));
+    cx.observe_global::<ZoomStore>(|cx| {
+        for window in cx.windows() {
+            zoom_window(window, cx);
+        }
+    })
+    .detach();
+}
+
+/// Zoom `window` to the app's zoom level.
+fn zoom_window(window: AnyWindowHandle, cx: &mut App) {
+    let factor = cx.global::<ZoomStore>().zoom().factor();
+    if let Err(error) = window.update(cx, |_, window, cx| window.set_zoom(factor, cx)) {
+        tracing::error!(%error, "cannot zoom the window");
+    }
 }
 
 /// Edit > Undo and Redo on macOS, Paste and Match Style and Delete: to a web page holding the
@@ -378,6 +393,7 @@ pub fn in_window_bar(bar: &Entity<AppMenuBar>, cx: &App) -> AnyElement {
 /// `BrowserWindow.getFocusedWindow()`). Once the window has closed only Quit, and Exit and
 /// Kill Daemon on `store`'s local daemon, do anything (with no window, nothing asks first).
 pub fn route_to_window(window: AnyWindowHandle, view: WeakEntity<AppView>, store: Entity<AppStore>, cx: &mut App) {
+    zoom_window(window, cx);
     route::<Quit, _>(window, view.clone(), AppView::quit, |cx| cx.quit(), cx);
     let kill = CloseAnyway::KillDaemonAndQuit(store);
     route::<QuitAndKillDaemon, _>(window, view.clone(), AppView::quit_and_kill_daemon, move |cx| kill.run(cx), cx);
@@ -1122,5 +1138,71 @@ mod tests {
         let zoomed = cx.update(|_, cx| cx.global::<ZoomStore>().zoom());
         assert_ne!(zoomed, Zoom::default());
         assert_eq!(ZoomStore::load(user_data.path()).zoom(), zoomed, "Zoom In saved");
+    }
+
+    /// A 20px square at (100, 100) counting its clicks.
+    #[derive(Default)]
+    struct Target {
+        clicks: usize,
+    }
+
+    impl Render for Target {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            div().size_full().child(
+                div()
+                    .id("target")
+                    .absolute()
+                    .left(px(100.))
+                    .top(px(100.))
+                    .size(px(20.))
+                    .on_click(cx.listener(|target, _, _, _| target.clicks += 1)),
+            )
+        }
+    }
+
+    /// The zoom scales the whole window, as Chromium's page zoom does: it is laid out in pixels
+    /// the zoom's times as large, which the platform's pointer positions land in, and a window
+    /// opened later takes the zoom too.
+    #[gpui_kit::test]
+    fn the_zoom_scales_the_whole_window(cx: &mut TestAppContext) {
+        let (window, target) = cx.update(|cx| {
+            gpui_kit::init(cx);
+            bind_keys(true, KeyOptions::for_host(), cx);
+            install_zoom(ZoomStore::in_memory(), cx);
+            gpui_kit::open_window(WindowOptions::default(), cx, |_, cx| cx.new(|_| Target::default()))
+                .expect("open a window")
+        });
+        let cx = VisualTestContext::from_window(window, cx).into_mut();
+        let geometry =
+            |cx: &mut VisualTestContext| cx.update(|window, _| (window.viewport_size(), window.scale_factor()));
+        let (unzoomed, scale) = geometry(cx);
+
+        cx.simulate_keystrokes("cmd-+ cmd-+");
+        cx.run_until_parked();
+        let factor = cx.update(|_, cx| cx.global::<ZoomStore>().zoom().factor());
+        assert!((factor - 1.2).abs() < 1e-4, "two half levels: {factor}");
+        let (viewport, zoomed_scale) = geometry(cx);
+        assert_eq!(viewport, gpui_kit::size(unzoomed.width / factor, unzoomed.height / factor));
+        assert_eq!(zoomed_scale, scale * factor);
+
+        let clicks = |cx: &mut VisualTestContext| target.read_with(cx, |target, _| target.clicks);
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.simulate_click(gpui_kit::point(px(110.), px(110.)), gpui_kit::Modifiers::default());
+        assert_eq!(clicks(cx), 0, "(110, 110) on the screen is (92, 92) in the window");
+        cx.simulate_click(gpui_kit::point(px(110. * factor), px(110. * factor)), gpui_kit::Modifiers::default());
+        assert_eq!(clicks(cx), 1);
+
+        let later = cx.update(|_, cx| {
+            gpui_kit::open_window(WindowOptions::default(), cx, |_, cx| cx.new(|_| Probe::default()))
+                .expect("open a window")
+                .0
+        });
+        cx.update(|_, cx| zoom_window(later, cx));
+        let later_zoom = cx.update(|_, cx| later.update(cx, |_, window, _| window.zoom()).expect("the window is open"));
+        assert_eq!(later_zoom, factor);
+
+        cx.simulate_keystrokes("cmd-0");
+        cx.run_until_parked();
+        assert_eq!(geometry(cx), (unzoomed, scale), "Actual Size");
     }
 }

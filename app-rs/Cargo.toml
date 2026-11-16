@@ -19,7 +19,7 @@ default-members = [
     "crates/treeterm-testkit",
 ]
 # Patched third-party crates (see [patch.crates-io]): not ours to test or lint.
-exclude = ["vendor/gpui-component", "vendor/avif-decode"]
+exclude = ["vendor/gpui-component", "vendor/avif-decode", "vendor/gpui-pre", "vendor/gpui-webview"]
 
 [workspace.package]
 version = "0.1.0"
@@ -63,6 +63,11 @@ tempfile = "3"
 gpui-component = { path = "vendor/gpui-component" }
 # avif-decode with rav1d's assembly left out on every target, so no build needs NASM.
 avif-decode = { path = "vendor/avif-decode" }
+# GPUI with a window zoom (`Window::set_zoom`), which View > Actual Size, Zoom In and Zoom Out
+# apply to the whole window as Electron's page zoom does, and its webview, whose native page
+# follows that zoom. Changes are marked `TreeTerm patch`; see README "Vendored crates".
+gpui-pre = { path = "vendor/gpui-pre" }
+gpui-webview = { path = "vendor/gpui-webview" }
 
 [workspace.lints.rust]
 unused_must_use = "deny"

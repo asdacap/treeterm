@@ -107,8 +107,8 @@ Done (tested against a real in-process daemon unless noted):
   (Electron's template: About, Services, Hide, Close Window, Edit's Undo, Redo, Cut, Copy,
   Paste, Paste and Match Style, Delete and Select All on whatever has focus, a Browser or Web
   App page included, Actual Size,
-  Zoom In, Zoom Out (terminal text; Cmd/Ctrl+= zooms in too; the level is kept in
-  `zoom.json` and restored at the next start, as Electron's), Toggle Full Screen, Reset Input, Minimize, Zoom,
+  Zoom In, Zoom Out (the whole window, web pages included; Cmd/Ctrl+= zooms in too; the level
+  is kept in `zoom.json` and restored at the next start, as Electron's), Toggle Full Screen, Reset Input, Minimize, Zoom,
   Bring All to Front, Help; its commands also work while a dialog has focus;
   off macOS the window draws the menu bar, and a focused terminal keeps the keys it encodes,
   as with xterm.js), Exit and Kill Daemon; all 13 Settings sections (reopened on the one shown
@@ -346,8 +346,25 @@ are not ours). Its changes are marked `TreeTerm patch` (`grep -rn "TreeTerm patc
   Run menu's long script names do in Electron. The Kit's row grew with its content and the
   menu cut it off at its edge.
 
-When `gpui-kit` is upgraded, copy the new `gpui-component` over this directory and re-apply
-the marked changes (or drop the patch if the Kit gained the option).
+`vendor/gpui-pre` (GPUI, `gpui-pre` 0.3.12, without its `examples/` directory, which only
+its own example targets use) and `vendor/gpui-webview` (GPUI Kit's `gpui-webview` 0.9.1) are
+vendored the same way, for the window zoom that View > Actual Size,
+Zoom In and Zoom Out apply, as Electron's page zoom scales the whole page:
+
+- `gpui-pre` `src/window.rs`, `src/interactive.rs`, `src/platform.rs`: `Window::zoom` and
+  `Window::set_zoom`. A window zoomed `z` times lays itself out in pixels `z` times as large:
+  its scale factor is the display's times `z`, its viewport `z` times smaller, and the
+  platform's pointer and file-drop positions and pixel scroll distances are divided by `z` as
+  they come in (`PlatformInput::zoomed_out`); the IME's rectangles and character lookups, and
+  `Window::resize`, are converted back. GPUI had no page zoom (its scale factor is the
+  display's).
+- `gpui-webview` `src/lib.rs`: on macOS a page's view is placed in points (`z` times the
+  window's pixels) and its page zoom is multiplied by the window's, as Chromium's
+  `<webview>` follows its embedder's zoom. WebKitGTK's view already follows GPUI's scale
+  factor.
+
+When `gpui-kit` is upgraded, copy the new crates over these directories and re-apply the
+marked changes (or drop a patch if the Kit gained the option).
 
 `vendor/avif-decode` is avif-decode 3.0.0 as published on crates.io (Review's AVIF image
 diffs), swapped in and excluded the same way. Its one change, marked `TreeTerm patch` in
@@ -387,11 +404,11 @@ The chrome was matched to Electron's computed styles, measured side by side on o
 - In the Review diff, a review comment's text and the diff's code are selected apart: a
   selection running from a comment into the code (or back) copies the comment text only,
   not the code it spans, where Electron copies both, in reading order.
-- View → Actual Size, Zoom In and Zoom Out scale terminal text only (in Chromium's steps and
-  25%–500% limits, for every window): GPUI has no page zoom, and the rest of the window is
-  laid out in fixed pixels. The level is restored at the next start, as Electron's is, from the
-  native app's own `zoom.json` (Electron keeps its level in Chromium's `Preferences`, which
-  Chromium rewrites whole), so each app starts at its own last level.
+- View → Actual Size, Zoom In and Zoom Out (in Chromium's steps and 25%–500% limits, for every
+  window) restore their level at the next start from the native app's own `zoom.json`
+  (Electron keeps its level in Chromium's `Preferences`, which Chromium rewrites whole), so
+  each app starts at its own last level. The macOS window buttons stay where they are, as in
+  Electron.
 - Review's diff is coloured as Electron's (VS Code's Dark+), but through GPUI Kit's
   tree-sitter grammars, not shiki's TextMate ones: control keywords (`if`, `return`,
   `import`) are purple (`#C586C0`) in Rust, JavaScript, TypeScript, Python and Go only,
