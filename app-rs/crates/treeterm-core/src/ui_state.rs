@@ -1,6 +1,7 @@
 //! Local UI state Electron kept in `localStorage` (`sessionNames`: names and sidebar order;
-//! `recentDirectories`: the Open Workspace dialog's list), stored next to `settings.json`
-//! as `ui-state.json`. Unknown keys are kept on save.
+//! `recentDirectories`: the Open Workspace dialog's list; `logLevel`: the log's level, read at
+//! start-up by [`read_log_level`]), stored next to `settings.json` as `ui-state.json`. Unknown
+//! keys are kept on save.
 
 use std::collections::BTreeMap;
 use std::io;
@@ -37,6 +38,8 @@ pub struct UiState {
 pub enum UiStateError {
     #[error("cannot read {path}: {source}")]
     Read { path: String, source: io::Error },
+    #[error("{path} is not valid UI state: {source}")]
+    Parse { path: String, source: serde_json::Error },
     #[error("{path} is not valid UI state ({parse}), and cannot be moved to {backup}: {source}")]
     MoveAside { path: String, backup: String, parse: serde_json::Error, source: io::Error },
     #[error("cannot write {path}: {source}")]
@@ -113,6 +116,25 @@ pub fn load(path: &Path, now: SystemTime) -> Result<Loaded, UiStateError> {
             Err(UiStateError::MoveAside { path: shown(path), backup: shown(&backup), parse: error, source })
         }
     }
+}
+
+/// The `logLevel` stored in the file (Electron's localStorage `treeterm:logLevel`), read before
+/// the log starts: a missing file or key is `None`. Nothing else in the file is checked, and a
+/// file that is not valid JSON is an error and left as it is ([`load`] moves it aside later).
+pub fn read_log_level(path: &Path) -> Result<Option<String>, UiStateError> {
+    #[derive(Deserialize)]
+    struct Stored {
+        #[serde(rename = "logLevel", default)]
+        log_level: Option<String>,
+    }
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => return Err(UiStateError::Read { path: path.display().to_string(), source }),
+    };
+    let stored: Stored = serde_json::from_slice(&bytes)
+        .map_err(|source| UiStateError::Parse { path: path.display().to_string(), source })?;
+    Ok(stored.log_level)
 }
 
 /// Carry over the Recent Directories Electron kept in localStorage, once: each connection's
@@ -198,7 +220,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("nested").join("ui-state.json");
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(&path, r#"{"other":{"x":1},"sessionNames":{"local":"Laptop"}}"#).unwrap();
+        std::fs::write(&path, r#"{"other":{"x":1},"logLevel":"debug","sessionNames":{"local":"Laptop"}}"#).unwrap();
         let mut state = saved(&path);
         assert_eq!(state.session_names.get("local").map(String::as_str), Some("Laptop"));
         state.session_names.insert("ssh:me@box:22".to_owned(), "Box".to_owned());
@@ -210,8 +232,37 @@ mod tests {
         assert_eq!(again.session_names.len(), 2);
         assert_eq!(again.session_order, ["ssh:me@box:22", "local"]);
         assert_eq!(again.extra["other"]["x"], 1);
+        assert_eq!(read_log_level(&path).unwrap().as_deref(), Some("debug"), "the log level is kept");
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(!text.contains("importedElectronRecentDirectories"), "not imported: not written: {text}");
+    }
+
+    #[test]
+    fn the_log_level_is_read_without_touching_the_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = ui_state_path(dir.path());
+        assert_eq!(read_log_level(&path).unwrap(), None, "no file");
+
+        let stored = [
+            (r#"{"sessionNames":{"local":"Laptop"}}"#, None),
+            (r#"{"logLevel":null}"#, None),
+            (r#"{"logLevel":"Warn","sessionNames":"not a map"}"#, Some("Warn")),
+            (r#"{"logLevel":"verbose"}"#, Some("verbose")),
+        ];
+        for (text, level) in stored {
+            std::fs::write(&path, text).unwrap();
+            assert_eq!(read_log_level(&path).unwrap().as_deref(), level, "{text}");
+        }
+
+        for text in ["{nope", r#"{"logLevel":5}"#] {
+            std::fs::write(&path, text).unwrap();
+            assert!(matches!(read_log_level(&path), Err(UiStateError::Parse { .. })), "{text}");
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), text, "left as it is");
+        }
+
+        std::fs::remove_file(&path).unwrap();
+        std::fs::create_dir(&path).unwrap();
+        assert!(matches!(read_log_level(&path), Err(UiStateError::Read { .. })));
     }
 
     #[test]

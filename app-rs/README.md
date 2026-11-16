@@ -16,6 +16,11 @@ cargo build -p treeterm-app            # add --features automation for the contr
 For an isolated sandbox (separate HOME, socket, daemon) and the automation socket, see
 `AGENTS.md`.
 
+The app logs to stdout. Its level is `RUST_LOG` when that is set (tracing's directives, such
+as `RUST_LOG=treeterm_core=debug`); else `"logLevel"` in `ui-state.json` beside
+`settings.json`: `debug`, `info`, `warn`, `error` or `silent`, in any case, read at start-up
+(Electron's renderer read it from its localStorage `treeterm:logLevel`); else `info`.
+
 End-to-end tests launch the real binary in such a sandbox (daemon lifecycle, terminal output
 across restarts). They open a window, so they only run when asked:
 
@@ -439,6 +444,8 @@ The chrome was matched to Electron's computed styles, measured side by side on o
 - A corrupt `ui-state.json` (session names and order, Recent Directories) is logged and kept as
   `ui-state.json.corrupt-<ms since the epoch>`; the state starts empty and is saved again as
   usual. Electron dropped a corrupt stored value silently and overwrote it.
+- A `logLevel` in `ui-state.json` that names no level is logged as a warning and ignored;
+  Electron ignored an unknown `treeterm:logLevel` silently.
 - An entry of the worktree registry (`~/.treeterm/worktrees.json`) that cannot be read, such as
   a hand-edited one with no `branch` or a fractional `lastUsedAt`, is left out of Auto Open
   and the recent workspaces (logged) and kept in the file as it is. Electron listed it with

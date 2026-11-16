@@ -49,7 +49,9 @@ use treeterm_model::keybinding_store::KeybindingStore;
 use treeterm_model::settings_store::{SettingsEvent, SettingsStore};
 use treeterm_core::crash_report::{self, CrashReport};
 use treeterm_core::local_daemon::LocalDaemonSpec;
+use treeterm_core::logging::StoredLevel;
 use treeterm_core::paths::{self, process_env};
+use treeterm_core::ui_state;
 use treeterm_core::rt::Rt;
 use treeterm_model::app_store::AppStore;
 use treeterm_model::zoom::ZoomStore;
@@ -157,13 +159,34 @@ fn install_crash_hook() {
     }));
 }
 
+/// Start the log, on stdout. Its level is `RUST_LOG` when that is set (tracing's directives),
+/// else the `logLevel` kept in `ui-state.json` (Electron's localStorage `treeterm:logLevel`),
+/// else info. What could not be read is logged once the log runs.
+fn start_logging() {
+    let stored = paths::user_data_dir()
+        .map_err(|error| error.to_string())
+        .and_then(|dir| {
+            ui_state::read_log_level(&ui_state::ui_state_path(&dir)).map_err(|error| error.to_string())
+        });
+    let level = match &stored {
+        Ok(name) => StoredLevel::from_stored(name.as_deref()),
+        Err(_) => StoredLevel::Absent,
+    };
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(level.level().directive()));
+    tracing_subscriber::fmt().with_env_filter(filter).init();
+    match (stored, level) {
+        (Err(error), _) => tracing::error!(%error, "logLevel not read from UI state; it is ignored"),
+        (Ok(_), StoredLevel::Unknown(name)) => tracing::warn!(
+            log_level = name,
+            "logLevel in ui-state.json is not debug, info, warn, error or silent; it is ignored"
+        ),
+        (Ok(_), StoredLevel::Absent | StoredLevel::Known(_)) => {}
+    }
+}
+
 fn main() {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info".into()),
-        )
-        .init();
+    start_logging();
 
     let args: Vec<String> = std::env::args().skip(1).collect();
     let cwd = std::env::current_dir().unwrap_or_default();

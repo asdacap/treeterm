@@ -29,6 +29,7 @@ pub mod layout;
 pub mod llm;
 pub mod local_daemon;
 pub mod locale;
+pub mod logging;
 pub mod paths;
 pub mod pty;
 pub mod review;
