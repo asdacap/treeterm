@@ -3,9 +3,13 @@
 //! Several of its CSS rules use `var(--border)`, which is not defined: those borders are not
 //! drawn in Electron, so they are not drawn here either.
 
+use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::*;
-use gpui_kit::{ClipboardItem, Context, Entity, FontWeight, Hsla, SharedString, Subscription, Window, div, px, rgb, rgba};
+use gpui_kit::{
+    App, ClipboardItem, Context, Div, ElementId, Entity, FontWeight, Hsla, SharedString, Stateful, Subscription, Window, div, px, rgb,
+    rgba,
+};
 use treeterm_core::review::{Freshness, Resolution};
 use treeterm_model::session_store::SessionStore;
 use treeterm_model::tool_tabs::comments::{CommentsModel, PushState, created_at};
@@ -29,10 +33,8 @@ impl CommentsView {
 }
 
 /// The tab's borderless text buttons (`.comments-push-btn`, `.comments-reprompt-btn`, …):
-/// secondary, filled and primary on hover.
-fn flat_button(id: impl Into<gpui_kit::ElementId>, label: impl Into<SharedString>, size: f32, pad: (f32, f32), cx: &gpui_kit::App) -> gpui_kit::Stateful<gpui_kit::Div> {
-    let c = colors(cx);
-    let (hover, primary) = (c.bg_hover, c.text_primary);
+/// secondary text, and [`lit_on_hover`] where Electron's `:hover` applies.
+fn flat_button(id: impl Into<ElementId>, label: impl Into<SharedString>, size: f32, pad: (f32, f32), cx: &App) -> Stateful<Div> {
     div()
         .id(id)
         .flex_shrink_0()
@@ -42,10 +44,18 @@ fn flat_button(id: impl Into<gpui_kit::ElementId>, label: impl Into<SharedString
         .text_size(px(size))
         .line_height(normal_line(size))
         .font_weight(FontWeight::NORMAL)
-        .text_color(c.text_secondary)
+        .text_color(colors(cx).text_secondary)
         .cursor_pointer()
-        .hover(move |d| d.bg(hover).text_color(primary))
         .child(label.into())
+}
+
+/// The buttons' `:hover`: filled, with primary text. The active filter tab keeps its accent
+/// (`.active` comes after `:hover`) and a disabled Push button stays as it is
+/// (`:hover:not(:disabled)`), so neither gets it.
+fn lit_on_hover(button: Stateful<Div>, cx: &App) -> Stateful<Div> {
+    let c = colors(cx);
+    let (hover, primary) = (c.bg_hover, c.text_primary);
+    button.hover(move |d| d.bg(hover).text_color(primary))
 }
 
 impl Render for CommentsView {
@@ -85,6 +95,7 @@ impl Render for CommentsView {
             flat_button(id, label, 12., (3., 10.), cx)
                 .font_weight(FontWeight::MEDIUM)
                 .when(active, |d| d.bg(accent).text_color(primary))
+                .when(!active, |d| lit_on_hover(d, cx))
                 .on_click(cx.listener(move |view, _, _, cx| view.model.update(cx, |m, cx| m.set_filter(target, cx))))
         };
         let pushing = push == PushState::Pushing;
@@ -110,9 +121,9 @@ impl Render for CommentsView {
                     cx,
                 )
                 .when(!can_push, |d| d.opacity(0.5).cursor_default())
+                .when(can_push, |d| lit_on_hover(d, cx))
                 .tooltip(|window, cx| {
-                    gpui_kit::component::tooltip::Tooltip::new("Push unprompted comments to GitHub as inline PR review comments")
-                        .build(window, cx)
+                    Tooltip::new("Push unprompted comments to GitHub as inline PR review comments").build(window, cx)
                 })
                 .when(can_push, |d| {
                     d.on_click(cx.listener(|view, _, _, cx| {
@@ -137,6 +148,7 @@ impl Render for CommentsView {
             let outdated = comment.freshness == Freshness::Outdated;
             let (delete_id, prompt_id) = (comment.id.clone(), comment.id.clone());
             let goto = comment.clone();
+            let path = SharedString::from(comment.file_path.clone());
             let mut card = v_flex()
                 .p(px(12.))
                 .rounded(px(4.))
@@ -150,7 +162,17 @@ impl Render for CommentsView {
                         .mb(px(8.))
                         .text_size(px(12.))
                         .line_height(normal_line(12.))
-                        .child(div().flex_1().min_w_0().truncate().font_family(MONO).text_color(primary).child(comment.file_path.clone()))
+                        .child(
+                            div()
+                                .id(SharedString::from(format!("comment-path-{}", comment.id)))
+                                .flex_1()
+                                .min_w_0()
+                                .truncate()
+                                .font_family(MONO)
+                                .text_color(primary)
+                                .child(comment.file_path.clone())
+                                .tooltip(move |window, cx| Tooltip::new(path.clone()).build(window, cx)),
+                        )
                         .child(
                             div()
                                 .font_family(MONO)
@@ -160,6 +182,7 @@ impl Render for CommentsView {
                         .when(outdated, |d| {
                             d.child(
                                 div()
+                                    .id(SharedString::from(format!("comment-outdated-{}", comment.id)))
                                     .px(px(6.))
                                     .py(px(2.))
                                     .rounded(px(3.))
@@ -168,7 +191,8 @@ impl Render for CommentsView {
                                     .line_height(normal_line(10.))
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .text_color(rgb(0x1e1e1e))
-                                    .child("OUTDATED"),
+                                    .child("OUTDATED")
+                                    .tooltip(|window, cx| Tooltip::new("This comment may be outdated").build(window, cx)),
                             )
                         })
                         .child({
@@ -186,7 +210,7 @@ impl Render for CommentsView {
                                 .cursor_pointer()
                                 .hover(move |d| d.bg(hover).text_color(rgb(0xf14c4c)))
                                 .child("×")
-                                .tooltip(|window, cx| gpui_kit::component::tooltip::Tooltip::new("Delete comment").build(window, cx))
+                                .tooltip(|window, cx| Tooltip::new("Delete comment").build(window, cx))
                                 .on_click(cx.listener(move |view, _, _, cx| {
                                     view.model.update(cx, |m, cx| m.delete(&delete_id, cx));
                                 }))
@@ -230,22 +254,37 @@ impl Render for CommentsView {
                         .line_height(normal_line(11.))
                         .child(div().flex_1().min_w_0().text_color(secondary).child(created_at(&comment)))
                         .child(
-                            flat_button(
-                                SharedString::from(format!("comment-prompt-{}", comment.id)),
-                                if addressed { "Re-prompt" } else { "Prompt" },
-                                11.,
-                                (3., 8.),
+                            lit_on_hover(
+                                flat_button(
+                                    SharedString::from(format!("comment-prompt-{}", comment.id)),
+                                    if addressed { "Re-prompt" } else { "Prompt" },
+                                    11.,
+                                    (3., 8.),
+                                    cx,
+                                ),
                                 cx,
                             )
+                            .tooltip(move |window, cx| {
+                                Tooltip::new(if addressed {
+                                    "Re-send this comment to the AI harness"
+                                } else {
+                                    "Send this comment to the AI harness"
+                                })
+                                .build(window, cx)
+                            })
                             .on_click(cx.listener(move |view, _, _, cx| {
                                 view.model.update(cx, |m, cx| m.prompt_comment(&prompt_id, cx));
                             })),
                         )
                         .child(
-                            flat_button(SharedString::from(format!("comment-goto-{}", comment.id)), "Go to file", 11., (3., 8.), cx)
-                                .on_click(cx.listener(move |view, _, _, cx| {
-                                    view.model.update(cx, |m, cx| m.go_to_file(&goto, cx));
-                                })),
+                            lit_on_hover(
+                                flat_button(SharedString::from(format!("comment-goto-{}", comment.id)), "Go to file", 11., (3., 8.), cx),
+                                cx,
+                            )
+                            .tooltip(|window, cx| Tooltip::new("Open file at this line").build(window, cx))
+                            .on_click(cx.listener(move |view, _, _, cx| {
+                                view.model.update(cx, |m, cx| m.go_to_file(&goto, cx));
+                            })),
                         ),
                 );
             cards = cards.child(card);
@@ -278,8 +317,8 @@ impl Render for CommentsView {
                         })
                         .child(format!("{} Generated Prompt", if expanded { "▼" } else { "▶" }))
                         .child(
-                            flat_button("comments-copy", "Copy to Clipboard", 11., (2., 8.), cx)
-                                .tooltip(|window, cx| gpui_kit::component::tooltip::Tooltip::new("Copy to clipboard").build(window, cx))
+                            lit_on_hover(flat_button("comments-copy", "Copy to Clipboard", 11., (2., 8.), cx), cx)
+                                .tooltip(|window, cx| Tooltip::new("Copy to clipboard").build(window, cx))
                                 .on_click(move |_, _, cx| {
                                     cx.stop_propagation();
                                     cx.write_to_clipboard(ClipboardItem::new_string(copy.clone()));
@@ -315,3 +354,4 @@ impl Render for CommentsView {
             .children(prompt_panel)
     }
 }
+
