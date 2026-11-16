@@ -106,8 +106,10 @@ const INPUT_CONTEXT: &str = "Input";
 /// Edit's Undo, Redo, Cut, Copy, Paste and Select All keep GPUI Kit's keys, which are
 /// Electron's, in the inputs and editors that handle them (a terminal binds its own, see
 /// `terminal_view::edit_keys`). On macOS Undo and Redo also have them everywhere else, for a
-/// web page ([`FocusedPage`]). Redo off macOS is Electron's Linux Ctrl+Shift+Z, besides the
-/// Kit's Ctrl+Y (Windows'). Edit > Delete has no shortcut, as in Electron.
+/// web page ([`FocusedPage`]), and a web page holding the keyboard takes all of these keys
+/// before those bindings see them (`route_page_keys`). Redo off macOS is Electron's Linux
+/// Ctrl+Shift+Z, besides the Kit's Ctrl+Y (Windows'). Edit > Delete has no shortcut, as in
+/// Electron.
 fn key_bindings(mac: bool) -> Vec<KeyBinding> {
     if mac {
         vec![
@@ -407,10 +409,12 @@ pub fn route_to_window(window: AnyWindowHandle, view: WeakEntity<AppView>, store
     route_edit(window, focused_page(), cx);
 }
 
-/// On macOS, Undo's, Redo's and Paste and Match Style's keys while a web page holds the
-/// keyboard outside GPUI (`page`) go to the page, whatever GPUI's focus is: GPUI sees a key
-/// equivalent before AppKit's menu, and its focus can still be on a field the page took the
-/// keyboard from.
+/// On macOS, the Edit menu's keys (Undo, Redo, Cut, Copy, Paste, Paste and Match Style and
+/// Select All) while a web page holds the keyboard outside GPUI (`page`) go to the page,
+/// whatever GPUI's focus is: GPUI sees a key equivalent before AppKit's menu, and its focus
+/// can still be on a field or terminal the page took the keyboard from, whose own bindings
+/// for these keys would act on it instead.
+#[cfg(any(target_os = "macos", test))]
 pub fn route_page_keys(page: FocusedPage, cx: &mut App) {
     cx.intercept_keystrokes(move |event, _, cx| {
         let keystroke = &event.keystroke;
@@ -418,7 +422,11 @@ pub fn route_page_keys(page: FocusedPage, cx: &mut App) {
         let command = match (keystroke.key.as_str(), m.platform, m.control, m.alt, m.shift) {
             ("z", true, false, false, false) => EditCommand::Undo,
             ("z", true, false, false, true) => EditCommand::Redo,
+            ("x", true, false, false, false) => EditCommand::Cut,
+            ("c", true, false, false, false) => EditCommand::Copy,
+            ("v", true, false, false, false) => EditCommand::Paste,
             ("v", true, false, true, true) => EditCommand::PasteAsPlainText,
+            ("a", true, false, false, false) => EditCommand::SelectAll,
             _ => return,
         };
         if page(command) {
@@ -1004,25 +1012,33 @@ mod tests {
         assert_eq!(cx.read_from_clipboard(), None, "Delete is not Cut");
     }
 
-    /// A web page holding the keyboard outside GPUI (on macOS, AppKit's first responder) takes
-    /// macOS's Undo, Redo, Paste and Match Style and Delete, from the menu and from their keys,
-    /// though GPUI's focus is still on the field the page took the keyboard from.
-    #[gpui_kit::test]
-    fn a_web_page_holding_the_keyboard_takes_the_edit_menu(cx: &mut TestAppContext) {
-        let taken = Rc::new(std::cell::RefCell::new(Vec::new()));
-        let page: FocusedPage = {
-            let taken = taken.clone();
-            Rc::new(move |command| {
-                taken.borrow_mut().push(command);
-                true
-            })
-        };
+    /// A web page that holds the keyboard outside GPUI or not (`holds`), and the Edit commands
+    /// it was offered.
+    fn fake_page(holds: bool) -> (FocusedPage, Rc<std::cell::RefCell<Vec<EditCommand>>>) {
+        let offered = Rc::new(std::cell::RefCell::new(Vec::new()));
+        let record = offered.clone();
+        let page: FocusedPage = Rc::new(move |command| {
+            record.borrow_mut().push(command);
+            holds
+        });
+        (page, offered)
+    }
+
+    /// A window whose focused input holds "hello world" with "hello" selected, beside `page`,
+    /// with macOS's Edit keys: the menu's and GPUI Kit's input ones, whatever the host.
+    fn field_beside_page(cx: &mut TestAppContext, page: FocusedPage) -> (&mut VisualTestContext, Entity<input::InputState>) {
         let (window, field) = cx.update(|cx| {
             gpui_kit::init(cx);
             bind_keys(true, KeyOptions::for_host(), cx);
+            cx.bind_keys([
+                KeyBinding::new("cmd-x", input::Cut, Some(INPUT_CONTEXT)),
+                KeyBinding::new("cmd-c", input::Copy, Some(INPUT_CONTEXT)),
+                KeyBinding::new("cmd-v", input::Paste, Some(INPUT_CONTEXT)),
+                KeyBinding::new("cmd-a", input::SelectAll, Some(INPUT_CONTEXT)),
+            ]);
             route_page_keys(page.clone(), cx);
             let (window, field) = gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
-                let state = cx.new(|cx| input::InputState::new(window, cx).default_value("hello"));
+                let state = cx.new(|cx| input::InputState::new(window, cx).default_value("hello world"));
                 cx.new(|_| Field(state))
             })
             .expect("open a window");
@@ -1038,6 +1054,17 @@ mod tests {
             });
         });
         cx.run_until_parked();
+        (cx, state)
+    }
+
+    /// A web page holding the keyboard outside GPUI (on macOS, AppKit's first responder) takes
+    /// macOS's Undo, Redo, Paste and Match Style and Delete from the menu, and the Edit menu's
+    /// keys, Cut's, Copy's, Paste's and Select All's included, though GPUI's focus is still on
+    /// the field the page took the keyboard from, whose own bindings for them are left unrun.
+    #[gpui_kit::test]
+    fn a_web_page_holding_the_keyboard_takes_the_edit_menu(cx: &mut TestAppContext) {
+        let (page, taken) = fake_page(true);
+        let (cx, state) = field_beside_page(cx, page);
 
         let menu: [Box<dyn Action>; 4] =
             [Box::new(Undo), Box::new(Redo), Box::new(PasteAndMatchStyle), Box::new(DeleteSelection)];
@@ -1046,14 +1073,44 @@ mod tests {
             cx.run_until_parked();
             next_frames(cx);
         }
-        for keys in ["cmd-z", "cmd-shift-z", "cmd-alt-shift-v"] {
+        for keys in ["cmd-z", "cmd-shift-z", "cmd-alt-shift-v", "cmd-x", "cmd-c", "cmd-v", "cmd-a"] {
             cx.simulate_keystrokes(keys);
         }
         cx.run_until_parked();
-        use EditCommand::{Delete, PasteAsPlainText, Redo as PageRedo, Undo as PageUndo};
-        let (menu, keys) = ([PageUndo, PageRedo, PasteAsPlainText, Delete], [PageUndo, PageRedo, PasteAsPlainText]);
+        next_frames(cx);
+        use EditCommand::{Copy, Cut, Delete, Paste, PasteAsPlainText, Redo as PageRedo, SelectAll, Undo as PageUndo};
+        let menu = [PageUndo, PageRedo, PasteAsPlainText, Delete];
+        let keys = [PageUndo, PageRedo, PasteAsPlainText, Cut, Copy, Paste, SelectAll];
         assert_eq!(*taken.borrow(), menu.into_iter().chain(keys).collect::<Vec<_>>());
-        assert_eq!(state.read_with(cx, |state, _| state.value().to_string()), "hello", "the field is left alone");
+        let (value, selected) = state.read_with(cx, |state, _| (state.value().to_string(), state.selected_range()));
+        assert_eq!(value, "hello world", "the field is left alone");
+        assert_eq!(selected, 0..5, "the field's selection is left alone");
+        assert_eq!(cx.read_from_clipboard(), None, "the field copied nothing");
+    }
+
+    /// While no web page holds the keyboard, Cut's, Copy's, Paste's and Select All's keys act
+    /// on the focused field.
+    #[gpui_kit::test]
+    fn the_edit_keys_act_on_the_focused_field_while_no_page_holds_the_keyboard(cx: &mut TestAppContext) {
+        let (page, offered) = fake_page(false);
+        let (cx, state) = field_beside_page(cx, page);
+        let press = |cx: &mut VisualTestContext, keys: &str| {
+            cx.simulate_keystrokes(keys);
+            cx.run_until_parked();
+            next_frames(cx);
+            state.read_with(cx, |state, _| (state.value().to_string(), state.selected_range()))
+        };
+        let clipboard = |cx: &mut VisualTestContext| cx.read_from_clipboard().and_then(|item| item.text());
+
+        assert_eq!(press(cx, "cmd-c"), ("hello world".to_string(), 0..5));
+        assert_eq!(clipboard(cx).as_deref(), Some("hello"));
+        assert_eq!(press(cx, "cmd-a"), ("hello world".to_string(), 0..11));
+        assert_eq!(press(cx, "cmd-v"), ("hello".to_string(), 5..5));
+        cx.update(|_, cx| state.update(cx, |state, cx| state.set_selected_range(1..3, cx)));
+        assert_eq!(press(cx, "cmd-x"), ("hlo".to_string(), 1..1));
+        assert_eq!(clipboard(cx).as_deref(), Some("el"));
+        use EditCommand::{Copy, Cut, Paste, SelectAll};
+        assert_eq!(*offered.borrow(), [Copy, SelectAll, Paste, Cut], "the page was asked first");
     }
 
     /// Delivers two frames, as the platform would: each runs what the last scheduled, then draws.
