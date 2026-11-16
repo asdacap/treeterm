@@ -2589,6 +2589,106 @@ fn an_uncommitted_reload_reads_again_the_staged_unstaged_and_untracked_files_ask
     assert_eq!(file_diff(cx, &review, "c.txt"), Some(FileDiff::NotLoaded));
 }
 
+/// Git reads `path`'s two sides slowly (a textconv sleeping a second for each) in any patch that
+/// shows it; listing the files (numstat, name-status, stat) stays quick.
+fn slow_to_read(repo: &TempRepo, path: &str) {
+    let info = repo.path.join(".git/info");
+    std::fs::create_dir_all(&info).unwrap();
+    std::fs::write(info.join("attributes"), format!("{path} diff=slow\n")).unwrap();
+    repo.git(&["config", "diff.slow.textconv", "sleep 1; cat"]);
+}
+
+/// Lets a reload just started list its files (its re-read of a file [`slow_to_read`] then runs
+/// for two seconds).
+fn let_it_list(cx: &mut TestAppContext) {
+    for _ in 0..30 {
+        cx.run_until_parked();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
+#[gpui_kit::test]
+fn a_file_read_on_its_own_while_a_reload_reads_others_keeps_that_read(cx: &mut TestAppContext) {
+    use treeterm_model::review_patch::FileDiff;
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let repo = TempRepo::new(&h);
+    let names = ["a.txt", "b.txt", "slow.txt"];
+    for name in names {
+        repo.write(name, "x\n");
+    }
+    repo.commit_all("base");
+    repo.git(&["checkout", "-q", "-b", "feature"]);
+    for name in names {
+        repo.write(name, &format!("{name}\n"));
+    }
+    repo.commit_all("feature");
+    slow_to_read(&repo, "slow.txt");
+    let store = open_store(cx, &h);
+    let workspace = open_repo_workspace(cx, &h, &store, &repo);
+    let (_, review) =
+        open_review_with(cx, &workspace, serde_json::json!({ "viewMode": "committed", "baseBranchOverride": "main" }));
+    wait_review(cx, &review, "listed", |r, _| matches!(r.content(), ReviewContent::Committed(_)));
+    wait_review(cx, &review, "loaded", |r, _| !r.is_loading());
+    review.update(cx, |r, cx| r.request_files(&["slow.txt".to_owned()], cx));
+    wait_review(cx, &review, "slow.txt read", |r, _| !r.is_file_loading("slow.txt"));
+    let loaded = |diff: &Option<FileDiff>, text: &str| matches!(diff, Some(FileDiff::Loaded(section)) if section.contains(text));
+    assert!(loaded(&file_diff(cx, &review, "slow.txt"), "+slow.txt"));
+
+    // A reload reads slow.txt again, slowly. a.txt, asked for as it starts, and b.txt, asked
+    // for once it has listed the files, are read on their own meanwhile, and first.
+    review.update(cx, |r, cx| {
+        r.refresh(cx);
+        r.request_files(&["a.txt".to_owned()], cx);
+    });
+    let_it_list(cx);
+    review.update(cx, |r, cx| r.request_files(&["b.txt".to_owned()], cx));
+    wait_review(cx, &review, "a.txt and b.txt read", |r, _| !r.is_file_loading("a.txt") && !r.is_file_loading("b.txt"));
+    assert!(review.read_with(cx, |r, _| r.is_refreshing()), "the reload ended first");
+    let (a, b) = (file_diff(cx, &review, "a.txt"), file_diff(cx, &review, "b.txt"));
+    assert!(loaded(&a, "+a.txt") && loaded(&b, "+b.txt"), "{a:?} {b:?}");
+
+    // Once it ends, they keep what they read (not "Scroll to load diff", nor read again).
+    wait_review(cx, &review, "reloaded", |r, _| !r.is_refreshing());
+    assert_eq!((file_diff(cx, &review, "a.txt"), file_diff(cx, &review, "b.txt")), (a, b));
+    assert!(review.read_with(cx, |r, _| !r.is_file_loading("a.txt") && !r.is_file_loading("b.txt")));
+    assert!(loaded(&file_diff(cx, &review, "slow.txt"), "+slow.txt"));
+}
+
+#[gpui_kit::test]
+fn a_file_read_on_its_own_during_a_reload_that_lists_it_another_way_is_read_again(cx: &mut TestAppContext) {
+    use treeterm_model::review_patch::FileDiff;
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let repo = TempRepo::new(&h);
+    repo.write("a.txt", "a\n");
+    repo.write("slow.txt", "x\n");
+    repo.commit_all("base");
+    repo.write("a.txt", "A\n");
+    repo.write("slow.txt", "X\n");
+    slow_to_read(&repo, "slow.txt");
+    let store = open_store(cx, &h);
+    let workspace = open_repo_workspace(cx, &h, &store, &repo);
+    let review = open_review(cx, &workspace);
+    wait_review(cx, &review, "listed", |r, _| matches!(r.content(), ReviewContent::Uncommitted(u) if u.changes.files.len() == 2));
+    wait_review(cx, &review, "loaded", |r, _| !r.is_loading());
+    review.update(cx, |r, cx| r.request_files(&["slow.txt".to_owned()], cx));
+    wait_review(cx, &review, "slow.txt read", |r, _| !r.is_file_loading("slow.txt"));
+
+    // a.txt is staged, then asked for while a reload (reading slow.txt again, slowly) runs: it
+    // is read the way the list shown has it, unstaged, which now shows nothing. The reload
+    // lists it staged: it is read again that way.
+    repo.git(&["add", "a.txt"]);
+    review.update(cx, |r, cx| r.refresh(cx));
+    let_it_list(cx);
+    review.update(cx, |r, cx| r.request_files(&["a.txt".to_owned()], cx));
+    wait_review(cx, &review, "reloaded", |r, _| !r.is_refreshing() && !r.is_file_loading("a.txt"));
+    let a = file_diff(cx, &review, "a.txt");
+    assert!(matches!(&a, Some(FileDiff::Loaded(section)) if section.contains("+A")), "{a:?}");
+}
+
 #[gpui_kit::test]
 fn a_commits_rename_reads_as_a_deletion_and_an_addition_also_read_together(cx: &mut TestAppContext) {
     use treeterm_model::review::{Loaded, ReviewMode};
@@ -2634,7 +2734,6 @@ fn a_commits_rename_reads_as_a_deletion_and_an_addition_also_read_together(cx: &
     let (c, d) = (file_diff(cx, &review, "c.txt"), file_diff(cx, &review, "d.txt"));
     assert!(deleted(&c) && added(&d), "{c:?} {d:?}");
 }
-
 
 #[gpui_kit::test]
 fn find_reads_every_file_a_few_at_a_time_and_counts_once_all_are_read(cx: &mut TestAppContext) {

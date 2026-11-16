@@ -987,8 +987,10 @@ impl ReviewModel {
             };
             let diffs = read_files(&patches, listed, reads).await;
             match this.update(cx, |model, cx| {
-                let diffs = model.with_file_loads(&list, diffs);
-                model.commit_diff_read(&hash, Loaded::Ready(CommitDiff { files, diffs }), true, cx);
+                let show = |model: &mut Self, diffs, cx: &mut Context<Self>| {
+                    model.commit_diff_read(&hash, Loaded::Ready(CommitDiff { files, diffs }), true, cx);
+                };
+                model.reloaded(&list, diffs, show, cx);
             }) {
                 Ok(()) | Err(_) => {} // Err: tab closed
             }
@@ -1554,13 +1556,48 @@ impl ReviewModel {
         self.file_loads.retain(|(list, _), _| !of(list));
     }
 
-    /// A whole list's diffs as read, with the files read on their own since it started still
-    /// loading: their own read is the later one.
-    fn with_file_loads(&self, list: &DiffList, mut diffs: FileDiffs) -> FileDiffs {
+    /// A reload of `list` read again the files asked for when it listed them (`diffs`): `show`
+    /// puts its list, with them, in place of the one shown. A file asked for on its own since
+    /// the reload listed its files (or started) keeps that read, the later one, whether it
+    /// finished first (read or failed: [`FileDiffs::keep_asked_since`]) or still runs (loading,
+    /// also a file the reload read again). Unless the new list reads that file another way than
+    /// the list it was read from (staged since, say): it is then read again, on its own.
+    fn reloaded(
+        &mut self,
+        list: &DiffList,
+        mut diffs: FileDiffs,
+        show: impl FnOnce(&mut Self, FileDiffs, &mut Context<Self>),
+        cx: &mut Context<Self>,
+    ) {
+        let mut own: IndexSet<String> = match self.diffs(list) {
+            Some(shown) => diffs.keep_asked_since(shown).into_iter().collect(),
+            None => IndexSet::new(),
+        };
         for (_, path) in self.file_loads.keys().filter(|(loading, _)| loading == list) {
             diffs.set(path, FileDiff::Loading);
+            own.insert(path.clone());
         }
-        diffs
+        let read_with: Vec<(String, Option<ExecRequest>)> = own
+            .into_iter()
+            .map(|path| {
+                let request = self.file_request(list, &path);
+                (path, request)
+            })
+            .collect();
+        show(self, diffs, cx);
+        for (path, before) in read_with {
+            match self.file_request(list, &path) {
+                Some(now) if Some(&now) != before.as_ref() => {
+                    self.read_file(list.clone(), &path, cx);
+                }
+                Some(_) | None => {}
+            }
+        }
+    }
+
+    /// The command reading `path` of `list` on its own, as shown (none: not listed).
+    fn file_request(&self, list: &DiffList, path: &str) -> Option<ExecRequest> {
+        self.file_reads(list, &[path.to_owned()]).pop().map(|read| read.request)
     }
 
     /// Something is being read from git for the views: a view's data, `HEAD` or the
@@ -1663,8 +1700,10 @@ impl ReviewModel {
             let diffs = read_files(&patches, listed, reads).await;
             match this.update(cx, |model, cx| {
                 model.committed_load = None;
-                let diffs = model.with_file_loads(&DiffList::Committed, diffs);
-                model.committed = Slot::Ready(committed(&diff, diffs));
+                let show = |model: &mut Self, diffs, _: &mut Context<Self>| {
+                    model.committed = Slot::Ready(committed(&diff, diffs));
+                };
+                model.reloaded(&DiffList::Committed, diffs, show, cx);
                 model.listed(ReviewMode::Committed, &files, cx);
             }) {
                 Ok(()) | Err(_) => {} // Err: tab closed
@@ -1711,8 +1750,10 @@ impl ReviewModel {
             let diffs = read_files(&patches, listed, reads).await;
             match this.update(cx, |model, cx| {
                 model.uncommitted_load = None;
-                let diffs = model.with_file_loads(&DiffList::Uncommitted, diffs);
-                model.uncommitted = Slot::Ready(Uncommitted { changes, diffs });
+                let show = |model: &mut Self, diffs, _: &mut Context<Self>| {
+                    model.uncommitted = Slot::Ready(Uncommitted { changes, diffs });
+                };
+                model.reloaded(&DiffList::Uncommitted, diffs, show, cx);
                 model.listed(ReviewMode::Uncommitted, &files, cx);
             }) {
                 Ok(()) | Err(_) => {} // Err: tab closed

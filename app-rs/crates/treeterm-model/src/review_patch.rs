@@ -82,6 +82,30 @@ impl FileDiffs {
         }
     }
 
+    /// A reload's diffs (`self`: the files it listed, those it read again set) as it finishes,
+    /// `shown` being what the list shows meanwhile. A file it left not asked for but asked for
+    /// in `shown` (being read, read or failed) was asked for since it listed its files, on its
+    /// own (near the viewport, searched): that read is the later one, so it is kept, read or
+    /// still being read. The files it read again keep what it read. The files kept, in list
+    /// order.
+    pub fn keep_asked_since(&mut self, shown: &FileDiffs) -> Vec<String> {
+        let mut kept = Vec::new();
+        for (path, diff) in &mut self.0 {
+            match (&*diff, shown.0.get(path)) {
+                (
+                    FileDiff::NotLoaded,
+                    Some(asked @ (FileDiff::Loading | FileDiff::Loaded(_) | FileDiff::Failed(_))),
+                ) => {
+                    *diff = asked.clone();
+                    kept.push(path.clone());
+                }
+                (FileDiff::NotLoaded, Some(FileDiff::NotLoaded) | None)
+                | (FileDiff::Loading | FileDiff::Loaded(_) | FileDiff::Failed(_), _) => {}
+            }
+        }
+        kept
+    }
+
     /// Replaces a listed path's diff (one no longer listed is left out).
     pub fn set(&mut self, path: &str, diff: FileDiff) {
         if let Some(entry) = self.0.get_mut(path) {
@@ -627,6 +651,53 @@ mod tests {
         assert_eq!(
             FileDiff::of("a.txt", &Err("  ".to_owned())),
             FileDiff::Failed("Failed to load diff".to_owned())
+        );
+    }
+
+    #[test]
+    fn a_reload_keeps_the_files_asked_for_on_their_own_since_it_listed_them() {
+        let section = |path: &str, text: &str| MODIFIED.replace("a.txt", path).replace("ONE", text);
+        // Shown while the reload ran: a.txt read before it (so read again by it); b.txt, c.txt
+        // and d.txt asked for on their own since it listed them (read, being read, failed);
+        // e.txt not asked for; gone.txt no longer listed.
+        let mut shown =
+            FileDiffs::not_loaded(["a.txt", "b.txt", "c.txt", "d.txt", "e.txt", "gone.txt"]);
+        shown.set("a.txt", FileDiff::Loaded(section("a.txt", "OLD")));
+        shown.set("b.txt", FileDiff::Loaded(section("b.txt", "OWN")));
+        shown.set("c.txt", FileDiff::Loading);
+        shown.set("d.txt", FileDiff::failed("fatal: bad object"));
+        shown.set("gone.txt", FileDiff::Loaded(section("gone.txt", "GONE")));
+
+        // The reload lists every file but gone.txt, plus new.txt, and reads a.txt again.
+        let mut reloaded =
+            FileDiffs::not_loaded(["a.txt", "b.txt", "c.txt", "d.txt", "e.txt", "new.txt"]);
+        reloaded.set_read(["a.txt"], &Ok(section("a.txt", "NEW")));
+        assert_eq!(
+            reloaded.keep_asked_since(&shown),
+            ["b.txt", "c.txt", "d.txt"]
+        );
+        assert_eq!(
+            reloaded.iter().collect::<Vec<_>>(),
+            [
+                ("a.txt", &FileDiff::Loaded(section("a.txt", "NEW"))),
+                ("b.txt", &FileDiff::Loaded(section("b.txt", "OWN"))),
+                ("c.txt", &FileDiff::Loading),
+                ("d.txt", &FileDiff::Failed("fatal: bad object".to_owned())),
+                ("e.txt", &FileDiff::NotLoaded),
+                ("new.txt", &FileDiff::NotLoaded),
+            ]
+        );
+
+        // What the reload read (or failed to read) stands over what was shown.
+        let mut failed = FileDiffs::not_loaded(["a.txt", "b.txt"]);
+        failed.set_read(["a.txt", "b.txt"], &Err("fatal: bad revision".to_owned()));
+        assert!(failed.keep_asked_since(&shown).is_empty());
+        assert_eq!(
+            failed.iter().collect::<Vec<_>>(),
+            [
+                ("a.txt", &FileDiff::Failed("fatal: bad revision".to_owned())),
+                ("b.txt", &FileDiff::Failed("fatal: bad revision".to_owned())),
+            ]
         );
     }
 
