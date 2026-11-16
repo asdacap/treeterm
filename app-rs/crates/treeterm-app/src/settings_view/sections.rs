@@ -1,8 +1,7 @@
 //! The sections that edit single settings (the instance lists are in `instance_list`).
 
-use gpui_kit::component::input::InputState;
 use gpui_kit::prelude::*;
-use gpui_kit::{AnyElement, Context, Div, Entity, Stateful, div, px, rgb, rgba};
+use gpui_kit::{AnyElement, Context, Div, Stateful, div, px, rgb, rgba};
 use treeterm_core::keybinding::{Os, PrefixAction};
 use treeterm_core::settings::{
     ClassifiedState, ClassifierCriteria, ClassifierProvider, CursorStyle, DEFAULT_ANALYZER_SYSTEM_PROMPT,
@@ -85,10 +84,10 @@ impl SettingsView {
             cx,
         );
         section()
-            .child(group("Font Size", number(&self.inputs.font_size, cx), None, cx))
+            .child(group("Font Size", NumberField::new(&self.inputs.font_size, form::FONT_SIZE), None, cx))
             .child(group(
                 "Max Columns",
-                number(&self.inputs.max_cols, cx),
+                NumberField::new(&self.inputs.max_cols, form::MAX_COLS),
                 Some(
                     "Terminals fit to at most this many columns; the \"col limit\" switch in a tab's \
                      status bar lifts it for that tab",
@@ -228,19 +227,19 @@ impl SettingsView {
             ))
             .child(group(
                 "Buffer Lines",
-                number(&self.inputs.buffer_lines, cx),
+                NumberField::new(&self.inputs.buffer_lines, form::BUFFER_LINES),
                 Some("Number of terminal buffer lines to send to the analyzer."),
                 cx,
             ))
             .child(group(
                 "Idle Debounce (ms)",
-                number(&self.inputs.idle_debounce, cx),
+                NumberField::new(&self.inputs.idle_debounce, form::IDLE_DEBOUNCE),
                 Some("Milliseconds of quiet terminal output before a tab is considered idle or classified."),
                 cx,
             ))
             .child(group(
                 "Idle Debounce When Unread (ms)",
-                number(&self.inputs.idle_debounce_unread, cx),
+                NumberField::new(&self.inputs.idle_debounce_unread, form::IDLE_DEBOUNCE_UNREAD),
                 Some("Same, while the workspace already shows an unread marker."),
                 cx,
             ))
@@ -397,11 +396,6 @@ impl SettingsView {
             ))
             .into_any_element()
     }
-}
-
-/// `input[type=number].settings-input`.
-fn number(state: &Entity<InputState>, cx: &gpui_kit::App) -> impl IntoElement + use<> {
-    div().w(px(crate::number_field::WIDTH)).child(ui::text_input(state, cx))
 }
 
 /// `formatKeybindingLabel`: Electron names five actions and shows the sixth by its key.

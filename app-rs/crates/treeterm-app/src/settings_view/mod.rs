@@ -599,6 +599,61 @@ mod tests {
         assert_eq!(text(cx), "500");
     }
 
+    /// What `field` holds once it is focused holding `text` and `keys` are pressed.
+    fn stepped(cx: &mut VisualTestContext, field: &Entity<InputState>, text: &str, keys: &str) -> String {
+        let text = text.to_owned();
+        cx.update(|window, cx| {
+            field.update(cx, |input, cx| {
+                input.set_value(text, window, cx);
+                input.focus(window, cx);
+            })
+        });
+        cx.simulate_keystrokes(keys);
+        cx.update(|_, cx| field.read(cx).value().to_string())
+    }
+
+    /// Font Size, Max Columns, Buffer Lines and both Idle Debounces are Electron's
+    /// `<input type="number">`s: ArrowUp/ArrowDown step each by its own step within its own
+    /// bounds, and letters cannot be typed.
+    #[gpui_kit::test]
+    fn the_number_fields_step_within_their_bounds(cx: &mut TestAppContext) {
+        let (cx, _, view) = dialog(cx);
+        let [font_size, max_cols, buffer_lines, idle_debounce, idle_debounce_unread] = cx.update(|_, cx| {
+            let inputs = &view.read(cx).inputs;
+            [
+                &inputs.font_size,
+                &inputs.max_cols,
+                &inputs.buffer_lines,
+                &inputs.idle_debounce,
+                &inputs.idle_debounce_unread,
+            ]
+            .map(Entity::clone)
+        });
+
+        assert_eq!(stepped(cx, &font_size, "14", "up up up"), "17");
+        assert_eq!(stepped(cx, &font_size, "32", "up"), "32");
+        assert_eq!(stepped(cx, &font_size, "8", "down"), "8");
+        assert_eq!(stepped(cx, &max_cols, "40", "down"), "40");
+        assert_eq!(stepped(cx, &max_cols, "2000", "down"), "1000");
+        cx.simulate_input("a");
+        assert_eq!(texts(cx, &view).max_cols, "1000", "letters are not typed");
+
+        cx.update(|_, cx| {
+            view.update(cx, |view, cx| {
+                view.section = Section::Llm;
+                cx.notify();
+            })
+        });
+        cx.run_until_parked();
+        assert_eq!(stepped(cx, &buffer_lines, "100", "up"), "100");
+        assert_eq!(stepped(cx, &buffer_lines, "1", "down"), "1");
+        assert_eq!(stepped(cx, &buffer_lines, "30", "down"), "29");
+        assert_eq!(stepped(cx, &idle_debounce, "2050", "up"), "2100");
+        assert_eq!(stepped(cx, &idle_debounce, "2000", "down down"), "1800");
+        assert_eq!(stepped(cx, &idle_debounce_unread, "0", "down"), "0");
+        assert_eq!(stepped(cx, &idle_debounce_unread, "15000", "up"), "15100");
+    }
+
     /// An action key in prefix mode runs its action, not the recorder; Cmd/Ctrl+1–9 (only
     /// `preventDefault`ed) reach both.
     #[gpui_kit::test]

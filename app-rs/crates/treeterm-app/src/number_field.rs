@@ -1,13 +1,16 @@
 //! `<input type="number" class="settings-input" min max step>` as Chromium draws it: a text
-//! field that takes numbers, with spin buttons (shown while it is hovered or focused) and
-//! ArrowUp/ArrowDown that step its value as Chromium's do. Typed values are never clamped:
-//! `min` and `max` only bound the stepping.
+//! field that takes numbers, with spin buttons (shown while it is hovered or focused),
+//! ArrowUp/ArrowDown and, while it is focused, the wheel over it, which step its value as
+//! Chromium's do. Typed values are never clamped: `min` and `max` only bound the stepping.
 
 use gpui_kit::assets::IconName;
 use gpui_kit::base::{Button, NumberInput, StepAction};
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::prelude::*;
-use gpui_kit::{App, Entity, Focusable as _, SharedString, Window, div, px};
+use gpui_kit::{
+    App, Entity, Focusable as _, ScrollDelta, ScrollEvent, ScrollSource, SharedString, Window, div,
+    px,
+};
 
 use crate::theme::colors;
 use crate::ui;
@@ -107,6 +110,42 @@ fn format_number(value: f64) -> String {
     format!("{value}")
 }
 
+/// The step a wheel event over the focused field takes (Chromium's
+/// `SpinButtonElement::ForwardEvent` with `DoStepAction(wheelDeltaY)`): every event that
+/// scrolls up steps up once and every one that scrolls down steps down once, however far it
+/// scrolls. `None` for an event that moves on neither (a gesture's start or end, a sideways
+/// scroll) and for a touchscreen pan, which is no wheel event: these scroll the page.
+fn wheel_step(event: &ScrollEvent) -> Option<StepAction> {
+    let y = match (event.source, event.delta) {
+        (ScrollSource::Touch, _) => return None,
+        (ScrollSource::Pointer, ScrollDelta::Pixels(delta)) => delta.y.as_f32(),
+        (ScrollSource::Pointer, ScrollDelta::Lines(delta)) => delta.y,
+    };
+    if y > 0. {
+        Some(StepAction::Increment)
+    } else if y < 0. {
+        Some(StepAction::Decrement)
+    } else {
+        None
+    }
+}
+
+/// Step `state` (focusing it, as a press on Chromium's spin button does).
+fn step(
+    state: &Entity<InputState>,
+    action: StepAction,
+    spec: NumberSpec,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    state.update(cx, |input, cx| {
+        input.focus(window, cx);
+        if let Some(text) = spin(&input.value(), action, spec) {
+            input.set_value(text, window, cx);
+        }
+    });
+}
+
 /// The field over `state`, stepping by `spec`.
 #[derive(IntoElement)]
 pub struct NumberField {
@@ -148,8 +187,20 @@ impl RenderOnce for NumberField {
                 .child(ui::icon(icon, 8., arrows))
         };
         let spin_up = spin_button.clone();
+        let wheel = self.state.clone();
         div()
             .group(field)
+            // Chromium's spin button takes the wheel only while the field is focused; the
+            // page around it does not scroll then.
+            .on_scroll(move |event, window, cx| {
+                if !wheel.read(cx).focus_handle(cx).is_focused(window) {
+                    return;
+                }
+                if let Some(action) = wheel_step(event) {
+                    cx.stop_propagation();
+                    step(&wheel, action, spec, window, cx);
+                }
+            })
             .w(px(WIDTH))
             .h(px(33.5))
             .px(px(12.))
@@ -162,14 +213,7 @@ impl RenderOnce for NumberField {
                 NumberInput::new(&self.state)
                     .controls_right()
                     .size_full()
-                    .on_step(move |action, window, cx| {
-                        state.update(cx, |input, cx| {
-                            input.focus(window, cx);
-                            if let Some(text) = spin(&input.value(), action, spec) {
-                                input.set_value(text, window, cx);
-                            }
-                        });
-                    })
+                    .on_step(move |action, window, cx| step(&state, action, spec, window, cx))
                     .input(
                         Input::new(&self.state)
                             .appearance(false)
@@ -186,6 +230,14 @@ impl RenderOnce for NumberField {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    use gpui_kit::{
+        Context, Modifiers, MouseMoveEvent, Pixels, Point, Render, TestAppContext, TouchPhase,
+        VisualTestContext, point,
+    };
+
     use super::*;
 
     /// The prefix Timeout field: `min=500 max=5000 step=100`.
@@ -308,5 +360,141 @@ mod tests {
             spin("14", StepAction::Increment, font),
             Some("15".to_owned())
         );
+    }
+
+    /// A Timeout field at the window's top left, in a box that counts the wheel events that
+    /// reach it.
+    struct Host {
+        field: Entity<InputState>,
+        scrolls: Rc<Cell<usize>>,
+    }
+
+    impl Render for Host {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let scrolls = self.scrolls.clone();
+            div()
+                .size_full()
+                .on_scroll(move |_, _, _| scrolls.set(scrolls.get() + 1))
+                .child(NumberField::new(&self.field, TIMEOUT))
+        }
+    }
+
+    fn host(
+        cx: &mut TestAppContext,
+    ) -> (Entity<InputState>, Rc<Cell<usize>>, &mut VisualTestContext) {
+        cx.update(gpui_kit::init);
+        cx.update(crate::theme::install);
+        let scrolls = Rc::new(Cell::new(0));
+        let (host, cx) = cx.add_window_view({
+            let scrolls = scrolls.clone();
+            move |window, cx| Host {
+                field: cx.new(|cx| InputState::new(window, cx).default_value("1500")),
+                scrolls,
+            }
+        });
+        draw(cx);
+        let field = cx.update(|_, cx| host.read(cx).field.clone());
+        (field, scrolls, cx)
+    }
+
+    fn draw(cx: &mut VisualTestContext) {
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+    }
+
+    fn text(field: &Entity<InputState>, cx: &mut VisualTestContext) -> String {
+        cx.update(|_, cx| field.read(cx).value().to_string())
+    }
+
+    fn wheel(
+        cx: &mut VisualTestContext,
+        position: Point<Pixels>,
+        delta: ScrollDelta,
+        source: ScrollSource,
+    ) {
+        cx.simulate_event(MouseMoveEvent {
+            position,
+            pressed_button: None,
+            modifiers: Modifiers::default(),
+        });
+        cx.simulate_event(ScrollEvent {
+            position,
+            delta,
+            modifiers: Modifiers::default(),
+            touch_phase: TouchPhase::Moved,
+            source,
+        });
+        draw(cx);
+    }
+
+    /// Over the field, 30px in from its left edge.
+    const OVER: Point<Pixels> = point(px(30.), px(16.));
+    const UP: ScrollDelta = ScrollDelta::Lines(point(0., 1.));
+
+    /// The wheel over the field steps it once per event while it is focused, and the box
+    /// around it does not scroll; otherwise the box scrolls.
+    #[gpui_kit::test]
+    fn the_wheel_steps_the_focused_field(cx: &mut TestAppContext) {
+        let (field, scrolls, cx) = host(cx);
+        wheel(cx, OVER, UP, ScrollSource::Pointer);
+        assert_eq!(text(&field, cx), "1500", "not focused");
+        assert_eq!(scrolls.get(), 1);
+
+        cx.update(|window, cx| field.update(cx, |input, cx| input.focus(window, cx)));
+        draw(cx);
+        wheel(cx, OVER, UP, ScrollSource::Pointer);
+        assert_eq!(text(&field, cx), "1600");
+        let down = ScrollDelta::Pixels(point(px(0.), px(-0.5)));
+        wheel(cx, OVER, down, ScrollSource::Pointer);
+        wheel(cx, OVER, down, ScrollSource::Pointer);
+        assert_eq!(text(&field, cx), "1400", "however little it scrolls");
+        assert_eq!(scrolls.get(), 1, "the box does not scroll");
+
+        cx.update(|window, cx| field.update(cx, |input, cx| input.set_value("5000", window, cx)));
+        wheel(cx, OVER, UP, ScrollSource::Pointer);
+        assert_eq!(text(&field, cx), "5000", "at max");
+        assert_eq!(scrolls.get(), 1, "still taken at max");
+
+        let sideways = ScrollDelta::Pixels(point(px(5.), px(0.)));
+        wheel(cx, OVER, sideways, ScrollSource::Pointer);
+        wheel(cx, OVER, UP, ScrollSource::Touch);
+        wheel(cx, point(px(300.), px(200.)), UP, ScrollSource::Pointer);
+        assert_eq!(text(&field, cx), "5000");
+        assert_eq!(
+            scrolls.get(),
+            4,
+            "a sideways scroll, a touch pan and a wheel beside the field scroll the box"
+        );
+    }
+
+    /// The spin buttons sit inside the field's right padding: up over down.
+    #[gpui_kit::test]
+    fn the_spin_buttons_step_and_focus_the_field(cx: &mut TestAppContext) {
+        let (field, _, cx) = host(cx);
+        cx.simulate_click(point(px(79.), px(10.)), Modifiers::none());
+        draw(cx);
+        assert_eq!(text(&field, cx), "1600");
+        assert!(cx.update(|window, cx| field.read(cx).focus_handle(cx).is_focused(window)));
+        cx.simulate_click(point(px(79.), px(23.)), Modifiers::none());
+        cx.simulate_click(point(px(79.), px(23.)), Modifiers::none());
+        draw(cx);
+        assert_eq!(text(&field, cx), "1400");
+    }
+
+    /// Only numbers can be typed: letters are dropped, digits, a sign and a point are not.
+    #[gpui_kit::test]
+    fn only_numbers_can_be_typed(cx: &mut TestAppContext) {
+        let (field, _, cx) = host(cx);
+        cx.update(|window, cx| {
+            field.update(cx, |input, cx| {
+                input.set_value("", window, cx);
+                input.focus(window, cx);
+            })
+        });
+        draw(cx);
+        for typed in ["-", "1", "a", "2", "x", ".", "5"] {
+            cx.simulate_input(typed);
+        }
+        assert_eq!(text(&field, cx), "-12.5");
     }
 }

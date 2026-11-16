@@ -200,6 +200,16 @@ fn whole_number<T: FromStr + PartialOrd>(text: &str, min: T) -> Option<T> {
     }
 }
 
+/// The Font Size field (`<input type="number" min=8 max=32>`).
+pub const FONT_SIZE: NumberSpec = NumberSpec { min: 8., max: 32., step: 1. };
+/// The Max Columns field (`<input type="number" min=40 max=1000>`).
+pub const MAX_COLS: NumberSpec = NumberSpec { min: 40., max: 1000., step: 1. };
+/// The Buffer Lines field (`<input type="number" min=1 max=100>`).
+pub const BUFFER_LINES: NumberSpec = NumberSpec { min: 1., max: 100., step: 1. };
+/// The Idle Debounce (ms) field (`<input type="number" min=0 step=100>`).
+pub const IDLE_DEBOUNCE: NumberSpec = NumberSpec { min: 0., max: f64::MAX, step: 100. };
+/// The Idle Debounce When Unread (ms) field (`<input type="number" min=0 step=100>`).
+pub const IDLE_DEBOUNCE_UNREAD: NumberSpec = NumberSpec { min: 0., max: f64::MAX, step: 100. };
 /// The prefix Timeout field (`<input type="number" min=500 max=5000 step=100>`).
 pub const PREFIX_TIMEOUT: NumberSpec = NumberSpec { min: 500., max: 5000., step: 100. };
 
@@ -638,6 +648,40 @@ mod tests {
         texts.prefix_key = String::new();
         texts.apply(&mut settings).unwrap();
         assert_eq!(settings.prefix_mode.prefix_key, "");
+    }
+
+    /// The number fields step within their `min`/`max` and by their `step` from `min`, as
+    /// Electron's `<input type="number">`s do; an empty field steps into range.
+    #[test]
+    fn the_number_fields_step_as_electrons_inputs() {
+        use gpui_kit::base::StepAction::{self, Decrement, Increment};
+
+        use crate::number_field::spin;
+
+        let cases: [(NumberSpec, &str, StepAction, Option<&str>); 19] = [
+            (FONT_SIZE, "14", Increment, Some("15")),
+            (FONT_SIZE, "14", Decrement, Some("13")),
+            (FONT_SIZE, "32", Increment, None),
+            (FONT_SIZE, "8", Decrement, None),
+            (FONT_SIZE, "", Increment, Some("8")),
+            (FONT_SIZE, "5", Increment, Some("8")),
+            (FONT_SIZE, "33", Decrement, Some("32")),
+            (MAX_COLS, "160", Increment, Some("161")),
+            (MAX_COLS, "40", Decrement, None),
+            (MAX_COLS, "2000", Decrement, Some("1000")),
+            (MAX_COLS, "2000", Increment, None),
+            (BUFFER_LINES, "100", Increment, None),
+            (BUFFER_LINES, "1", Decrement, None),
+            (IDLE_DEBOUNCE, "2050", Increment, Some("2100")),
+            (IDLE_DEBOUNCE, "2050", Decrement, Some("2000")),
+            (IDLE_DEBOUNCE, "0", Decrement, None),
+            (IDLE_DEBOUNCE, "", Increment, Some("100")),
+            (IDLE_DEBOUNCE_UNREAD, "15000", Increment, Some("15100")),
+            (PREFIX_TIMEOUT, "450", Increment, Some("500")),
+        ];
+        for (spec, text, action, stepped) in cases {
+            assert_eq!(spin(text, action, spec).as_deref(), stepped, "{spec:?} {text:?} {action:?}");
+        }
     }
 
     /// `parseInt(e.target.value) || 1500` over what `<input type="number">` reports.
