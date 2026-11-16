@@ -2823,6 +2823,45 @@ fn retry_starts_a_web_apps_server_terminal_again_after_it_failed_to_start(cx: &m
 }
 
 #[gpui_kit::test]
+fn a_web_app_closed_while_its_server_terminal_starts_kills_it_once_it_exists(cx: &mut TestAppContext) {
+    use treeterm_model::web_app::WebAppEvent;
+    cx.executor().allow_parking();
+    let h = harness();
+    let (_session, workspace) = web_app_workspace(cx, &h, h.conn.clone(), "echo serving on $PORT");
+    let (tab, app) = web_app_on_port_1(cx, &workspace);
+    // Closed as soon as its creation is under way.
+    let (closing, owned_tab) = (workspace.clone(), tab.clone());
+    let _close = cx.update(|cx| {
+        cx.subscribe(&app, move |_, event: &WebAppEvent, cx| match event {
+            WebAppEvent::ServerPtyNeeded(_) => closing.update(cx, |w, cx| w.remove_tab(&owned_tab, cx)),
+            WebAppEvent::PortAssigned(_) | WebAppEvent::LocalPortAssigned(_) => {}
+        })
+    });
+    drop(app);
+    cx.run_until_parked();
+    assert_eq!(server_terminal(cx, &workspace, &tab), "gone");
+
+    let sessions = || futures::executor::block_on(h.conn.list_pty_sessions()).unwrap().unwrap().len();
+    // The daemon starts it all the same…
+    for _ in 0..500 {
+        if sessions() == 1 {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert_eq!(sessions(), 1, "the server's PTY was created");
+    // …and it is killed once its id is known.
+    for _ in 0..500 {
+        cx.run_until_parked();
+        if sessions() == 0 {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    panic!("the closed tab's PTY was left running");
+}
+
+#[gpui_kit::test]
 fn a_local_browser_tab_opens_its_remembered_page_directly(cx: &mut TestAppContext) {
     use treeterm_model::browser_page::BrowserPhase;
     use treeterm_model::workspace_store::PageHost;

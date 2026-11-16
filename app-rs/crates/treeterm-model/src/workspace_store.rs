@@ -1738,13 +1738,15 @@ impl WorkspaceStore {
         if let Some(web_app) = self.web_apps.get(tab_id) {
             web_app.model.update(cx, |app, cx| app.close(cx));
         }
-        match self.tabs.get(tab_id) {
+        match self.tabs.remove(tab_id) {
             Some(TabRef::Terminal(TerminalTab::Attached { model, .. })) => {
                 model.update(cx, |model, cx| model.kill(cx));
             }
-            Some(TabRef::Terminal(TerminalTab::Creating { handle, .. })) => {
-                // Its creation finds the tab gone and kills the PTY (`on_pty_created`).
+            Some(TabRef::Terminal(TerminalTab::Creating { handle, _task: creation })) => {
+                // Left to finish rather than dropped (which would abandon the PTY): it finds
+                // the tab gone and kills the PTY (`on_pty_created`).
                 tracing::debug!(%handle, "tab closed while its PTY was starting");
+                creation.detach();
             }
             Some(TabRef::Browser { page, .. }) => page.update(cx, |page, cx| page.close(cx)),
             Some(
