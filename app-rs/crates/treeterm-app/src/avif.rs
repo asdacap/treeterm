@@ -4,6 +4,10 @@
 //! data (a panic in its C interface cannot unwind; about one in twenty single-bit flips of a
 //! frame does it), so a corrupt `.avif` ends the child only, and its side shows the broken
 //! image, as Chromium shows an image it cannot decode.
+//!
+//! avif-decode reads still, single-image AVIFs only: an animated (`avis`) or grid AVIF fails
+//! in the child too, and `irot`/`imir`/`clap` are not applied, where Chromium draws them all
+//! (README, Appearance).
 
 use std::fmt;
 use std::io::{self, Read, Write};

@@ -450,6 +450,10 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   child process, the app run with `--decode-avif`: rav1d 1.1.0 aborts the process on some
   corrupt frames, so such a side shows as a broken image with its alt text
   (`Before: <path>`), as Chromium shows an image it cannot decode, and the app carries on.
+  avif-decode's parser (avif-parse 2.1.0) reads still, single-image AVIFs only: an animated
+  AVIF (`avis`) or one stored as a grid of tiles also shows in Review as a broken image with
+  its alt text, where Electron shows the picture (animated, for an `avis`), and an AVIF's
+  rotation, mirroring and crop (`irot`, `imir`, `clap`) are not applied.
 - The Markdown preview shows raw HTML as its text, as react-markdown does, but each HTML
   block (`<p align="center">…</p>` and the like) on lines of its own with the paragraph gap
   between them: Electron's browser runs consecutive HTML blocks together into one paragraph

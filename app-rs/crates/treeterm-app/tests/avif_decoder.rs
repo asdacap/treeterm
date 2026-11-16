@@ -58,6 +58,33 @@ fn it_fails_on_what_is_not_an_avif() {
     );
 }
 
+/// 128×128, stored as a grid of four 64×64 tiles (made with `heif-enc -T`).
+const GRID: &[u8] = include_bytes!("fixtures/grid-2x2.avif");
+
+/// avif-decode's parser (avif-parse 2.1.0) reads still, single-image AVIFs only, so an
+/// animated AVIF and a grid of tiles fail, and Review shows such a side as a broken image
+/// where Electron draws it (README, Appearance). When this fails, avif-decode has learnt one:
+/// update the README.
+#[test]
+fn it_fails_on_an_animated_or_grid_avif() {
+    // The parser turns an animated AVIF away by the `ftyp` box's major brand, `avis`.
+    let mut animated = OPAQUE_8BIT.to_vec();
+    assert_eq!(&animated[8..12], b"avif");
+    animated[8..12].copy_from_slice(b"avis");
+    for (avif, error) in [
+        (animated.as_slice(), "Animated AVIF is not supported"),
+        (GRID, "Grid-based AVIF collage is not supported"),
+    ] {
+        let output = decode(avif);
+        assert_eq!(output.status.code(), Some(1), "{output:?}");
+        assert!(output.stdout.is_empty());
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains(error),
+            "{output:?}"
+        );
+    }
+}
+
 /// A bit flipped in the frame's data, where rav1d 1.1.0 panics in its C interface, which
 /// would abort the process: it exits with a failure instead (no crash report).
 #[test]
