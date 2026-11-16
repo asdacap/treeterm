@@ -15,7 +15,7 @@ use treeterm_model::settings_store::SettingsStore;
 use treeterm_model::tool_tabs::analyzer_history::HistorySource;
 use treeterm_model::tool_tabs::chat::{ChatRole, MISSING_API_KEY};
 use treeterm_model::tool_tabs::comments::PushState;
-use treeterm_model::tool_tabs::prompt_debugger::{DebugMode, DebugOutput};
+use treeterm_model::tool_tabs::prompt_debugger::{DebugMode, DebugOutput, PromptDebuggerEvent};
 use treeterm_model::tool_tabs::ssh_upload::UploadTarget;
 use treeterm_model::tool_tabs::tty_list::{ProcessList, referenced_pty_ids};
 use treeterm_model::workspace_store::{TabContent, WorkspaceStore};
@@ -42,9 +42,20 @@ fn llm_settings() -> Settings {
 }
 
 fn open_store(cx: &mut TestAppContext, h: &Harness, settings: Settings, llm: Option<LlmService>) -> Entity<SessionStore> {
-    let conn = h.conn.clone();
+    open_window(cx, h, "client-a", settings, llm)
+}
+
+/// The session as window `client` sees it.
+fn open_window(
+    cx: &mut TestAppContext,
+    h: &Harness,
+    client: &str,
+    settings: Settings,
+    llm: Option<LlmService>,
+) -> Entity<SessionStore> {
+    let (conn, client) = (h.conn.clone(), client.to_owned());
     let settings = cx.new(|_| SettingsStore::in_memory(settings));
-    cx.new(|cx| SessionStore::new(conn, "client-a".into(), settings, llm, cx))
+    cx.new(|cx| SessionStore::new(conn, client, settings, llm, cx))
 }
 
 /// A directory under the daemon's root as a loaded workspace with no tabs; its id and store.
@@ -450,6 +461,52 @@ fn the_prompt_debugger_without_an_llm_client_sends_nothing(cx: &mut TestAppConte
     assert_eq!(output, DebugOutput { run: None, refused: Some("No LLM client is available in this session".into()) });
     assert!(!debugger.read_with(cx, |d, _| d.is_running()));
     assert_eq!(workspace.read_with(cx, |w, _| w.activity(&tab)), ActivityState::Idle);
+}
+
+#[gpui_kit::test]
+fn the_prompt_debugger_buffer_follows_its_tab_state_from_another_window(cx: &mut TestAppContext) {
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let store = open_store(cx, &h, llm_settings(), None);
+    let (id, _dir, workspace) = open_workspace(cx, &h, &store, json!({}));
+    let other = open_window(cx, &h, "client-b", llm_settings(), None);
+    wait_until(cx, &other, |s| matches!(s.entry(&id), Some(WorkspaceEntry::Loaded(_))));
+    let theirs = other.read_with(cx, |s, _| s.workspace_store(&id).unwrap().clone());
+    let tab = workspace.update(cx, |w, cx| w.open_prompt_debugger("first", cx)).unwrap();
+    let TabContent::PromptDebugger(debugger) = content(cx, &workspace, &tab) else { panic!("not a debugger tab") };
+    let events = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let _events = cx.update(|cx| {
+        let events = events.clone();
+        cx.subscribe(&debugger, move |_, event: &PromptDebuggerEvent, _| events.borrow_mut().push(event.clone()))
+    });
+    wait_until(cx, &theirs, |w| w.file().app_states.contains_key(&tab));
+    let write = |cx: &mut TestAppContext, key: &str, value: serde_json::Value| {
+        theirs.update(cx, |w, cx| w.update_tab_state(&tab, |state| state[key] = value, cx));
+    };
+    let arrived = |cx: &mut TestAppContext, key: &str, value: serde_json::Value| {
+        wait_until(cx, &workspace, |w| w.file().app_states[&tab].state[key] == value);
+    };
+    let buffer = |cx: &mut TestAppContext| debugger.read_with(cx, |d, _| d.buffer().to_owned());
+
+    // The other window (or Electron) points the tab at another buffer.
+    write(cx, "bufferText", json!("second"));
+    wait_until(cx, &debugger, |d| d.buffer() == "second");
+    assert_eq!(*events.borrow(), vec![PromptDebuggerEvent::BufferReplaced("second".into())]);
+
+    // Edits survive a body whose bufferText did not change, and an empty one.
+    debugger.update(cx, |d, _| d.set_buffer("mine"));
+    write(cx, "unrelated", json!(1));
+    arrived(cx, "unrelated", json!(1));
+    assert_eq!(buffer(cx), "mine");
+    write(cx, "bufferText", json!(""));
+    arrived(cx, "bufferText", json!(""));
+    assert_eq!(buffer(cx), "mine");
+    assert_eq!(events.borrow().len(), 1);
+    // The same text again after a change is new again.
+    write(cx, "bufferText", json!("second"));
+    wait_until(cx, &debugger, |d| d.buffer() == "second");
+    assert_eq!(events.borrow().len(), 2);
 }
 
 #[gpui_kit::test]

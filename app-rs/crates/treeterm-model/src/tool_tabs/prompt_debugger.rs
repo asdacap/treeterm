@@ -1,7 +1,8 @@
 //! The System Prompt Debugger tab (`SystemPromptDebugger.tsx`): run the terminal analyzer
 //! or the title generator on a buffer with an edited prompt and model, see the raw result
 //! and its timing, and save the prompt to the settings. Tab state `{ bufferText? }` seeds
-//! the buffer. A test drives the tab's own activity state (`Debugger` transitions).
+//! the buffer, and a later non-empty `bufferText` replaces it. A test drives the tab's own
+//! activity state (`Debugger` transitions).
 
 use std::time::Duration;
 
@@ -78,6 +79,8 @@ impl DebugOutput {
 pub enum PromptDebuggerEvent {
     /// Drive this tab's activity state.
     SetActivity { state: ActivityState, detail: TransitionDetail },
+    /// The tab state's `bufferText` replaced the buffer.
+    BufferReplaced(String),
 }
 
 impl EventEmitter<PromptDebuggerEvent> for PromptDebugger {}
@@ -90,6 +93,8 @@ pub struct PromptDebugger {
     analyzer_prompt: String,
     title_prompt: String,
     buffer: String,
+    /// The tab state's `bufferText` as last seen: only a change replaces the buffer.
+    seeded: String,
     classifier_model: String,
     title_model: String,
     reasoning: ReasoningEffort,
@@ -103,13 +108,15 @@ impl PromptDebugger {
     /// The prompts and models start from `settings`; the buffer from the tab state.
     pub fn new(llm: Option<LlmService>, settings: &Settings, state: &Value, workspace: WeakEntity<WorkspaceStore>) -> Self {
         let analyzer = &settings.terminal_analyzer;
+        let seeded = buffer_text(state).to_owned();
         Self {
             llm,
             workspace,
             mode: DebugMode::Analyzer,
             analyzer_prompt: analyzer.system_prompt.clone(),
             title_prompt: analyzer.title_system_prompt.clone(),
-            buffer: state.get("bufferText").and_then(Value::as_str).unwrap_or_default().to_owned(),
+            buffer: seeded.clone(),
+            seeded,
             classifier_model: analyzer.model.clone(),
             title_model: analyzer.title_model.clone(),
             reasoning: analyzer.reasoning_effort,
@@ -117,6 +124,22 @@ impl PromptDebugger {
             output: DebugOutput::default(),
             _run: None,
         }
+    }
+
+    /// The tab's state changed (another window, Electron): a new, non-empty `bufferText`
+    /// replaces the buffer, edits included; the same one again leaves the edits alone.
+    pub fn follow_state(&mut self, state: &Value, cx: &mut Context<Self>) {
+        let text = buffer_text(state);
+        if text == self.seeded {
+            return;
+        }
+        self.seeded = text.to_owned();
+        if text.is_empty() {
+            return;
+        }
+        self.buffer = text.to_owned();
+        cx.emit(PromptDebuggerEvent::BufferReplaced(self.buffer.clone()));
+        cx.notify();
     }
 
     pub fn mode(&self) -> DebugMode {
@@ -336,6 +359,11 @@ impl PromptDebugger {
         });
         cx.notify();
     }
+}
+
+/// The tab state's `bufferText` (empty when unset).
+fn buffer_text(state: &Value) -> &str {
+    state.get("bufferText").and_then(Value::as_str).unwrap_or_default()
 }
 
 /// The reasoning choices, in order.

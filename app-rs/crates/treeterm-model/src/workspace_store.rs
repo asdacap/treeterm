@@ -826,6 +826,24 @@ impl WorkspaceStore {
         }
     }
 
+    /// System Prompt Debuggers follow their tab's `bufferText` (SystemPromptDebugger re-reads
+    /// it on every store change).
+    fn sync_prompt_debuggers(&mut self, cx: &mut Context<Self>) {
+        let debuggers: Vec<(Entity<crate::tool_tabs::prompt_debugger::PromptDebugger>, Value)> = self
+            .tabs
+            .iter()
+            .filter_map(|(tab_id, tab)| {
+                let TabRef::Tool(crate::tool_tabs::ToolTab::PromptDebugger { model, .. }) = tab else {
+                    return None;
+                };
+                Some((model.clone(), self.workspace.file.app_states[tab_id].state.clone()))
+            })
+            .collect();
+        for (model, state) in debuggers {
+            model.update(cx, |model, cx| model.follow_state(&state, cx));
+        }
+    }
+
     /// The status bar's "Idle detector" switch, persisted per tab.
     pub fn set_idle_detector_enabled(&mut self, tab_id: &str, enabled: bool, cx: &mut Context<Self>) {
         self.update_tab_state(
@@ -1057,8 +1075,13 @@ impl WorkspaceStore {
                 let model = cx.new(|_| prompt_debugger::PromptDebugger::new(llm, &settings, state, weak));
                 let owned_tab = tab_id.to_owned();
                 let events = cx.subscribe(&model, move |store, _, event: &prompt_debugger::PromptDebuggerEvent, cx| {
-                    let prompt_debugger::PromptDebuggerEvent::SetActivity { state, detail } = event;
-                    store.set_activity(&owned_tab, *state, detail.clone(), cx);
+                    match event {
+                        prompt_debugger::PromptDebuggerEvent::SetActivity { state, detail } => {
+                            store.set_activity(&owned_tab, *state, detail.clone(), cx);
+                        }
+                        // For the view's buffer field.
+                        prompt_debugger::PromptDebuggerEvent::BufferReplaced(_) => {}
+                    }
                 });
                 ToolTab::PromptDebugger { model, _events: events }
             }
@@ -1877,8 +1900,8 @@ impl WorkspaceStore {
 
     /// A body written elsewhere, with hash `sha`, replaces ours (`applyWorkspaceFile`): tabs
     /// it dropped are detached, new tabs initialised, a terminal whose tab now names
-    /// another PTY re-attaches, and the others take their tab's width limit. Emits no
-    /// change: the body is already on disk.
+    /// another PTY re-attaches, the others take their tab's width limit, and debuggers
+    /// their tab's `bufferText`. Emits no change: the body is already on disk.
     pub fn apply_external(&mut self, mut file: WorkspaceFile, sha: &str, cx: &mut Context<Self>) {
         let removed: Vec<String> = self
             .workspace
@@ -1923,6 +1946,7 @@ impl WorkspaceStore {
             self.init_tab(&tab_id, cx);
         }
         self.sync_terminal_options(cx);
+        self.sync_prompt_debuggers(cx);
         let rewrite = self.attention.has_pending() && self.reapply_attention();
         self.observe_attention(false, cx);
         self.sync_idle_timeouts(cx);

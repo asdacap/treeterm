@@ -8,7 +8,7 @@ use gpui_kit::prelude::*;
 use gpui_kit::{AnyElement, Context, Entity, FontWeight, Subscription, Window, div, px, rgb};
 use treeterm_core::settings::ClassifierProvider;
 use treeterm_model::settings_store::SettingsStore;
-use treeterm_model::tool_tabs::prompt_debugger::{DebugMode, PromptDebugger, REASONING_CHOICES};
+use treeterm_model::tool_tabs::prompt_debugger::{DebugMode, PromptDebugger, PromptDebuggerEvent, REASONING_CHOICES};
 
 use crate::ui::{FieldStyle, MONO, field, normal_line, pane_select_box, pane_text_area, text_button};
 
@@ -71,6 +71,13 @@ impl PromptDebuggerView {
                 let text = input.read(cx).value().to_string();
                 debugger.update(cx, |d, _| d.set_buffer(&text));
             }
+        }));
+        // The tab state's `bufferText` replaced the buffer (`set_value` emits no Change).
+        subscriptions.push(cx.subscribe_in(&model, window, |view, _, event: &PromptDebuggerEvent, window, cx| match event {
+            PromptDebuggerEvent::BufferReplaced(text) => {
+                view.buffer.update(cx, |input, cx| input.set_value(text.clone(), window, cx));
+            }
+            PromptDebuggerEvent::SetActivity { .. } => {}
         }));
         Self { model, settings, analyzer, title, buffer, _subscriptions: subscriptions }
     }
