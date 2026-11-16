@@ -538,6 +538,34 @@ fn typing_or_pasting_after_the_stream_ended_shows_why(cx: &mut TestAppContext) {
     wait_until(cx, &model, |m| *m.overlay() == ended);
 }
 
+/// Electron's `PtyViewer` only logs a write that fails: typing or pasting into a viewer
+/// whose stream ended leaves its "Terminal disconnected" banner.
+#[gpui_kit::test]
+fn typing_or_pasting_into_a_viewer_after_its_stream_ended_keeps_its_banner(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    let conn = h.conn.clone();
+    let viewer = TerminalOptions { role: TerminalRole::Viewer, ..options("no-such-pty".into()) };
+    let model = cx.new(|cx| TerminalModel::new(conn, viewer, cx));
+    wait_until(cx, &model, |m| *m.overlay() == Overlay::Disconnected);
+    let (events, _subscription) = record(cx, &model);
+
+    model.update(cx, |m, cx| {
+        m.set_focused(true, cx);
+        m.write_input(b"x", cx);
+        m.paste("y", cx);
+    });
+    // Time for the paste's failure to come back (a tab shows it: see above).
+    for _ in 0..20 {
+        cx.run_until_parked();
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(model.read_with(cx, |m, _| m.overlay().clone()), Overlay::Disconnected);
+    assert_eq!(model.read_with(cx, |m, _| m.banner()), Overlay::Disconnected);
+    // The input was tried all the same.
+    assert_eq!(events.borrow().iter().filter(|e| matches!(e, TerminalEvent::Input(_))).count(), 2);
+}
+
 #[gpui_kit::test]
 fn writes_after_a_stream_error_show_that_error(cx: &mut TestAppContext) {
     cx.executor().allow_parking();

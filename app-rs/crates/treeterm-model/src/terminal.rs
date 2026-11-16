@@ -546,7 +546,8 @@ impl TerminalModel {
     /// Typed input or encoded keys. Dropped while replaying or unfocused: keystrokes can only
     /// come from the focused terminal, and anything else would be the emulator answering a
     /// query that was answered when it first ran. Dropped too after the attach failed, as
-    /// Electron then has no tty. A write that fails shows why, as Electron does.
+    /// Electron then has no tty. A write that fails is logged, and a tab shows why, as
+    /// Electron does ([`Self::show_write_failure`]).
     pub fn write_input(&mut self, bytes: &[u8], cx: &mut Context<Self>) {
         let gate = &self.attachment.gate;
         if gate.is_replaying() || !gate.is_focused() {
@@ -558,8 +559,7 @@ impl TerminalModel {
         }
         if let Err(error) = self.attachment.input.send(bytes) {
             tracing::error!(pty = %self.options.pty_id, %error, "pty write failed");
-            self.overlay = Overlay::Error(error.to_string());
-            cx.notify();
+            self.show_write_failure(error.to_string(), cx);
         }
         cx.emit(TerminalEvent::Input(String::from_utf8_lossy(bytes).into_owned()));
         // Typing returns to the newest output, as xterm.js does.
@@ -638,9 +638,9 @@ impl TerminalModel {
     /// menu pastes into a terminal that may not hold keyboard focus. Claims the PTY's input
     /// first, as the key press or right-click that pastes does in Electron. The paste is
     /// input like typing (a pasted line ending starts the analyzer's title capture). A paste
-    /// that fails shows why, as Electron does, even over a newer attachment: one pending
-    /// across a refresh fails with "pty stream detached". Nothing is pasted after the attach
-    /// failed, as Electron then has no tty.
+    /// that fails is logged, and a tab shows why, as Electron does, even over a newer
+    /// attachment: one pending across a refresh fails with "pty stream detached". Nothing is
+    /// pasted after the attach failed, as Electron then has no tty.
     pub fn paste(&mut self, text: &str, cx: &mut Context<Self>) {
         match self.attachment.status {
             AttachStatus::Failed => return,
@@ -655,16 +655,27 @@ impl TerminalModel {
         cx.spawn(async move |this, cx| {
             if let Err(error) = write.await {
                 tracing::error!(%pty, %error, "paste write failed");
-                match this.update(cx, |model, cx| {
-                    model.overlay = Overlay::Error(error.to_string());
-                    cx.notify();
-                }) {
+                match this.update(cx, |model, cx| model.show_write_failure(error.to_string(), cx)) {
                     Ok(()) | Err(_) => {} // Err: model dropped
                 }
             }
         })
         .detach();
         self.scroll_to_bottom_quietly();
+    }
+
+    /// A keystroke or paste the PTY did not take (already logged). A tab shows why as its
+    /// overlay (`BaseTerminal`); a viewer leaves its banner as it is, as Electron's
+    /// `PtyViewer` only logs a failed write, so a viewer whose stream ended keeps saying
+    /// "Terminal disconnected".
+    fn show_write_failure(&mut self, error: String, cx: &mut Context<Self>) {
+        match self.options.role {
+            TerminalRole::Tab { .. } => {
+                self.overlay = Overlay::Error(error);
+                cx.notify();
+            }
+            TerminalRole::Viewer => {}
+        }
     }
 
     /// Whether this terminal holds keyboard focus in the focused window. Gaining it claims
