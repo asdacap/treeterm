@@ -713,11 +713,13 @@ impl WorkspaceStore {
         cx.notify();
     }
 
-    /// The window starts or stops showing this workspace; shown, it is marked read.
+    /// The window starts or stops showing this workspace; shown, it is marked read, and its
+    /// terminals are told (Electron mounts only the shown workspace's terminals).
     pub fn set_viewed(&mut self, viewed: bool, cx: &mut Context<Self>) {
         if self.viewed != viewed {
             self.viewed = viewed;
             self.observe_attention(false, cx);
+            self.sync_terminal_options(cx);
         }
     }
 
@@ -973,7 +975,8 @@ impl WorkspaceStore {
 
     /// Live terminals take what their tab's state and application now say, whoever changed
     /// them: BaseTerminal re-reads `widthLimitDisabled` on every store change, so a flip
-    /// made in another window refits it, and mounts again on a settings change.
+    /// made in another window refits it, and mounts again on a settings change. They also
+    /// take the DEBUG badge setting and whether the window shows the workspace.
     fn sync_terminal_options(&mut self, cx: &mut Context<Self>) {
         let terminals: Vec<(Entity<TerminalModel>, WidthLimit, ScrollbarVisibility, Rgb)> = self
             .tabs
@@ -993,13 +996,14 @@ impl WorkspaceStore {
                 | TabRef::Tool(_) => None,
             })
             .collect();
-        let debug_badge = self.settings.debug.show_badge;
+        let (debug_badge, shown) = (self.settings.debug.show_badge, self.viewed);
         for (model, width_limit, scrollbar, background) in terminals {
             model.update(cx, |model, cx| {
                 model.set_width_limit(width_limit, cx);
                 model.set_scrollbar(scrollbar, cx);
                 model.set_background(background, cx);
                 model.set_debug_badge(debug_badge, cx);
+                model.set_shown(shown);
             });
         }
     }
@@ -1280,6 +1284,7 @@ impl WorkspaceStore {
             idle_timeout: Some(self.idle_timeout()),
             traffic: self.traffic_counter.clone(),
             show_debug_badge: settings.debug.show_badge,
+            shown: self.viewed,
         }
     }
 

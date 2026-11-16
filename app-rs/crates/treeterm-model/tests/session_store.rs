@@ -928,6 +928,48 @@ fn the_debug_settings_reach_every_live_terminal(cx: &mut TestAppContext) {
     }
 }
 
+/// Electron mounts only the shown workspace's terminals, and only a mounted terminal logs
+/// Show Raw Characters' `[RAW]` lines.
+#[gpui_kit::test]
+fn only_the_shown_workspace_s_terminals_are_shown(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    for id in ["a", "b"] {
+        std::fs::write(h.daemon.workspaces_dir().join(format!("{id}.json")), body(id, None)).unwrap();
+    }
+    publish(&h, &["a", "b"]);
+    let settings = treeterm_core::settings::from_value(serde_json::json!({ "terminal": { "showRawChars": true } }));
+    let settings = cx.new(|_| SettingsStore::in_memory(settings.unwrap()));
+    let conn = h.conn.clone();
+    let store = cx.new(|cx| SessionStore::new(conn, "client-a".into(), settings, None, cx.new(ConnectionTraffic::new), cx));
+    wait_until(cx, &store, |s| loaded(s, "a") && loaded(s, "b"));
+    let [a, b] = ["a", "b"].map(|id| store.read_with(cx, |s, _| ws(s, id)));
+    let add_terminal = |cx: &mut TestAppContext, workspace: &Entity<WorkspaceStore>| {
+        let tab = workspace.update(cx, |w, cx| w.add_tab("terminal", cx)).unwrap();
+        wait_until(cx, workspace, |w| terminal_of(w, &tab).is_some());
+        workspace.read_with(cx, |w, _| terminal_of(w, &tab).unwrap())
+    };
+    let shown = |cx: &mut TestAppContext, terminals: &[&Entity<treeterm_model::terminal::TerminalModel>]| -> Vec<bool> {
+        terminals.iter().map(|t| t.read_with(cx, |t, _| t.options().shown)).collect()
+    };
+
+    // The window does not show the session yet: a terminal added to its active workspace is
+    // not shown.
+    let in_a = add_terminal(cx, &a);
+    assert_eq!(shown(cx, &[&in_a]), [false]);
+    // The window shows the session: its active workspace's terminals are shown; a terminal
+    // added to another workspace is not.
+    store.update(cx, |s, cx| s.set_shown(true, cx));
+    let in_b = add_terminal(cx, &b);
+    assert_eq!(shown(cx, &[&in_a, &in_b]), [true, false]);
+    // Another workspace is picked.
+    store.update(cx, |s, cx| s.set_active_workspace("b".into(), cx));
+    assert_eq!(shown(cx, &[&in_a, &in_b]), [false, true]);
+    // A session pane (or another session) is shown instead.
+    store.update(cx, |s, cx| s.set_shown(false, cx));
+    assert_eq!(shown(cx, &[&in_a, &in_b]), [false, false]);
+}
+
 #[gpui_kit::test]
 fn an_ai_harness_draws_on_its_css_background_whether_sandboxed_or_not(cx: &mut TestAppContext) {
     use treeterm_term::alacritty_terminal::vte::ansi::Rgb;

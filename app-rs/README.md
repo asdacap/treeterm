@@ -86,8 +86,9 @@ Done (tested against a real in-process daemon unless noted):
   `http(s)` hyperlink opens in the browser on a click, a URL in the text on Cmd/Ctrl+click;
   underlined, with a pointer cursor, under the pointer), scroll badge/pin, ALT SCREEN, size
   mismatch, DEBUG badge (Settings > Debug), overlays, refresh, status bar (activity, idle
-  detector, col limit), Show Raw Characters (each chunk of output logs the last 50
-  characters as an info `[RAW]` line). 200k lines render in ~0.4 s.
+  detector, col limit), Show Raw Characters (each chunk of output of the shown workspace's
+  terminals logs the last 50 characters as an info `[RAW]` line). 200k lines render in
+  ~0.4 s.
 - **Session/workspace sync (M2):** full write side of `createSessionStore` (ref CAS with
   retry, body CAS with parentHash chain, echo suppression, conflict rewrite, watch reopen,
   lock ops), tabs (add/close/activate/state, PTY creation keyed by `ptyHandle`, close-on-exit,
@@ -502,7 +503,11 @@ The chrome was matched to Electron's computed styles, measured side by side on o
 - A `logLevel` in `ui-state.json` that names no level is logged as a warning and ignored;
   Electron ignored an unknown `treeterm:logLevel` silently.
 - Show Raw Characters logs its `[RAW]` lines to the app log (stdout), with the PTY's id, and
-  its hint says so; Electron logged them to the DevTools console.
+  its hint says so; Electron logged them to the DevTools console. They are info lines, so a
+  `logLevel` above `info` hides them, where Electron's `console.log` always printed. As in
+  Electron, only the terminals of the shown workspace log, starting over each time it is
+  shown again; while a session pane is up none do, where Electron kept logging the session's
+  active workspace's terminals behind it.
 - An entry of the worktree registry (`~/.treeterm/worktrees.json`) that cannot be read, such as
   a hand-edited one with no `branch` or a fractional `lastUsedAt`, is left out of Auto Open
   and the recent workspaces (logged) and kept in the file as it is. Electron listed it with

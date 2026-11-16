@@ -75,6 +75,18 @@ pub struct TerminalOptions {
     /// Settings > Debug > Show Debug Badge: a purple DEBUG badge on the terminal. A
     /// viewer never shows it (`PtyViewer` is no `BaseTerminal`).
     pub show_debug_badge: bool,
+    /// The window shows the terminal's workspace; a viewer is shown while selected. Electron
+    /// mounts only the shown workspace's terminals, and only a mounted one logs Show Raw
+    /// Characters' `[RAW]` lines.
+    pub shown: bool,
+}
+
+impl TerminalOptions {
+    /// Whether the output logs `[RAW]` lines: Show Raw Characters is on and the terminal
+    /// shown.
+    fn logs_raw_chars(&self) -> bool {
+        self.settings.show_raw_chars && self.shown
+    }
 }
 
 /// What the terminal is shown as, which decides what a program's exit does and what the
@@ -302,7 +314,7 @@ impl RawOutput {
     }
 
     /// On or off from now on, starting from no output (Electron mounts its terminals again
-    /// on a settings change, which empties its `rawChars`).
+    /// on a settings change and on showing their workspace, which empties `rawChars`).
     fn set(&self, on: bool) {
         *self.log.lock().expect("raw output log poisoned") = RawLog::new(on);
     }
@@ -422,7 +434,7 @@ impl TerminalModel {
         );
         let term = core.term().clone();
         let gate = core.gate().clone();
-        let raw_output = RawOutput::new(&options.pty_id, options.settings.show_raw_chars);
+        let raw_output = RawOutput::new(&options.pty_id, options.logs_raw_chars());
 
         let inbox = Arc::new(Mutex::new(Batch::default()));
         // Capacity 1 with try_send: at most one wake-up is ever pending, however fast
@@ -773,6 +785,17 @@ impl TerminalModel {
         }
         self.options.show_debug_badge = shown;
         cx.notify();
+    }
+
+    /// The window started or stopped showing the terminal's workspace. Electron unmounts
+    /// the terminals of a workspace it hides and mounts them again when it shows it, so Show
+    /// Raw Characters logs only while it is shown, starting from no output each time.
+    pub fn set_shown(&mut self, shown: bool) {
+        if self.options.shown == shown {
+            return;
+        }
+        self.options.shown = shown;
+        self.attachment.raw_output.set(self.options.logs_raw_chars());
     }
 
     // ---- viewport ----------------------------------------------------------------------
@@ -1143,8 +1166,8 @@ impl TerminalModel {
         if let WidthLimit::Capped(_) = self.options.width_limit {
             self.options.width_limit = WidthLimit::Capped(settings.max_cols);
         }
-        self.attachment.raw_output.set(settings.show_raw_chars);
         self.options.settings = settings;
+        self.attachment.raw_output.set(self.options.logs_raw_chars());
         // Electron mounts its terminals again on a settings change, which fits them again.
         self.fit.reset();
         cx.notify();

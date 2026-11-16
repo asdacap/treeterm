@@ -98,6 +98,8 @@ impl ActiveProcesses {
             // A viewer, not a workspace: nobody meters it.
             traffic: treeterm_core::traffic::ByteCounter::default(),
             show_debug_badge: false,
+            // Shown while selected.
+            shown: true,
         };
         let conn = self.conn.clone();
         let terminal = cx.new(|cx| TerminalModel::new(conn, options, cx));

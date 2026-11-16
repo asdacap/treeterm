@@ -66,6 +66,7 @@ fn options(pty_id: String) -> TerminalOptions {
         idle_timeout: None,
         traffic: treeterm_core::traffic::ByteCounter::default(),
         show_debug_badge: false,
+        shown: true,
     }
 }
 
@@ -319,6 +320,47 @@ fn show_raw_characters_logs_the_last_output_escaped_while_on(cx: &mut TestAppCon
     wait_until(cx, &model, |m| m.screen_text().contains("on-5"));
     assert!(raw_lines() > before, "{}", logs.text());
     assert!(logs.text().lines().filter(|line| line.contains("[RAW] ")).all(|line| !line.contains("off-3")));
+}
+
+/// Electron mounts only the shown workspace's terminals, and only a mounted one logs.
+#[gpui_kit::test]
+fn show_raw_characters_logs_only_while_shown_and_starts_over_when_shown_again(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let logs = treeterm_testkit::logs::capture();
+    let raw_lines = || -> Vec<String> {
+        logs.text().lines().filter(|line| line.contains("[RAW] ")).map(str::to_owned).collect()
+    };
+    let h = harness();
+    // `cat` echoes what is typed and prints nothing else, so each `[RAW]` line is the tail.
+    let pty = spawn_cat(&h);
+    let on = TerminalSettings { show_raw_chars: true, ..TerminalSettings::default() };
+    let model = open(cx, &h, TerminalOptions { settings: on, shown: false, ..options(pty) });
+    wait_until(cx, &model, |m| m.screen_text().contains("exec cat"));
+    model.update(cx, |m, cx| m.set_focused(true, cx));
+    type_line(cx, &model, "cat-ready");
+    wait_until(cx, &model, |m| m.screen_text().contains("cat-ready\ncat-ready"));
+    // A tab of a workspace the window does not show: nothing is logged, its replay included.
+    assert_eq!(raw_lines(), Vec::<String>::new());
+
+    // Shown: the output from then on is logged.
+    model.update(cx, |m, _| m.set_shown(true));
+    model.update(cx, |m, cx| m.write_input(b"seen", cx));
+    wait_until(cx, &model, |_| logs.text().contains("[RAW] seen pty="));
+
+    // Hidden: nothing is logged.
+    model.update(cx, |m, _| m.set_shown(false));
+    let before = raw_lines();
+    model.update(cx, |m, cx| m.write_input(b"-unseen", cx));
+    wait_until(cx, &model, |m| m.screen_text().contains("seen-unseen"));
+    assert_eq!(raw_lines(), before);
+
+    // Shown again: from no output, as Electron's remount empties `rawChars`.
+    model.update(cx, |m, _| m.set_shown(true));
+    model.update(cx, |m, cx| m.write_input(b"+again", cx));
+    wait_until(cx, &model, |_| logs.text().contains("+again pty="));
+    let after = raw_lines();
+    assert!(after[before.len()..].iter().all(|line| !line.contains("seen")), "{after:#?}");
+    assert!(after.last().is_some_and(|line| line.contains("[RAW] +again pty=")), "{after:#?}");
 }
 
 #[gpui_kit::test]
