@@ -331,13 +331,6 @@ impl TerminalModel {
         self.scroll_to_bottom_quietly();
     }
 
-    /// Write on the program's behalf, whatever has focus (the analyzer's auto-approve).
-    pub fn send_unfocused(&self, bytes: &[u8]) {
-        if self.attachment.input.send(bytes).is_err() {
-            tracing::debug!(pty = %self.options.pty_id, "input dropped: pty stream closed");
-        }
-    }
-
     /// The visible screen as the idle detector and analyzer read it.
     pub fn viewport(&self) -> String {
         view::snapshot_viewport(&*self.attachment.term.lock())

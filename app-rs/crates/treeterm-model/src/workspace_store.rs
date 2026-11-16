@@ -24,7 +24,8 @@ use treeterm_term::fit::WidthLimit;
 use treeterm_term::palette::{DEFAULT_BACKGROUND, SANDBOX_BACKGROUND};
 
 use crate::analyzer::{AnalyzerEvent, AnalyzerModel, LlmService};
-use crate::apps::{AppKind, AppRegistry};
+use crate::apps::{AI_HARNESS_PREFIX, AppKind, AppRegistry};
+use crate::pty_writer::PtyWriter;
 use crate::terminal::{TerminalEvent, TerminalModel, TerminalOptions};
 
 /// A workspace as the app uses it: the file body joined with its ref.
@@ -253,6 +254,8 @@ pub struct WorkspaceStore {
     traffic_counter: treeterm_core::traffic::ByteCounter,
     /// The merge into the parent running or last finished, until dismissed.
     merge_output: Option<MergeOutput>,
+    /// Background writers by PTY id, for harness prompts and auto-approve (`ttyWriters`).
+    writers: HashMap<String, PtyWriter>,
     _git_refresh: Option<Task<()>>,
 }
 
@@ -265,6 +268,16 @@ fn parse_hex_color(text: &str) -> Option<treeterm_term::alacritty_terminal::vte:
         g: (value >> 8) as u8,
         b: value as u8,
     })
+}
+
+/// `isAiHarnessState`: a terminal's state (`ptyId` a string or null) with a `sandbox` that
+/// JavaScript's `typeof` calls an object (so also an array or null).
+pub(crate) fn is_ai_harness_state(state: &Value) -> bool {
+    let Value::Object(state) = state else {
+        return false;
+    };
+    matches!(state.get("ptyId"), Some(Value::String(_) | Value::Null))
+        && matches!(state.get("sandbox"), Some(Value::Object(_) | Value::Array(_) | Value::Null))
 }
 
 pub(crate) fn new_tab_id() -> String {
@@ -307,6 +320,7 @@ impl WorkspaceStore {
             traffic,
             traffic_counter,
             merge_output: None,
+            writers: HashMap::new(),
             _git_refresh: None,
         };
         let tab_ids: Vec<String> = store.workspace.file.app_states.keys().cloned().collect();
@@ -395,24 +409,67 @@ impl WorkspaceStore {
         self.workspace.file.metadata.get("isFavourite").map(String::as_str) == Some("true")
     }
 
-    /// `promptHarness`: paste `text` into the workspace's first AI-harness tab (in tab
-    /// order) whose terminal is attached, press Enter, and show that tab.
-    pub fn prompt_harness(&mut self, text: &str, cx: &mut Context<Self>) -> Result<(), String> {
-        let Some((tab_id, terminal)) = self.running_harness() else {
-            return Err("No AI harness is running in this workspace".to_owned());
+    /// `promptHarness`: type `text` and Enter, raw, into the running harness's PTY through
+    /// the background writer, and once it landed show that tab. Fails when no harness runs
+    /// or the write failed twice.
+    pub fn prompt_harness(&mut self, text: &str, cx: &mut Context<Self>) -> Task<Result<(), String>> {
+        let Some((tab_id, pty_id)) = self.running_harness() else {
+            return Task::ready(Err("No AI harness is running in this workspace".to_owned()));
         };
-        terminal.update(cx, |terminal, cx| {
-            terminal.paste(text, cx);
-            terminal.send_unfocused(b"\r");
-        });
-        self.set_active_tab(&tab_id, cx);
-        Ok(())
+        let write = self.write_to_pty(&pty_id, format!("{text}\r").into_bytes(), cx);
+        cx.spawn(async move |this, cx| {
+            write.await.map_err(|error| format!("Failed to write to the AI harness: {error}"))?;
+            match this.update(cx, |store, cx| store.set_active_tab(&tab_id, cx)) {
+                Ok(()) | Err(_) => {} // Err: the workspace left after the prompt landed
+            }
+            Ok(())
+        })
     }
 
-    /// `findRunningHarness`: an AI-harness tab is attached to its terminal (the prompt
-    /// buttons show).
+    /// `findRunningHarness`: an AI-harness tab has a PTY (the prompt buttons show).
     pub fn has_running_harness(&self) -> bool {
         self.running_harness().is_some()
+    }
+
+    /// The cached background writer to `pty_id`, opened anew once spent (`getTtyWriter`).
+    fn pty_writer(&mut self, pty_id: &str, cx: &mut Context<Self>) -> &PtyWriter {
+        // Electron evicts a writer when its stream ends; here spent ones go on the next use.
+        self.writers.retain(|_, writer| !writer.is_closed());
+        let executor = cx.background_executor().clone();
+        let conn = &self.conn;
+        self.writers
+            .entry(pty_id.to_owned())
+            .or_insert_with(|| PtyWriter::open(conn, pty_id, &executor))
+    }
+
+    /// Write `data` to `pty_id` through the background writer; a failed write is retried
+    /// once through a fresh writer (`promptHarness`).
+    fn write_to_pty(&mut self, pty_id: &str, data: Vec<u8>, cx: &mut Context<Self>) -> Task<Result<(), String>> {
+        let first = self.pty_writer(pty_id, cx).write(&data);
+        let pty_id = pty_id.to_owned();
+        cx.spawn(async move |this, cx| {
+            match first.await {
+                Ok(()) => return Ok(()),
+                Err(error) => tracing::debug!(pty = %pty_id, %error, "write failed; retrying through a fresh writer"),
+            }
+            let retry = this
+                .update(cx, |store, cx| store.pty_writer(&pty_id, cx).write(&data))
+                .map_err(|_| "The workspace is closed".to_owned())?;
+            retry.await.map_err(|error| error.to_string())
+        })
+    }
+
+    /// An analyzer's auto-approve: through the background writer, as Electron's analyzer
+    /// writes through its own background attachment (and, like it, without a retry).
+    fn write_for_analyzer(&mut self, pty_id: &str, text: &str, cx: &mut Context<Self>) {
+        let write = self.pty_writer(pty_id, cx).write(text.as_bytes());
+        let pty_id = pty_id.to_owned();
+        cx.spawn(async move |_, _| {
+            if let Err(error) = write.await {
+                tracing::error!(pty = %pty_id, %error, "auto-approve write failed");
+            }
+        })
+        .detach();
     }
 
     /// The daemon's file API, for the workspace's own tabs (Review's favourites).
@@ -420,25 +477,16 @@ impl WorkspaceStore {
         self.conn.fs_client()
     }
 
-    /// The first AI-harness tab (in tab order) whose terminal is attached.
-    fn running_harness(&self) -> Option<(String, Entity<TerminalModel>)> {
+    /// The first AI-harness tab (in tab order) with a PTY: its tab and PTY ids. Found by
+    /// its application id's prefix, as Electron does, so a tab whose instance left the
+    /// settings is still prompted while its PTY lives.
+    fn running_harness(&self) -> Option<(String, String)> {
         self.workspace.file.app_states.iter().find_map(|(tab_id, tab)| {
-            let app = self.registry.get(&tab.application_id)?;
-            let AppKind::AiHarness { .. } = app.kind else {
+            if !tab.application_id.starts_with(AI_HARNESS_PREFIX) || !is_ai_harness_state(&tab.state) {
                 return None;
-            };
-            match self.tabs.get(tab_id) {
-                Some(TabRef::Terminal(TerminalTab::Attached { model, .. })) => Some((tab_id.clone(), model.clone())),
-                Some(
-                    TabRef::Terminal(TerminalTab::Creating { .. } | TerminalTab::Failed(_))
-                    | TabRef::Files { .. }
-                    | TabRef::Editor { .. }
-                    | TabRef::Review { .. }
-                    | TabRef::Browser { .. }
-                    | TabRef::Tool(_),
-                )
-                | None => None,
             }
+            let pty_id = tab.state.get("ptyId")?.as_str()?;
+            Some((tab_id.clone(), pty_id.to_owned()))
         })
     }
 
@@ -974,6 +1022,7 @@ impl WorkspaceStore {
         let llm = self.llm.clone()?;
         let cwd = self.workspace.path.clone();
         let repo_path = self.workspace.file.git_root_path.clone().unwrap_or_else(|| cwd.clone());
+        let pty_id = terminal.read(cx).pty_id().to_owned();
         let (settings, git, terminal, workspace, owned_tab) =
             (self.settings.clone(), self.conn.git(), terminal.clone(), cx.weak_entity(), tab_id.to_owned());
         let analyzer =
@@ -984,6 +1033,7 @@ impl WorkspaceStore {
             AnalyzerEvent::UpdateMetadata { key, value } => store.update_metadata(key, value, cx),
             AnalyzerEvent::BranchRenamed(branch) => store.set_git_branch(branch, cx),
             AnalyzerEvent::RefreshGit => store.refresh_git_branch(cx),
+            AnalyzerEvent::Write(text) => store.write_for_analyzer(&pty_id, text, cx),
         });
         Some((analyzer, events))
     }
@@ -1107,6 +1157,10 @@ impl WorkspaceStore {
     }
 
     fn dispose_tab(&mut self, tab_id: &str) {
+        let pty_id = self.workspace.file.app_states.get(tab_id).and_then(|tab| tab.state.get("ptyId"));
+        if let Some(Value::String(pty_id)) = pty_id {
+            self.writers.remove(pty_id);
+        }
         self.tabs.remove(tab_id);
         self.web_apps.remove(tab_id);
         self.activity.remove_tab_state(tab_id);
@@ -1658,8 +1712,34 @@ impl WorkspaceStore {
         }
     }
 
-    /// The workspace leaves the session: detach every terminal. PTYs keep running.
+    /// The workspace leaves the session: detach every terminal and writer. PTYs keep
+    /// running.
     pub fn dispose(&mut self) {
         self.tabs.clear();
+        self.writers.clear();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::is_ai_harness_state;
+
+    #[test]
+    fn a_harness_state_has_a_pty_id_or_null_and_an_object_typed_sandbox() {
+        let sandbox = json!({ "enabled": false, "allowNetwork": true, "allowedPaths": [] });
+        assert!(is_ai_harness_state(&json!({ "ptyId": "p1", "sandbox": sandbox })));
+        assert!(is_ai_harness_state(&json!({ "ptyId": null, "sandbox": sandbox })));
+        // `typeof` is 'object' for arrays and null too.
+        assert!(is_ai_harness_state(&json!({ "ptyId": "p1", "sandbox": [] })));
+        assert!(is_ai_harness_state(&json!({ "ptyId": "p1", "sandbox": null })));
+
+        assert!(!is_ai_harness_state(&json!({ "ptyId": "p1" })), "no sandbox");
+        assert!(!is_ai_harness_state(&json!({ "ptyId": "p1", "sandbox": true })));
+        assert!(!is_ai_harness_state(&json!({ "sandbox": sandbox })), "no ptyId");
+        assert!(!is_ai_harness_state(&json!({ "ptyId": 7, "sandbox": sandbox })));
+        assert!(!is_ai_harness_state(&json!(null)));
+        assert!(!is_ai_harness_state(&json!(["p1"])));
     }
 }

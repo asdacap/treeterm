@@ -1,19 +1,27 @@
-//! The AI harness's auto-approve switch, against a real in-process daemon.
+//! Writes into a running AI harness (prompts and auto-approve) and the auto-approve switch,
+//! against a real in-process daemon.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
-use gpui_kit::{AppContext as _, Entity, TestAppContext};
+use gpui_kit::{AppContext as _, Entity, Task, TestAppContext};
 use serde_json::{Value, json};
 use treeterm_core::llm::FakeLlm;
 use treeterm_core::pty::CreatePty;
-use treeterm_core::settings::{ClassifierProvider, Settings};
+use treeterm_core::review::{REVIEW_COMMENTS_KEY, Resolution, ReviewComments};
+use treeterm_core::settings::{ClassifierProvider, Settings, TerminalSettings};
 use treeterm_model::analyzer::LlmService;
+use treeterm_model::harness_prompts::{self, HarnessPrompt};
 use treeterm_model::session_store::{SessionState, SessionStore, WorkspaceEntry};
 use treeterm_model::settings_store::SettingsStore;
-use treeterm_model::workspace_store::WorkspaceStore;
+use treeterm_model::terminal::{Overlay, TerminalModel, TerminalOptions};
+use treeterm_model::workspace_store::{TabContent, WorkspaceStore};
 use treeterm_proto::treeterm::WorkspaceRef;
+use treeterm_term::fit::WidthLimit;
+use treeterm_term::palette::DEFAULT_BACKGROUND;
 
 mod common;
 use common::{Harness, harness, wait_until, wait_until_app};
@@ -111,6 +119,16 @@ fn sandbox() -> Value {
     json!({ "enabled": false, "allowNetwork": true, "allowedPaths": [] })
 }
 
+/// Workspace metadata holding one open review comment, `c1`.
+fn open_comment() -> Value {
+    let comment = json!({
+        "id": "c1", "filePath": "src/lib.rs", "lineNumber": 5, "text": "fix c1",
+        "commitHash": "abc", "lineCommitHash": null, "createdAt": 1_700_000_000_000_i64,
+        "isOutdated": false, "addressed": false, "side": "modified"
+    });
+    json!({ REVIEW_COMMENTS_KEY: json!([comment]).to_string() })
+}
+
 /// A login shell with an empty config dir, so the user's dotfiles stay out of the test.
 fn spawn_shell(h: &Harness) -> String {
     let mut env = HashMap::new();
@@ -127,6 +145,215 @@ fn spawn_shell(h: &Harness) -> String {
     }))
     .unwrap()
     .unwrap()
+}
+
+/// Another terminal attachment of `pty_id` (another window, Electron), once its replay is
+/// shown.
+fn viewer(cx: &mut TestAppContext, h: &Harness, pty_id: &str) -> Entity<TerminalModel> {
+    let options = TerminalOptions {
+        pty_id: pty_id.to_owned(),
+        background: DEFAULT_BACKGROUND,
+        settings: TerminalSettings::default(),
+        keep_on_exit: true,
+        width_limit: WidthLimit::Capped(160),
+        idle_timeout: None,
+        traffic: treeterm_core::traffic::ByteCounter::default(),
+    };
+    let conn = h.conn.clone();
+    let model = cx.new(|cx| TerminalModel::new(conn, options, cx));
+    wait_until(cx, &model, |m| {
+        *m.overlay() == Overlay::Hidden && !m.screen_text().trim().is_empty()
+    });
+    model
+}
+
+fn terminal_of(
+    cx: &mut TestAppContext,
+    workspace: &Entity<WorkspaceStore>,
+    tab: &str,
+) -> Entity<TerminalModel> {
+    wait_until_app(cx, workspace, |w, _| {
+        matches!(w.tab_content(tab), Some(TabContent::Terminal(_)))
+    });
+    match workspace.read_with(cx, |w, _| w.tab_content(tab)) {
+        Some(TabContent::Terminal(terminal)) => terminal,
+        _ => unreachable!(),
+    }
+}
+
+/// Run `task` to completion (its I/O arrives from tokio threads in real time).
+fn finish<T: 'static>(cx: &mut TestAppContext, task: Task<T>) -> T {
+    let slot = Rc::new(RefCell::new(None));
+    let sink = slot.clone();
+    cx.foreground_executor()
+        .spawn(async move { *sink.borrow_mut() = Some(task.await) })
+        .detach();
+    for _ in 0..1000 {
+        cx.run_until_parked();
+        if let Some(value) = slot.borrow_mut().take() {
+            return value;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    panic!("task did not finish");
+}
+
+fn active_tab(cx: &mut TestAppContext, workspace: &Entity<WorkspaceStore>) -> Option<String> {
+    workspace.read_with(cx, |w, _| w.file().active_tab_id.clone())
+}
+
+fn prompt(
+    cx: &mut TestAppContext,
+    workspace: &Entity<WorkspaceStore>,
+    text: &str,
+) -> Result<(), String> {
+    let task = workspace.update(cx, |w, cx| w.prompt_harness(text, cx));
+    finish(cx, task)
+}
+
+#[gpui_kit::test]
+fn a_prompt_lands_raw_while_another_terminal_holds_the_input(cx: &mut TestAppContext) {
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    // Asks for bracketed paste, then shows every byte it gets (ESC as ^[).
+    let store = open_store(
+        cx,
+        &h,
+        bot_settings(r#"sh -c 'printf "\033[?2004h"; echo ready-$((40+2)); exec cat -v'"#),
+        None,
+    );
+    let (_, workspace) = open_workspace(cx, &h, &store, json!({}), None, json!({}));
+    let bot = workspace
+        .update(cx, |w, cx| w.add_tab("aiharness-bot", cx))
+        .unwrap();
+    let terminal = terminal_of(cx, &workspace, &bot);
+    wait_until(cx, &terminal, |t| t.screen_text().contains("ready-42"));
+    let other = workspace
+        .update(cx, |w, cx| w.add_tab("comments", cx))
+        .unwrap();
+    assert_eq!(active_tab(cx, &workspace), Some(other));
+
+    // Another terminal of the PTY claims its input; its own keystroke landing proves it.
+    let pty = terminal.read_with(cx, |t, _| t.pty_id().to_owned());
+    let claimer = viewer(cx, &h, &pty);
+    claimer.update(cx, |t, cx| {
+        t.set_focused(true, cx);
+        t.write_input(b"claimed-by-viewer\r", cx);
+    });
+    wait_until(cx, &terminal, |t| {
+        t.screen_text().contains("claimed-by-viewer")
+    });
+    // The tab's own terminal attachment is now gated by the daemon.
+    terminal.update(cx, |t, cx| t.paste("dropped-by-daemon", cx));
+
+    let result = prompt(cx, &workspace, "hello\nworld");
+    assert_eq!(result, Ok(()));
+    wait_until(cx, &terminal, |t| t.screen_text().contains("world"));
+    let screen = terminal.read_with(cx, |t, _| t.screen_text());
+    assert!(screen.contains("hello"), "{screen}");
+    assert!(
+        !screen.contains("[200~"),
+        "written raw, not bracketed: {screen}"
+    );
+    assert!(!screen.contains("dropped-by-daemon"), "{screen}");
+    assert_eq!(active_tab(cx, &workspace), Some(bot));
+}
+
+#[gpui_kit::test]
+fn a_prompt_that_cannot_be_written_shows_nothing_and_marks_nothing(cx: &mut TestAppContext) {
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let store = open_store(cx, &h, Settings::default(), None);
+    let tabs = json!({
+        "other": { "applicationId": "comments", "title": "Comments", "state": {} },
+        "dead": { "applicationId": "aiharness-bot", "title": "Bot", "state": { "ptyId": "no-such-pty", "sandbox": sandbox() } },
+    });
+    let (id, workspace) = open_workspace(cx, &h, &store, tabs, Some("other"), open_comment());
+    assert!(workspace.read_with(cx, |w, _| w.has_running_harness()));
+
+    // Written twice (the retry through a fresh writer), failing both times.
+    let task =
+        cx.update(|cx| harness_prompts::send(&HarnessPrompt::ReviewComments, &store, &id, cx));
+    let error = finish(cx, task).unwrap_err();
+    assert!(
+        error.starts_with("Failed to write to the AI harness"),
+        "{error}"
+    );
+    let raw = workspace.read_with(cx, |w, _| {
+        w.file().metadata.get(REVIEW_COMMENTS_KEY).cloned()
+    });
+    let comments = ReviewComments::parse(raw.as_deref()).unwrap().comments();
+    assert_eq!(comments[0].resolution, Resolution::Open);
+    assert_eq!(active_tab(cx, &workspace).as_deref(), Some("other"));
+}
+
+#[gpui_kit::test]
+fn a_harness_tab_is_found_by_its_id_and_state_even_without_its_instance(cx: &mut TestAppContext) {
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let pty = spawn_shell(&h);
+    let store = open_store(cx, &h, Settings::default(), None);
+    // `aiharness-gone` is not in the settings, and its state lacks a sandbox.
+    let tabs = json!({ "gone": { "applicationId": "aiharness-gone", "title": "Gone", "state": { "ptyId": pty } } });
+    let (_, workspace) = open_workspace(cx, &h, &store, tabs, Some("gone"), json!({}));
+    assert!(
+        !workspace.read_with(cx, |w, _| w.has_running_harness()),
+        "not a harness state without a sandbox"
+    );
+    let result = prompt(cx, &workspace, "echo nope");
+    assert_eq!(
+        result,
+        Err("No AI harness is running in this workspace".to_owned())
+    );
+
+    let set_state = |cx: &mut TestAppContext, state: Value| {
+        workspace.update(cx, |w, cx| w.update_tab_state("gone", |s| *s = state, cx));
+    };
+    set_state(cx, json!({ "ptyId": null, "sandbox": sandbox() }));
+    assert!(
+        !workspace.read_with(cx, |w, _| w.has_running_harness()),
+        "no PTY yet"
+    );
+    set_state(cx, json!({ "ptyId": pty, "sandbox": sandbox() }));
+    assert!(workspace.read_with(cx, |w, _| w.has_running_harness()));
+
+    let shell = viewer(cx, &h, &pty);
+    let result = prompt(cx, &workspace, "echo prompted-$((40+2))");
+    assert_eq!(result, Ok(()));
+    wait_until(cx, &shell, |t| t.screen_text().contains("prompted-42"));
+}
+
+#[gpui_kit::test]
+fn the_comments_tab_marks_a_comment_prompted_once_it_landed(cx: &mut TestAppContext) {
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let pty = spawn_shell(&h);
+    let store = open_store(cx, &h, Settings::default(), None);
+    let tabs = json!({
+        "list": { "applicationId": "comments", "title": "Comments", "state": {} },
+        "gone": { "applicationId": "aiharness-gone", "title": "Gone", "state": { "ptyId": pty, "sandbox": sandbox() } },
+    });
+    let (_, workspace) = open_workspace(cx, &h, &store, tabs, Some("list"), open_comment());
+    let Some(TabContent::Comments(model)) = workspace.read_with(cx, |w, _| w.tab_content("list"))
+    else {
+        panic!("not a comments tab");
+    };
+    let shell = viewer(cx, &h, &pty);
+
+    model.update(cx, |m, cx| m.prompt_comment("c1", cx));
+    wait_until_app(cx, &model, |m, cx| {
+        m.comments(cx).unwrap()[0].resolution == Resolution::Addressed
+    });
+    assert_eq!(
+        model.read_with(cx, |m, _| m.error().map(str::to_owned)),
+        None
+    );
+    assert_eq!(active_tab(cx, &workspace).as_deref(), Some("gone"));
+    wait_until(cx, &shell, |t| t.screen_text().contains("fix c1"));
 }
 
 #[gpui_kit::test]
@@ -157,4 +384,48 @@ fn auto_approve_starts_off_and_is_never_saved(cx: &mut TestAppContext) {
         w.file().app_states["bot"].state["autoApprove"].clone()
     });
     assert_eq!(saved, json!(true));
+}
+
+#[gpui_kit::test]
+fn auto_approve_lands_while_another_terminal_holds_the_input(cx: &mut TestAppContext) {
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    // Waits for the other terminal's line, asks, and reports the answer it got.
+    let mut settings = bot_settings(
+        r#"sh -c 'read claim; echo "Allow write to config-$((40+2)).toml? (y/n)"; read answer; echo approved-$((40+2)); sleep 60'"#,
+    );
+    let llm = safe_once_shown(&mut settings, &h, "config-42.toml");
+    let store = open_store(cx, &h, settings, Some(llm));
+    let (_, workspace) = open_workspace(cx, &h, &store, json!({}), None, json!({}));
+    let bot = workspace
+        .update(cx, |w, cx| w.add_tab("aiharness-bot", cx))
+        .unwrap();
+    let terminal = terminal_of(cx, &workspace, &bot);
+    wait_until_app(cx, &workspace, |w, _| w.analyzer(&bot).is_some());
+    workspace.update(cx, |w, cx| w.set_auto_approve(&bot, true, cx));
+    // The command has started once its line is echoed.
+    wait_until(cx, &terminal, |t| t.screen_text().contains("exec sh -c"));
+
+    let pty = terminal.read_with(cx, |t, _| t.pty_id().to_owned());
+    let claimer = viewer(cx, &h, &pty);
+    claimer.update(cx, |t, cx| {
+        t.set_focused(true, cx);
+        t.write_input(b"claimed\r", cx);
+    });
+    wait_until(cx, &terminal, |t| {
+        t.screen_text().contains("config-42.toml")
+    });
+
+    // Each idle edge (fake clock) gets the screen classified; the safe question is approved.
+    for _ in 0..1000 {
+        std::thread::sleep(Duration::from_millis(20));
+        cx.executor().advance_clock(Duration::from_millis(100));
+        cx.run_until_parked();
+        if terminal.read_with(cx, |t, _| t.screen_text().contains("approved-42")) {
+            return;
+        }
+    }
+    let screen = terminal.read_with(cx, |t, _| t.screen_text());
+    panic!("the safe question was never approved; screen:\n{screen}");
 }

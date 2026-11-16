@@ -158,6 +158,7 @@ fn the_comments_tab_lists_comments_with_their_code_and_acts_on_them(cx: &mut Tes
 
     // Prompting needs an AI harness in the workspace.
     model.update(cx, |m, cx| m.prompt_comment("c1", cx));
+    wait_until(cx, &model, |m| m.error().is_some());
     assert_eq!(model.read_with(cx, |m, _| m.error().map(str::to_owned)).as_deref(), Some("No AI harness is running in this workspace"));
     // Pushing needs the session's GitHub client.
     model.update(cx, |m, cx| m.push_to_github(None, cx));

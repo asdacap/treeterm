@@ -16,6 +16,7 @@ pub mod forward_monitor;
 pub mod git_controller;
 pub mod harness_prompts;
 pub mod keybinding_store;
+pub mod pty_writer;
 pub mod review;
 pub mod review_find;
 pub mod review_tree;

@@ -3,7 +3,9 @@
 //! for, and reports workspace changes as events for the workspace store to apply.
 //!
 //! The analyzer reads the tab's own terminal (always alive in the workspace store), so
-//! unlike Electron it needs no second, headless attachment.
+//! unlike Electron it needs no second, headless attachment. Its auto-approve is written by
+//! the workspace store through a background writer ([`crate::pty_writer`]), which the
+//! daemon never gates on focus, as Electron's analyzer writes through its own.
 //!
 //! Auto-approve starts off with every analyzer and is never saved, as in Electron.
 
@@ -65,6 +67,8 @@ pub enum AnalyzerEvent {
     BranchRenamed(String),
     /// The program may have changed files: re-read git info.
     RefreshGit,
+    /// Write to the tab's PTY (auto-approve's Enter).
+    Write(&'static str),
 }
 
 impl EventEmitter<AnalyzerEvent> for AnalyzerModel {}
@@ -243,7 +247,7 @@ impl AnalyzerModel {
                     );
                 }
                 Effect::SetActivity { state, detail } => cx.emit(AnalyzerEvent::SetActivity { state, detail }),
-                Effect::Write(text) => self.terminal.read(cx).send_unfocused(text.as_bytes()),
+                Effect::Write(text) => cx.emit(AnalyzerEvent::Write(text)),
                 Effect::RequestIdleEdge => self.terminal.update(cx, |t, cx| t.request_idle_edge(cx)),
                 Effect::UpdateMetadata { key, value, reason } => {
                     tracing::debug!(tab = %self.tab_id, key, reason, "analyzer updates metadata");

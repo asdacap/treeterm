@@ -2,7 +2,7 @@
 //! `PromptCommitButton`, `PromptRebaseButton`, `ReviewCommentsButton`,
 //! `ParentReviewCommentsButton` and `PromptGitHubCommentsButton`.
 
-use gpui_kit::{App, Entity};
+use gpui_kit::{App, Entity, Task};
 use treeterm_core::git_status::{ParentConflicts, ParentDiff, PullRequest, WorkingTree};
 use treeterm_core::review::{
     REVIEW_COMMENTS_KEY, Resolution, ReviewComment, ReviewCommentStore, ReviewComments, build_prompt_for_comments,
@@ -106,29 +106,52 @@ fn mark_addressed(session: &Entity<SessionStore>, workspace: Entity<WorkspaceSto
         .map_err(|e| e.to_string())
 }
 
-/// Paste `prompt`'s text into the harness; comments it sends count as addressed.
-pub fn send(prompt: &HarnessPrompt, session: &Entity<SessionStore>, workspace_id: &str, cx: &mut App) -> Result<(), String> {
-    let store = session.read(cx).workspace_store(workspace_id).cloned().ok_or("The workspace is gone")?;
+/// What sending a prompt does.
+enum Outgoing {
+    /// Type `text` into the harness; once it landed, the `addressed` comments of `holder`
+    /// count as addressed.
+    Prompt { text: String, holder: Entity<WorkspaceStore>, addressed: Vec<String> },
+    /// Nothing is left to send (the parent's comments were addressed meanwhile).
+    Nothing,
+}
+
+/// Type `prompt`'s text into the harness; once it landed, the comments it sent count as
+/// addressed. A failed prompt marks nothing.
+pub fn send(prompt: &HarnessPrompt, session: &Entity<SessionStore>, workspace_id: &str, cx: &mut App) -> Task<Result<(), String>> {
+    let Some(store) = session.read(cx).workspace_store(workspace_id).cloned() else {
+        return Task::ready(Err("The workspace is gone".to_owned()));
+    };
+    let (text, holder, addressed) = match outgoing(prompt, session, &store, cx) {
+        Ok(Outgoing::Prompt { text, holder, addressed }) => (text, holder, addressed),
+        Ok(Outgoing::Nothing) => return Task::ready(Ok(())),
+        Err(error) => return Task::ready(Err(error)),
+    };
+    let write = store.update(cx, |w, cx| w.prompt_harness(&text, cx));
+    let session = session.clone();
+    cx.spawn(async move |cx| {
+        write.await?;
+        cx.update(|cx| mark_addressed(&session, holder, addressed, cx))
+    })
+}
+
+fn outgoing(prompt: &HarnessPrompt, session: &Entity<SessionStore>, store: &Entity<WorkspaceStore>, cx: &App) -> Result<Outgoing, String> {
+    let plain = |text: String| Outgoing::Prompt { text, holder: store.clone(), addressed: Vec::new() };
     match prompt {
-        HarnessPrompt::Commit => store.update(cx, |w, cx| w.prompt_harness("commit", cx)),
-        HarnessPrompt::Rebase { branch, parent } => {
-            let text = format!("rebase local branch {branch} onto {parent}");
-            store.update(cx, |w, cx| w.prompt_harness(&text, cx))
-        }
-        HarnessPrompt::GitHubComments { .. } => store.update(cx, |w, cx| w.prompt_harness("Pull Github comment and address", cx)),
+        HarnessPrompt::Commit => Ok(plain("commit".to_owned())),
+        HarnessPrompt::Rebase { branch, parent } => Ok(plain(format!("rebase local branch {branch} onto {parent}"))),
+        HarnessPrompt::GitHubComments { .. } => Ok(plain("Pull Github comment and address".to_owned())),
         HarnessPrompt::ReviewComments => {
             let comments = comments_of(store.read(cx));
             let text = generate_review_prompt(&comments);
-            store.update(cx, |w, cx| w.prompt_harness(&text, cx))?;
-            let ids = comments.into_iter().filter(|c| c.resolution == Resolution::Open).map(|c| c.id).collect();
-            mark_addressed(session, store, ids, cx)
+            let addressed = comments.into_iter().filter(|c| c.resolution == Resolution::Open).map(|c| c.id).collect();
+            Ok(Outgoing::Prompt { text, holder: store.clone(), addressed })
         }
         HarnessPrompt::ParentReviewComments { .. } => {
             let parent_id = store.read(cx).file().parent_id.clone().filter(|p| !p.is_empty()).ok_or("No parent workspace")?;
             let parent = session.read(cx).workspace_store(&parent_id).cloned().ok_or("The parent workspace is gone")?;
             let open = open_comments(parent.read(cx));
             if open.is_empty() {
-                return Ok(());
+                return Ok(Outgoing::Nothing);
             }
             // Files-browser comments carry absolute paths into the parent's worktree.
             let parent_prefix = format!("{}/", parent.read(cx).workspace().path);
@@ -145,8 +168,7 @@ pub fn send(prompt: &HarnessPrompt, session: &Entity<SessionStore>, workspace_id
                 .collect();
             let refs: Vec<&ReviewComment> = rebased.iter().collect();
             let text = build_prompt_for_comments(&refs);
-            store.update(cx, |w, cx| w.prompt_harness(&text, cx))?;
-            mark_addressed(session, parent, open.into_iter().map(|c| c.id).collect(), cx)
+            Ok(Outgoing::Prompt { text, holder: parent, addressed: open.into_iter().map(|c| c.id).collect() })
         }
     }
 }

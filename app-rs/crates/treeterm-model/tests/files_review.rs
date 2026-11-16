@@ -602,7 +602,7 @@ fn review_comments_are_added_addressed_prompted_and_deleted(cx: &mut TestAppCont
     // Without a harness the prompt fails and nothing is marked.
     assert!(!review.read_with(cx, |r, cx| r.header(cx).harness));
     review.update(cx, |r, cx| r.prompt_open_comments(cx));
-    assert!(matches!(review.read_with(cx, |r, _| r.notice().clone()), Notice::Error(e) if e.contains("No AI harness")));
+    wait_until(cx, &review, |r| matches!(r.notice(), Notice::Error(e) if e.contains("No AI harness")));
     assert_eq!(review.read_with(cx, |r, cx| r.comments(cx).unwrap()[0].resolution), Resolution::Open);
     review.update(cx, |r, cx| r.dismiss_notice(cx));
 
@@ -615,8 +615,8 @@ fn review_comments_are_added_addressed_prompted_and_deleted(cx: &mut TestAppCont
     wait_until_app(cx, &workspace, |w, _| matches!(w.tab_content(&bot), Some(TabContent::Terminal(_))));
     assert!(review.read_with(cx, |r, cx| r.header(cx).harness));
     review.update(cx, |r, cx| r.prompt_open_comments(cx));
+    wait_review(cx, &review, "comment addressed", |r, cx| r.comments(cx).unwrap()[0].resolution == Resolution::Addressed);
     assert_eq!(review.read_with(cx, |r, _| r.notice().clone()), Notice::Clear);
-    assert_eq!(review.read_with(cx, |r, cx| r.comments(cx).unwrap()[0].resolution), Resolution::Addressed);
     assert_eq!(workspace.read_with(cx, |w, _| w.file().active_tab_id.clone()), Some(bot.clone()));
     let screen = |w: &WorkspaceStore, cx: &gpui_kit::App| match w.tab_content(&bot) {
         Some(TabContent::Terminal(t)) => t.read(cx).screen_text(),

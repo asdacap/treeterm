@@ -2404,10 +2404,19 @@ fn harness_prompt_buttons(session: &Entity<SessionStore>, workspace_id: &str, cx
                 .tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(title).build(window, cx))
                 .child(prompt.label())
                 .on_click(move |_, window, cx| {
-                    if let Err(error) = treeterm_model::harness_prompts::send(&prompt, &session, &id, cx) {
-                        use gpui_kit::component::WindowExt as _;
-                        window.push_notification(error, cx);
-                    }
+                    let task = treeterm_model::harness_prompts::send(&prompt, &session, &id, cx);
+                    let handle = window.window_handle();
+                    cx.spawn(async move |cx| {
+                        if let Err(error) = task.await {
+                            match handle.update(cx, |_, window, cx| {
+                                use gpui_kit::component::WindowExt as _;
+                                window.push_notification(error, cx);
+                            }) {
+                                Ok(()) | Err(_) => {} // Err: the window closed
+                            }
+                        }
+                    })
+                    .detach();
                 }),
         );
     }

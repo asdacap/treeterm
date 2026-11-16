@@ -7,6 +7,9 @@
 use serde_json::{Value, json};
 use treeterm_core::settings::Settings;
 
+/// What every AI-harness application id starts with (`aiharness-<instance>`).
+pub const AI_HARNESS_PREFIX: &str = "aiharness-";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AppKind {
     /// A shell (or a startup command) in a daemon PTY.
@@ -496,7 +499,7 @@ impl AppRegistry {
         }
         for instance in &settings.ai_harness.instances {
             apps.push(AppDef {
-                id: format!("aiharness-{}", instance.id),
+                id: format!("{AI_HARNESS_PREFIX}{}", instance.id),
                 name: instance.name.clone(),
                 icon: instance.icon.clone(),
                 kind: AppKind::AiHarness {

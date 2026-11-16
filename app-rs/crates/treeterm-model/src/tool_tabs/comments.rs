@@ -229,8 +229,8 @@ impl CommentsModel {
         self.with_store(cx, |store| store.delete_review_comment(comment_id).map_err(|e| e.to_string()));
     }
 
-    /// "Prompt" / "Re-prompt": paste the comment into the workspace's AI harness; once sent
-    /// it counts as prompted.
+    /// "Prompt" / "Re-prompt": type the comment into the workspace's AI harness; once it
+    /// landed it counts as prompted.
     pub fn prompt_comment(&mut self, comment_id: &str, cx: &mut Context<Self>) {
         let comments = match self.comments(cx) {
             Ok(comments) => comments,
@@ -247,13 +247,22 @@ impl CommentsModel {
             return;
         };
         let prompt = build_prompt_for_comments(&[comment]);
-        if let Err(error) = workspace.update(cx, |w, cx| w.prompt_harness(&prompt, cx)) {
-            self.error = Some(error);
-            cx.notify();
-            return;
-        }
+        let write = workspace.update(cx, |w, cx| w.prompt_harness(&prompt, cx));
         let ids = [comment.id.clone()];
-        self.with_store(cx, |store| store.mark_review_comments_addressed(&ids).map_err(|e| e.to_string()));
+        cx.spawn(async move |this, cx| {
+            let result = write.await;
+            let shown = this.update(cx, |model, cx| match result {
+                Ok(()) => model.with_store(cx, |store| store.mark_review_comments_addressed(&ids).map_err(|e| e.to_string())),
+                Err(error) => {
+                    model.error = Some(error);
+                    cx.notify();
+                }
+            });
+            match shown {
+                Ok(()) | Err(_) => {} // Err: the tab closed
+            }
+        })
+        .detach();
     }
 
     /// "Go to file": a Files tab on the comment's file, scrolled to its line.

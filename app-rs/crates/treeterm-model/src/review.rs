@@ -750,7 +750,7 @@ impl ReviewModel {
     pub fn prompt_rebase(&mut self, cx: &mut Context<Self>) {
         let header = self.header(cx);
         if let Some(parent) = header.parent_branch {
-            self.prompt_harness(&format!("rebase local branch {} onto {parent}", header.branch), &[], cx);
+            self.prompt_harness(&format!("rebase local branch {} onto {parent}", header.branch), Vec::new(), cx);
         }
     }
 
@@ -758,7 +758,7 @@ impl ReviewModel {
     pub fn prompt_update_from_parent(&mut self, cx: &mut Context<Self>) {
         let header = self.header(cx);
         if let Some(parent) = header.parent_branch {
-            self.prompt_harness(&format!("merge {parent} into local branch {}", header.branch), &[], cx);
+            self.prompt_harness(&format!("merge {parent} into local branch {}", header.branch), Vec::new(), cx);
         }
     }
 
@@ -1706,24 +1706,36 @@ impl ReviewModel {
         }
     }
 
-    /// Paste `prompt` into the workspace's AI harness; on success mark `addressed` addressed.
-    fn prompt_harness(&mut self, prompt: &str, addressed: &[String], cx: &mut Context<Self>) {
+    /// Type `prompt` into the workspace's AI harness; once it landed, mark `addressed`
+    /// addressed.
+    fn prompt_harness(&mut self, prompt: &str, addressed: Vec<String>, cx: &mut Context<Self>) {
         let Some(workspace) = self.workspace.upgrade() else {
             return;
         };
-        if let Err(error) = workspace.update(cx, |workspace, cx| workspace.prompt_harness(prompt, cx)) {
-            self.notice = Notice::Error(error);
-            cx.notify();
-            return;
-        }
-        let result = self.with_metadata(cx, |metadata| {
-            ReviewCommentStore::new(metadata)
-                .mark_review_comments_addressed(addressed)
-                .map_err(|e| e.to_string())
-        });
-        match result {
-            Some(()) | None => {}
-        }
+        let write = workspace.update(cx, |workspace, cx| workspace.prompt_harness(prompt, cx));
+        cx.spawn(async move |this, cx| {
+            let result = write.await;
+            let shown = this.update(cx, |review, cx| match result {
+                Ok(()) => {
+                    let marked = review.with_metadata(cx, |metadata| {
+                        ReviewCommentStore::new(metadata)
+                            .mark_review_comments_addressed(&addressed)
+                            .map_err(|e| e.to_string())
+                    });
+                    match marked {
+                        Some(()) | None => {} // None: shown as the notice
+                    }
+                }
+                Err(error) => {
+                    review.notice = Notice::Error(error);
+                    cx.notify();
+                }
+            });
+            match shown {
+                Ok(()) | Err(_) => {} // Err: the tab closed
+            }
+        })
+        .detach();
     }
 
     /// "Address Comments": prompt the harness with every comment not yet addressed, then
@@ -1746,7 +1758,7 @@ impl ReviewModel {
             .filter(|comment| comment.resolution == Resolution::Open)
             .map(|comment| comment.id.clone())
             .collect();
-        self.prompt_harness(&prompt, &open, cx);
+        self.prompt_harness(&prompt, open, cx);
     }
 
     /// "Prompt" / "Re-prompt" one comment, whatever its state.
@@ -1763,12 +1775,12 @@ impl ReviewModel {
             return;
         };
         let prompt = build_prompt_for_comments(&[comment]);
-        self.prompt_harness(&prompt, std::slice::from_ref(&comment.id), cx);
+        self.prompt_harness(&prompt, vec![comment.id.clone()], cx);
     }
 
     /// "Prompt Commit": ask the harness to commit.
     pub fn prompt_commit(&mut self, cx: &mut Context<Self>) {
-        self.prompt_harness("commit", &[], cx);
+        self.prompt_harness("commit", Vec::new(), cx);
     }
 }
 
