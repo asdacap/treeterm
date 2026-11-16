@@ -583,14 +583,16 @@ impl SessionStore {
     }
 
     /// Active worktree workspaces (not yet merged or abandoned), as `(name, branch)`: closing
-    /// the app asks first when there are any (`getUnmergedSubWorkspaces`).
+    /// the app asks first when there are any (`getUnmergedSubWorkspaces`). A worktree made
+    /// without a branch records `gitBranch: ""`; it has no branch to show, as the dialog
+    /// shows one only when `gitBranch` is truthy.
     pub fn unmerged_sub_workspaces(&self, cx: &App) -> Vec<(String, Option<String>)> {
         self.entries
             .values()
             .filter_map(WorkspaceEntry::store)
             .map(|store| store.read(cx).file())
             .filter(|file| file.is_worktree && file.status == WorkspaceStatus::Active)
-            .map(|file| (file.name.clone(), file.git_branch.clone()))
+            .map(|file| (file.name.clone(), file.git_branch.clone().filter(|branch| !branch.is_empty())))
             .collect()
     }
 

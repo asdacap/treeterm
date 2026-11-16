@@ -2271,6 +2271,29 @@ fn active_child_workspaces_count_as_unmerged(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn an_unmerged_worktree_without_a_branch_lists_no_branch(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    let write = |id: &str, branch: &str| {
+        let mut json: serde_json::Value = serde_json::from_str(&body(id, Some("root"))).unwrap();
+        json["isGitRepo"] = true.into();
+        json["gitBranch"] = branch.into();
+        std::fs::write(h.daemon.workspaces_dir().join(format!("{id}.json")), json.to_string()).unwrap();
+    };
+    std::fs::write(h.daemon.workspaces_dir().join("root.json"), body("root", None)).unwrap();
+    // Electron records `gitBranch: ""` for a worktree it made without a branch.
+    write("nobranch", "");
+    write("feature", "feat");
+    // In a directory git cannot run in, the loaded bodies keep their branches.
+    publish_gone(&h, &["root", "nobranch", "feature"]);
+    let store = open_store(cx, &h, "client-a");
+    wait_until(cx, &store, |s| loaded(s, "root") && loaded(s, "nobranch") && loaded(s, "feature"));
+    let mut unmerged = cx.read(|cx| store.read(cx).unmerged_sub_workspaces(cx));
+    unmerged.sort();
+    assert_eq!(unmerged, vec![("feature".to_owned(), Some("feat".to_owned())), ("nobranch".to_owned(), None)]);
+}
+
+#[gpui_kit::test]
 fn an_ai_harness_tab_is_classified_by_its_analyzer(cx: &mut TestAppContext) {
     use std::sync::Arc;
     use treeterm_core::llm::FakeLlm;
