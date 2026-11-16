@@ -290,9 +290,12 @@ pub struct FileBrowser {
     _definition: Option<Task<()>>,
     _favourites: Option<Task<()>>,
     _workspace: Subscription,
-    /// Saving a copy of a file to this computer (`FileDownloadButton`).
+    /// Saving a copy of the shown file to this computer (`FileDownloadButton`). Every read
+    /// starts it at Idle, as Electron's button is mounted afresh with each read.
     download: DownloadState,
-    _download: Option<Task<()>>,
+    /// Running downloads, by the read they were started from. One started from an earlier
+    /// read keeps going, unseen (its failure is logged).
+    downloads: HashMap<u64, Task<()>>,
     name_search: NameSearch,
     _name_search: Option<Task<()>>,
     comments: comments::Comments,
@@ -410,7 +413,7 @@ impl FileBrowser {
             loads: HashMap::new(),
             _read: None,
             download: DownloadState::Idle,
-            _download: None,
+            downloads: HashMap::new(),
             _search: None,
             _definition: None,
             _favourites: None,
@@ -453,7 +456,8 @@ impl FileBrowser {
         self.download = DownloadState::Downloading;
         let read = self.fs.read_file(&self.root, path, u64::MAX);
         let executor = cx.background_executor().clone();
-        self._download = Some(cx.spawn(async move |this, cx| {
+        let started = self.reads;
+        let task = cx.spawn(async move |this, cx| {
             let result = match read.await {
                 Ok(Ok(ReadOutcome::Read(file))) => {
                     let content = file.content;
@@ -466,15 +470,25 @@ impl FileBrowser {
                 Err(lost) => Err(lost.to_string()),
             };
             match this.update(cx, |browser, cx| {
-                browser.download = match result {
-                    Ok(()) => DownloadState::Idle,
-                    Err(error) => DownloadState::Failed(error),
-                };
-                cx.notify();
+                browser.downloads.remove(&started);
+                match (browser.reads == started, result) {
+                    (true, result) => {
+                        browser.download = match result {
+                            Ok(()) => DownloadState::Idle,
+                            Err(error) => DownloadState::Failed(error),
+                        };
+                        cx.notify();
+                    }
+                    // Another file is shown now, with its own button.
+                    (false, Ok(())) => {}
+                    (false, Err(error)) => tracing::error!(%error, "download failed"),
+                }
             }) {
-                Ok(()) | Err(_) => {}
+                Ok(()) | Err(_) => {} // Err: tab closed
             }
-        }));
+        });
+        // One per read: the read's button is disabled while its download runs.
+        self.downloads.insert(started, task);
         cx.notify();
     }
 
@@ -623,6 +637,7 @@ impl FileBrowser {
         self.selected = Some(path.to_owned());
         self.view = FileView::Loading(path.to_owned());
         self.reads += 1;
+        self.download = DownloadState::Idle;
         self.reveal = None;
         if let SearchPanel::Open(search) = &mut self.search {
             search.active = None;
