@@ -192,10 +192,11 @@ impl FsClient {
                 (true, None) => {
                     Err(ApiError::Protocol("ReadDirectory succeeded without contents").into())
                 }
+                // Without a reason, Electron's file tree says "Failed to load".
                 (false, _) => Err(FsError::Daemon(
                     response
                         .error
-                        .unwrap_or_else(|| "read directory failed".to_owned()),
+                        .unwrap_or_else(|| "Failed to load".to_owned()),
                 )),
             }
         })
@@ -218,8 +219,9 @@ impl FsClient {
             if response.success {
                 Ok(response.entries)
             } else {
+                // Without a reason, Electron's file tree says "Search failed".
                 Err(FsError::Daemon(
-                    response.error.unwrap_or_else(|| "search failed".to_owned()),
+                    response.error.unwrap_or_else(|| "Search failed".to_owned()),
                 ))
             }
         })

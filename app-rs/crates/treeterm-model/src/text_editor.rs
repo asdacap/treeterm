@@ -9,7 +9,9 @@ use std::time::Duration;
 
 use gpui_kit::{Context, EventEmitter, Task};
 use serde_json::{Value, json};
-use treeterm_core::fs::{FsClient, ReadOutcome, WriteGuard, WriteOutcome};
+use treeterm_core::fs::{FsClient, FsError, ReadOutcome, WriteGuard, WriteOutcome};
+
+use crate::file_browser::{fs_error_text, fs_outcome};
 
 /// Edits are persisted to the tab state this long after the last keystroke.
 const PERSIST_DEBOUNCE: Duration = Duration::from_millis(800);
@@ -97,7 +99,7 @@ impl TextEditor {
                     language: text("language").unwrap_or_else(|| "plaintext".to_owned()),
                 };
             }
-            _ if editor.path.is_empty() => editor.doc = EditorDoc::Error("No file to edit".to_owned()),
+            _ if editor.path.is_empty() => editor.doc = EditorDoc::Error("Invalid tab".to_owned()),
             _ => editor.load(cx),
         }
         editor
@@ -169,8 +171,8 @@ impl TextEditor {
         let read = self.fs.read_file(&self.root, &self.path, u64::MAX);
         let language = self.language();
         self._load = Some(cx.spawn(async move |this, cx| {
-            let doc = match read.await {
-                Ok(Ok(ReadOutcome::Read(file))) => match String::from_utf8(file.content) {
+            let doc = match fs_outcome(read.await) {
+                Ok(ReadOutcome::Read(file)) => match String::from_utf8(file.content) {
                     Ok(text) => EditorDoc::Ready {
                         original: text.clone(),
                         current: text,
@@ -178,9 +180,9 @@ impl TextEditor {
                     },
                     Err(_) => EditorDoc::Error("Binary files cannot be edited".to_owned()),
                 },
-                Ok(Ok(ReadOutcome::TooLarge { size })) => EditorDoc::Error(format!("File too large ({size} bytes)")),
-                Ok(Err(error)) => EditorDoc::Error(error.to_string()),
-                Err(lost) => EditorDoc::Error(lost.to_string()),
+                Ok(ReadOutcome::TooLarge { size }) => EditorDoc::Error(format!("File too large ({size} bytes)")),
+                // The daemon's reason as it gave it (`error: result.error`).
+                Err(error) => EditorDoc::Error(fs_error_text(&error, "", "Error loading file: ")),
             };
             match this.update(cx, |editor, cx| {
                 // A markdown file opens on its preview.
@@ -239,11 +241,11 @@ impl TextEditor {
             .write_file(&self.root, &self.path, saved.clone().into_bytes(), WriteGuard::Unconditional);
         self.save = SaveState::Saving;
         self._save = Some(cx.spawn(async move |this, cx| {
-            let result = match write.await {
-                Ok(Ok(WriteOutcome::Written { .. })) => Ok(()),
-                Ok(Ok(WriteOutcome::Conflict)) => Err("the file changed on disk".to_owned()),
-                Ok(Err(error)) => Err(error.to_string()),
-                Err(lost) => Err(lost.to_string()),
+            let result = match fs_outcome(write.await) {
+                Ok(WriteOutcome::Written { .. }) => Ok(()),
+                Err(error) => Err(save_error_text(&error)),
+                // Unreachable: the write is unconditional.
+                Ok(WriteOutcome::Conflict) => Err("Failed to save: the file changed on disk".to_owned()),
             };
             match this.update(cx, |editor, cx| {
                 match result {
@@ -254,7 +256,7 @@ impl TextEditor {
                         editor.save = SaveState::Idle;
                         editor.persist_now(cx);
                     }
-                    Err(error) => editor.save = SaveState::Failed(format!("Failed to save: {error}")),
+                    Err(error) => editor.save = SaveState::Failed(error),
                 }
                 cx.notify();
             }) {
@@ -283,9 +285,25 @@ impl TextEditor {
     }
 }
 
+/// The alert a failed save shows: the daemon's refusal, or the call failing outright (a
+/// rejected IPC call in Electron).
+fn save_error_text(error: &FsError) -> String {
+    match error {
+        FsError::Daemon(reason) => format!("Failed to save: {reason}"),
+        FsError::Api(error) => format!("Error saving file: {error}"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_save_fails_in_electrons_words() {
+        assert_eq!(save_error_text(&FsError::Daemon("Permission denied".into())), "Failed to save: Permission denied");
+        let deadline = treeterm_core::daemon::ApiError::DeadlineExceeded(Duration::from_secs(30));
+        assert_eq!(save_error_text(&FsError::Api(deadline)), "Error saving file: daemon did not answer within 30s");
+    }
 
     #[test]
     fn the_title_is_the_file_name_marked_while_unsaved() {

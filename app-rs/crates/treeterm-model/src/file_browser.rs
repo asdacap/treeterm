@@ -25,9 +25,11 @@ use std::time::Duration;
 
 use gpui_kit::{App, Context, Entity, EventEmitter, Subscription, Task, WeakEntity};
 use serde_json::{Value, json};
+use treeterm_core::daemon::ApiError;
 use treeterm_core::exec::{ExecApi, ExecError};
 use treeterm_core::files::{FavouriteFile, detect_monaco_language, normalize_favourite_path, resolve_favourite_files};
-use treeterm_core::fs::{FsClient, ReadOutcome};
+use treeterm_core::fs::{FsClient, FsError, ReadOutcome};
+use treeterm_core::rt::TaskLost;
 use treeterm_core::git::GitApi;
 use treeterm_core::search::{self, DefinitionLocation, RepoHit, RepoSearchEvent};
 use treeterm_proto::treeterm::FileEntry;
@@ -300,6 +302,22 @@ pub enum DownloadState {
     Failed(String),
 }
 
+/// A filesystem call's outcome, a lost background task counting as the call failing.
+pub(crate) fn fs_outcome<T>(result: Result<Result<T, FsError>, TaskLost>) -> Result<T, FsError> {
+    result.unwrap_or_else(|lost| Err(ApiError::from(lost).into()))
+}
+
+/// What a failed filesystem call says, in the words of Electron's renderer: the daemon's
+/// own reason, or `fallback` when it gave none (`result.error || fallback`); a call that
+/// failed outright (a rejected IPC call in Electron) is `prefix` then the error.
+pub(crate) fn fs_error_text(error: &FsError, fallback: &str, prefix: &str) -> String {
+    match error {
+        FsError::Daemon(reason) if reason.is_empty() => fallback.to_owned(),
+        FsError::Daemon(reason) => reason.clone(),
+        FsError::Api(error) => format!("{prefix}{error}"),
+    }
+}
+
 /// Directories first, then names byte by byte (capitals before lowercase): the daemon's
 /// order, which the Electron tree shows as it comes.
 fn sort_entries(entries: &mut [FileEntry]) {
@@ -506,13 +524,12 @@ impl FileBrowser {
         let read = self.fs.read_directory(&self.root, &dir);
         let key = dir.clone();
         let task = cx.spawn(async move |this, cx| {
-            let listing = match read.await {
-                Ok(Ok(mut contents)) => {
+            let listing = match fs_outcome(read.await) {
+                Ok(mut contents) => {
                     sort_entries(&mut contents.entries);
                     Listing::Loaded(contents.entries)
                 }
-                Ok(Err(error)) => Listing::Failed(error.to_string()),
-                Err(lost) => Listing::Failed(lost.to_string()),
+                Err(error) => Listing::Failed(fs_error_text(&error, "Failed to load", "Error: ")),
             };
             match this.update(cx, |browser, cx| {
                 browser.listings.insert(key.clone(), listing);
@@ -590,8 +607,8 @@ impl FileBrowser {
         let read = self.fs.read_file(&self.root, path, budget);
         let owned = path.to_owned();
         self._read = Some(cx.spawn(async move |this, cx| {
-            let view = match read.await {
-                Ok(Ok(ReadOutcome::Read(file))) => match presentation {
+            let view = match fs_outcome(read.await) {
+                Ok(ReadOutcome::Read(file)) => match presentation {
                     Presentation::Image(kind) => FileView::Image {
                         path: owned.clone(),
                         bytes: std::sync::Arc::new(file.content),
@@ -608,9 +625,11 @@ impl FileBrowser {
                     },
                     Presentation::Text => text_view(owned.clone(), file.content),
                 },
-                Ok(Ok(ReadOutcome::TooLarge { size })) => FileView::TooLarge { path: owned.clone(), size },
-                Ok(Err(error)) => FileView::Failed { path: owned.clone(), error: error.to_string() },
-                Err(lost) => FileView::Failed { path: owned.clone(), error: lost.to_string() },
+                Ok(ReadOutcome::TooLarge { size }) => FileView::TooLarge { path: owned.clone(), size },
+                Err(error) => FileView::Failed {
+                    path: owned.clone(),
+                    error: fs_error_text(&error, "Failed to load file", "Error loading file: "),
+                },
             };
             match this.update(cx, |browser, cx| {
                 // A later selection wins.
@@ -976,10 +995,9 @@ impl FileBrowser {
                 Ok(Some(search)) => search,
                 Ok(None) | Err(_) => return, // blank, or the tab closed
             };
-            let results = match search.await {
-                Ok(Ok(entries)) => NameResults::Found(entries),
-                Ok(Err(error)) => NameResults::Failed(error.to_string()),
-                Err(lost) => NameResults::Failed(format!("Search error: {lost}")),
+            let results = match fs_outcome(search.await) {
+                Ok(entries) => NameResults::Found(entries),
+                Err(error) => NameResults::Failed(fs_error_text(&error, "Search failed", "Search error: ")),
             };
             match this.update(cx, |browser, cx| {
                 browser.name_search.results = results;
@@ -1161,6 +1179,23 @@ mod tests {
         assert!(!search("").is_active());
         assert!(!search("  ").is_active());
         assert!(search(" a").is_active());
+    }
+
+    #[test]
+    fn failures_read_as_electron_words_them() {
+        let text = |error: FsError| fs_error_text(&error, "Failed to load", "Error: ");
+        assert_eq!(text(FsError::Daemon("Permission denied".into())), "Permission denied");
+        assert_eq!(text(FsError::Daemon(String::new())), "Failed to load");
+        assert_eq!(
+            text(FsError::Api(ApiError::Protocol("ReadDirectory succeeded without contents"))),
+            "Error: daemon protocol violation: ReadDirectory succeeded without contents"
+        );
+        assert_eq!(
+            text(fs_outcome::<()>(Err(TaskLost)).unwrap_err()),
+            "Error: background task ended without a result (panicked or runtime shut down)"
+        );
+        assert!(matches!(fs_outcome(Ok(Ok(7))), Ok(7)));
+        assert!(matches!(fs_outcome::<()>(Ok(Err(FsError::Daemon("no".into())))), Err(FsError::Daemon(reason)) if reason == "no"));
     }
 
     #[test]

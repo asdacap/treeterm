@@ -1076,6 +1076,48 @@ fn an_editor_tab_loads_edits_and_saves_a_file(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn an_editor_tab_says_why_a_file_did_not_load_or_save(cx: &mut TestAppContext) {
+    use std::os::unix::fs::PermissionsExt as _;
+    use treeterm_model::text_editor::{EditorDoc, SaveState};
+    cx.executor().allow_parking();
+    let h = harness();
+    std::fs::write(h.daemon.workspaces_dir().join("a.json"), body("a", None)).unwrap();
+    publish(&h, &["a"]);
+    let locked = h.daemon.root().join("locked");
+    std::fs::create_dir_all(&locked).unwrap();
+    let file = locked.join("notes.txt");
+    std::fs::write(&file, "hello\n").unwrap();
+    let store = open_store(cx, &h, "client-a");
+    wait_until(cx, &store, |s| loaded(s, "a"));
+    let workspace = store.read_with(cx, |s, _| ws(s, "a"));
+    let open = |cx: &mut TestAppContext, path: &std::path::Path| {
+        let tab = workspace.update(cx, |w, cx| w.open_in_editor(&path.to_string_lossy(), cx)).unwrap();
+        let Some(TabContent::Editor(editor)) = workspace.read_with(cx, |w, _| w.tab_content(&tab)) else {
+            panic!("not an editor tab");
+        };
+        wait_until(cx, &editor, |e| !matches!(e.doc(), EditorDoc::Loading));
+        editor
+    };
+
+    // The daemon's reason, as it gave it.
+    let missing = open(cx, &h.daemon.root().join("missing.txt"));
+    let EditorDoc::Error(reason) = missing.read_with(cx, |e, _| e.doc().clone()) else { panic!("loaded a missing file") };
+    assert!(reason.contains("No such file"), "{reason}");
+
+    // A directory the daemon cannot write in: the save fails with the daemon's reason.
+    let editor = open(cx, &file);
+    editor.update(cx, |e, cx| e.set_content("changed\n".into(), cx));
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o555)).unwrap();
+    editor.update(cx, |e, cx| e.save(cx));
+    wait_until(cx, &editor, |e| !matches!(e.save_state(), SaveState::Saving));
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let SaveState::Failed(message) = editor.read_with(cx, |e, _| e.save_state().clone()) else { panic!("saved") };
+    assert!(message.starts_with("Failed to save: ") && message.contains("denied"), "{message}");
+    assert!(editor.read_with(cx, |e, _| e.is_dirty()), "the edit is kept");
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "hello\n");
+}
+
+#[gpui_kit::test]
 fn the_review_tab_stages_and_commits_uncommitted_changes(cx: &mut TestAppContext) {
     use treeterm_core::git::Staging;
     use treeterm_model::review::{ReviewContent, StageTarget};
