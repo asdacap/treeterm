@@ -581,6 +581,25 @@ mod tests {
         assert_eq!(copy_drag(from, point(px(299.), row(2)), cx), "one\n\nthree");
     }
 
+    /// A drag that ends on a line, however far past its end, stops at the end of the line, as
+    /// Chromium's selection does: its line break is not copied. One that ends at the start of
+    /// the next line takes it in.
+    #[gpui_kit::test]
+    fn a_drag_ending_past_the_end_of_a_line_stops_there(cx: &mut TestAppContext) {
+        let cx = card("one\ntwo\nthree", cx);
+        let from = line_start(row(0), cx);
+        assert_eq!(copy_drag(from, point(px(299.), row(1)), cx), "one\ntwo");
+        assert_eq!(copy_drag(from, line_start(row(2), cx), cx), "one\ntwo\n", "to the start of the next line");
+    }
+
+    /// A drag ending on a blank line copies the line break before it, not its own.
+    #[gpui_kit::test]
+    fn a_drag_ending_on_a_blank_line_stops_at_it(cx: &mut TestAppContext) {
+        let cx = card("one\n\nthree", cx);
+        let from = line_start(row(0), cx);
+        assert_eq!(copy_drag(from, point(px(299.), row(1)), cx), "one\n");
+    }
+
     /// A card's header row, 200px wide: the commented file's path, then the line.
     struct Header {
         path: String,

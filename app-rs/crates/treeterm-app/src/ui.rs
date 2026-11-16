@@ -1,6 +1,8 @@
 //! Building blocks shared by the views, sized and coloured as `src/renderer/styles/index.css`
 //! draws them, so the native chrome matches Electron pixel for pixel.
 
+use std::ops::Range;
+
 use gpui_kit::assets::IconName;
 use gpui_kit::component::Icon;
 use gpui_kit::prelude::*;
@@ -344,9 +346,11 @@ impl ReadingOrder {
         Self(order)
     }
 
-    pub fn text(&mut self, id: impl Into<ElementId>, text: impl Into<SharedString>) -> gpui_kit::base::SelectableText {
+    /// A run of text, of one line or several (see [`PlainText`]).
+    pub fn text(&mut self, id: impl Into<ElementId>, text: impl Into<SharedString>) -> PlainText {
         self.0 += 1;
-        gpui_kit::base::SelectableText::new(id, text).document_order(self.0)
+        let text = text.into();
+        PlainText { id: id.into(), laid_out: gpui_kit::StyledText::new(text.clone()), text, order: self.0 }
     }
 
     /// One line of text to be cut short by its parent's `truncate()` (see [`EllipsizedText`]).
@@ -357,13 +361,181 @@ impl ReadingOrder {
     }
 }
 
+/// What a run of text in a [`ReadingOrder`] keeps between frames: its part in the window's
+/// selection, and what that part copies, as last painted.
+#[derive(Clone)]
+pub struct RunState {
+    handle: gpui_kit::base::TextSelectionHandle,
+    copied: std::rc::Rc<std::cell::RefCell<String>>,
+}
+
+impl RunState {
+    /// The state of the run `global_id` showing `text`, kept from the frame before.
+    fn kept(global_id: Option<&gpui_kit::GlobalElementId>, text: SharedString, window: &mut Window, cx: &mut App) -> Self {
+        window.with_element_state(global_id.expect("a run of text has an id"), |kept, _| {
+            let state = kept.unwrap_or_else(|| {
+                let copied = std::rc::Rc::new(std::cell::RefCell::new(String::new()));
+                let handle = gpui_kit::base::TextSelectionHandle::new(text, cx);
+                let copy = copied.clone();
+                handle.copy_with(move |_| copy.borrow().clone(), cx);
+                RunState { handle, copied }
+            });
+            (state.clone(), state)
+        })
+    }
+
+    /// Takes part in the window's selection with the run's `bounds`, `order`th in reading
+    /// order.
+    fn register(&self, bounds: Bounds<Pixels>, order: u64, window: &mut Window, cx: &mut App) -> gpui_kit::Hitbox {
+        use gpui_kit::base::TextSelectionRegistration;
+        let hitbox = window.insert_hitbox(bounds, gpui_kit::HitboxBehavior::Normal);
+        let registration = TextSelectionRegistration::new(hitbox.clone(), bounds)
+            .with_document_order(order)
+            .with_text_bounds(vec![bounds])
+            .with_rendered_element(&self.handle, window, cx);
+        self.handle.register(registration, window, cx);
+        hitbox
+    }
+
+    /// The part of `text`, laid out in `layout` at `bounds`, that the window's selection
+    /// takes in, as GPUI Kit selects it.
+    fn selected(
+        &self,
+        text: SharedString,
+        layout: &gpui_kit::TextLayout,
+        bounds: Bounds<Pixels>,
+        order: u64,
+        cx: &mut App,
+    ) -> Option<Range<usize>> {
+        let run = gpui_kit::base::TextSelectionRun::new(text, layout.clone(), bounds).with_document_order(order);
+        self.handle.update_runs(&[run], cx).ranges().first().cloned().flatten()
+    }
+}
+
+/// Fills the selection of `range` of the text laid out in `layout`, as GPUI Kit's
+/// `SelectableText` does: from its start to its end, the rows between them whole.
+fn paint_selection(layout: &gpui_kit::TextLayout, range: Range<usize>, window: &mut Window, cx: &App) {
+    use gpui_kit::point;
+    let (Some(start), Some(end)) = (layout.position_for_index(range.start), layout.position_for_index(range.end)) else {
+        return;
+    };
+    let (bounds, line) = (layout.bounds(), layout.line_height());
+    let quads = if start.y == end.y {
+        vec![Bounds::from_corners(start, point(end.x, end.y + line))]
+    } else {
+        let mut quads = vec![Bounds::from_corners(start, point(bounds.right(), start.y + line))];
+        if end.y > start.y + line {
+            quads.push(Bounds::from_corners(point(bounds.left(), start.y + line), point(bounds.right(), end.y)));
+        }
+        quads.push(Bounds::from_corners(point(bounds.left(), end.y), point(end.x, end.y + line)));
+        quads
+    };
+    let color = gpui_kit::base::Theme::global(cx).tokens.colors.selection;
+    for quad in quads {
+        window.paint_quad(gpui_kit::fill(quad, color));
+    }
+}
+
+/// What Chromium selects of `range` of `text`, as GPUI Kit's window selection takes it in:
+/// not a line break last that lies on the row the selection ends on (`on_end_row`, given the
+/// break's index), as Chromium's selection stops at the end of the line the pointer is on,
+/// however far past it. `None` when that leaves nothing.
+fn stop_at_line_end(text: &str, range: Range<usize>, on_end_row: impl Fn(usize) -> bool) -> Option<Range<usize>> {
+    let end = if text[range.clone()].ends_with('\n') && on_end_row(range.end - 1) { range.end - 1 } else { range.end };
+    (range.start < end).then_some(range.start..end)
+}
+
+/// A run of text in a [`ReadingOrder`], of one line or several, selected and copied as
+/// Chromium selects page text: a drag that ends on a line, past its end, stops at the end of
+/// the line ([`stop_at_line_end`]). GPUI Kit's `SelectableText` takes in the line break too
+/// once the pointer is past it, so a copy of the lines down to there ended with a line break.
+pub struct PlainText {
+    id: ElementId,
+    text: SharedString,
+    laid_out: gpui_kit::StyledText,
+    order: u64,
+}
+
+impl IntoElement for PlainText {
+    type Element = Self;
+
+    fn into_element(self) -> Self::Element {
+        self
+    }
+}
+
+impl gpui_kit::Element for PlainText {
+    type RequestLayoutState = RunState;
+    type PrepaintState = gpui_kit::Hitbox;
+
+    fn id(&self) -> Option<ElementId> {
+        Some(self.id.clone())
+    }
+
+    fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        global_id: Option<&gpui_kit::GlobalElementId>,
+        inspector_id: Option<&gpui_kit::InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (gpui_kit::LayoutId, RunState) {
+        let state = RunState::kept(global_id, self.text.clone(), window, cx);
+        let (layout_id, ()) = self.laid_out.request_layout(global_id, inspector_id, window, cx);
+        (layout_id, state)
+    }
+
+    fn prepaint(
+        &mut self,
+        global_id: Option<&gpui_kit::GlobalElementId>,
+        inspector_id: Option<&gpui_kit::InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        state: &mut RunState,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> gpui_kit::Hitbox {
+        self.laid_out.prepaint(global_id, inspector_id, bounds, &mut (), window, cx);
+        state.register(bounds, self.order, window, cx)
+    }
+
+    fn paint(
+        &mut self,
+        global_id: Option<&gpui_kit::GlobalElementId>,
+        inspector_id: Option<&gpui_kit::InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        state: &mut RunState,
+        _: &mut gpui_kit::Hitbox,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let layout = self.laid_out.layout().clone();
+        let selected = state.selected(self.text.clone(), &layout, bounds, self.order, cx);
+        // Where the selection ends: the lower of its two ends.
+        let points = state.handle.snapshot(cx).and_then(|snapshot| snapshot.window_points());
+        let end = points.map(|points| points.anchor().y.max(points.cursor().y));
+        let line = layout.line_height();
+        let selected = selected.zip(end).and_then(|(range, end)| {
+            let on_end_row = |at: usize| layout.position_for_index(at).is_some_and(|at| at.y <= end && end < at.y + line);
+            stop_at_line_end(&self.text, range, on_end_row)
+        });
+        *state.copied.borrow_mut() = selected.clone().map_or_else(String::new, |range| self.text[range].to_owned());
+        if let Some(range) = selected {
+            paint_selection(&layout, range, window, cx);
+        }
+        self.laid_out.paint(global_id, inspector_id, bounds, &mut (), &mut (), window, cx);
+    }
+}
+
 /// The ellipsis `Styled::truncate` ends a line it cuts short with.
 const ELLIPSIS: &str = "…";
 
 /// What a selection of `range` in `shown`, `text` as laid out, copies: `shown` is `text`, or
 /// a start of it and the [`ELLIPSIS`] standing for the rest, which a selection taking in the
 /// ellipsis copies too, as Chromium's does.
-fn ellipsized_copy(text: &str, shown: &str, range: std::ops::Range<usize>) -> String {
+fn ellipsized_copy(text: &str, shown: &str, range: Range<usize>) -> String {
     let kept = if shown == text { text.len() } else { shown.len() - ELLIPSIS.len() };
     let end = if range.end > kept { text.len() } else { range.end };
     text[range.start.min(kept)..end].to_owned()
@@ -382,14 +554,6 @@ pub struct EllipsizedText {
     order: u64,
 }
 
-/// What an [`EllipsizedText`] keeps between frames: its part in the window's selection, and
-/// what that part copies, as last painted.
-#[derive(Clone)]
-pub struct EllipsizedState {
-    handle: gpui_kit::base::TextSelectionHandle,
-    copied: std::rc::Rc<std::cell::RefCell<String>>,
-}
-
 impl IntoElement for EllipsizedText {
     type Element = Self;
 
@@ -399,7 +563,7 @@ impl IntoElement for EllipsizedText {
 }
 
 impl gpui_kit::Element for EllipsizedText {
-    type RequestLayoutState = EllipsizedState;
+    type RequestLayoutState = RunState;
     type PrepaintState = gpui_kit::Hitbox;
 
     fn id(&self) -> Option<ElementId> {
@@ -416,18 +580,8 @@ impl gpui_kit::Element for EllipsizedText {
         inspector_id: Option<&gpui_kit::InspectorElementId>,
         window: &mut Window,
         cx: &mut App,
-    ) -> (gpui_kit::LayoutId, EllipsizedState) {
-        let text = self.text.clone();
-        let state = window.with_element_state(global_id.expect("an EllipsizedText has an id"), |kept, _| {
-            let state = kept.unwrap_or_else(|| {
-                let copied = std::rc::Rc::new(std::cell::RefCell::new(String::new()));
-                let handle = gpui_kit::base::TextSelectionHandle::new(text, cx);
-                let copy = copied.clone();
-                handle.copy_with(move |_| copy.borrow().clone(), cx);
-                EllipsizedState { handle, copied }
-            });
-            (state.clone(), state)
-        });
+    ) -> (gpui_kit::LayoutId, RunState) {
+        let state = RunState::kept(global_id, self.text.clone(), window, cx);
         let (layout_id, ()) = self.shown.request_layout(global_id, inspector_id, window, cx);
         (layout_id, state)
     }
@@ -437,19 +591,12 @@ impl gpui_kit::Element for EllipsizedText {
         global_id: Option<&gpui_kit::GlobalElementId>,
         inspector_id: Option<&gpui_kit::InspectorElementId>,
         bounds: Bounds<Pixels>,
-        state: &mut EllipsizedState,
+        state: &mut RunState,
         window: &mut Window,
         cx: &mut App,
     ) -> gpui_kit::Hitbox {
-        use gpui_kit::base::TextSelectionRegistration;
         self.shown.prepaint(global_id, inspector_id, bounds, &mut (), window, cx);
-        let hitbox = window.insert_hitbox(bounds, gpui_kit::HitboxBehavior::Normal);
-        let registration = TextSelectionRegistration::new(hitbox.clone(), bounds)
-            .with_document_order(self.order)
-            .with_text_bounds(vec![bounds])
-            .with_rendered_element(&state.handle, window, cx);
-        state.handle.register(registration, window, cx);
-        hitbox
+        state.register(bounds, self.order, window, cx)
     }
 
     fn paint(
@@ -457,23 +604,18 @@ impl gpui_kit::Element for EllipsizedText {
         global_id: Option<&gpui_kit::GlobalElementId>,
         inspector_id: Option<&gpui_kit::InspectorElementId>,
         bounds: Bounds<Pixels>,
-        state: &mut EllipsizedState,
+        state: &mut RunState,
         _: &mut gpui_kit::Hitbox,
         window: &mut Window,
         cx: &mut App,
     ) {
         let layout = self.shown.layout().clone();
         let shown = SharedString::from(layout.text());
-        let run = gpui_kit::base::TextSelectionRun::new(shown.clone(), layout.clone(), bounds).with_document_order(self.order);
-        let selected = state.handle.update_runs(&[run], cx).ranges().first().cloned().flatten();
+        let selected = state.selected(shown.clone(), &layout, bounds, self.order, cx);
         let copied = selected.clone().map_or_else(String::new, |range| ellipsized_copy(&self.text, &shown, range));
         *state.copied.borrow_mut() = copied;
-        if let Some(range) = selected
-            && let (Some(start), Some(end)) = (layout.position_for_index(range.start), layout.position_for_index(range.end))
-        {
-            let color = gpui_kit::base::Theme::global(cx).tokens.colors.selection;
-            let end = gpui_kit::point(end.x, end.y + layout.line_height());
-            window.paint_quad(gpui_kit::fill(Bounds::from_corners(start, end), color));
+        if let Some(range) = selected {
+            paint_selection(&layout, range, window, cx);
         }
         self.shown.paint(global_id, inspector_id, bounds, &mut (), &mut (), window, cx);
     }
@@ -2729,6 +2871,18 @@ mod tests {
         assert!(cx.debug_bounds("rows").is_none());
         show(true, cx);
         assert_eq!(f32::from(area("rows", cx).size.height), 78.);
+    }
+
+    /// A selection ending on the row of a line break it takes in last leaves the break out;
+    /// one ending further down keeps it. A selection of a line break alone, ending on its row,
+    /// takes nothing.
+    #[test]
+    fn a_selection_ending_on_a_line_stops_at_its_end() {
+        let text = "one\ntwo\n";
+        assert_eq!(stop_at_line_end(text, 0..8, |at| at == 7), Some(0..7));
+        assert_eq!(stop_at_line_end(text, 0..8, |_| false), Some(0..8), "ending further down");
+        assert_eq!(stop_at_line_end(text, 0..6, |_| true), Some(0..6), "no line break last");
+        assert_eq!(stop_at_line_end(text, 3..4, |at| at == 3), None, "the line break alone");
     }
 
     /// A selection in a line cut short copies what it takes in of the part shown, and the

@@ -2,7 +2,6 @@
 
 use std::rc::Rc;
 
-use gpui_kit::base::SelectableText;
 use gpui_kit::component::input::{InputEvent, InputState, TextareaState};
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::{h_flex, v_flex};
@@ -16,7 +15,8 @@ use treeterm_model::workspace_store::WorkspaceStore;
 
 use crate::theme::colors;
 use crate::ui::{
-    FieldStyle, MONO, ReadingOrder, document_orders, field, normal_line, overflows, pane_select_box, pane_text_area, scrollbar,
+    FieldStyle, MONO, PlainText, ReadingOrder, document_orders, field, normal_line, overflows, pane_select_box, pane_text_area,
+    scrollbar,
 };
 
 pub struct WorkspaceSettingsView {
@@ -136,7 +136,7 @@ impl Fields {
 /// border: one on the right while the lines are taller than the box, one at the bottom while
 /// one is wider, and the white square Chromium paints where the two meet (the page styles
 /// no `::-webkit-scrollbar-corner`). Its `json` is selectable page text.
-fn json_box(json: SelectableText, scroll: &ScrollHandle, cx: &App) -> Div {
+fn json_box(json: PlainText, scroll: &ScrollHandle, cx: &App) -> Div {
     let c = colors(cx);
     let corner = overflows(scroll, Axis::Vertical) && overflows(scroll, Axis::Horizontal);
     v_flex()
@@ -219,7 +219,7 @@ fn settings_page(
     // A `<textarea>` keeps Chromium's monospace font: `.settings-input` sets none.
     let (name_style, description_style) = (field_style(34., cx), FieldStyle { mono: true, ..field_style(63., cx) });
     // The heading, labels and hint are ordinary page text: selectable, as the JSON is.
-    let group = |label: SelectableText| {
+    let group = |label: PlainText| {
         v_flex().gap(px(6.)).child(
             div()
                 .text_size(px(13.))

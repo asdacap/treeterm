@@ -420,12 +420,9 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   Zoom In or Zoom Out zooms the window, save for the few lengths GPUI Kit gives in pixels
   (its menus' 2px separators, rounded corners and shadows), which follow the zoom. On macOS
   GPUI greys out a Cut, Copy, Paste or Select All that nothing focused can do (Cut in a
-  terminal, Paste with no input focused); Electron's stay enabled and do nothing there. Off macOS the Edit menu acts on a
-  web page (Browser and Web App tabs) once the page has been clicked, not when it has the
-  keyboard otherwise (an `autofocus` field).
-- The Comments tab's code and generated prompt, and the Settings tab's Raw Workspace JSON,
-  are each one run of GPUI Kit text: a drag past the end of a line copies the line break
-  too, where Chromium's selection stops at the end of the line.
+  terminal, Paste with no input focused); Electron's stay enabled and do nothing there. Off
+  macOS the Edit menu acts on a web page (Browser and Web App tabs) once the page has been
+  clicked, not when it has the keyboard otherwise (an `autofocus` field).
 - A press on one of the app's classic scrollbars (search results, the Files tree and its
   file's comments, the Markdown preview, the Comments tab's code, the Raw Workspace JSON)
   clears the current text selection, as GPUI Kit's window selection clears it on every left
