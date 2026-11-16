@@ -896,6 +896,53 @@ fn header_row(
         .on_click(toggle)
 }
 
+/// The squares of `.image-diff-side img`'s checkerboard, `repeating-conic-gradient(#3a3a3a 0%
+/// 25%, #2a2a2a 0% 50%) 50% / 16px 16px`: 16px tiles centred on the image, each a 2×2 of 8px
+/// squares, lighter above right of its centre and below left.
+const CHECKER_SQUARE: f32 = 8.;
+const CHECKER_DARK: u32 = 0x2a2a2a;
+const CHECKER_LIGHT: u32 = 0x3a3a3a;
+
+/// The light squares of the checkerboard filling `bounds`, cut to it (the dark ones are its
+/// background).
+fn checker_squares(bounds: Bounds<Pixels>) -> Vec<Bounds<Pixels>> {
+    let centre = bounds.center();
+    // The squares (counted from the centre) that `from..to` crosses on one axis.
+    let squares = |from: Pixels, to: Pixels, centre: Pixels| {
+        let index = |at: Pixels| f32::from(at - centre) / CHECKER_SQUARE;
+        index(from).floor() as i32..index(to).ceil() as i32
+    };
+    let (columns, rows) =
+        (squares(bounds.left(), bounds.right(), centre.x), squares(bounds.top(), bounds.bottom(), centre.y));
+    let at = |index: i32, centre: Pixels| centre + px(index as f32 * CHECKER_SQUARE);
+    rows.flat_map(|row| columns.clone().map(move |column| (column, row)))
+        // Above right of the centre is (0, -1): the light squares are those with an odd sum.
+        .filter(|(column, row)| (column + row).rem_euclid(2) == 1)
+        .map(|(column, row)| {
+            let top_left = gpui_kit::point(at(column, centre.x).max(bounds.left()), at(row, centre.y).max(bounds.top()));
+            let bottom_right =
+                gpui_kit::point(at(column + 1, centre.x).min(bounds.right()), at(row + 1, centre.y).min(bounds.bottom()));
+            Bounds::from_corners(top_left, bottom_right)
+        })
+        .collect()
+}
+
+/// The checkerboard behind a diff image, so that its transparent pixels show.
+fn checkerboard() -> impl IntoElement {
+    gpui_kit::canvas(
+        |_, _, _| {},
+        |bounds, _, window, _| {
+            for square in checker_squares(bounds) {
+                window.paint_quad(gpui_kit::fill(square, rgb(CHECKER_LIGHT)));
+            }
+        },
+    )
+    .absolute()
+    .top_0()
+    .left_0()
+    .size_full()
+}
+
 /// `ImageDiffViewer`: before and after side by side on a checkerboard.
 fn image_diff(path: &str, sides: ImageSides, cx: &App) -> AnyElement {
     let c = colors(cx);
@@ -926,7 +973,7 @@ fn image_diff(path: &str, sides: ImageSides, cx: &App) -> AnyElement {
                         // a list, so the side shows the broken image and its alt text.
                         ImageDrawing::Webview => broken(),
                     };
-                    div().max_w_full().bg(rgb(0x2a2a2a)).child(image).into_any_element()
+                    div().relative().max_w_full().bg(rgb(CHECKER_DARK)).child(checkerboard()).child(image).into_any_element()
                 }
                 None => div().p(px(24.)).text_size(px(12.)).italic().text_color(secondary).child("No file").into_any_element(),
             })
@@ -1044,6 +1091,43 @@ mod tests {
         assert_eq!(parse_iso("1970-01-01T08:00:00+08:00"), Some(0));
         assert_eq!(parse_iso("2000-03-01T00:00:01-01:30"), Some(951_868_801_000 + 5_400_000));
         assert_eq!(parse_iso("not a date"), None);
+    }
+
+    fn square(left: f32, top: f32, right: f32, bottom: f32) -> Bounds<Pixels> {
+        Bounds::from_corners(gpui_kit::point(px(left), px(top)), gpui_kit::point(px(right), px(bottom)))
+    }
+
+    #[test]
+    fn the_checkerboard_is_lighter_above_right_and_below_left_of_its_centre() {
+        // 32×32: 4×4 whole squares, half of them light.
+        let squares = checker_squares(square(100., 50., 132., 82.));
+        assert_eq!(squares.len(), 8, "{squares:?}");
+        assert!(squares.contains(&square(116., 58., 124., 66.)), "above right of the centre");
+        assert!(squares.contains(&square(108., 66., 116., 74.)), "below left of the centre");
+        assert!(!squares.contains(&square(108., 58., 116., 66.)), "above left of the centre");
+        assert!(!squares.contains(&square(116., 66., 124., 74.)), "below right of the centre");
+        assert!(!squares.contains(&square(100., 50., 108., 58.)), "the corner, as above left");
+        assert!(squares.contains(&square(108., 50., 116., 58.)), "beside the corner");
+    }
+
+    #[test]
+    fn checkerboard_squares_are_cut_at_the_edges() {
+        // 20×20, centred on (10, 10): the squares around the middle 16px are cut to 2px.
+        let squares = checker_squares(square(0., 0., 20., 20.));
+        assert_eq!(
+            squares,
+            vec![
+                square(2., 0., 10., 2.),
+                square(18., 0., 20., 2.),
+                square(0., 2., 2., 10.),
+                square(10., 2., 18., 10.),
+                square(2., 10., 10., 18.),
+                square(18., 10., 20., 18.),
+                square(0., 18., 2., 20.),
+                square(10., 18., 18., 20.),
+            ]
+        );
+        assert!(checker_squares(square(5., 5., 5., 9.)).is_empty(), "nothing to fill");
     }
 
     #[test]
