@@ -9390,6 +9390,7 @@ name = "treeterm-term"
 version = "0.1.0"
 dependencies = [
  "alacritty_terminal",
+ "base64 0.22.1",
  "regex",
  "thiserror 2.0.21",
  "tracing",

@@ -16,8 +16,12 @@ use std::time::Instant;
 use alacritty_terminal::event::{Event, EventListener, WindowSize};
 use alacritty_terminal::grid::{Dimensions, Scroll};
 use alacritty_terminal::sync::FairMutex;
-use alacritty_terminal::term::{ClipboardType, Config, Osc52, Term};
+use alacritty_terminal::term::{Config, Osc52, Term};
+use alacritty_terminal::vte;
 use alacritty_terminal::vte::ansi::{CursorShape, CursorStyle, Processor};
+use base64::Engine as _;
+use base64::alphabet;
+use base64::engine::{DecodePaddingMode, GeneralPurpose, GeneralPurposeConfig};
 
 use crate::palette::Palette;
 use crate::view;
@@ -92,11 +96,9 @@ impl EmulatorSettings {
                 shape: self.cursor.shape(),
                 blinking: self.cursor_blink,
             },
-            osc52: if self.allow_osc52_clipboard {
-                Osc52::OnlyCopy
-            } else {
-                Osc52::Disabled
-            },
+            // TermCore decodes OSC 52 copies itself ([`decode_osc52`]): alacritty's decoding
+            // is stricter than Electron's, and reads are never served.
+            osc52: Osc52::Disabled,
             semantic_escape_chars: XTERM_WORD_SEPARATORS.to_owned(),
             ..Config::default()
         }
@@ -116,6 +118,86 @@ pub fn apply_settings(term: &SharedTerm, gate: &Gate, settings: EmulatorSettings
 pub fn write_local(term: &SharedTerm, bytes: &[u8]) {
     let mut parser: Processor = Processor::new();
     parser.advance(&mut *term.lock(), bytes);
+}
+
+/// Base64 as `atob` reads it once its padding is checked: trailing bits are ignored.
+const ATOB_BASE64: GeneralPurpose = GeneralPurpose::new(
+    &alphabet::STANDARD,
+    GeneralPurposeConfig::new()
+        .with_decode_padding_mode(DecodePaddingMode::RequireNone)
+        .with_decode_allow_trailing_bits(true),
+);
+
+/// The text an OSC 52 write copies, decoded as the Electron app's `decodeOsc52Clipboard`
+/// does. `params` are the sequence's parameters after `52`: the selection `Pc` and the
+/// base64 data `Pd`.
+///
+/// `None` copies nothing: another selection, a read (`?`, never served), an empty payload,
+/// extra parameters, data that `atob` rejects, more than [`MAX_OSC52_BYTES`] or text that is
+/// not UTF-8. Padding is optional and trailing bits are ignored, as `atob` does.
+pub fn decode_osc52(params: &[&[u8]]) -> Option<String> {
+    let [selection, data] = params else {
+        return None;
+    };
+    // The clipboard. Unlike Electron, which wants exactly `c`, an empty selection means the
+    // clipboard and only its first letter counts, as alacritty reads it.
+    if !matches!(selection.first(), None | Some(b'c')) {
+        return None;
+    }
+    if data.is_empty() || *data == b"?" || data.len() > MAX_OSC52_BYTES.div_ceil(3) * 4 {
+        return None;
+    }
+    // `^[A-Za-z0-9+/]*={0,2}$`, then `atob`: padding counts only where it completes a
+    // quad, and a lone symbol in the last quad is no byte.
+    let symbols = data
+        .strip_suffix(b"==")
+        .or_else(|| data.strip_suffix(b"="))
+        .unwrap_or(data);
+    let padded = symbols.len() != data.len();
+    if !symbols
+        .iter()
+        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'/'))
+        || (padded && !data.len().is_multiple_of(4))
+    {
+        return None;
+    }
+    let bytes = match ATOB_BASE64.decode(symbols) {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            tracing::debug!("OSC 52 copy ignored, its data is not base64: {err}");
+            return None;
+        }
+    };
+    if bytes.len() > MAX_OSC52_BYTES {
+        return None;
+    }
+    match String::from_utf8(bytes) {
+        Ok(mut text) => {
+            // `TextDecoder` drops a byte order mark.
+            if text.starts_with('\u{feff}') {
+                text.replace_range(..'\u{feff}'.len_utf8(), "");
+            }
+            Some(text)
+        }
+        Err(err) => {
+            tracing::debug!("OSC 52 copy ignored, its text is not UTF-8: {err}");
+            None
+        }
+    }
+}
+
+/// Finds the OSC 52 copies in program output: a parser of its own, beside alacritty's,
+/// because alacritty hands on only part of the sequence.
+struct Osc52Scanner<'a>(&'a mut Vec<String>);
+
+impl vte::Perform for Osc52Scanner<'_> {
+    fn osc_dispatch(&mut self, params: &[&[u8]], _bell_terminated: bool) {
+        if let [b"52", rest @ ..] = params
+            && let Some(text) = decode_osc52(rest)
+        {
+            self.0.push(text);
+        }
+    }
 }
 
 /// Collects the emulator's events while the grid is locked; [`TermCore`] handles them once
@@ -199,6 +281,8 @@ pub type Responder = Box<dyn Fn(Vec<u8>) + Send>;
 pub struct TermCore {
     term: SharedTerm,
     parser: Processor,
+    /// Sees the same stream as `parser`, for [`Osc52Scanner`].
+    osc52: vte::Parser,
     pending: Arc<Mutex<Vec<Event>>>,
     gate: Arc<Gate>,
     respond: Option<Responder>,
@@ -222,6 +306,7 @@ impl TermCore {
         Self {
             term: Arc::new(FairMutex::new(term)),
             parser: Processor::new(),
+            osc52: vte::Parser::new(),
             pending,
             gate,
             respond,
@@ -254,7 +339,14 @@ impl TermCore {
     /// Parse PTY output. Returns what the UI should act on.
     pub fn feed(&mut self, bytes: &[u8]) -> Vec<Notice> {
         self.apply_output(|parser, term| parser.advance(term, bytes));
-        self.drain_events()
+        let mut notices = self.drain_events();
+        let mut copies = Vec::new();
+        self.osc52.advance(&mut Osc52Scanner(&mut copies), bytes);
+        // A replayed copy already happened when it first ran.
+        if !self.gate.is_replaying() && self.gate.allow_osc52_clipboard.load(Ordering::Acquire) {
+            notices.extend(copies.into_iter().map(Notice::Clipboard));
+        }
+        notices
     }
 
     /// Put output on the grid. A pinned terminal, or a viewport at the bottom (within one
@@ -343,18 +435,9 @@ impl TermCore {
                     };
                     self.answer(format(window));
                 }
-                Event::ClipboardStore(ClipboardType::Clipboard, text) => {
-                    // A replayed copy already happened when it first ran.
-                    if !self.gate.is_replaying()
-                        && self.gate.allow_osc52_clipboard.load(Ordering::Acquire)
-                        && text.len() <= MAX_OSC52_BYTES
-                    {
-                        notices.push(Notice::Clipboard(text));
-                    }
-                }
-                // Only the system clipboard is supported, and reads are never served: a
-                // program must not be able to read what the user copied elsewhere.
-                Event::ClipboardStore(ClipboardType::Selection, _) | Event::ClipboardLoad(..) => {}
+                // alacritty's OSC 52 is off: `feed` finds the copies, and reads are never
+                // served (a program must not read what the user copied elsewhere).
+                Event::ClipboardStore(..) | Event::ClipboardLoad(..) => {}
                 Event::Title(title) => notices.push(Notice::Title(Some(title))),
                 Event::ResetTitle => notices.push(Notice::Title(None)),
                 Event::Bell => {
@@ -469,6 +552,186 @@ mod tests {
             None,
         );
         assert!(disabled.feed(b"\x1b]52;c;aGk=\x07").is_empty());
+
+        // Turned off while the terminal runs.
+        let (mut core, _) = core_with_answers();
+        apply_settings(
+            core.term(),
+            core.gate(),
+            EmulatorSettings {
+                allow_osc52_clipboard: false,
+                ..settings()
+            },
+        );
+        let notices = core.feed(b"\x1b]52;c;aGk=\x07");
+        assert!(
+            !notices
+                .iter()
+                .any(|notice| matches!(notice, Notice::Clipboard(_))),
+            "{notices:?}"
+        );
+    }
+
+    fn copies(output: &[u8]) -> Vec<Notice> {
+        let (mut core, _) = core_with_answers();
+        core.feed(output)
+    }
+
+    fn copied(text: &str) -> Vec<Notice> {
+        vec![Notice::Clipboard(text.to_owned())]
+    }
+
+    #[test]
+    fn osc52_copies_decode_base64_as_atob_does() {
+        assert_eq!(copies(b"\x1b]52;c;aGk\x07"), copied("hi"), "unpadded");
+        assert_eq!(copies(b"\x1b]52;c;aGl=\x07"), copied("hi"), "trailing bits");
+        assert_eq!(copies(b"\x1b]52;c;aGk=\x1b\\"), copied("hi"), "ended by ST");
+        assert_eq!(
+            copies(b"\x1b]52;;aGk=\x07"),
+            copied("hi"),
+            "empty selection"
+        );
+    }
+
+    #[test]
+    fn osc52_sequences_electron_ignores_copy_nothing() {
+        for output in [
+            &b"\x1b]52;c;\x07"[..],
+            b"\x1b]52;c;aGk=;x\x07",
+            b"\x1b]52;p;aGk=\x07",
+            b"\x1b]52;c;?\x07",
+            b"\x1b]52;c;a\x07",
+            b"\x1b]52;c;/w==\x07",
+            b"\x1b]52;aGk=\x07",
+        ] {
+            assert!(copies(output).is_empty(), "{}", output.escape_ascii());
+        }
+    }
+
+    #[test]
+    fn an_osc52_copy_split_across_reads_is_found() {
+        let (mut core, _) = core_with_answers();
+        assert!(core.feed(b"out\x1b]52;c;a").is_empty());
+        assert_eq!(core.feed(b"Gk=\x07put"), copied("hi"));
+        assert!(screen_text(&core.term().lock()).starts_with("output"));
+    }
+
+    #[test]
+    fn an_osc52_copy_in_a_synchronized_update_is_found() {
+        let (mut core, _) = core_with_answers();
+        assert_eq!(core.feed(b"\x1b[?2026h\x1b]52;c;aGk=\x07"), copied("hi"));
+        assert!(core.flush_sync().is_empty(), "copied once");
+    }
+
+    #[test]
+    fn osc52_copies_come_with_the_other_notices() {
+        assert_eq!(
+            copies(b"\x1b]2;t\x07\x1b]52;c;aGk=\x07"),
+            vec![
+                Notice::Title(Some("t".to_owned())),
+                Notice::Clipboard("hi".to_owned())
+            ]
+        );
+    }
+
+    fn decoded(selection: &str, data: &[u8]) -> Option<String> {
+        decode_osc52(&[selection.as_bytes(), data])
+    }
+
+    #[test]
+    fn decode_osc52_reads_the_clipboard_selection_only() {
+        assert_eq!(decoded("c", b"aGk="), Some("hi".to_owned()));
+        // Lenient, as alacritty: empty means the clipboard, and the first letter counts.
+        assert_eq!(decoded("", b"aGk="), Some("hi".to_owned()));
+        assert_eq!(decoded("cs", b"aGk="), Some("hi".to_owned()));
+        assert_eq!(decoded("p", b"aGk="), None);
+        assert_eq!(decoded("s", b"aGk="), None);
+        assert_eq!(decoded("0", b"aGk="), None);
+    }
+
+    #[test]
+    fn decode_osc52_wants_a_selection_and_data_only() {
+        assert_eq!(decode_osc52(&[b"c", b"aGk=", b"x"]), None);
+        assert_eq!(decode_osc52(&[b"c", b"aGk=", b""]), None);
+        assert_eq!(decode_osc52(&[b"aGk="]), None);
+        assert_eq!(decode_osc52(&[]), None);
+    }
+
+    #[test]
+    fn decode_osc52_ignores_reads_and_empty_payloads() {
+        assert_eq!(decoded("c", b"?"), None);
+        assert_eq!(decoded("c", b""), None);
+    }
+
+    #[test]
+    fn decode_osc52_takes_padding_as_atob_does() {
+        assert_eq!(decoded("c", b"aGk"), Some("hi".to_owned()));
+        assert_eq!(decoded("c", b"aA=="), Some("h".to_owned()));
+        assert_eq!(decoded("c", b"aA"), Some("h".to_owned()));
+        assert_eq!(decoded("c", b"aGVsbG8="), Some("hello".to_owned()));
+        assert_eq!(decoded("c", b"aGVsbG8"), Some("hello".to_owned()));
+        // Padding that does not complete a quad, or too much of it.
+        assert_eq!(decoded("c", b"aA="), None);
+        assert_eq!(decoded("c", b"aGk=="), None);
+        assert_eq!(decoded("c", b"aGk==="), None);
+        assert_eq!(decoded("c", b"aGVs=="), None);
+        assert_eq!(decoded("c", b"=="), None);
+        assert_eq!(decoded("c", b"="), None);
+        // A lone symbol in the last quad.
+        assert_eq!(decoded("c", b"a"), None);
+        assert_eq!(decoded("c", b"aGVsb"), None);
+    }
+
+    #[test]
+    fn decode_osc52_ignores_trailing_bits() {
+        assert_eq!(decoded("c", b"aGl="), Some("hi".to_owned()));
+        assert_eq!(decoded("c", b"aGl"), Some("hi".to_owned()));
+        assert_eq!(decoded("c", b"aB=="), Some("h".to_owned()));
+    }
+
+    #[test]
+    fn decode_osc52_wants_base64_symbols_only() {
+        assert_eq!(decoded("c", b"aG k"), None);
+        assert_eq!(decoded("c", b"aGk-"), None);
+        assert_eq!(decoded("c", b"aG_k"), None);
+        assert_eq!(decoded("c", b"aG=k"), None);
+        assert_eq!(decoded("c", b"aGk=aGk="), None);
+        assert_eq!(decoded("c", "aGké".as_bytes()), None);
+        assert_eq!(decoded("c", b"Pz8/"), Some("???".to_owned()));
+        assert_eq!(decoded("c", b"+/+/"), None, "decodes, but not to UTF-8");
+    }
+
+    #[test]
+    fn decode_osc52_wants_utf8_and_drops_a_byte_order_mark() {
+        assert_eq!(decoded("c", b"/w=="), None);
+        assert_eq!(decoded("c", b"w6k="), Some("é".to_owned()));
+        assert_eq!(decoded("c", b"77u/aGk="), Some("hi".to_owned()));
+        assert_eq!(
+            decoded("c", b"77u/"),
+            Some(String::new()),
+            "a copied mark copies nothing"
+        );
+        assert_eq!(
+            decoded("c", b"77u/77u/"),
+            Some("\u{feff}".to_owned()),
+            "only the first"
+        );
+    }
+
+    #[test]
+    fn decode_osc52_caps_the_copy_at_a_mebibyte() {
+        use base64::engine::general_purpose::STANDARD;
+        let encoded = |len: usize| STANDARD.encode("a".repeat(len));
+        assert_eq!(
+            decoded("c", encoded(MAX_OSC52_BYTES).as_bytes()).map(|text| text.len()),
+            Some(MAX_OSC52_BYTES)
+        );
+        // As long encoded as the largest copy, but one byte more.
+        let over = encoded(MAX_OSC52_BYTES + 1);
+        assert_eq!(over.len(), encoded(MAX_OSC52_BYTES).len());
+        assert_eq!(decoded("c", over.as_bytes()), None);
+        // Too long to decode at all.
+        assert_eq!(decoded("c", encoded(MAX_OSC52_BYTES + 3).as_bytes()), None);
     }
 
     #[test]

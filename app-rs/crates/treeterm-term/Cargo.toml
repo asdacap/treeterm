@@ -8,6 +8,8 @@ description = "Terminal emulation core (alacritty_terminal) without any UI: pars
 
 [dependencies]
 alacritty_terminal = "=0.26.0"
+# OSC 52 copies are decoded here, as forgivingly as `atob` does in the Electron app.
+base64 = "0.22"
 regex = "1"
 thiserror.workspace = true
 tracing.workspace = true
