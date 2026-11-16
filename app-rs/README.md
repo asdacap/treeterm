@@ -798,8 +798,9 @@ The chrome was matched to Electron's computed styles, measured side by side on o
 - Review comment and viewed-file metadata (`reviewComments`, `reviewViewedFiles`) that is not
   valid JSON of the expected shape (an entry missing a field Electron writes, or of the wrong
   type) is an error shown where it is used (Review, the Comments tab, the Files viewer), and
-  changes to it are refused until it is fixed. Electron read it as empty ("No review comments
-  yet") and overwrote it on its next change.
+  changes to it are refused until it is fixed. Electron read a value it could not parse (or
+  comments that were not a list) as empty ("No review comments yet") and overwrote it on its
+  next change, and it took entries of any shape as they were.
 - A review comment that cannot be saved shows "Failed to add comment: …" under its box,
   keeping the draft, and a failed merge is reported in the Review tab's merge output (and, when
   git failed, the workspace's "Operation failed" panel); Electron also opened an alert for each.
