@@ -54,6 +54,9 @@ pub struct AppView {
     sidebar_collapsed: bool,
     /// Dragged on the divider, 150–400px (`App.tsx` `treeWidth`).
     sidebar_width: f32,
+    /// The divider is being dragged: it stays accent-coloured wherever the pointer is
+    /// (`isResizing`, `.divider.active`).
+    resizing: bool,
     /// A session being dragged in the sidebar or the rail (`dragState`).
     session_drag: SessionDrag,
     /// The Settings dialog: Settings again does not stack a second one (Electron's
@@ -382,6 +385,7 @@ impl AppView {
             open_on_start: None,
             sidebar_collapsed: false,
             sidebar_width: 250.,
+            resizing: false,
             session_drag: SessionDrag::Idle,
             settings_dialog: crate::settings_view::SettingsDialog::default(),
             connection_picker: cx.new(|cx| crate::connection_picker::ConnectionPicker::new(store.clone(), window, cx)),
@@ -1087,9 +1091,10 @@ impl Render for AppView {
             (c.bg_primary, c.text_primary, c.text_secondary, c.error, c.border, c.accent);
         self.sync_info(window, cx);
         // `handleSessionDragEnd`: a session dropped, or let go of where nothing takes it, is no
-        // longer dragged.
+        // longer dragged. `handleMouseUp`: the divider let go of is no longer resizing.
         if !cx.has_active_drag() {
             self.session_drag = SessionDrag::Idle;
+            self.resizing = false;
         }
         let sidebar = self.sidebar(window, cx);
         let info = self.info.clone();
@@ -1155,7 +1160,7 @@ impl Render for AppView {
                 .w(px(4.))
                 .h_full()
                 .flex_shrink_0()
-                .bg(border)
+                .bg(if self.resizing { accent } else { border })
                 .hover(move |d| d.bg(accent))
                 .cursor_col_resize()
                 .on_drag(SidebarResize, |drag, _, _, cx| cx.new(|_| drag.clone()))
@@ -1167,7 +1172,8 @@ impl Render for AppView {
             .child(pane)
             .on_drag_move(cx.listener(|view, event: &gpui_kit::DragMoveEvent<SidebarResize>, _, cx| {
                 let width = f32::from(event.event.position.x).clamp(150., 400.);
-                if (width - view.sidebar_width).abs() >= 1. {
+                if !view.resizing || (width - view.sidebar_width).abs() >= 1. {
+                    view.resizing = true;
                     view.sidebar_width = width;
                     cx.notify();
                 }
@@ -3639,7 +3645,7 @@ mod tests {
 
     /// An app store whose local daemon is nowhere (its connection fails at once), on a runtime
     /// that outlives the test.
-    fn app_store(cx: &mut VisualTestContext, dir: &std::path::Path) -> Entity<AppStore> {
+    fn app_store(cx: &mut App, dir: &std::path::Path) -> Entity<AppStore> {
         static RUNTIME: std::sync::LazyLock<tokio::runtime::Runtime> =
             std::sync::LazyLock::new(|| tokio::runtime::Runtime::new().expect("a tokio runtime"));
         let rt = treeterm_core::rt::Rt::new(RUNTIME.handle().clone());
@@ -3649,10 +3655,8 @@ mod tests {
             log_path: dir.join("daemon.log"),
             pid_file: dir.join("daemon.pid"),
         };
-        cx.update(|_, cx| {
-            let settings = cx.new(|_| SettingsStore::in_memory(Default::default()));
-            cx.new(|cx| AppStore::new(rt, spec, settings, cx))
-        })
+        let settings = cx.new(|_| SettingsStore::in_memory(Default::default()));
+        cx.new(|cx| AppStore::new(rt, spec, settings, cx))
     }
 
     /// Exit and Kill Daemon while the close confirmation is open asks it again: its Close
@@ -3663,7 +3667,7 @@ mod tests {
         cx.executor().allow_parking();
         let cx = window(cx);
         let dir = tempfile::tempdir().expect("temp dir");
-        let store = app_store(cx, dir.path());
+        let store = cx.update(|_, cx| app_store(cx, dir.path()));
         let unmerged = vec![("child".to_owned(), Some("child".to_owned()))];
         let confirm = cx.update(|window, cx| crate::active_processes_view::confirm_close(unmerged, CloseAnyway::Quit, window, cx));
         cx.run_until_parked();
@@ -3741,5 +3745,57 @@ mod tests {
         assert!(matches!(drag, SessionDrag::Idle));
 
         assert_eq!(drag.drop_on(&a), None, "nothing dragged");
+    }
+
+    /// The main window's view over a store whose daemon is nowhere, drawn.
+    fn app_view<'a>(cx: &'a mut TestAppContext, dir: &std::path::Path) -> (Entity<AppView>, &'a mut VisualTestContext) {
+        let (window, view) = cx.update(|cx| {
+            gpui_kit::init(cx);
+            crate::theme::install(cx);
+            let store = app_store(cx, dir);
+            let keybindings = cx.new(|_| KeybindingStore::new(treeterm_core::keybinding::KeybindingSettings::default()));
+            let settings = cx.new(|_| SettingsStore::in_memory(Default::default()));
+            let names = cx.new(|_| treeterm_model::session_names::SessionNames::new(None));
+            gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
+                cx.new(|cx| AppView::new(store, keybindings, settings, names, window, cx))
+            })
+            .expect("open a window")
+        });
+        let cx = VisualTestContext::from_window(window, cx).into_mut();
+        draw(cx);
+        (view, cx)
+    }
+
+    /// `isResizing` (`.divider.active`): once dragged, the sidebar divider stays
+    /// accent-coloured wherever the pointer goes, past the 400px clamp included, until the
+    /// button comes up.
+    #[gpui_kit::test]
+    fn the_sidebar_divider_stays_active_while_dragged(cx: &mut TestAppContext) {
+        // The store's connection is driven on tokio, which wakes its status task from there.
+        cx.executor().allow_parking();
+        let dir = tempfile::tempdir().expect("temp dir");
+        let (view, cx) = app_view(cx, dir.path());
+        let state = |cx: &mut VisualTestContext| cx.update(|_, cx| (view.read(cx).resizing, view.read(cx).sidebar_width));
+        let (left, none) = (gpui_kit::MouseButton::Left, gpui_kit::Modifiers::default());
+        let at = |x: f32| gpui_kit::point(px(x), px(300.));
+
+        // The divider sits right of the 250px sidebar. A press alone is no drag.
+        cx.simulate_mouse_move(at(252.), None, none);
+        cx.simulate_mouse_down(at(252.), left, none);
+        draw(cx);
+        assert_eq!(state(cx), (false, 250.), "pressed");
+
+        // The first move past the threshold starts the drag; the next ones resize.
+        cx.simulate_mouse_move(at(300.), left, none);
+        cx.simulate_mouse_move(at(320.), left, none);
+        draw(cx);
+        assert_eq!(state(cx), (true, 320.), "dragged");
+        cx.simulate_mouse_move(at(600.), left, none);
+        draw(cx);
+        assert_eq!(state(cx), (true, 400.), "off the divider, past the clamp: still active");
+
+        cx.simulate_mouse_up(at(600.), left, none);
+        draw(cx);
+        assert_eq!(state(cx), (false, 400.), "let go");
     }
 }
