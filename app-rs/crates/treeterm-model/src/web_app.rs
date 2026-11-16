@@ -8,6 +8,7 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+use futures::channel::oneshot;
 use gpui_kit::{AsyncApp, Context, EventEmitter, Task, WeakEntity};
 use treeterm_core::connection::{
     ConnectionId, Persistence, PortForwardConfig, PortForwardId, PortForwardStatus,
@@ -54,11 +55,15 @@ pub enum WebAppPhase {
     Error(String),
 }
 
-/// Ports to persist in the tab state (`port`, `localPort`).
+/// Ports to persist in the tab state (`port`, `localPort`), and the server's terminal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WebAppEvent {
-    /// The server's port: start the dev server with it.
+    /// The server's port was found.
     PortAssigned(u16),
+    /// The start-up needs the server's terminal, its command run with this port
+    /// (`ensurePty`): the owner answers with [`WebAppModel::server_pty_settled`] once it is
+    /// attached or failed to start.
+    ServerPtyNeeded(u16),
     /// The local end of the ssh forward (kept so the page's origin survives restarts).
     LocalPortAssigned(u16),
 }
@@ -79,6 +84,8 @@ pub struct WebAppModel {
     local_port: Option<u16>,
     remote: Option<RemoteHost>,
     phase: WebAppPhase,
+    /// The start-up waiting for its server's terminal: the PTY's error, if it failed.
+    pty_waiter: Option<oneshot::Sender<Result<(), String>>>,
     _run: Option<Task<()>>,
 }
 
@@ -119,6 +126,7 @@ impl WebAppModel {
             local_port,
             remote,
             phase: WebAppPhase::AllocatingPort,
+            pty_waiter: None,
             _run: None,
         };
         model.start(cx);
@@ -133,7 +141,8 @@ impl WebAppModel {
         self.port
     }
 
-    /// Run the start-up again (after an error).
+    /// Run the whole start-up again (after an error): the port if it has none, the server's
+    /// terminal if it failed to start, the wait and the forward.
     pub fn retry(&mut self, cx: &mut Context<Self>) {
         self.start(cx);
     }
@@ -142,12 +151,23 @@ impl WebAppModel {
     pub fn restart_forward(&mut self, cx: &mut Context<Self>) {
         self.remove_forward(cx);
         self.start(cx);
-        cx.notify();
+    }
+
+    /// The server's terminal asked for by [`WebAppEvent::ServerPtyNeeded`] is attached
+    /// (`Ok`) or failed to start: the start-up goes on, or ends in the error.
+    pub fn server_pty_settled(&mut self, result: Result<(), String>) {
+        if let Some(waiter) = self.pty_waiter.take()
+            && let Err(unread) = waiter.send(result)
+        {
+            // Its start-up was dropped with the task that awaited it.
+            tracing::debug!(tab = %self.tab_id, ?unread, "nobody awaited the server's terminal");
+        }
     }
 
     /// The tab closed: drop its forward.
     pub fn close(&mut self, cx: &mut Context<Self>) {
         self._run = None;
+        self.pty_waiter = None;
         self.remove_forward(cx);
     }
 
@@ -164,11 +184,12 @@ impl WebAppModel {
         cx.notify();
     }
 
+    /// The start-up (`start`): the port, the server's terminal, the server's first answer,
+    /// then (on an ssh session) the forward. Finding a free port lasts until the port and
+    /// the terminal are both there, on every start.
     fn start(&mut self, cx: &mut Context<Self>) {
-        self.phase = match self.port {
-            Some(port) => WebAppPhase::WaitingForServer { port },
-            None => WebAppPhase::AllocatingPort,
-        };
+        self.pty_waiter = None;
+        self.set_phase(WebAppPhase::AllocatingPort, cx);
         let (exec, known_port, remote, tab_id, preferred) =
             (self.exec.clone(), self.port, self.remote.clone(), self.tab_id.clone(), self.local_port);
         let executor = cx.background_executor().clone();
@@ -189,12 +210,21 @@ impl WebAppModel {
                         this.update(cx, |model, cx| {
                             model.port = Some(port);
                             cx.emit(WebAppEvent::PortAssigned(port));
-                            model.set_phase(WebAppPhase::WaitingForServer { port }, cx);
                         })
                         .map_err(|_| "closed".to_owned())?;
                         port
                     }
                 };
+                // Stored before the event: the owner may answer while handling it.
+                let (waiter, settled) = oneshot::channel();
+                this.update(cx, |model, cx| {
+                    model.pty_waiter = Some(waiter);
+                    cx.emit(WebAppEvent::ServerPtyNeeded(port));
+                })
+                .map_err(|_| "closed".to_owned())?;
+                settled.await.map_err(|_| "closed".to_owned())??;
+                this.update(cx, |model, cx| model.set_phase(WebAppPhase::WaitingForServer { port }, cx))
+                    .map_err(|_| "closed".to_owned())?;
                 // Any HTTP answer will do (curl exits 0 whatever the status).
                 while probe(&exec, port).await? != 0 {
                     executor.timer(POLL_INTERVAL).await;

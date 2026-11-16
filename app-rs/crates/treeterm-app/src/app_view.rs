@@ -2629,8 +2629,8 @@ fn tab_content(
             div().size_full().child(view).into_any_element()
         }
         Some(TabContent::Browser { page, forward }) => browser_tab(connected, workspace, id, tab_id, &page, forward, cx),
-        Some(TabContent::WebApp { app, terminal, forward }) => {
-            web_app_tab(connected, shown, workspace, id, tab_id, &app, terminal, forward, window, cx)
+        Some(TabContent::WebApp { app, server, forward }) => {
+            web_app_tab(connected, shown, workspace, id, tab_id, &app, server, forward, window, cx)
         }
         Some(
             tool @ (TabContent::GitHub
@@ -2932,14 +2932,14 @@ fn web_app_tab(
     workspace_id: &str,
     tab_id: &str,
     app: &Entity<treeterm_model::web_app::WebAppModel>,
-    terminal: Option<Entity<treeterm_model::terminal::TerminalModel>>,
+    server: treeterm_model::workspace_store::ServerTerminal,
     forward: PageHost,
     window: &mut Window,
     cx: &mut Context<AppView>,
 ) -> AnyElement {
     use treeterm_model::web_app::WebAppPhase;
     let c = colors(cx);
-    let secondary = c.text_secondary;
+    let (secondary, error) = (c.text_secondary, c.error);
     let key = (workspace_id.to_owned(), tab_id.to_owned());
     let sub = connected.page_subtabs.get(&key).copied().unwrap_or(PageSubTab::Browser);
     let tabs: &[PageSubTab] = match &forward {
@@ -2953,8 +2953,9 @@ fn web_app_tab(
         let restart = app.clone();
         port_forward_pane(monitor, move |cx| restart.update(cx, |app, cx| app.restart_forward(cx)), cx)
     } else if sub == PageSubTab::Shell {
-        match terminal {
-            Some(model) => {
+        use treeterm_model::workspace_store::ServerTerminal;
+        match server {
+            ServerTerminal::Attached(model) => {
                 let view = connected
                     .terminal_views
                     .entry(model.entity_id())
@@ -2967,7 +2968,12 @@ fn web_app_tab(
                     .child(terminal_status_bar(workspace, tab_id, cx))
                     .into_any_element()
             }
-            None => centered(div().text_color(secondary).child("The server starts once a port is found…")),
+            // `Terminal` before its tab has a PTY: plain text at the top left. A PTY that
+            // failed to start says why (the Browser sub-tab has Retry).
+            ServerTerminal::Starting => {
+                div().p(px(16.)).text_color(secondary).child("Creating terminal...").into_any_element()
+            }
+            ServerTerminal::Failed(message) => div().p(px(16.)).text_color(error).child(message).into_any_element(),
         }
     } else {
         match app.read(cx).phase().clone() {

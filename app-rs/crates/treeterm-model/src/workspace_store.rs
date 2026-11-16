@@ -171,10 +171,10 @@ pub enum TabContent {
     Failed(String),
     /// An application the native app does not have yet.
     NotPorted(String),
-    /// A dev server and its page; `terminal` once its PTY is attached.
+    /// A dev server and its page, and the terminal the server runs in.
     WebApp {
         app: Entity<crate::web_app::WebAppModel>,
-        terminal: Option<Entity<TerminalModel>>,
+        server: ServerTerminal,
         forward: PageHost,
     },
     /// The branch's pull request, from the session's git controller of this workspace.
@@ -189,6 +189,15 @@ pub enum TabContent {
     SshUpload(Entity<crate::tool_tabs::ssh_upload::SshUpload>),
 }
 
+/// A Web App's server terminal (its Shell sub-tab).
+pub enum ServerTerminal {
+    /// Not there yet: the server starts once the port is found, in a PTY then created.
+    Starting,
+    Attached(Entity<TerminalModel>),
+    /// Its PTY failed to start; Retry creates it again.
+    Failed(String),
+}
+
 /// Where a Web App's or Browser tab's page is served from.
 #[derive(Clone)]
 pub enum PageHost {
@@ -201,6 +210,8 @@ pub enum PageHost {
 /// A Web App tab's runtime state.
 struct WebAppTab {
     model: Entity<crate::web_app::WebAppModel>,
+    /// The instance's command, `$PORT` not yet replaced (the instance the tab loaded with).
+    command: String,
     forward: PageHost,
     _events: Subscription,
 }
@@ -387,11 +398,12 @@ impl WorkspaceStore {
     pub fn tab_content(&self, tab_id: &str) -> Option<TabContent> {
         let tab = self.workspace.file.app_states.get(tab_id)?;
         if let Some(web_app) = self.web_apps.get(tab_id) {
-            let terminal = match self.tabs.get(tab_id) {
-                Some(TabRef::Terminal(TerminalTab::Attached { model, .. })) => Some(model.clone()),
-                Some(_) | None => None,
+            let server = match self.tabs.get(tab_id) {
+                Some(TabRef::Terminal(TerminalTab::Attached { model, .. })) => ServerTerminal::Attached(model.clone()),
+                Some(TabRef::Terminal(TerminalTab::Failed(error))) => ServerTerminal::Failed(error.clone()),
+                Some(_) | None => ServerTerminal::Starting,
             };
-            return Some(TabContent::WebApp { app: web_app.model.clone(), terminal, forward: web_app.forward.clone() });
+            return Some(TabContent::WebApp { app: web_app.model.clone(), server, forward: web_app.forward.clone() });
         }
         Some(match self.tabs.get(tab_id) {
             Some(TabRef::Terminal(TerminalTab::Attached { model, .. })) => TabContent::Terminal(model.clone()),
@@ -1020,29 +1032,19 @@ impl WorkspaceStore {
                 };
                 let (port, local_port) = (assigned("port"), assigned("localPort"));
                 let pty = tab.state.get("ptyId").and_then(Value::as_str).map(str::to_owned);
-                let handle = match tab.state.get("ptyHandle") {
-                    Some(Value::String(handle)) => handle.clone(),
-                    Some(_) | None => uuid::Uuid::new_v4().to_string(),
-                };
-                let (exec, owned, remote, command) =
-                    (self.conn.exec_client(), tab_id.to_owned(), self.remote.clone(), command.clone());
+                let (exec, owned, remote) = (self.conn.exec_client(), tab_id.to_owned(), self.remote.clone());
                 let model = cx.new(|cx| crate::web_app::WebAppModel::new(exec, owned, port, local_port, remote, cx));
                 let owned_tab = tab_id.to_owned();
                 let events = cx.subscribe(&model, move |store, _, event: &crate::web_app::WebAppEvent, cx| {
                     store.on_web_app_event(&owned_tab, *event, cx);
                 });
                 let forward = self.page_host(tab_id, &model, cx);
-                self.web_apps.insert(tab_id.to_owned(), WebAppTab { model, forward, _events: events });
-                // The server runs in a terminal once its port is known.
-                let terminal = match (pty, port) {
-                    (Some(pty_id), _) => Some(self.attach_terminal(tab_id, pty_id, cx)),
-                    (None, Some(port)) => {
-                        let command = crate::web_app::resolve_command(&command, port);
-                        Some(self.create_pty(tab_id, handle, None, Some(command), cx))
-                    }
-                    (None, None) => None,
-                };
-                if let Some(terminal) = terminal {
+                let command = command.clone();
+                self.web_apps.insert(tab_id.to_owned(), WebAppTab { model, command, forward, _events: events });
+                // A server already running shows at once; otherwise its PTY is created when
+                // the start-up asks for it (`ServerPtyNeeded`).
+                if let Some(pty_id) = pty {
+                    let terminal = self.attach_terminal(tab_id, pty_id, cx);
                     self.tabs.insert(tab_id.to_owned(), TabRef::Terminal(terminal));
                 }
             }
@@ -1339,6 +1341,8 @@ impl WorkspaceStore {
         TerminalTab::Creating { handle, _task: task }
     }
 
+    /// A tab's PTY was created or failed to start. A web app's start-up waiting for it goes
+    /// on, or shows the error (with Retry).
     fn on_pty_created(&mut self, tab_id: &str, handle: &str, result: Result<String, String>, cx: &mut Context<Self>) {
         let pty_id = match result {
             Ok(pty_id) => pty_id,
@@ -1350,6 +1354,9 @@ impl WorkspaceStore {
                         TabRef::Terminal(TerminalTab::Failed(format!("Failed to start terminal: {error}"))),
                     );
                     cx.notify();
+                }
+                if let Some(web_app) = self.web_apps.get(tab_id) {
+                    web_app.model.update(cx, |app, _| app.server_pty_settled(Err(error)));
                 }
                 return;
             }
@@ -1372,6 +1379,9 @@ impl WorkspaceStore {
         let terminal = self.attach_terminal(tab_id, pty_id, cx);
         self.tabs.insert(tab_id.to_owned(), TabRef::Terminal(terminal));
         self.changed(cx);
+        if let Some(web_app) = self.web_apps.get(tab_id) {
+            web_app.model.update(cx, |app, _| app.server_pty_settled(Ok(())));
+        }
     }
 
     /// Release a tab's runtime state without touching the body (`disposeTabResources`).
@@ -1387,12 +1397,14 @@ impl WorkspaceStore {
         }
     }
 
-    /// A web app picked its port (start its server) or its local forward port.
+    /// A web app or browser page picked its port or its local forward port (persisted), or
+    /// a web app's start-up needs its server's terminal.
     fn on_web_app_event(&mut self, tab_id: &str, event: crate::web_app::WebAppEvent, cx: &mut Context<Self>) {
         use crate::web_app::WebAppEvent;
         let (key, port) = match event {
             WebAppEvent::PortAssigned(port) => ("port", port),
             WebAppEvent::LocalPortAssigned(port) => ("localPort", port),
+            WebAppEvent::ServerPtyNeeded(port) => return self.ensure_server_pty(tab_id, port, cx),
         };
         self.update_tab_state(
             tab_id,
@@ -1403,24 +1415,37 @@ impl WorkspaceStore {
             },
             cx,
         );
-        let WebAppEvent::PortAssigned(port) = event else {
-            return;
+    }
+
+    /// `ensurePty`: a web app's server terminal, its command run with `port`. One attached
+    /// already is used as it is and one being created reports when it is done
+    /// (`on_pty_created`); otherwise (none yet, or it failed to start) the PTY is created,
+    /// keyed by the tab's handle.
+    fn ensure_server_pty(&mut self, tab_id: &str, port: u16, cx: &mut Context<Self>) {
+        let Some(web_app) = self.web_apps.get(tab_id) else {
+            return; // the event came from its model, which the tab owns
         };
-        if self.tabs.contains_key(tab_id) {
-            return;
+        match self.tabs.get(tab_id) {
+            Some(TabRef::Terminal(TerminalTab::Attached { .. })) => {
+                web_app.model.update(cx, |app, _| app.server_pty_settled(Ok(())));
+                return;
+            }
+            Some(TabRef::Terminal(TerminalTab::Creating { .. })) => return,
+            Some(TabRef::Terminal(TerminalTab::Failed(_))) | None => {}
+            // Only a terminal runs a web app's server.
+            Some(
+                TabRef::Files { .. }
+                | TabRef::Editor { .. }
+                | TabRef::Review { .. }
+                | TabRef::Browser { .. }
+                | TabRef::Tool(_),
+            ) => return,
         }
-        let Some(tab) = self.workspace.file.app_states.get(tab_id) else {
-            return;
-        };
-        let command = match self.registry.get(&tab.application_id).map(|app| &app.kind) {
-            Some(AppKind::WebApp { command, .. }) => command.clone(),
-            Some(_) | None => return,
-        };
-        let handle = match tab.state.get("ptyHandle") {
+        let command = crate::web_app::resolve_command(&web_app.command, port);
+        let handle = match self.workspace.file.app_states.get(tab_id).and_then(|tab| tab.state.get("ptyHandle")) {
             Some(Value::String(handle)) => handle.clone(),
             Some(_) | None => uuid::Uuid::new_v4().to_string(),
         };
-        let command = crate::web_app::resolve_command(&command, port);
         let terminal = self.create_pty(tab_id, handle, None, Some(command), cx);
         self.tabs.insert(tab_id.to_owned(), TabRef::Terminal(terminal));
         cx.notify();

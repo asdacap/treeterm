@@ -2639,25 +2639,61 @@ fn an_unparsable_body_is_rejected_with_the_parsers_message_once(cx: &mut TestApp
     assert_eq!(error.to_lowercase().matches("invalid workspace file").count(), 1, "{error}");
 }
 
+/// A session over `conn` whose workspace `a` is loaded, with a Web App instance
+/// (`webapp-py`) running `command`. The session must outlive the workspace's use.
+fn web_app_workspace(
+    cx: &mut TestAppContext,
+    h: &Harness,
+    conn: DaemonConnection,
+    command: &str,
+) -> (Entity<SessionStore>, Entity<WorkspaceStore>) {
+    std::fs::write(h.daemon.workspaces_dir().join("a.json"), body("a", None)).unwrap();
+    publish(h, &["a"]);
+    let settings = treeterm_core::settings::from_value(serde_json::json!({
+        "webApp": { "instances": [{
+            "id": "py", "name": "Py", "icon": "P", "command": command, "isDefault": false, "keepOnExit": false
+        }]}
+    }))
+    .unwrap();
+    let settings_store = cx.new(|_| SettingsStore::in_memory(settings));
+    let store = cx.new(|cx| SessionStore::new(conn, "client-a".into(), settings_store, None, cx.new(ConnectionTraffic::new), cx));
+    wait_until(cx, &store, |s| loaded(s, "a"));
+    let workspace = store.read_with(cx, |s, _| ws(s, "a"));
+    (store, workspace)
+}
+
+/// A Web App tab whose server's port is already known (1: nothing answers there).
+fn web_app_on_port_1(
+    cx: &mut TestAppContext,
+    workspace: &Entity<WorkspaceStore>,
+) -> (String, Entity<treeterm_model::web_app::WebAppModel>) {
+    let port = serde_json::json!({ "port": { "status": "assigned", "port": 1 } });
+    let tab = workspace.update(cx, |w, cx| w.add_tab_with("webapp-py", port, cx)).unwrap();
+    let Some(TabContent::WebApp { app, .. }) = workspace.read_with(cx, |w, _| w.tab_content(&tab)) else {
+        panic!("not a web app tab");
+    };
+    (tab, app)
+}
+
+/// What a Web App tab's Shell sub-tab shows.
+fn server_terminal(cx: &mut TestAppContext, workspace: &Entity<WorkspaceStore>, tab: &str) -> String {
+    use treeterm_model::workspace_store::ServerTerminal;
+    match workspace.read_with(cx, |w, _| w.tab_content(tab)) {
+        Some(TabContent::WebApp { server: ServerTerminal::Starting, .. }) => "starting".to_owned(),
+        Some(TabContent::WebApp { server: ServerTerminal::Attached(_), .. }) => "attached".to_owned(),
+        Some(TabContent::WebApp { server: ServerTerminal::Failed(error), .. }) => format!("failed: {error}"),
+        Some(_) => "not a web app".to_owned(),
+        None => "gone".to_owned(),
+    }
+}
+
 #[gpui_kit::test]
 fn a_web_app_gets_a_free_port_starts_its_server_and_is_ready(cx: &mut TestAppContext) {
     use treeterm_model::web_app::WebAppPhase;
     cx.executor().allow_parking();
     let h = harness();
-    std::fs::write(h.daemon.workspaces_dir().join("a.json"), body("a", None)).unwrap();
-    publish(&h, &["a"]);
-    let settings = treeterm_core::settings::from_value(serde_json::json!({
-        "webApp": { "instances": [{
-            "id": "py", "name": "Py", "icon": "P", "command": "python3 -m http.server $PORT --bind 127.0.0.1",
-            "isDefault": false, "keepOnExit": false
-        }]}
-    }))
-    .unwrap();
-    let conn = h.conn.clone();
-    let settings_store = cx.new(|_| SettingsStore::in_memory(settings));
-    let store = cx.new(|cx| SessionStore::new(conn, "client-a".into(), settings_store, None, cx.new(ConnectionTraffic::new), cx));
-    wait_until(cx, &store, |s| loaded(s, "a"));
-    let workspace = store.read_with(cx, |s, _| ws(s, "a"));
+    let (_session, workspace) =
+        web_app_workspace(cx, &h, h.conn.clone(), "python3 -m http.server $PORT --bind 127.0.0.1");
     let tab = workspace.update(cx, |w, cx| w.add_tab("webapp-py", cx)).unwrap();
     let Some(TabContent::WebApp { app, .. }) = workspace.read_with(cx, |w, _| w.tab_content(&tab)) else {
         panic!("not a web app tab");
@@ -2677,10 +2713,113 @@ fn a_web_app_gets_a_free_port_starts_its_server_and_is_ready(cx: &mut TestAppCon
     assert_eq!(phase, WebAppPhase::Ready { url: format!("http://localhost:{port}/") });
     assert!((20000..45000).contains(&port));
     wait_for_disk(cx, || file_on_disk(&h, "a")["appStates"][&tab]["state"]["port"]["port"] == port);
-    assert!(matches!(
-        workspace.read_with(cx, |w, _| w.tab_content(&tab)),
-        Some(TabContent::WebApp { terminal: Some(_), .. })
-    ));
+    assert_eq!(server_terminal(cx, &workspace, &tab), "attached");
+}
+
+#[gpui_kit::test]
+fn a_web_app_with_its_port_waits_for_its_server_terminal_before_its_server(cx: &mut TestAppContext) {
+    use treeterm_model::web_app::WebAppPhase;
+    cx.executor().allow_parking();
+    let h = harness();
+    let (_session, workspace) = web_app_workspace(cx, &h, h.conn.clone(), "echo serving on $PORT");
+    let (tab, app) = web_app_on_port_1(cx, &workspace);
+    // A known port still starts in "Finding a free port…", with no terminal yet.
+    assert_eq!(app.read_with(cx, |a, _| a.phase().clone()), WebAppPhase::AllocatingPort);
+    assert_eq!(server_terminal(cx, &workspace, &tab), "starting");
+    for _ in 0..1000 {
+        cx.run_until_parked();
+        let phase = app.read_with(cx, |a, _| a.phase().clone());
+        if phase != WebAppPhase::AllocatingPort {
+            // The server is waited for once its terminal is there.
+            assert_eq!(phase, WebAppPhase::WaitingForServer { port: 1 });
+            assert_eq!(server_terminal(cx, &workspace, &tab), "attached");
+            let state = workspace.read_with(cx, |w, _| w.file().app_states[&tab].state.clone());
+            assert!(state["ptyId"].as_str().is_some_and(|id| !id.is_empty()), "{state}");
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    panic!("the server's terminal never started");
+}
+
+#[gpui_kit::test]
+fn a_web_app_whose_server_terminal_fails_shows_the_error_and_retry_asks_for_it_again(cx: &mut TestAppContext) {
+    use std::cell::{Cell, RefCell};
+    use std::rc::Rc;
+    use treeterm_model::web_app::{WebAppEvent, WebAppModel, WebAppPhase};
+    cx.executor().allow_parking();
+    let h = harness();
+    let exec = h.conn.exec_client();
+    let app = cx.new(|cx| WebAppModel::new(exec, "tab-1".to_owned(), Some(1), None, None, cx));
+    let needed = Rc::new(RefCell::new(Vec::new()));
+    let seen = needed.clone();
+    let _events = cx.update(|cx| {
+        cx.subscribe(&app, move |_, event: &WebAppEvent, _| match event {
+            WebAppEvent::ServerPtyNeeded(port) => seen.borrow_mut().push(*port),
+            WebAppEvent::PortAssigned(_) | WebAppEvent::LocalPortAssigned(_) => {}
+        })
+    });
+    let notified = Rc::new(Cell::new(0));
+    let count = notified.clone();
+    let _redraws = cx.update(|cx| cx.observe(&app, move |_, _| count.set(count.get() + 1)));
+    let phase = |cx: &mut TestAppContext| app.read_with(cx, |a, _| a.phase().clone());
+
+    cx.run_until_parked();
+    assert_eq!(*needed.borrow(), [1]);
+    assert_eq!(phase(cx), WebAppPhase::AllocatingPort);
+    app.update(cx, |a, _| a.server_pty_settled(Err("boom".to_owned())));
+    cx.run_until_parked();
+    assert_eq!(phase(cx), WebAppPhase::Error("boom".to_owned()));
+
+    // Retry shows "Finding a free port…" at once and asks for the terminal again.
+    let before = notified.get();
+    app.update(cx, |a, cx| a.retry(cx));
+    assert_eq!(phase(cx), WebAppPhase::AllocatingPort);
+    assert!(notified.get() > before, "Retry redraws");
+    cx.run_until_parked();
+    assert_eq!(*needed.borrow(), [1, 1]);
+    app.update(cx, |a, _| a.server_pty_settled(Ok(())));
+    cx.run_until_parked();
+    assert_eq!(phase(cx), WebAppPhase::WaitingForServer { port: 1 });
+    // An answer nobody waits for any more is dropped.
+    app.update(cx, |a, _| a.server_pty_settled(Err("late".to_owned())));
+    assert_eq!(phase(cx), WebAppPhase::WaitingForServer { port: 1 });
+}
+
+#[gpui_kit::test]
+fn retry_starts_a_web_apps_server_terminal_again_after_it_failed_to_start(cx: &mut TestAppContext) {
+    use treeterm_model::web_app::WebAppPhase;
+    cx.executor().allow_parking();
+    let h = harness();
+    let dir = tempfile::Builder::new().prefix("tt").tempdir_in("/tmp").unwrap();
+    let socket = dir.path().join("p.sock");
+    let proxy = Proxy::start(&socket, h.daemon.socket_path());
+    let conn = futures::executor::block_on(DaemonConnection::open(&h.rt, &socket)).unwrap().unwrap();
+    let (_session, workspace) = web_app_workspace(cx, &h, conn.clone(), "echo serving on $PORT");
+
+    // The daemon cannot be reached: the server's PTY fails to start.
+    drop(proxy);
+    for _ in 0..500 {
+        if futures::executor::block_on(conn.list_pty_sessions()).unwrap().is_err() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let (tab, app) = web_app_on_port_1(cx, &workspace);
+    wait_until(cx, &app, |a| matches!(a.phase(), WebAppPhase::Error(_)));
+    let WebAppPhase::Error(error) = app.read_with(cx, |a, _| a.phase().clone()) else {
+        unreachable!()
+    };
+    assert!(!error.is_empty());
+    assert_eq!(server_terminal(cx, &workspace, &tab), format!("failed: Failed to start terminal: {error}"));
+
+    // Retry starts it again (it fails again: the connection stays down), rather than
+    // waiting for the failed one.
+    app.update(cx, |a, cx| a.retry(cx));
+    assert_eq!(app.read_with(cx, |a, _| a.phase().clone()), WebAppPhase::AllocatingPort);
+    wait_until(cx, &app, |a| !matches!(a.phase(), WebAppPhase::AllocatingPort));
+    assert_eq!(app.read_with(cx, |a, _| a.phase().clone()), WebAppPhase::Error(error.clone()));
+    assert_eq!(server_terminal(cx, &workspace, &tab), format!("failed: Failed to start terminal: {error}"));
 }
 
 #[gpui_kit::test]
