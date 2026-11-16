@@ -6,12 +6,28 @@
 //! collapses `margin: 1em 0` between blocks: the 1em above the first block becomes extra
 //! top padding, and a heading's `margin-top: 1.5em` becomes padding above it less the gap
 //! the block before already left.
+//!
+//! react-markdown parses CommonMark and GFM, nothing more, and without `rehype-raw` it writes
+//! raw HTML out as text: `<b>x</b>` shows as typed, and an HTML block as a run of text in its
+//! place. Nor does it know math, so `$` is an ordinary character and a `$$` block an ordinary
+//! paragraph. And no image loads: `urlTransform` empties `data:` URLs and the CSP
+//! (`img-src 'self' data: blob:`) blocks the rest, so Chromium draws its broken-image icon and
+//! the `alt` text. GPUI Kit renders HTML, parses math and loads images, so it is given the
+//! source with HTML inside paragraphs and every `$` escaped ([`literal_source`]), and two
+//! plugins draw HTML blocks as text ([`LiteralHtml`]) and every image as a broken one
+//! ([`BrokenImage`]).
 
-use gpui_kit::base::{TextView, TextViewStyle};
+use gpui_kit::assets::IconName;
+use gpui_kit::base::{
+    InlineElement, InlineRenderContext, MarkdownExtensions, MarkdownNode, MarkdownParseContext, MarkdownPlugin, TextView,
+    TextViewStyle,
+};
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    AnyElement, App, FontWeight, HighlightStyle, Hsla, ScrollHandle, SharedString, StyleRefinement, div, px, relative, rems, rgb,
+    AnyElement, App, FontWeight, HighlightStyle, Hsla, ScrollHandle, SharedString, StyleRefinement, Window, div, px,
+    relative, rems, rgb,
 };
+use markdown::mdast::{Node, ReferenceKind};
 
 use crate::theme::colors;
 
@@ -98,10 +114,19 @@ pub(crate) type LinkHandler = std::sync::Arc<dyn Fn(&str, &mut gpui_kit::Window,
 
 /// The preview of `text`, scrolling in its own box (with Electron's classic scrollbar).
 /// Links open in the system browser unless `on_link` takes them.
-pub(crate) fn preview(id: SharedString, text: String, scroll: &ScrollHandle, on_link: Option<LinkHandler>, cx: &App) -> AnyElement {
+pub(crate) fn preview(
+    id: SharedString,
+    text: String,
+    scroll: &ScrollHandle,
+    on_link: Option<LinkHandler>,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
+    let source = literal(&id, text, window, cx);
     let c = colors(cx);
-    let view = TextView::markdown(id, text)
+    let view = TextView::markdown(id, source)
         .style(style(cx))
+        .markdown_extensions(MarkdownExtensions::default().plugin(LiteralHtml).plugin(BrokenImage))
         // react-markdown neither highlights code blocks nor labels their language.
         .code_block_highlighter(|_| Vec::new())
         .code_block_actions(|_, _, _| div());
@@ -118,4 +143,407 @@ pub(crate) fn preview(id: SharedString, text: String, scroll: &ScrollHandle, on_
         .line_height(relative(1.6))
         .child(view);
     div().size_full().bg(c.bg_primary).child(crate::ui::scroll_area("markdown-preview", scroll, content, cx)).into_any_element()
+}
+
+/// The last text a preview was given and its [`literal_source`].
+#[derive(Default)]
+struct Literal {
+    text: String,
+    source: SharedString,
+}
+
+/// [`literal_source`] of `text`, worked out again only when the text changes: it parses the
+/// whole document, and the preview draws every frame.
+fn literal(id: &SharedString, text: String, window: &mut Window, cx: &mut App) -> SharedString {
+    let memo = window.use_keyed_state(SharedString::from(format!("{id}/literal")), cx, |_, _| Literal::default());
+    if memo.read(cx).text != text {
+        let source = literal_source(&text).into();
+        memo.update(cx, |memo, _| *memo = Literal { text, source });
+    }
+    memo.read(cx).source.clone()
+}
+
+/// `source` as GPUI Kit must read it to show what react-markdown shows: the HTML inside
+/// paragraphs (and headings, table cells, link text) written out with each ASCII punctuation
+/// character escaped and each run of whitespace one space, as a browser shows the text, and
+/// each `$` of text escaped, so that the Kit (which turns math on) finds no math. `$` stays as
+/// written in code, HTML blocks and autolinks, which take no escapes. HTML blocks stay too:
+/// written out on one line, a block could join the paragraph after it, so [`LiteralHtml`]
+/// draws them.
+///
+/// The document is parsed as react-markdown parses it (GFM, no math), so what counts as HTML
+/// or text is what it counts.
+fn literal_source(source: &str) -> String {
+    if !source.contains(['<', '$']) {
+        return source.to_owned();
+    }
+    let root = markdown::to_mdast(source, &markdown::ParseOptions::gfm()).expect("markdown-rs fails only on MDX, which is off");
+    let mut literal = Rewrite { source, out: String::with_capacity(source.len() + source.len() / 8), copied: 0 };
+    literal.node(&root, Place::Flow);
+    literal.copy_to(source.len());
+    literal.out
+}
+
+/// Where a node sits: HTML among blocks is an HTML block; anywhere else it is inline.
+#[derive(Clone, Copy)]
+enum Place {
+    Flow,
+    Phrasing,
+}
+
+/// The source being copied out, with the replacements [`literal_source`] makes.
+struct Rewrite<'a> {
+    source: &'a str,
+    out: String,
+    /// The end of what has been copied out (or replaced) so far.
+    copied: usize,
+}
+
+impl Rewrite<'_> {
+    fn node(&mut self, node: &Node, place: Place) {
+        let Some(position) = node.position() else { return };
+        let range = position.start.offset..position.end.offset;
+        match (node, place) {
+            (Node::Html(html), Place::Phrasing) => {
+                self.copy_to(range.start);
+                escape_html(&html.value, &mut self.out);
+                self.copied = range.end;
+            }
+            // Backslash escapes count in an image's text, URL and title alike.
+            (Node::Text(_) | Node::Image(_), _) => {
+                let text = &self.source[range.clone()];
+                if text.contains('$') {
+                    self.copy_to(range.start);
+                    escape_dollars(text, &mut self.out);
+                    self.copied = range.end;
+                }
+            }
+            // An autolink (`<https://…>`, or a bare URL) takes its text as written.
+            (Node::Link(_), _) if !self.source[range].starts_with('[') => {}
+            // `[text]` and `[text][]` find their definition by the text as written.
+            (Node::LinkReference(link), _) if link.reference_kind != ReferenceKind::Full => {}
+            _ => {
+                let inner = match node {
+                    Node::Root(_) | Node::Blockquote(_) | Node::List(_) | Node::ListItem(_) | Node::FootnoteDefinition(_) => {
+                        Place::Flow
+                    }
+                    _ => Place::Phrasing,
+                };
+                for child in node.children().into_iter().flatten() {
+                    self.node(child, inner);
+                }
+            }
+        }
+    }
+
+    fn copy_to(&mut self, end: usize) {
+        self.out.push_str(&self.source[self.copied..end]);
+        self.copied = end;
+    }
+}
+
+/// Inline HTML as the text it shows: each ASCII punctuation character escaped, each run of
+/// whitespace (line breaks too) one space.
+fn escape_html(html: &str, out: &mut String) {
+    for (index, word) in html.split_ascii_whitespace().enumerate() {
+        if index > 0 {
+            out.push(' ');
+        }
+        for c in word.chars() {
+            if c.is_ascii_punctuation() {
+                out.push('\\');
+            }
+            out.push(c);
+        }
+    }
+}
+
+/// `text` (source) with each `$` escaped; those already escaped stay as they are.
+fn escape_dollars(text: &str, out: &mut String) {
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' => {
+                out.push(c);
+                if let Some(escaped) = chars.next_if(char::is_ascii_punctuation) {
+                    out.push(escaped);
+                }
+            }
+            '$' => out.push_str("\\$"),
+            c => out.push(c),
+        }
+    }
+}
+
+const LITERAL_HTML: &str = "literal-html";
+
+/// An HTML block, which react-markdown writes out as text in its place: each run of
+/// whitespace one space (none at the ends), as a browser lays it out, in the text style
+/// around it, with no margins of its own.
+struct LiteralHtml;
+
+impl MarkdownPlugin for LiteralHtml {
+    fn is_block(&self) -> bool {
+        true
+    }
+
+    fn name(&self) -> &str {
+        LITERAL_HTML
+    }
+
+    fn parse(&self, node: &Node, _: &MarkdownParseContext<'_>) -> Option<MarkdownNode> {
+        literal_html(node)
+    }
+
+    fn render(&self, node: &MarkdownNode, _: &mut Window, _: &mut App) -> impl IntoElement {
+        div().debug_selector(|| LITERAL_HTML.into()).child(SharedString::from(node.as_text().to_owned()))
+    }
+}
+
+fn literal_html(node: &Node) -> Option<MarkdownNode> {
+    let Node::Html(html) = node else { return None };
+    let text = html.value.split_ascii_whitespace().collect::<Vec<_>>().join(" ");
+    Some(MarkdownNode::new(LITERAL_HTML, ()).text(text))
+}
+
+const BROKEN_IMAGE: &str = "broken-image";
+
+/// An image, which never loads in Electron's preview: Chromium draws its broken-image icon
+/// and the `alt` text after it, on one line, or nothing when the `alt` is empty.
+struct BrokenImage;
+
+/// What [`BrokenImage`] draws.
+#[derive(Clone, Debug, PartialEq)]
+enum Broken {
+    Alt(SharedString),
+    NoAlt,
+}
+
+impl MarkdownPlugin for BrokenImage {
+    fn name(&self) -> &str {
+        BROKEN_IMAGE
+    }
+
+    fn parse(&self, node: &Node, _: &MarkdownParseContext<'_>) -> Option<MarkdownNode> {
+        broken_image(node)
+    }
+
+    fn render_inline(
+        &self,
+        node: &MarkdownNode,
+        context: &InlineRenderContext,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Option<InlineElement> {
+        // `None` (a node not of this plugin) draws the node's text.
+        Some(match node.data::<Broken>()? {
+            Broken::Alt(alt) => broken_image_element(alt, context, window, cx),
+            // The Kit draws the source in place of a box with no width.
+            Broken::NoAlt => InlineElement::new(div().w(px(1.)).h(px(1.))),
+        })
+    }
+}
+
+fn broken_image(node: &Node) -> Option<MarkdownNode> {
+    let alt = match node {
+        Node::Image(image) => &image.alt,
+        Node::ImageReference(image) => &image.alt,
+        _ => return None,
+    };
+    let broken = if alt.is_empty() { Broken::NoAlt } else { Broken::Alt(alt.clone().into()) };
+    Some(MarkdownNode::new(BROKEN_IMAGE, broken).text(alt.clone()))
+}
+
+/// The 16px icon (`ImageOff`, as for the Files viewer's broken image) at the top of the line,
+/// as Chromium draws its icon, then the `alt` text in the text style around it, on its
+/// baseline.
+fn broken_image_element(alt: &SharedString, context: &InlineRenderContext, window: &mut Window, cx: &App) -> InlineElement {
+    let line_height = context.line_height();
+    let run = context.text_style().to_run(alt.len());
+    let line = window.text_system().shape_line(alt.clone(), context.font_size(), &[run], None);
+    let baseline = (line_height - line.ascent - line.descent) / 2. + line.ascent;
+    let icon = crate::ui::icon(IconName::ImageOff, 16., colors(cx).text_secondary).flex_shrink_0();
+    let element = div().debug_selector(|| BROKEN_IMAGE.into()).flex().items_start().h(line_height).child(icon).child(alt.clone());
+    InlineElement::new(element).with_baseline(baseline)
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui_kit::{Context, Render, TestAppContext, VisualTestContext};
+    use markdown::ParseOptions;
+
+    use super::*;
+
+    /// How GPUI Kit parses (`MarkdownExtensions::parse_options`): GFM with math.
+    fn kit_options() -> ParseOptions {
+        let mut options = ParseOptions::gfm();
+        options.constructs.math_text = true;
+        options.constructs.math_flow = true;
+        options
+    }
+
+    /// The blocks GPUI Kit parses from the preview's source for `markdown`.
+    fn kit_blocks(markdown: &str) -> Vec<Node> {
+        match markdown::to_mdast(&literal_source(markdown), &kit_options()) {
+            Ok(Node::Root(root)) => root.children,
+            other => panic!("a root, not {other:?}"),
+        }
+    }
+
+    fn has_html_or_math(node: &Node) -> bool {
+        matches!(node, Node::Html(_) | Node::InlineMath(_) | Node::Math(_))
+            || node.children().into_iter().flatten().any(has_html_or_math)
+    }
+
+    /// Inline HTML shows as typed (react-markdown turns raw HTML into text), formatting tags
+    /// the Kit would apply as much as any other.
+    #[test]
+    fn inline_html_is_its_text() {
+        let markdown = r#"a <b>c</b> d <kbd>K</kbd> <span title="*x*">s</span>"#;
+        assert_eq!(literal_source(markdown), r#"a \<b\>c\<\/b\> d \<kbd\>K\<\/kbd\> \<span title\=\"\*x\*\"\>s\<\/span\>"#);
+        let blocks = kit_blocks(markdown);
+        assert_eq!(blocks.len(), 1);
+        assert!(!has_html_or_math(&blocks[0]));
+        assert_eq!(blocks[0].to_string(), markdown);
+    }
+
+    /// A tag over several lines is one line of text, its whitespace collapsed as a browser
+    /// shows it; the lines' blockquote markers are not part of it.
+    #[test]
+    fn inline_html_over_lines_is_one_line() {
+        let markdown = "> a <span\n>    title=\"x\">b</span> c";
+        assert_eq!(literal_source(markdown), r#"> a \<span title\=\"x\"\>b\<\/span\> c"#);
+        assert_eq!(kit_blocks(markdown)[0].to_string(), r#"a <span title="x">b</span> c"#);
+    }
+
+    /// HTML in headings, table cells and link text is inline HTML too.
+    #[test]
+    fn inline_html_anywhere_in_text_is_its_text() {
+        let markdown = "# T <sup>1</sup>\n\n| a <br> b |\n|---|\n\n[x <i>y</i>](https://e.com)";
+        let blocks = kit_blocks(markdown);
+        assert!(!blocks.iter().any(has_html_or_math));
+        let texts: Vec<String> = blocks.iter().map(Node::to_string).collect();
+        assert_eq!(texts, ["T <sup>1</sup>", "a <br> b", "x <i>y</i>"]);
+    }
+
+    /// An HTML block stays one: [`LiteralHtml`] shows its text, whitespace collapsed.
+    #[test]
+    fn an_html_block_is_its_text_with_whitespace_collapsed() {
+        let markdown = "<div align=\"center\">\n  <b>x</b>   y\n</div>\n\n- <p>\n  z\n  </p>";
+        assert_eq!(literal_source(markdown), markdown);
+        let blocks = kit_blocks(markdown);
+        let block = literal_html(&blocks[0]).expect("an HTML block");
+        assert_eq!(block.name(), LITERAL_HTML);
+        assert_eq!(block.as_text(), r#"<div align="center"> <b>x</b> y </div>"#);
+        let item = &blocks[1].children().expect("a list")[0];
+        let in_item = literal_html(&item.children().expect("a list item")[0]).expect("an HTML block");
+        assert_eq!(in_item.as_text(), "<p> z </p>");
+        assert!(literal_html(&kit_blocks("text")[0]).is_none());
+    }
+
+    /// react-markdown has no math: a `$$` block is a paragraph, Markdown inside it included.
+    #[test]
+    fn a_math_block_is_a_paragraph() {
+        let markdown = "$$\nx^2 + \\{y\\} *z*\n$$";
+        assert_eq!(literal_source(markdown), "\\$\\$\nx^2 + \\{y\\} *z*\n\\$\\$");
+        let blocks = kit_blocks(markdown);
+        assert_eq!(blocks.len(), 1);
+        let Node::Paragraph(paragraph) = &blocks[0] else { panic!("a paragraph, not {:?}", blocks[0]) };
+        assert!(paragraph.children.iter().any(|child| matches!(child, Node::Emphasis(_))));
+        assert!(!has_html_or_math(&blocks[0]));
+        assert_eq!(blocks[0].to_string(), "$$\nx^2 + {y} z\n$$");
+    }
+
+    /// Dollars in text are text; ones already escaped stay escaped (`\\$` is an escaped
+    /// backslash, then a dollar).
+    #[test]
+    fn dollars_are_text() {
+        let markdown = r"Inline $a$, $5 and $10, a\$b and \\$c.";
+        assert_eq!(literal_source(markdown), r"Inline \$a\$, \$5 and \$10, a\$b and \\\$c.");
+        let blocks = kit_blocks(markdown);
+        assert!(!has_html_or_math(&blocks[0]));
+        assert_eq!(blocks[0].to_string(), r"Inline $a$, $5 and $10, a$b and \$c.");
+    }
+
+    /// Code, code blocks, autolinks and `[text]` references take no escapes: what is in them
+    /// stays as written.
+    #[test]
+    fn code_autolinks_and_reference_text_stay_as_written() {
+        let markdown =
+            "`$x$ <b>`\n\n```\n$$\n<b>\n```\n\n<https://e.com/$q$> https://e.com/$r\n\n[a $x$] [b $y$][]\n\n[a $x$]: u\n[b $y$]: v";
+        assert_eq!(literal_source(markdown), markdown);
+        assert_eq!(literal_source("[a $x$][r]\n\n[r]: u"), "[a \\$x\\$][r]\n\n[r]: u");
+    }
+
+    /// An image's text keeps its dollars; its URL and title are unchanged by the escapes.
+    #[test]
+    fn an_images_dollars_are_text() {
+        let blocks = kit_blocks(r#"![a $x$](u/$y$ "t $z$")"#);
+        let Node::Image(image) = &blocks[0].children().expect("a paragraph")[0] else { panic!("an image") };
+        assert_eq!((image.alt.as_str(), image.url.as_str(), image.title.as_deref()), ("a $x$", "u/$y$", Some("t $z$")));
+    }
+
+    #[test]
+    fn markdown_without_tags_or_dollars_is_as_written() {
+        assert_eq!(literal_source("# Hi *there*\n\n- [x] done"), "# Hi *there*\n\n- [x] done");
+    }
+
+    /// No image loads (Electron's CSP; react-markdown empties `data:` URLs): each is a broken
+    /// one with its `alt` text, which is nothing when the `alt` is empty.
+    #[test]
+    fn every_image_is_broken_with_its_alt() {
+        let markdown = "![logo](https://e.com/x.png) ![rel](img/x.png) ![d](data:image/png;base64,AAAA) \
+                        ![](https://e.com/y.png) ![ref][r]\n\n[r]: x.png";
+        let blocks = kit_blocks(markdown);
+        let broken: Vec<Broken> = blocks[0]
+            .children()
+            .expect("a paragraph")
+            .iter()
+            .filter_map(broken_image)
+            .map(|node| {
+                assert_eq!(node.name(), BROKEN_IMAGE);
+                node.data::<Broken>().expect("what to draw").clone()
+            })
+            .collect();
+        let alt = |text: &str| Broken::Alt(text.to_owned().into());
+        assert_eq!(broken, [alt("logo"), alt("rel"), alt("d"), Broken::NoAlt, alt("ref")]);
+        assert!(broken_image(&kit_blocks("text")[0]).is_none());
+    }
+
+    struct Host {
+        text: String,
+    }
+
+    impl Render for Host {
+        fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            let scroll = ScrollHandle::new();
+            div().w(px(600.)).h(px(600.)).child(preview("md-test".into(), self.text.clone(), &scroll, None, window, cx))
+        }
+    }
+
+    fn draw(cx: &mut VisualTestContext) {
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+    }
+
+    /// The preview draws HTML blocks and images with the plugins, and follows a new text.
+    #[gpui_kit::test]
+    fn the_preview_draws_html_blocks_and_broken_images(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            crate::theme::install(cx);
+        });
+        let (host, cx) = cx.add_window_view(|_, _| Host { text: "plain".into() });
+        draw(cx);
+        assert!(cx.debug_bounds(LITERAL_HTML).is_none());
+        assert!(cx.debug_bounds(BROKEN_IMAGE).is_none());
+        host.update_in(cx, |host, _, cx| {
+            host.text = "<div>block</div>\n\nAn ![image](https://e.com/x.png) here.".into();
+            cx.notify();
+        });
+        draw(cx);
+        draw(cx);
+        assert!(cx.debug_bounds(LITERAL_HTML).is_some());
+        assert!(cx.debug_bounds(BROKEN_IMAGE).is_some());
+    }
 }

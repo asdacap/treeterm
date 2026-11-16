@@ -451,7 +451,7 @@ impl Render for BrowserView {
             address.update(cx, |input, cx| input.set_value(current, window, cx));
         }
         let c = colors(cx);
-        let (error, border, accent) = (c.error, c.border, c.accent);
+        let (error, border, accent, bg_primary, bg_secondary) = (c.error, c.border, c.accent, c.bg_primary, c.bg_secondary);
         let focused = gpui_kit::Focusable::focus_handle(address.read(cx), cx).is_focused(window);
         let invalid = match &self.draft {
             Draft::Editing { error: Some(error) } => Some(error.clone()),
@@ -472,6 +472,7 @@ impl Render for BrowserView {
                         move |href, _, cx| match this.update(cx, |view, cx| view.follow_markdown_link(href, cx)) {
                             Ok(()) | Err(_) => {} // Err: the tab closed
                         },
+                        window,
                         cx,
                     );
                     div().relative().size_full().child(webview.clone()).child(div().absolute().inset_0().child(preview)).into_any_element()
@@ -489,7 +490,7 @@ impl Render for BrowserView {
                 crate::ui::field(
                     &address,
                     crate::ui::FieldStyle {
-                        bg: c.bg_primary,
+                        bg: bg_primary,
                         border: if invalid.is_some() { rgb(0xf44336).into() } else { border },
                         radius: 14.,
                         pad: (4., 12.),
@@ -511,7 +512,7 @@ impl Render for BrowserView {
             .py(px(4.))
             .border_b_1()
             .border_color(border)
-            .bg(c.bg_secondary)
+            .bg(bg_secondary)
             .text_size(px(12.))
             .child(toolbar_button("page-back", "←", "Back", can_back, cx).when(can_back, |d| {
                 d.on_click(cx.listener(|view, _, _, cx| view.go(Pending::Back, cx)))

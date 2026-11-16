@@ -350,6 +350,11 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   draws them, centred and scaled down as Electron's `<img>`). Review's image diffs, which
   scroll in a list, show the sides of an `.avif` change as broken images with their alt text
   (`Before: <path>`), as Electron shows an image it cannot decode.
+- The Markdown preview shows raw HTML as its text, as react-markdown does, but each HTML
+  block (`<p align="center">…</p>` and the like) on lines of its own with the paragraph gap
+  between them: Electron's browser runs consecutive HTML blocks together into one paragraph
+  of text. Images show as broken with their alt text, as in Electron (where none loads),
+  with the grey image-off icon in place of Chromium's broken-picture icon.
 - PDFs show in WebKit's viewer, which has no toolbar: a strip above it has Chromium's Zoom
   out, zoom level, Zoom in and Print (100% is the width WebKit fits the pages to, not the
   pages' own size). There is no page box, thumbnails, fit or rotate; those need a bundled

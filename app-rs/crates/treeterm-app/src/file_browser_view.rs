@@ -1562,7 +1562,7 @@ impl FileBrowserView {
             FileView::Text { path, text } => {
                 let language: SharedString = detect_monaco_language(&path).into();
                 let body = if self.markdown_preview.as_deref() == Some(path.as_str()) {
-                    markdown_preview(SharedString::from(format!("md-{path}")), text, &self.preview_scroll, cx)
+                    markdown_preview(SharedString::from(format!("md-{path}")), text, &self.preview_scroll, window, cx)
                 } else {
                     self.text_body(&path, &text, window, cx)
                 };
@@ -1835,8 +1835,14 @@ impl FileBrowserView {
 }
 
 /// `MarkdownPreview`: GitHub-flavoured markdown in 20px of padding.
-pub(crate) fn markdown_preview(id: SharedString, text: String, scroll: &gpui_kit::ScrollHandle, cx: &App) -> AnyElement {
-    markdown::preview(id, text, scroll, None, cx)
+pub(crate) fn markdown_preview(
+    id: SharedString,
+    text: String,
+    scroll: &gpui_kit::ScrollHandle,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
+    markdown::preview(id, text, scroll, None, window, cx)
 }
 
 /// [`markdown_preview`] whose links go to `on_link` (with the `href` as written).
@@ -1845,10 +1851,11 @@ pub(crate) fn markdown_preview_linked(
     text: String,
     scroll: &gpui_kit::ScrollHandle,
     on_link: impl Fn(&str, &mut Window, &mut App) + Send + Sync + 'static,
-    cx: &App,
+    window: &mut Window,
+    cx: &mut App,
 ) -> AnyElement {
     let on_link: markdown::LinkHandler = std::sync::Arc::new(on_link);
-    markdown::preview(id, text, scroll, Some(on_link), cx)
+    markdown::preview(id, text, scroll, Some(on_link), window, cx)
 }
 
 impl Render for FileBrowserView {

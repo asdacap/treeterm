@@ -297,7 +297,13 @@ impl Render for TextEditorView {
             EditorDoc::Ready { current, .. } => current,
         };
         let body = if preview {
-            crate::file_browser_view::markdown_preview(SharedString::from(format!("md-{path}")), current, &self.preview_scroll, cx)
+            crate::file_browser_view::markdown_preview(
+                SharedString::from(format!("md-{path}")),
+                current,
+                &self.preview_scroll,
+                window,
+                cx,
+            )
         } else {
             match self.editor(window, cx) {
                 Some(editor) => {

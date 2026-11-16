@@ -26,6 +26,9 @@ tracing-subscriber.workspace = true
 serde_json.workspace = true
 # The types of GPUI Kit's editor hooks (`CompletionProvider`, `DefinitionProvider`); its version.
 lsp-types = "0.97.0"
+# The Markdown preview parses as react-markdown does before GPUI Kit's parser sees the text
+# (`file_browser_view/markdown.rs`); GPUI Kit's version.
+markdown = "1.0.0"
 futures = { workspace = true, optional = true }
 
 # The AppKit calls GPUI does not wrap (`macos.rs`). GPUI's `gpui-base` already builds these
