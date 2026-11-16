@@ -259,6 +259,7 @@ impl SessionInfoView {
             header = header.child(
                 button("log", if expanded { "Hide" } else { "Log" }, secondary)
                     .hover(move |d| d.text_color(primary))
+                    .tooltip(crate::ui::title_tooltip(if expanded { "Hide output" } else { "Show output" }))
                     .on_click(cx.listener(move |view, _, _, cx| {
                         view.info.update(cx, |info, cx| info.toggle_forward_log(&toggle, cx));
                     })),
