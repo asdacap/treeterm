@@ -118,7 +118,16 @@ pub fn favourites(view: &ReviewView, changed: &[ListedFile], cx: &mut Context<Re
                     .child(crate::ui::icon(IconName::StarFill, 12., star))
                     .child(div().flex_1().min_w_0().truncate().child(name))
                     .when(in_diff, |d| {
-                        d.child(div().ml_auto().flex_shrink_0().text_size(px(10.)).text_color(secondary).child("CHANGED"))
+                        d.child(
+                            div()
+                                .id("changed")
+                                .ml_auto()
+                                .flex_shrink_0()
+                                .text_size(px(10.))
+                                .text_color(secondary)
+                                .child("CHANGED")
+                                .tooltip(title("Changed in this view — jumps to the diff")),
+                        )
                     })
                     // `title={file.relativePath}`: two favourites with one name told apart.
                     .tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(tooltip.clone()).build(window, cx))

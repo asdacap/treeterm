@@ -231,6 +231,11 @@ impl ReviewView {
             Some(base) => base.clone().into(),
             None => "Pick base branch".into(),
         };
+        // The only place a base cut short shows in full, with the parent's.
+        let tip: SharedString = match (overridden, &current, &header.parent_branch) {
+            (true, Some(base), Some(default)) => format!("Base override: {base} (default: {default}). Click to change.").into(),
+            _ => "Change base branch or commit for review".into(),
+        };
         let empty = current.is_none();
         let button = branch_pill(cx)
             .id("review-base-selector")
@@ -245,6 +250,7 @@ impl ReviewView {
             .hover(|d| d.bg(rgba(0x0078d440)))
             .child(label)
             .child(plain_icon(IconName::ChevronDown, 12.))
+            .tooltip(title(tip))
             .on_click(cx.listener(|view, _: &ClickEvent, window, cx| view.toggle_base_picker(window, cx)));
         let mut selector = div().relative().child(button);
         if self.base_picker.is_some() {
@@ -351,6 +357,8 @@ impl ReviewView {
                             .flex()
                             .child("Compare against commit/ref: ")
                             .child(div().text_color(accent).child(query.clone()))
+                            // The item cuts a long ref short.
+                            .tooltip(title(format!("Compare against {query}")))
                             .on_click(cx.listener(move |view, _: &ClickEvent, _, cx| view.choose_base(Some(custom.clone()), cx))),
                     );
                 }
@@ -434,10 +442,12 @@ impl ReviewView {
                         .hover(move |d| d.bg(hover))
                         .on_click(cx.listener(|view, _: &ClickEvent, _, cx| view.model.update(cx, |m, cx| m.refresh(cx))))
                 })
-                .child(if refreshing { spinner(14., primary) } else { plain_icon(IconName::RefreshCw, 14.).into_any_element() }),
+                .child(if refreshing { spinner(14., primary) } else { plain_icon(IconName::RefreshCw, 14.).into_any_element() })
+                .tooltip(title("Refresh changes")),
         );
         let prompt_commit = (has_uncommitted && header.harness).then(|| {
             action_button("review-prompt-commit", rgb(0x6366f1).into(), rgb(0x7c7ff7).into(), white, idle)
+                .tooltip(title("Send commit command to the AI harness"))
                 .child("Prompt Commit")
                 .when(idle, |d| d.on_click(cx.listener(|view, _: &ClickEvent, _, cx| view.model.update(cx, |m, cx| m.prompt_commit(cx)))))
         });
@@ -458,6 +468,7 @@ impl ReviewView {
                     .children(prompt_commit)
                     .child(
                         action_button("review-close-and-clean", rgb(0x0066cc).into(), rgb(0x0077ee).into(), white, idle)
+                            .tooltip(title("Remove worktree but keep the branch"))
                             // `.btn-spinner`: 12px, 6px before the label.
                             .when(removing, |d| d.child(div().mr(px(6.)).child(spinner(12., white))))
                             .child(if removing { "Closing..." } else { "Close and Clean" })
@@ -477,6 +488,7 @@ impl ReviewView {
                     .when(has_conflicts && parent.is_some(), |d| {
                         d.child(
                             action_button("review-prompt-rebase", violet.0, violet.1, white, idle)
+                                .tooltip(title("Send rebase command to the AI harness"))
                                 .child("Prompt Rebase")
                                 .when(idle, |d| {
                                     d.on_click(cx.listener(|view, _: &ClickEvent, _, cx| view.model.update(cx, |m, cx| m.prompt_rebase(cx))))
@@ -523,7 +535,10 @@ impl ReviewView {
         let blue_hover: gpui_kit::Hsla = rgb(0x006cbf).into();
         // Only the plain merge is on the button; the others are in the closed menu.
         let plain_merge = merging.is_some_and(|m| !m.squash && m.after == AfterMerge::Remove);
+        // Each merge says what it does, or why none can run.
+        let tip = move |what: &'static str| title(if has_conflicts { "Cannot merge: resolve conflicts first" } else { what });
         let main = action_button("review-merge", accent, blue_hover, white, enabled)
+            .tooltip(tip("Merge changes into parent branch"))
             .rounded_r(px(0.))
             // `.btn-spinner`: 12px, 6px before the label.
             .when(plain_merge, |d| d.child(div().mr(px(6.)).child(spinner(12., white))))
@@ -537,6 +552,7 @@ impl ReviewView {
             .border_l_1()
             .border_color(rgba(0xffffff4d))
             .child(plain_icon(IconName::ChevronDown, 14.))
+            .tooltip(title("More merge options"))
             .when(enabled, |d| {
                 d.on_click(cx.listener(|view, _: &ClickEvent, _, cx| {
                     view.merge_menu = !view.merge_menu;
@@ -548,7 +564,7 @@ impl ReviewView {
             let suffix = if has_conflicts { " (has conflicts)" } else { "" };
             // `.merge-dropdown-item:disabled`: conflicts found or something started while the
             // menu was open.
-            let item = |id: &'static str, label: &'static str, squash: bool, after: AfterMerge, cx: &mut Context<Self>| {
+            let item = |id: &'static str, label: &'static str, what: &'static str, squash: bool, after: AfterMerge, cx: &mut Context<Self>| {
                 div()
                     .id(id)
                     .w_full()
@@ -558,6 +574,7 @@ impl ReviewView {
                     .text_color(primary)
                     .whitespace_nowrap()
                     .child(format!("{label}{suffix}"))
+                    .tooltip(tip(what))
                     .when(!enabled, |d| d.opacity(0.5))
                     .when(enabled, |d| {
                         d.cursor_pointer().hover(move |d| d.bg(hover)).on_click(cx.listener(move |view, _: &ClickEvent, _, cx| {
@@ -576,9 +593,9 @@ impl ReviewView {
                 .rounded(px(4.))
                 .shadow_lg()
                 .line_height(gpui_kit::relative(1.2))
-                .child(item("merge-squash", "Squash Merge", true, AfterMerge::Remove, cx))
-                .child(item("merge-keep", "Merge and Keep", false, AfterMerge::Keep, cx))
-                .child(item("merge-squash-keep", "Squash Merge and Keep", true, AfterMerge::Keep, cx))
+                .child(item("merge-squash", "Squash Merge", "Squash all commits into one", true, AfterMerge::Remove, cx))
+                .child(item("merge-keep", "Merge and Keep", "Merge into parent but keep this workspace", false, AfterMerge::Keep, cx))
+                .child(item("merge-squash-keep", "Squash Merge and Keep", "Squash merge into parent but keep this workspace", true, AfterMerge::Keep, cx))
                 .on_mouse_down_out(cx.listener(|view, _, _, cx| {
                     view.merge_menu = false;
                     cx.notify();
@@ -1183,6 +1200,7 @@ impl ReviewView {
                         .cursor_pointer()
                         .hover(move |d| d.bg(hover).text_color(primary))
                         .child("\u{2715}")
+                        .tooltip(title("Clear filter"))
                         .on_click(cx.listener(move |view, _: &ClickEvent, window, cx| {
                             clear.update(cx, |input, cx| input.set_value("", window, cx));
                             view.query.clear();
