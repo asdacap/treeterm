@@ -105,7 +105,7 @@ pub fn toggle(
     on: bool,
     label: &'static str,
     on_click: impl Fn(bool, &mut Window, &mut App) + 'static,
-) -> Stateful<Div> {
+) -> StatusToggle {
     toggle_owned(id, on, label, on_click)
 }
 
@@ -115,36 +115,70 @@ pub fn toggle_owned(
     on: bool,
     label: impl Into<gpui_kit::SharedString>,
     on_click: impl Fn(bool, &mut Window, &mut App) + 'static,
-) -> Stateful<Div> {
-    let label: gpui_kit::SharedString = label.into();
-    div()
-        .id(id)
-        .flex()
-        .flex_shrink_0()
-        .items_center()
-        .gap(px(6.))
-        .cursor_pointer()
-        .text_size(px(SMALL))
-        .text_color(rgb(0x999999))
-        .child(
-            div()
-                .relative()
-                .w(px(28.))
-                .h(px(14.))
-                .rounded(px(7.))
-                .bg(rgb(if on { 0x0dbc79 } else { 0x555555 }))
-                .child(
+) -> StatusToggle {
+    StatusToggle { id: id.into(), on, label: label.into(), on_click: Box::new(on_click) }
+}
+
+/// What a [`StatusToggle`] does when clicked, given the state it switches to.
+type OnToggle = dyn Fn(bool, &mut Window, &mut App);
+
+/// `.terminal-toggle` ([`toggle`]). Switching it slides the knob and blends the track's
+/// colour over 0.2s with CSS's default `ease` (`transition: background 0.2s` on the slider,
+/// `transition: transform 0.2s` on its knob); it is drawn at rest when it first shows.
+#[derive(IntoElement)]
+pub struct StatusToggle {
+    id: ElementId,
+    on: bool,
+    label: gpui_kit::SharedString,
+    on_click: Box<OnToggle>,
+}
+
+/// The `.terminal-toggle-slider` track off (`#555`) and on (`#0dbc79`).
+const TOGGLE_OFF: u32 = 0x555555;
+const TOGGLE_ON: u32 = 0x0dbc79;
+
+/// The toggle drawn `on_ness` of the way from off (0) to on (1): the track's colour, blended in
+/// sRGB as CSS transitions blend colours, and the knob's left edge (2px off, moved 14px on).
+fn toggle_at(on_ness: f32) -> (gpui_kit::Rgba, f32) {
+    let (off, on) = (rgb(TOGGLE_OFF), rgb(TOGGLE_ON));
+    let mix = |from: f32, to: f32| from * (1. - on_ness) + to * on_ness;
+    let track = gpui_kit::Rgba { r: mix(off.r, on.r), g: mix(off.g, on.g), b: mix(off.b, on.b), a: mix(off.a, on.a) };
+    (track, 2. + 14. * on_ness)
+}
+
+impl RenderOnce for StatusToggle {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        use gpui_kit::base::motion::{Easing, Transition, transition};
+        let target = if self.on { 1. } else { 0. };
+        let policy = Transition::new(std::time::Duration::from_millis(200)).easing(Easing::Ease);
+        let on_ness = transition((self.id.clone(), "slide"), target, policy, window, cx);
+        let (track, knob_left) = toggle_at(on_ness);
+        let knob = self.id.clone();
+        let (on, on_click) = (self.on, self.on_click);
+        div()
+            .id(self.id)
+            .flex()
+            .flex_shrink_0()
+            .items_center()
+            .gap(px(6.))
+            .cursor_pointer()
+            .text_size(px(SMALL))
+            .text_color(rgb(0x999999))
+            .child(
+                div().relative().w(px(28.)).h(px(14.)).rounded(px(7.)).bg(track).child(
                     div()
+                        .debug_selector(move || format!("{knob}-knob"))
                         .absolute()
                         .top(px(2.))
-                        .left(px(if on { 16. } else { 2. }))
+                        .left(px(knob_left))
                         .size(px(10.))
                         .rounded_full()
                         .bg(rgb(0xcccccc)),
                 ),
-        )
-        .child(div().whitespace_nowrap().child(label))
-        .on_click(move |_: &ClickEvent, window, cx| on_click(!on, window, cx))
+            )
+            .child(div().whitespace_nowrap().child(self.label))
+            .on_click(move |_: &ClickEvent, window, cx| on_click(!on, window, cx))
+    }
 }
 
 /// A styled element usable as a dropdown trigger (`dropdown_menu` needs `Selectable`), so
@@ -1921,6 +1955,87 @@ mod tests {
         cx.run_until_parked();
         cx.update(|window, cx| window.draw(cx).clear(cx));
         cx.run_until_parked();
+    }
+
+    /// A lone status-bar [`toggle`] at the window's top left, switched by clicking it.
+    struct ToggleHost {
+        on: bool,
+    }
+
+    impl Render for ToggleHost {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            let host = cx.entity();
+            div().child(toggle("switch", self.on, "Idle detector", move |on, _, cx| {
+                host.update(cx, |host, cx| {
+                    host.on = on;
+                    cx.notify();
+                });
+            }))
+        }
+    }
+
+    fn toggle_window(on: bool, cx: &mut TestAppContext) -> &mut VisualTestContext {
+        cx.update(gpui_kit::init);
+        let cx = cx.add_window_view(move |_, _| ToggleHost { on }).1;
+        draw(cx);
+        cx
+    }
+
+    /// The knob's left edge, from the track's (which is the window's).
+    fn knob_left(cx: &mut VisualTestContext) -> f32 {
+        f32::from(cx.debug_bounds("switch-knob").expect("the knob is drawn").origin.x)
+    }
+
+    /// `after` later, the frame the toggle asked for: whether it asked for one, and where the
+    /// knob is then.
+    fn next_frame(after: std::time::Duration, cx: &mut VisualTestContext) -> (bool, f32) {
+        cx.executor().advance_clock(after);
+        let asked = cx.update(|window, cx| window.simulate_next_frame(cx)) > 0;
+        draw(cx);
+        (asked, knob_left(cx))
+    }
+
+    /// Clicking the toggle slides its knob from 2px to 16px over 0.2s, eased (most of the way
+    /// by half time), and it stops asking for frames once there; switching back slides it
+    /// back.
+    #[gpui_kit::test]
+    fn a_toggle_slides_its_knob_over_a_fifth_of_a_second(cx: &mut TestAppContext) {
+        let ms = std::time::Duration::from_millis;
+        let cx = toggle_window(false, cx);
+        assert_eq!(knob_left(cx), 2.);
+
+        let knob = cx.debug_bounds("switch-knob").expect("the knob is drawn");
+        cx.simulate_click(knob.center(), gpui_kit::Modifiers::none());
+        draw(cx);
+        assert_eq!(knob_left(cx), 2., "it starts where it was");
+        let (asked, mid) = next_frame(ms(100), cx);
+        assert!(asked);
+        assert!((12. ..15.).contains(&mid), "eased past the middle at half time: {mid}");
+        assert_eq!(next_frame(ms(100), cx), (true, 16.));
+        assert_eq!(next_frame(ms(16), cx), (false, 16.), "at rest");
+
+        cx.simulate_click(knob.center(), gpui_kit::Modifiers::none());
+        draw(cx);
+        assert_eq!(next_frame(ms(200), cx), (true, 2.));
+        assert_eq!(next_frame(ms(16), cx), (false, 2.), "at rest");
+    }
+
+    /// A toggle that shows already on (a tab switched to) is drawn at rest, not sliding in.
+    #[gpui_kit::test]
+    fn a_toggle_first_drawn_on_is_at_rest(cx: &mut TestAppContext) {
+        let cx = toggle_window(true, cx);
+        assert_eq!(knob_left(cx), 16.);
+        assert_eq!(next_frame(std::time::Duration::from_millis(16), cx), (false, 16.));
+    }
+
+    /// The track is `#555` off and `#0dbc79` on, and blends between them in sRGB.
+    #[test]
+    fn a_toggle_track_blends_its_colours_in_srgb() {
+        assert_eq!(toggle_at(0.), (rgb(0x555555), 2.));
+        assert_eq!(toggle_at(1.), (rgb(0x0dbc79), 16.));
+        let (track, knob) = toggle_at(0.5);
+        let channels = [track.r, track.g, track.b, track.a].map(|c| (c * 255.).round());
+        assert_eq!((channels, knob), ([49., 137., 103., 255.], 9.));
     }
 
     struct Model;
