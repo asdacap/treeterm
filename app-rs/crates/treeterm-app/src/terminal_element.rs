@@ -697,16 +697,51 @@ impl Element for TerminalElement {
                 ));
             }
             if let Some(strip) = frame.unused_strip {
-                let mut shade = frame.border;
-                shade.a = 0.25;
-                window.paint_quad(fill(strip, shade));
-                window.paint_quad(fill(
-                    Bounds::new(strip.origin, size(px(1.), strip.size.height)),
-                    frame.border,
-                ));
+                paint_unused_strip(strip, frame.border, window);
             }
         });
     }
+}
+
+/// `.terminal-unused-width`: a 1px dashed left border and `repeating-linear-gradient(-45deg,
+/// transparent 0 6px, border 6px 7px)` (1px stripes rising to the right, 7px apart), all in
+/// the border colour at the strip's 35% opacity.
+fn paint_unused_strip(strip: Bounds<Pixels>, border: Hsla, window: &mut Window) {
+    let shade = border.opacity(0.35);
+    // GPUI's slash pattern is in device pixels and measures its width and interval along
+    // the x axis, √2 times the 45° stripes' own thickness and spacing.
+    let scale = window.scale_factor();
+    let stripe = std::f32::consts::SQRT_2 * scale;
+    window.paint_quad(fill(strip, gpui_kit::pattern_slash(shade, stripe, 6. * stripe)));
+    for top in dash_offsets(f32::from(strip.size.height)) {
+        let dash = Bounds::new(
+            point(strip.origin.x, strip.origin.y + px(top)),
+            size(px(1.), px(DASH.min(f32::from(strip.size.height) - top))),
+        );
+        window.paint_quad(fill(dash, shade));
+    }
+}
+
+/// Chromium's dash for a 1px `dashed` border (`StrokeData::DashLengthRatio`: 3 × width).
+const DASH: f32 = 3.;
+/// Chromium's gap for a 1px `dashed` border (`StrokeData::DashGapRatio`: 2 × width).
+const DASH_GAP: f32 = 2.;
+
+/// Where the dashes of a dashed border `length` px long start. Chromium stretches or shrinks
+/// the gap so that a dash ends the line (`SelectBestDashGap`), keeping whichever whole
+/// number of dashes needs the gap closest to the usual one.
+fn dash_offsets(length: f32) -> impl Iterator<Item = f32> {
+    let fewer = ((length + DASH_GAP) / (DASH + DASH_GAP)).floor();
+    let gap_for = |dashes: f32| (length - dashes * DASH) / (dashes - 1.);
+    let gap = if fewer < 2. {
+        DASH_GAP
+    } else {
+        let (shrunk, stretched) = (gap_for(fewer + 1.), gap_for(fewer));
+        if shrunk <= 0. || (stretched - DASH_GAP).abs() < (shrunk - DASH_GAP).abs() { stretched } else { shrunk }
+    };
+    (0..)
+        .map(move |index| index as f32 * (DASH + gap))
+        .take_while(move |top| *top < length)
 }
 
 fn paint_cursor(cursor: &CursorPaint, line_height: Pixels, window: &mut Window, cx: &mut App) {
@@ -764,5 +799,22 @@ mod tests {
         assert_eq!(GEOMETRY.overshoot(px(50.)), 0.);
         assert_eq!(GEOMETRY.overshoot(px(130.)), 0., "the bottom edge is over the rows");
         assert_eq!(GEOMETRY.overshoot(px(133.)), 3.);
+    }
+
+    #[test]
+    fn dashes_are_spaced_so_that_one_ends_the_border() {
+        let dashes = |length: f32| dash_offsets(length).collect::<Vec<_>>();
+        // 23px fits five dashes 2px apart exactly.
+        assert_eq!(dashes(23.), [0., 5., 10., 15., 20.]);
+        // 200px: 40 dashes 80/39px apart (as Chrome draws it) beat 41 dashes 77/40px apart.
+        let tall = dashes(200.);
+        assert_eq!(tall.len(), 40);
+        assert!((tall[39] + DASH - 200.).abs() < 1e-3, "the last dash ends at the bottom");
+        // 27px: 6 dashes 1.8px apart beat 5 dashes 3px apart.
+        let shrunk = dashes(27.);
+        assert_eq!(shrunk.len(), 6);
+        assert!((shrunk[5] + DASH - 27.).abs() < 1e-3);
+        // Too short for two dashes: one, cut at the end.
+        assert_eq!(dashes(4.), [0.]);
     }
 }
