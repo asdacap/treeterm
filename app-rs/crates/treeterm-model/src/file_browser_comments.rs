@@ -1,6 +1,7 @@
 //! Review comments on the Files tab's file (the comment half of `FilesystemBrowser.tsx`):
 //! a click on a line number starts one, `HEAD` (read when the tab opens, marking comments
-//! outdated whose line moved since) anchors it, and the file's comments show with it.
+//! outdated whose line moved since; none outside git or before the first commit) anchors it,
+//! and the file's comments show with it.
 //!
 //! New comments get the workspace-relative path the Review tab writes, so they show in both
 //! tabs and can be pushed to GitHub. Electron's Files tab writes the absolute path; those
@@ -24,6 +25,8 @@ pub enum Anchor {
     NotInRepo,
     Reading,
     Head(String),
+    /// `HEAD` could not be read (a repository with no commits yet): comments have no commit
+    /// (`null`), as outside git.
     Failed(String),
 }
 
@@ -159,15 +162,10 @@ impl FileBrowser {
             return;
         }
         let commit = match &self.comments.anchor {
-            Anchor::NotInRepo => CommitAnchor::NotInRepo,
+            Anchor::NotInRepo | Anchor::Failed(_) => CommitAnchor::NotInRepo,
             Anchor::Head(hash) => CommitAnchor::Head(hash.clone()),
             Anchor::Reading => {
                 self.comments.adding = GitOp::Failed("Still reading HEAD; try again".to_owned());
-                cx.notify();
-                return;
-            }
-            Anchor::Failed(error) => {
-                self.comments.adding = GitOp::Failed(format!("Cannot comment without a commit: {error}"));
                 cx.notify();
                 return;
             }

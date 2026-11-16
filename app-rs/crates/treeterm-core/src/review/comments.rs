@@ -34,7 +34,8 @@ impl Side {
 /// `commitHash`: `HEAD` when the comment was made.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum CommitAnchor {
-    /// The file is not in a git repository (`null`).
+    /// No commit (`null`): the file is not in a git repository, or `HEAD` could not be read
+    /// (a repository with no commits yet).
     NotInRepo,
     Head(String),
 }
@@ -358,8 +359,8 @@ impl<D: ReviewCommentDeps> ReviewCommentStore<D> {
         Ok(self.read()?.comments())
     }
 
-    /// Only the modified side is the working-tree file that blame describes, and only inside
-    /// a repository; other comments are untracked.
+    /// Only the modified side is the working-tree file that blame describes, and only with a
+    /// commit; other comments are untracked.
     pub async fn add_review_comment(
         &self,
         comment: NewReviewComment,

@@ -38,6 +38,13 @@ struct TempRepo {
 
 impl TempRepo {
     fn new(h: &Harness) -> Self {
+        let repo = Self::without_commits(h);
+        repo.git(&["commit", "-q", "--allow-empty", "-m", "init"]);
+        repo
+    }
+
+    /// A repo whose `HEAD` cannot be read yet.
+    fn without_commits(h: &Harness) -> Self {
         let name = format!("tt-test-{}", uuid::Uuid::new_v4().simple());
         let path = h.daemon.root().join(&name);
         std::fs::create_dir_all(&path).unwrap();
@@ -48,7 +55,6 @@ impl TempRepo {
         repo.git(&["init", "-q", "-b", "main"]);
         repo.git(&["config", "user.email", "t@t"]);
         repo.git(&["config", "user.name", "t"]);
-        repo.git(&["commit", "-q", "--allow-empty", "-m", "init"]);
         repo
     }
 
@@ -1159,6 +1165,29 @@ fn files_comments_are_made_on_a_line_shown_with_the_file_and_go_outdated(cx: &mu
     assert_eq!(browser.read_with(cx, |b, _| b.comment_notice().clone()), Notice::Clear);
     let left: Vec<String> = browser.read_with(cx, |b, cx| b.file_comments(cx).unwrap()).into_iter().map(|c| c.id).collect();
     assert_eq!(left, vec!["absolute".to_owned()]);
+}
+
+#[gpui_kit::test]
+fn a_repo_without_commits_takes_files_comments_without_a_commit(cx: &mut TestAppContext) {
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let repo = TempRepo::without_commits(&h);
+    repo.write("a.txt", "one\ntwo\n");
+    let (_store, workspace, browser) = open_browser(cx, &h, &repo, "a.txt");
+    wait_files(cx, &browser, "HEAD unreadable", |b, _| matches!(b.anchor(), Anchor::Failed(_)));
+
+    // Saved with no commit, its line untracked (Electron's `currentCommitHash` stays null).
+    browser.update(cx, |b, cx| b.start_comment(2, cx));
+    browser.update(cx, |b, cx| b.submit_comment("before the first commit", cx));
+    wait_files(cx, &browser, "comment saved", |b, _| b.comment_draft().is_none());
+    assert_eq!(browser.read_with(cx, |b, _| b.adding_comment().clone()), GitOp::Idle);
+    let comments = browser.read_with(cx, |b, cx| b.file_comments(cx).unwrap());
+    assert_eq!(comments.len(), 1);
+    let comment = comments[0].clone();
+    assert_eq!((&comment.commit, &comment.line), (&CommitAnchor::NotInRepo, &LineAnchor::Untracked));
+    let stored = metadata(cx, &workspace, "reviewComments").unwrap();
+    assert_eq!((&stored[0]["commitHash"], &stored[0]["lineCommitHash"]), (&serde_json::Value::Null, &serde_json::Value::Null));
 }
 
 // ---- review ----------------------------------------------------------------------------
