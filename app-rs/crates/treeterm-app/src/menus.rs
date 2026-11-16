@@ -8,8 +8,9 @@
 
 use std::rc::Rc;
 
-use gpui_kit::component::GlobalState;
+use gpui_kit::component::input::{self, AnyInputState};
 use gpui_kit::component::menu::AppMenuBar;
+use gpui_kit::component::{GlobalState, WindowExt as _};
 use gpui_kit::prelude::*;
 use gpui_kit::{
     Action, AnyElement, AnyWindowHandle, App, Context, Entity, KeyBinding, Menu, MenuItem,
@@ -44,7 +45,9 @@ actions!(
         ZoomOut,
         ZoomWindow,
         BringAllToFront,
-        LearnMore
+        LearnMore,
+        PasteAndMatchStyle,
+        DeleteSelection
     ]
 );
 
@@ -52,12 +55,31 @@ actions!(
 /// GPUI runs bindings before a focused terminal sees the key, so the terminal takes back
 /// those it encodes (`terminal_view::keep_terminal_keys`), as xterm.js consumed them in
 /// Electron.
-pub const ACCELERATORS: &[&str] =
-    &["ctrl-,", "ctrl-q", "ctrl-shift-q", "ctrl-m", "ctrl-w", "ctrl-0", "ctrl-=", "ctrl-+", "ctrl--", "f11"];
+pub const ACCELERATORS: &[&str] = &[
+    "ctrl-,",
+    "ctrl-q",
+    "ctrl-shift-q",
+    "ctrl-m",
+    "ctrl-w",
+    "ctrl-0",
+    "ctrl-=",
+    "ctrl-+",
+    "ctrl--",
+    "f11",
+    "ctrl-shift-z",
+];
+
+/// GPUI Kit's text inputs' key context.
+const INPUT_CONTEXT: &str = "Input";
 
 /// The menu shortcuts (Electron's role accelerators). Zoom In is Electron's Cmd/Ctrl+Plus
 /// (Shift+=), and also Cmd/Ctrl+= as in Chromium. Its menu item shows Plus: the macOS menu
 /// bar shows an action's first binding, GPUI Kit's menu bar (off macOS) its last.
+///
+/// Edit's Undo, Redo, Cut, Copy, Paste and Select All keep GPUI Kit's keys, which are
+/// Electron's, in the inputs and editors that handle them (a terminal binds its own, see
+/// `terminal_view::edit_keys`). Redo off macOS is Electron's Linux Ctrl+Shift+Z, besides the
+/// Kit's Ctrl+Y (Windows'). Edit > Delete has no shortcut, as in Electron.
 fn key_bindings(mac: bool) -> Vec<KeyBinding> {
     if mac {
         vec![
@@ -73,6 +95,7 @@ fn key_bindings(mac: bool) -> Vec<KeyBinding> {
             KeyBinding::new("cmd--", ZoomOut, None),
             KeyBinding::new("ctrl-cmd-f", ToggleFullScreen, None),
             KeyBinding::new("cmd-m", Minimize, None),
+            KeyBinding::new("cmd-alt-shift-v", PasteAndMatchStyle, None),
         ]
     } else {
         vec![
@@ -86,6 +109,7 @@ fn key_bindings(mac: bool) -> Vec<KeyBinding> {
             KeyBinding::new("ctrl-+", ZoomIn, None),
             KeyBinding::new("ctrl--", ZoomOut, None),
             KeyBinding::new("f11", ToggleFullScreen, None),
+            KeyBinding::new("ctrl-shift-z", input::Redo, Some(INPUT_CONTEXT)),
         ]
     }
 }
@@ -99,14 +123,34 @@ fn bind_keys(mac: bool, terminal: KeyOptions, cx: &mut App) {
     }
 }
 
+/// Edit: Electron's edit roles, which act on whatever has focus. Its items run GPUI Kit's edit
+/// actions, which its inputs and editors, the diff, selectable text (Copy) and a terminal
+/// (Copy, Paste, Select All) handle; on macOS GPUI greys out an item nothing focused handles,
+/// and AppKit sends Cut, Copy, Paste and Select All to a focused web view itself.
+fn edit_menu(mac: bool) -> Menu {
+    let mut items = vec![
+        MenuItem::os_action("Undo", input::Undo, OsAction::Undo),
+        MenuItem::os_action("Redo", input::Redo, OsAction::Redo),
+        MenuItem::separator(),
+        MenuItem::os_action("Cut", input::Cut, OsAction::Cut),
+        MenuItem::os_action("Copy", input::Copy, OsAction::Copy),
+        MenuItem::os_action("Paste", input::Paste, OsAction::Paste),
+    ];
+    if mac {
+        items.push(MenuItem::action("Paste and Match Style", PasteAndMatchStyle));
+        items.push(MenuItem::action("Delete", DeleteSelection));
+    } else {
+        items.push(MenuItem::action("Delete", DeleteSelection));
+        items.push(MenuItem::separator());
+    }
+    items.push(MenuItem::os_action("Select All", input::SelectAll, OsAction::SelectAll));
+    Menu::new("Edit").items(items)
+}
+
 /// The menu bar: Electron's template, with its role labels. The product is "TreeTerm"
 /// where Electron shows `app.name`.
 fn menus(mac: bool) -> Vec<Menu> {
-    let edit = Menu::new("Edit").items([
-        MenuItem::os_action("Copy", terminal_view::Copy, OsAction::Copy),
-        MenuItem::os_action("Paste", terminal_view::Paste, OsAction::Paste),
-        MenuItem::os_action("Select All", terminal_view::SelectAll, OsAction::SelectAll),
-    ]);
+    let edit = edit_menu(mac);
     let view = Menu::new("View").items([
         MenuItem::action("Actual Size", ResetZoom),
         MenuItem::action("Zoom In", ZoomIn),
@@ -205,6 +249,42 @@ fn install_zoom(zoom: ZoomStore, cx: &mut App) {
     cx.on_action(|_: &ZoomOut, cx| cx.update_global::<ZoomStore, _>(|zoom, _| zoom.zoom_out()));
 }
 
+/// Edit > Paste and Match Style and Delete, which GPUI Kit has no action for: they send the
+/// Kit's Paste, or Backspace, to whatever has focus in `window`. All the app's text is plain,
+/// so matching the style pastes as Paste does (into a terminal too). Delete removes the
+/// selected text, as Chromium's does: with nothing selected it leaves the text as it is.
+/// Global listeners keep both enabled, as Electron's are.
+fn route_edit(window: AnyWindowHandle, cx: &mut App) {
+    cx.on_action(move |_: &PasteAndMatchStyle, cx| {
+        in_window(window, cx, |window, cx| window.dispatch_action(Box::new(input::Paste), cx));
+    });
+    cx.on_action(move |_: &DeleteSelection, cx| {
+        in_window(window, cx, |window, cx| {
+            if has_selected_text(window, cx) {
+                window.dispatch_action(Box::new(input::Backspace), cx);
+            }
+        });
+    });
+}
+
+/// Run `act` on `window` once GPUI, which holds the window while it dispatches an action to
+/// it, lets go. Once the window has closed nothing has focus to act on.
+fn in_window(window: AnyWindowHandle, cx: &mut App, act: impl FnOnce(&mut Window, &mut App) + 'static) {
+    cx.defer(move |cx| match window.update(cx, |_, window, cx| act(window, cx)) {
+        Ok(()) | Err(_) => {}
+    });
+}
+
+/// Whether the focused input, text area or editor has text selected.
+fn has_selected_text(window: &mut Window, cx: &mut App) -> bool {
+    match window.focused_input(cx) {
+        Some(AnyInputState::Input(state)) => !state.read(cx).selected_range().is_empty(),
+        Some(AnyInputState::Textarea(state)) => !state.read(cx).selected_range().is_empty(),
+        Some(AnyInputState::Editor(state)) => !state.read(cx).selected_range().is_empty(),
+        Some(AnyInputState::Otp(_)) | None => false,
+    }
+}
+
 /// The menus, for the system menu bar and for GPUI Kit's `AppMenuBar`: off macOS GPUI only
 /// stores them, and the window draws them (`in_window_bar`).
 fn set_menus(mac: bool, cx: &mut App) {
@@ -247,6 +327,7 @@ pub fn route_to_window(window: AnyWindowHandle, view: WeakEntity<AppView>, store
     route::<Minimize, _>(window, view.clone(), |_, window, _| window.minimize_window(), |_| {}, cx);
     route::<ZoomWindow, _>(window, view.clone(), |_, window, _| window.zoom_window(), |_| {}, cx);
     route::<ToggleFullScreen, _>(window, view, |_, window, _| window.toggle_fullscreen(), |_| {}, cx);
+    route_edit(window, cx);
 }
 
 /// Run `A` on `view` in `window`, or `no_window` once the window is gone. A global listener
@@ -274,7 +355,6 @@ fn route<A: Action, V: 'static>(
 
 #[cfg(test)]
 mod tests {
-    use gpui_kit::component::WindowExt as _;
     use gpui_kit::{
         IntoElement, OperatingSystem, OwnedMenu, OwnedMenuItem, Render,
         TestAppContext, VisualTestContext, WindowOptions, div,
@@ -306,10 +386,27 @@ mod tests {
         (name.to_owned(), items.iter().map(|item| (*item).to_owned()).collect())
     }
 
-    const EDIT: [&str; 3] = [
-        "Copy = terminal::Copy",
-        "Paste = terminal::Paste",
-        "Select All = terminal::SelectAll",
+    const MAC_EDIT: [&str; 9] = [
+        "Undo = input::Undo",
+        "Redo = input::Redo",
+        "-",
+        "Cut = input::Cut",
+        "Copy = input::Copy",
+        "Paste = input::Paste",
+        "Paste and Match Style = treeterm::PasteAndMatchStyle",
+        "Delete = treeterm::DeleteSelection",
+        "Select All = input::SelectAll",
+    ];
+    const LINUX_EDIT: [&str; 9] = [
+        "Undo = input::Undo",
+        "Redo = input::Redo",
+        "-",
+        "Cut = input::Cut",
+        "Copy = input::Copy",
+        "Paste = input::Paste",
+        "Delete = treeterm::DeleteSelection",
+        "-",
+        "Select All = input::SelectAll",
     ];
     const VIEW: [&str; 7] = [
         "Actual Size = treeterm::ResetZoom",
@@ -345,7 +442,7 @@ mod tests {
                 "File",
                 &["Close Window = treeterm::CloseWindow", "-", "Exit and Kill Daemon = treeterm::QuitAndKillDaemon"],
             ),
-            menu("Edit", &EDIT),
+            menu("Edit", &MAC_EDIT),
             menu("View", &VIEW),
             menu(
                 "Window",
@@ -376,7 +473,7 @@ mod tests {
                     "Exit and Kill Daemon = treeterm::QuitAndKillDaemon",
                 ],
             ),
-            menu("Edit", &EDIT),
+            menu("Edit", &LINUX_EDIT),
             menu("View", &VIEW),
             menu(
                 "Window",
@@ -423,6 +520,7 @@ mod tests {
                 ("cmd--", "treeterm::ZoomOut"),
                 ("ctrl-cmd-f", "treeterm::ToggleFullScreen"),
                 ("cmd-m", "treeterm::Minimize"),
+                ("alt-cmd-shift-v", "treeterm::PasteAndMatchStyle"),
             ])
         );
         assert_eq!(
@@ -438,6 +536,7 @@ mod tests {
                 ("ctrl-+", "treeterm::ZoomIn"),
                 ("ctrl--", "treeterm::ZoomOut"),
                 ("f11", "treeterm::ToggleFullScreen"),
+                ("ctrl-shift-z", "input::Redo"),
             ])
         );
         let keys: Vec<String> = shortcuts(false).into_iter().map(|(keys, _)| keys).collect();
@@ -551,7 +650,17 @@ mod tests {
                 .on_key_down(cx.listener(|terminal, event: &gpui_kit::KeyDownEvent, _, _| {
                     terminal.keys.push(event.keystroke.unparse(OperatingSystem::Linux));
                 }))
+                .on_action(cx.listener(|terminal, _: &input::Copy, _, _| terminal.commands.push("Copy")))
+                .on_action(cx.listener(|terminal, _: &input::Paste, _, _| terminal.commands.push("Paste")))
+                .on_action(cx.listener(|terminal, _: &input::SelectAll, _, _| terminal.commands.push("SelectAll")))
         }
+    }
+
+    fn terminal_window(cx: &mut App) -> (AnyWindowHandle, Entity<Terminal>) {
+        gpui_kit::open_window(WindowOptions::default(), cx, |_, cx| {
+            cx.new(|cx| Terminal { focus: cx.focus_handle(), keys: Vec::new(), commands: Vec::new() })
+        })
+        .expect("open a window")
     }
 
     #[gpui_kit::test]
@@ -562,12 +671,12 @@ mod tests {
         };
         let (window, terminal) = cx.update(|cx| {
             gpui_kit::init(cx);
+            // GPUI Kit Root's Copy key off macOS, whatever the host.
+            cx.bind_keys([KeyBinding::new("ctrl-c", input::Copy, Some("Root"))]);
+            cx.bind_keys(terminal_view::edit_keys(false));
             bind_keys(false, linux, cx);
             install_zoom(ZoomStore::in_memory(), cx);
-            gpui_kit::open_window(WindowOptions::default(), cx, |_, cx| {
-                cx.new(|cx| Terminal { focus: cx.focus_handle(), keys: Vec::new(), commands: Vec::new() })
-            })
-            .expect("open a window")
+            terminal_window(cx)
         });
         cx.update(|cx| {
             fn record<A: Action>(name: &'static str, window: AnyWindowHandle, terminal: &Entity<Terminal>, cx: &mut App) {
@@ -607,6 +716,147 @@ mod tests {
         assert_zoom_keys(cx, ["ctrl-+", "ctrl-=", "ctrl--", "ctrl-0"]);
         let keys = terminal.read_with(cx, |t, _| t.keys.clone());
         assert_eq!(keys, ["ctrl-w", "ctrl-q", "ctrl-m", "f11", "ctrl-c"], "a zoom key reached the terminal");
+
+        // Copy, Paste and Select All take Shift.
+        for keys in ["ctrl-shift-c", "ctrl-shift-v", "ctrl-shift-a"] {
+            cx.simulate_keystrokes(keys);
+        }
+        cx.run_until_parked();
+        let (keys, commands) = terminal.read_with(cx, |t, _| (t.keys.clone(), t.commands.clone()));
+        assert_eq!(commands, ["QuitAndKillDaemon", "OpenSettings", "Copy", "Paste", "SelectAll"]);
+        assert_eq!(keys, ["ctrl-w", "ctrl-q", "ctrl-m", "f11", "ctrl-c"]);
+    }
+
+    /// Edit's Copy, Paste and Select All, their keys and Paste and Match Style act on a focused
+    /// terminal; the items it has nothing for are greyed out, except Delete, which is a no-op.
+    #[gpui_kit::test]
+    fn the_edit_menu_acts_on_a_focused_terminal(cx: &mut TestAppContext) {
+        let (window, terminal) = cx.update(|cx| {
+            gpui_kit::init(cx);
+            cx.bind_keys(terminal_view::edit_keys(true));
+            bind_keys(true, KeyOptions::for_host(), cx);
+            let (window, terminal) = terminal_window(cx);
+            route_edit(window, cx);
+            (window, terminal)
+        });
+        let cx = VisualTestContext::from_window(window, cx).into_mut();
+        cx.update(|window, cx| {
+            // The menu bar asks the active window what its items can do.
+            window.activate_window();
+            let focus = terminal.read(cx).focus.clone();
+            window.focus(&focus, cx);
+        });
+        cx.run_until_parked();
+
+        for keys in ["cmd-c", "cmd-v", "cmd-a", "cmd-alt-shift-v"] {
+            cx.simulate_keystrokes(keys);
+        }
+        cx.run_until_parked();
+        let commands = terminal.read_with(cx, |t, _| t.commands.clone());
+        assert_eq!(commands, ["Copy", "Paste", "SelectAll", "Paste"]);
+
+        for action in [
+            Box::new(input::Copy) as Box<dyn Action>,
+            Box::new(input::Paste),
+            Box::new(input::SelectAll),
+            Box::new(PasteAndMatchStyle),
+            Box::new(DeleteSelection),
+        ] {
+            cx.update(|window, cx| window.dispatch_action(action, cx));
+            cx.run_until_parked();
+        }
+        let (keys, commands) = terminal.read_with(cx, |t, _| (t.keys.clone(), t.commands.clone()));
+        assert_eq!(commands, ["Copy", "Paste", "SelectAll", "Paste", "Copy", "Paste", "SelectAll", "Paste"]);
+        assert!(keys.is_empty(), "{keys:?} reached the terminal");
+
+        let available = |cx: &mut VisualTestContext, action: &dyn Action| cx.cx.update(|cx| cx.is_action_available(action));
+        assert!(!available(cx, &input::Undo) && !available(cx, &input::Redo) && !available(cx, &input::Cut));
+        assert!(available(cx, &input::Copy) && available(cx, &input::Paste) && available(cx, &input::SelectAll));
+        assert!(available(cx, &DeleteSelection) && available(cx, &PasteAndMatchStyle));
+    }
+
+    /// A focused text input.
+    struct Field(Entity<input::InputState>);
+
+    impl Render for Field {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            input::Input::new(&self.0)
+        }
+    }
+
+    /// Every Edit item acts on a focused input. Delete removes the selection, and with nothing
+    /// selected leaves the text as it is (Chromium's Delete).
+    #[gpui_kit::test]
+    fn the_edit_menu_acts_on_a_focused_input(cx: &mut TestAppContext) {
+        let (window, field) = cx.update(|cx| {
+            gpui_kit::init(cx);
+            let (window, field) = gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
+                let state = cx.new(|cx| input::InputState::new(window, cx).default_value("hello"));
+                cx.new(|_| Field(state))
+            })
+            .expect("open a window");
+            route_edit(window, cx);
+            (window, field)
+        });
+        let cx = VisualTestContext::from_window(window, cx).into_mut();
+        let state = field.read_with(cx, |field, _| field.0.clone());
+        cx.update(|window, cx| {
+            state.update(cx, |state, cx| {
+                state.focus(window, cx);
+                state.set_selected_range(5..5, cx);
+            });
+        });
+        cx.run_until_parked();
+        let menu = |cx: &mut VisualTestContext, action: &dyn Action| {
+            cx.update(|window, cx| window.dispatch_action(action.boxed_clone(), cx));
+            cx.run_until_parked();
+            state.read_with(cx, |state, _| state.value().to_string())
+        };
+
+        assert_eq!(menu(cx, &DeleteSelection), "hello", "nothing selected");
+        assert_eq!(menu(cx, &input::SelectAll), "hello");
+        assert_eq!(menu(cx, &input::Copy), "hello");
+        assert_eq!(cx.read_from_clipboard().and_then(|item| item.text()).as_deref(), Some("hello"));
+        assert_eq!(menu(cx, &DeleteSelection), "");
+        assert_eq!(menu(cx, &input::Undo), "hello");
+        assert_eq!(menu(cx, &input::Redo), "");
+        assert_eq!(menu(cx, &input::Paste), "hello");
+        assert_eq!(menu(cx, &PasteAndMatchStyle), "hellohello");
+        menu(cx, &input::SelectAll);
+        assert_eq!(menu(cx, &input::Cut), "");
+        assert_eq!(cx.read_from_clipboard().and_then(|item| item.text()).as_deref(), Some("hellohello"));
+    }
+
+    /// Redo is Electron's Ctrl+Shift+Z off macOS too, as well as GPUI Kit's Ctrl+Y.
+    #[gpui_kit::test]
+    fn redo_is_ctrl_shift_z_off_macos(cx: &mut TestAppContext) {
+        let linux = KeyOptions {
+            alt_sends_escape: true,
+            mac_word_motion: false,
+        };
+        let (window, field) = cx.update(|cx| {
+            gpui_kit::init(cx);
+            bind_keys(false, linux, cx);
+            gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
+                let state = cx.new(|cx| input::InputState::new(window, cx).default_value("hello"));
+                cx.new(|_| Field(state))
+            })
+            .expect("open a window")
+        });
+        let cx = VisualTestContext::from_window(window, cx).into_mut();
+        let state = field.read_with(cx, |field, _| field.0.clone());
+        cx.update(|window, cx| state.update(cx, |state, cx| state.focus(window, cx)));
+        cx.run_until_parked();
+        let text = |cx: &mut VisualTestContext| state.read_with(cx, |state, _| state.value().to_string());
+
+        cx.update(|window, cx| window.dispatch_action(Box::new(input::SelectAll), cx));
+        cx.update(|window, cx| window.dispatch_action(Box::new(input::Cut), cx));
+        cx.update(|window, cx| window.dispatch_action(Box::new(input::Undo), cx));
+        cx.run_until_parked();
+        assert_eq!(text(cx), "hello");
+        cx.simulate_keystrokes("ctrl-shift-z");
+        cx.run_until_parked();
+        assert_eq!(text(cx), "");
     }
 
     /// Presses Zoom In's two keys, then Zoom Out's and Actual Size's, checking the app's zoom

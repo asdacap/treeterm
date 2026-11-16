@@ -9,6 +9,7 @@ use std::ops::Range;
 use std::rc::Rc;
 use std::time::Duration;
 
+use gpui_kit::component::input;
 use gpui_kit::component::menu::ContextMenuExt as _;
 use gpui_kit::component::v_flex;
 use gpui_kit::prelude::*;
@@ -35,9 +36,6 @@ use crate::theme::colors;
 actions!(
     terminal,
     [
-        Copy,
-        Paste,
-        SelectAll,
         ScrollToTop,
         ScrollToBottom,
         RefreshStream,
@@ -56,19 +54,20 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("tab", NoAction, Some(CONTEXT)),
         KeyBinding::new("shift-tab", NoAction, Some(CONTEXT)),
     ]);
-    if cfg!(target_os = "macos") {
-        cx.bind_keys([
-            KeyBinding::new("cmd-c", Copy, Some(CONTEXT)),
-            KeyBinding::new("cmd-v", Paste, Some(CONTEXT)),
-            KeyBinding::new("cmd-a", SelectAll, Some(CONTEXT)),
-        ]);
-    } else {
-        cx.bind_keys([
-            KeyBinding::new("ctrl-shift-c", Copy, Some(CONTEXT)),
-            KeyBinding::new("ctrl-shift-v", Paste, Some(CONTEXT)),
-            KeyBinding::new("ctrl-shift-a", SelectAll, Some(CONTEXT)),
-        ]);
-    }
+    cx.bind_keys(edit_keys(cfg!(target_os = "macos")));
+}
+
+/// A focused terminal's Copy, Paste and Select All keys. They run GPUI Kit's edit actions,
+/// which Edit's menu items send to whatever has focus. Off macOS they take Shift: Ctrl+C,
+/// Ctrl+V and Ctrl+A go to the PTY.
+pub(crate) fn edit_keys(mac: bool) -> [KeyBinding; 3] {
+    let [copy, paste, select_all] =
+        if mac { ["cmd-c", "cmd-v", "cmd-a"] } else { ["ctrl-shift-c", "ctrl-shift-v", "ctrl-shift-a"] };
+    [
+        KeyBinding::new(copy, input::Copy, Some(CONTEXT)),
+        KeyBinding::new(paste, input::Paste, Some(CONTEXT)),
+        KeyBinding::new(select_all, input::SelectAll, Some(CONTEXT)),
+    ]
 }
 
 /// Give a focused terminal back the app shortcuts it encodes, from `accelerators` and GPUI
@@ -517,13 +516,13 @@ impl TerminalView {
 
     // ---- actions -----------------------------------------------------------------------
 
-    fn copy(&mut self, _: &Copy, _window: &mut Window, cx: &mut Context<Self>) {
+    fn copy(&mut self, _: &input::Copy, _window: &mut Window, cx: &mut Context<Self>) {
         if let Some(text) = self.model.read(cx).selection_text() {
             cx.write_to_clipboard(ClipboardItem::new_string(text));
         }
     }
 
-    fn paste(&mut self, _: &Paste, _window: &mut Window, cx: &mut Context<Self>) {
+    fn paste(&mut self, _: &input::Paste, _window: &mut Window, cx: &mut Context<Self>) {
         let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) else {
             return;
         };
@@ -533,7 +532,7 @@ impl TerminalView {
         self.model.update(cx, |model, cx| model.paste(&text, cx));
     }
 
-    fn select_all(&mut self, _: &SelectAll, _window: &mut Window, cx: &mut Context<Self>) {
+    fn select_all(&mut self, _: &input::SelectAll, _window: &mut Window, cx: &mut Context<Self>) {
         self.model.update(cx, |model, cx| model.select_all(cx));
     }
 
@@ -821,12 +820,12 @@ impl Render for TerminalView {
         root.context_menu(move |menu, _window, _cx| {
             let (copy, paste) = (view.clone(), view.clone());
             menu.item(crate::ui::menu_item("Copy").on_click(move |_, window, cx| {
-                match copy.update(cx, |view, cx| view.copy(&Copy, window, cx)) {
+                match copy.update(cx, |view, cx| view.copy(&input::Copy, window, cx)) {
                     Ok(()) | Err(_) => {}
                 }
             }))
             .item(crate::ui::menu_item("Paste").on_click(move |_, window, cx| {
-                match paste.update(cx, |view, cx| view.paste(&Paste, window, cx)) {
+                match paste.update(cx, |view, cx| view.paste(&input::Paste, window, cx)) {
                     Ok(()) | Err(_) => {}
                 }
             }))

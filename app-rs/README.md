@@ -102,9 +102,10 @@ Done (tested against a real in-process daemon unless noted):
   workspaces (new branch, existing branch, remote branch, existing worktree, quick fork; live
   git output), merge/squash-merge (keep or remove), remove with or without git cleanup.
 - **Keys and settings (M3):** prefix mode + overlay, workspace focus, Cmd/Ctrl+1–9, app menu
-  (Electron's template: About, Services, Hide, Close Window, Actual Size, Zoom In, Zoom Out
-  (terminal text; Cmd/Ctrl+= zooms in too; the level is kept in `zoom.json` and restored at
-  the next start, as Electron's), Toggle Full Screen, Reset Input, Minimize, Zoom,
+  (Electron's template: About, Services, Hide, Close Window, Edit's Undo, Redo, Cut, Copy,
+  Paste, Paste and Match Style, Delete and Select All on whatever has focus, Actual Size,
+  Zoom In, Zoom Out (terminal text; Cmd/Ctrl+= zooms in too; the level is kept in
+  `zoom.json` and restored at the next start, as Electron's), Toggle Full Screen, Reset Input, Minimize, Zoom,
   Bring All to Front, Help; its commands also work while a dialog has focus;
   off macOS the window draws the menu bar, and a focused terminal keeps the keys it encodes,
   as with xterm.js), Exit and Kill Daemon; all 13 Settings sections, whose controls Tab reaches
@@ -316,7 +317,9 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   jumps to its last message where Electron's smooth-scrolls there; GPUI does not scroll a
   focused control into view, so Tab can focus a Settings field below the panel's fold. Off
   macOS the menu bar is GPUI Kit's, drawn in the window (not GTK's), above dialogs so that it
-  stays usable while one is open, as GTK's is.
+  stays usable while one is open, as GTK's is. On macOS GPUI greys out an
+  Edit item that nothing focused can do (Undo, Redo or Cut in a terminal, Paste with no input
+  focused); Electron's stay enabled and do nothing there.
 - The Comments tab's text (paths, code, comments, the generated prompt) is selected as GPUI
   Kit selects text: a selection over several lines copies a blank line as nothing, and a
   path cut short by its ellipsis cannot be selected (its tooltip shows it whole). A long
