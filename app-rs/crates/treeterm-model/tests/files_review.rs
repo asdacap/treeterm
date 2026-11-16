@@ -5,7 +5,7 @@ use gpui_kit::{AppContext as _, Entity, TestAppContext};
 use treeterm_core::review::{CommitAnchor, Freshness, LineAnchor, Resolution, Side};
 use treeterm_model::file_browser::{
     Anchor, DefinitionLookup, Favourites, FileBrowser, FileView, Host, LineDraft, Listing, NAME_SEARCH_DEBOUNCE,
-    NameResults, REPO_SEARCH_DEBOUNCE, RepoResults, SearchPanel, SearchRow, Star,
+    NameResults, REPO_SEARCH_DEBOUNCE, RepoResults, SearchOpen, SearchOpened, SearchPanel, SearchRow, Star,
 };
 use treeterm_model::review::{
     DiffFind, Direction, FavouriteSelection, GitOp, Head, Notice, ReviewContent, ReviewMode, ReviewModel,
@@ -135,7 +135,8 @@ fn the_files_search_finds_matches_in_the_file_and_the_repo(cx: &mut TestAppConte
     repo.commit_all("files");
     let (_store, _workspace, browser) = open_browser(cx, &h, &repo, "src/lib.rs");
 
-    browser.update(cx, |b, cx| b.open_search("needle_fn", None, cx));
+    let opened = browser.update(cx, |b, cx| b.open_search(SearchOpen::Shortcut { selection: "needle_fn" }, cx));
+    assert_eq!(opened, SearchOpened::Focus);
     let matches = browser.read_with(cx, |b, _| b.file_matches());
     assert_eq!(matches.iter().map(|m| (m.line_number, m.column)).collect::<Vec<_>>(), vec![(1, 8), (4, 5)]);
     assert_eq!(matches[0].range, 7..16);
@@ -250,7 +251,8 @@ fn picking_the_file_shown_leaves_it_as_it_is(cx: &mut TestAppContext) {
 
     // Not read again: no "Loading...", the selected match stays, and so does the text read
     // before the file changed on disk.
-    browser.update(cx, |b, cx| b.open_search("word", None, cx));
+    let opened = browser.update(cx, |b, cx| b.open_search(SearchOpen::Shortcut { selection: "word" }, cx));
+    assert_eq!(opened, SearchOpened::Focus);
     browser.update(cx, |b, cx| b.select_match(1, cx));
     repo.write("a.rs", "changed\n");
     let reads = browser.read_with(cx, |b, _| b.reads());
@@ -386,17 +388,26 @@ fn the_search_panel_opens_on_the_selection_or_the_word_under_the_cursor(cx: &mut
         SearchPanel::Open(search) => Some(search.query.clone()),
         SearchPanel::Closed => None,
     };
+    let open = |cx: &mut TestAppContext, how: SearchOpen<'_>| browser.update(cx, |b, cx| b.open_search(how, cx));
 
-    browser.update(cx, |b, cx| b.open_search("", None, cx));
+    // The context menu off a word does nothing: the panel stays closed.
+    let equals = browser.read_with(cx, |b, _| offset_of(b, " = ", 0)) + 1;
+    assert_eq!(open(cx, SearchOpen::ContextMenu { selection: "", cursor: equals }), SearchOpened::Ignored);
+    assert_eq!(browser.read_with(cx, |b, _| query(b)), None);
+    // Cmd/Ctrl+F with nothing selected opens it empty.
+    assert_eq!(open(cx, SearchOpen::Shortcut { selection: "" }), SearchOpened::Focus);
     assert_eq!(browser.read_with(cx, |b, _| query(b)), Some(String::new()));
-    // Multi-line selections are not queries; an open panel keeps its query.
+    // Multi-line selections are not queries; an open panel keeps its query, and the
+    // context menu off a word leaves it alone.
     browser.update(cx, |b, cx| b.set_query("alp", cx));
-    browser.update(cx, |b, cx| b.open_search("a\nb", None, cx));
+    assert_eq!(open(cx, SearchOpen::Shortcut { selection: "a\nb" }), SearchOpened::Focus);
+    assert_eq!(browser.read_with(cx, |b, _| query(b)), Some("alp".into()));
+    assert_eq!(open(cx, SearchOpen::ContextMenu { selection: "a\nb", cursor: equals }), SearchOpened::Ignored);
     assert_eq!(browser.read_with(cx, |b, _| query(b)), Some("alp".into()));
     let beta = browser.read_with(cx, |b, _| offset_of(b, "beta", 0)) + 2;
-    browser.update(cx, |b, cx| b.open_search("", Some(beta), cx));
+    assert_eq!(open(cx, SearchOpen::ContextMenu { selection: "", cursor: beta }), SearchOpened::Focus);
     assert_eq!(browser.read_with(cx, |b, _| query(b)), Some("beta".into()));
-    browser.update(cx, |b, cx| b.open_search("alpha", Some(beta), cx));
+    assert_eq!(open(cx, SearchOpen::ContextMenu { selection: "alpha", cursor: beta }), SearchOpened::Focus);
     assert_eq!(browser.read_with(cx, |b, _| query(b)), Some("alpha".into()));
 
     // The word is read as Monaco reads the file's language: a CSS one holds `-`.
@@ -404,8 +415,51 @@ fn the_search_panel_opens_on_the_selection_or_the_word_under_the_cursor(cx: &mut
     browser.update(cx, |b, cx| b.select_file(&css, cx));
     wait_until(cx, &browser, |b| matches!(b.view(), FileView::Text { path, .. } if path.ends_with("style.css")));
     let background = browser.read_with(cx, |b, _| offset_of(b, "background", 0)) + 2;
-    browser.update(cx, |b, cx| b.open_search("", Some(background), cx));
+    assert_eq!(open(cx, SearchOpen::ContextMenu { selection: "", cursor: background }), SearchOpened::Focus);
     assert_eq!(browser.read_with(cx, |b, _| query(b)), Some("background-color".into()));
+}
+
+#[gpui_kit::test]
+fn searching_for_the_query_again_drops_the_selected_match(cx: &mut TestAppContext) {
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let repo = TempRepo::new(&h);
+    repo.write("a.rs", "let word = 1;\nlet word = 2;\n");
+    repo.commit_all("a");
+    let (_store, _workspace, browser) = open_browser(cx, &h, &repo, "a.rs");
+    let open = |cx: &mut TestAppContext, how: SearchOpen<'_>| browser.update(cx, |b, cx| b.open_search(how, cx));
+    let label = |cx: &mut TestAppContext| browser.read_with(cx, |b, _| b.match_count_label());
+    let repo_results = |cx: &mut TestAppContext| {
+        browser.read_with(cx, |b, _| match b.search() {
+            SearchPanel::Open(search) => search.repo.clone(),
+            SearchPanel::Closed => panic!("the panel is closed"),
+        })
+    };
+
+    assert_eq!(open(cx, SearchOpen::Shortcut { selection: "word" }), SearchOpened::Focus);
+    cx.executor().advance_clock(REPO_SEARCH_DEBOUNCE);
+    wait_until(cx, &browser, |b| match b.search() {
+        SearchPanel::Open(search) => matches!(search.repo, RepoResults::Done { .. } | RepoResults::Failed { .. }),
+        SearchPanel::Closed => false,
+    });
+    let searched = repo_results(cx);
+    browser.update(cx, |b, cx| b.select_match(1, cx));
+    assert_eq!(label(cx), "2/2");
+
+    // Cmd/Ctrl+F with nothing selected only focuses the panel.
+    assert_eq!(open(cx, SearchOpen::Shortcut { selection: "" }), SearchOpened::Focus);
+    assert_eq!(label(cx), "2/2");
+    // The same word again: back to "2 found", and the repo search is not run again.
+    let second = browser.read_with(cx, |b, _| offset_of(b, "word", 1)) + 1;
+    assert_eq!(open(cx, SearchOpen::ContextMenu { selection: "", cursor: second }), SearchOpened::Focus);
+    assert_eq!(label(cx), "2 found");
+    assert_eq!(repo_results(cx), searched);
+    browser.update(cx, |b, cx| b.select_match(0, cx));
+    assert_eq!(label(cx), "1/2");
+    assert_eq!(open(cx, SearchOpen::Shortcut { selection: "word" }), SearchOpened::Focus);
+    assert_eq!(label(cx), "2 found");
+    assert_eq!(repo_results(cx), searched);
 }
 
 #[gpui_kit::test]

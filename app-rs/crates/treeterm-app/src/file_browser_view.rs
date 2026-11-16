@@ -36,8 +36,8 @@ use treeterm_core::files::{
     ImageFormat, detect_monaco_language, favourite_file_name, format_megabytes, max_read_bytes_for,
 };
 use treeterm_model::file_browser::{
-    DefinitionLookup, Favourites, FileBrowser, FileView, LineDraft, Listing, NameResults, SearchPanel, Star,
-    ZoomDirection, pdf_zoom_step,
+    DefinitionLookup, Favourites, FileBrowser, FileView, LineDraft, Listing, NameResults, SearchOpen, SearchOpened,
+    SearchPanel, Star, ZoomDirection, pdf_zoom_step,
 };
 use treeterm_model::review::Notice;
 
@@ -863,8 +863,8 @@ impl FileBrowserView {
             Some(editor) if editor.read(cx).focus_handle(cx).is_focused(window) => editor.read(cx).selected_value().to_string(),
             Some(_) | None => String::new(),
         };
-        self.model.update(cx, |m, cx| m.open_search(&selection, None, cx));
-        self.focus_search(window, cx);
+        let opened = self.model.update(cx, |m, cx| m.open_search(SearchOpen::Shortcut { selection: &selection }, cx));
+        self.searched(opened, window, cx);
     }
 
     /// Context menu "Search": the selection, or the word under the cursor.
@@ -876,8 +876,18 @@ impl FileBrowserView {
             let editor = editor.read(cx);
             (editor.selected_value().to_string(), editor.cursor())
         };
-        self.model.update(cx, |m, cx| m.open_search(&selection, Some(cursor), cx));
-        self.focus_search(window, cx);
+        let opened =
+            self.model.update(cx, |m, cx| m.open_search(SearchOpen::ContextMenu { selection: &selection, cursor }, cx));
+        self.searched(opened, window, cx);
+    }
+
+    /// After [`FileBrowser::open_search`]: the panel's box takes the focus, unless there was
+    /// nothing to search for.
+    fn searched(&mut self, opened: SearchOpened, window: &mut Window, cx: &mut Context<Self>) {
+        match opened {
+            SearchOpened::Focus => self.focus_search(window, cx),
+            SearchOpened::Ignored => {}
+        }
     }
 
     fn on_go_to_definition(&mut self, _: &GoToDefinition, _: &mut Window, cx: &mut Context<Self>) {

@@ -135,6 +135,26 @@ pub enum SearchPanel {
     Open(SearchState),
 }
 
+/// What asks [`FileBrowser::open_search`] to open the panel, with the viewer's selection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SearchOpen<'a> {
+    /// Cmd/Ctrl+F.
+    Shortcut { selection: &'a str },
+    /// The context menu's "Search", with the cursor (a byte offset of the shown text), which
+    /// the right-click moved to where it was made.
+    ContextMenu { selection: &'a str, cursor: usize },
+}
+
+/// What the viewer does after [`FileBrowser::open_search`].
+#[must_use]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SearchOpened {
+    /// The panel is open: its box takes the focus.
+    Focus,
+    /// There was nothing to search for: the panel and the focus stay as they were.
+    Ignored,
+}
+
 /// An occurrence of the query in the open file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileMatch {
@@ -983,32 +1003,44 @@ impl FileBrowser {
         self.selected.as_deref().map(|path| search::to_workspace_relative(&self.root, path))
     }
 
-    /// Open the panel (Cmd/Ctrl+F, or the context menu's "Search"). A single-line
-    /// `selection` becomes the query; otherwise, with a `cursor` (the context menu), the word
-    /// under it as Monaco reads it in the file's language. With neither, an open panel keeps
-    /// its query.
-    pub fn open_search(&mut self, selection: &str, cursor: Option<usize>, cx: &mut Context<Self>) {
+    /// Open the panel (`openSearch` in Electron's `FileViewer`) on a single-line `selection`,
+    /// or, from the context menu, on the word under the cursor as Monaco reads it in the
+    /// file's language. Opened on the query it already has, the selected match is dropped
+    /// (the counter goes back to "N found") and the repo search goes on. With nothing to
+    /// search for, Cmd/Ctrl+F opens an empty panel (an open one keeps its query and match)
+    /// and the context menu does nothing.
+    pub fn open_search(&mut self, open: SearchOpen<'_>, cx: &mut Context<Self>) -> SearchOpened {
+        let selection = match open {
+            SearchOpen::Shortcut { selection } | SearchOpen::ContextMenu { selection, .. } => selection,
+        };
         let seed = if !selection.is_empty() && !selection.contains('\n') {
             Some(selection.to_owned())
         } else {
-            cursor.and_then(|offset| self.word_at(offset))
+            match open {
+                SearchOpen::ContextMenu { cursor, .. } => self.word_at(cursor),
+                SearchOpen::Shortcut { .. } => None,
+            }
         };
-        match (&self.search, seed) {
-            (SearchPanel::Open(_), None) => {}
-            (SearchPanel::Open(search), Some(query)) if search.query == query => {}
-            (SearchPanel::Closed, None) => {
+        match (&mut self.search, seed, open) {
+            (SearchPanel::Open(search), Some(query), _) if search.query == query => search.active = None,
+            (SearchPanel::Open(_) | SearchPanel::Closed, Some(query), _) => {
+                self.search = SearchPanel::Open(SearchState { query, active: None, repo: RepoResults::Idle });
+                self.start_repo_search(cx);
+            }
+            (SearchPanel::Open(_), None, SearchOpen::Shortcut { .. }) => return SearchOpened::Focus,
+            (SearchPanel::Closed, None, SearchOpen::Shortcut { .. }) => {
                 self.search = SearchPanel::Open(SearchState {
                     query: String::new(),
                     active: None,
                     repo: RepoResults::Idle,
                 });
             }
-            (SearchPanel::Open(_) | SearchPanel::Closed, Some(query)) => {
-                self.search = SearchPanel::Open(SearchState { query, active: None, repo: RepoResults::Idle });
-                self.start_repo_search(cx);
+            (SearchPanel::Open(_) | SearchPanel::Closed, None, SearchOpen::ContextMenu { .. }) => {
+                return SearchOpened::Ignored;
             }
         }
         cx.notify();
+        SearchOpened::Focus
     }
 
     /// The word at byte `cursor` of the shown text, by the file's language
