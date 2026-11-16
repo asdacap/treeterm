@@ -2366,6 +2366,51 @@ fn a_dismissed_workspace_comes_back_once_its_file_is_valid(cx: &mut TestAppConte
     assert_eq!(store.read_with(cx, |s, cx| ws(s, "broken").read(cx).file().name.clone()), "fixed");
 }
 
+/// `createChildWithLoading` sets the entry when its lock wait or git operation ends, also
+/// when it was dismissed meanwhile: the child comes back, failed or created, without
+/// becoming active again.
+#[gpui_kit::test]
+fn a_child_dismissed_while_it_waits_or_git_runs_comes_back(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    publish(&h, &[]);
+    let repo = TempRepo::new(&h);
+    let store = open_store(cx, &h, "client-a");
+    let root = open_repo_workspace(cx, &store, &repo);
+
+    // Refused the lock: back as the failure.
+    let other = futures::executor::block_on(treeterm_core::daemon::DaemonConnection::open(&h.rt, h.daemon.socket_path()))
+        .unwrap()
+        .unwrap();
+    let locked = futures::executor::block_on(other.lock_session(std::time::Duration::from_secs(600))).unwrap().unwrap();
+    assert!(matches!(locked, treeterm_core::daemon::SessionLockResult::Acquired(_)));
+    let refused = store.update(cx, |s, cx| s.add_child_workspace(&root, "feature-x".into(), false, None, cx)).unwrap();
+    store.update(cx, |s, cx| s.dismiss_workspace(&refused, cx));
+    assert!(store.read_with(cx, |s, _| s.entry(&refused).is_none()));
+    wait_until(cx, &store, |s| matches!(s.entry(&refused), Some(WorkspaceEntry::Error { .. })));
+    store.read_with(cx, |s, _| {
+        match s.entry(&refused) {
+            Some(WorkspaceEntry::Error { name, error }) => {
+                assert_eq!(name, "feature-x");
+                assert_eq!(error, "Session is locked by another window");
+            }
+            _ => unreachable!(),
+        }
+        assert_eq!(s.active_workspace(), None);
+    });
+    futures::executor::block_on(other.unlock_session()).unwrap().unwrap();
+
+    // Dismissed while git creates it: back as the workspace, its worktree tracked.
+    let created = store.update(cx, |s, cx| s.add_child_workspace(&root, "feature-y".into(), false, None, cx)).unwrap();
+    store.update(cx, |s, cx| s.dismiss_workspace(&created, cx));
+    assert!(store.read_with(cx, |s, _| s.entry(&created).is_none()));
+    wait_child(cx, &store, &created);
+    assert_eq!(store.read_with(cx, |s, _| s.active_workspace().map(str::to_owned)), None);
+    assert!(repo.worktrees_home.join("feature-y").exists());
+    wait_for_disk(cx, || h.daemon.workspaces_dir().join(format!("{created}.json")).exists());
+    assert_eq!(file_on_disk(&h, &created)["parentId"], root.as_str());
+}
+
 #[gpui_kit::test]
 fn a_file_downloads_to_a_local_path(cx: &mut TestAppContext) {
     cx.executor().allow_parking();

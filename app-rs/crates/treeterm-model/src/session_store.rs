@@ -1737,7 +1737,8 @@ impl SessionStore {
 
     /// Drop a placeholder or failed workspace from this window (`dismissWorkspace`): the
     /// window stops showing it. Its watch stays, so a later valid body for a ref the daemon
-    /// still lists brings it back.
+    /// still lists brings it back; a child still waiting for the lock or for git comes back
+    /// when that ends, created or failed.
     pub fn dismiss_workspace(&mut self, id: &str, cx: &mut Context<Self>) {
         if !matches!(
             self.entries.get(id),
@@ -1916,14 +1917,14 @@ impl SessionStore {
                 Ok(info) => {
                     let metadata = source.metadata(options.description.clone());
                     let own_default = options.default_application_id.clone();
-                    Some(s.finish_child(&child_id, &parent, name.clone(), info, options.detached, metadata, own_default, cx))
+                    Some(s.add_child(&child_id, &parent, name.clone(), info, options.detached, metadata, own_default, cx))
                 }
                 Err(error) => {
                     s.fail_child(&child_id, &name, error.to_string(), cx);
                     None
                 }
             });
-            if let Ok(Some(Some(published))) = published
+            if let Ok(Some(published)) = published
                 && published.await.is_err()
             {
                 tracing::debug!("child publish dropped with the store");
@@ -2058,36 +2059,17 @@ impl SessionStore {
         }
     }
 
+    /// A child's lock wait or git operation failed: its row shows why, also when it was
+    /// dismissed meanwhile (`createChildWithLoading` sets the entry either way).
     fn fail_child(&mut self, id: &str, name: &str, error: String, cx: &mut Context<Self>) {
-        if self.entries.contains_key(id) {
-            self.entries.insert(id.to_owned(), WorkspaceEntry::Error { name: name.to_owned(), error });
-            cx.notify();
-        }
-    }
-
-    /// Replace a created child's Loading row with the workspace, unless it was dismissed while
-    /// git ran.
-    #[allow(clippy::too_many_arguments)]
-    fn finish_child(
-        &mut self,
-        id: &str,
-        parent: &Entity<WorkspaceStore>,
-        name: String,
-        info: treeterm_core::git::WorktreeInfo,
-        detached: bool,
-        extra_metadata: std::collections::BTreeMap<String, String>,
-        own_default: Option<String>,
-        cx: &mut Context<Self>,
-    ) -> Option<oneshot::Receiver<()>> {
-        if !matches!(self.entries.get(id), Some(WorkspaceEntry::Loading { .. })) {
-            return None;
-        }
-        Some(self.add_child(id, parent, name, info, detached, extra_metadata, own_default, cx))
+        self.entries.insert(id.to_owned(), WorkspaceEntry::Error { name: name.to_owned(), error });
+        cx.notify();
     }
 
     /// Add a child workspace for the worktree `info` (`addChildWorkspaceFromResult`): its first
     /// tab is its own default application, else the parent chain's, else the global default.
-    /// Returns when it is published.
+    /// A created child replaces its Loading row, or comes back if that was dismissed while
+    /// git ran (`createChildWithLoading`). Returns when it is published.
     #[allow(clippy::too_many_arguments)]
     fn add_child(
         &mut self,
