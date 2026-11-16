@@ -9,15 +9,18 @@
 use std::rc::Rc;
 
 use gpui_kit::component::GlobalState;
+use gpui_kit::component::menu::AppMenuBar;
+use gpui_kit::prelude::*;
 use gpui_kit::{
-    Action, AnyWindowHandle, App, Context, Entity, KeyBinding, Menu, MenuItem, OsAction,
-    SystemMenuType, WeakEntity, Window, actions,
+    Action, AnyElement, AnyWindowHandle, App, Context, Entity, KeyBinding, Menu, MenuItem,
+    OsAction, SystemMenuType, WeakEntity, Window, actions, deferred, div, px,
 };
 use treeterm_model::app_store::AppStore;
 use treeterm_term::keys::KeyOptions;
 
 use crate::app_view::AppView;
 use crate::terminal_view;
+use crate::theme::colors;
 
 actions!(
     treeterm,
@@ -181,11 +184,37 @@ pub fn install(store: Entity<AppStore>, cx: &mut App) {
         cx.on_action(|_: &BringAllToFront, _| crate::macos::bring_all_to_front());
     }
 
-    cx.set_menus(menus(mac));
+    set_menus(mac, cx);
     #[cfg(target_os = "macos")]
     crate::macos::register_help_menu();
-    // Off macOS, GPUI only stores the menus: the window draws them (Kit `AppMenuBar`).
+}
+
+/// The menus, for the system menu bar and for GPUI Kit's `AppMenuBar`: off macOS GPUI only
+/// stores them, and the window draws them (`in_window_bar`).
+fn set_menus(mac: bool, cx: &mut App) {
+    cx.set_menus(menus(mac));
     GlobalState::global_mut(cx).set_app_menus(menus(mac).into_iter().map(Menu::owned).collect());
+}
+
+/// The menu bar drawn in the window off macOS, as a row above its content (Electron's Linux
+/// window shows its menu bar). GTK draws that bar outside the page, so it stays usable while
+/// a dialog is open: this row and its menus paint above GPUI Kit's dialogs, as the Kit's
+/// own popups do, and take the pointer from them.
+pub fn in_window_bar(bar: &Entity<AppMenuBar>, cx: &App) -> AnyElement {
+    let c = colors(cx);
+    deferred(
+        div()
+            .flex_shrink_0()
+            .h(px(28.))
+            .px_1()
+            .bg(c.bg_secondary)
+            .border_b_1()
+            .border_color(c.border)
+            .occlude()
+            .child(bar.clone()),
+    )
+    .with_priority(gpui_kit::base::POPUP_PRIORITY)
+    .into_any_element()
 }
 
 /// The commands that act on the window, sent to its view (Electron's
@@ -227,7 +256,6 @@ fn route<A: Action, V: 'static>(
 #[cfg(test)]
 mod tests {
     use gpui_kit::component::WindowExt as _;
-    use gpui_kit::prelude::*;
     use gpui_kit::{
         IntoElement, OperatingSystem, OwnedMenu, OwnedMenuItem, Render,
         TestAppContext, VisualTestContext, WindowOptions, div,
@@ -431,6 +459,44 @@ mod tests {
         cx.update(|cx| cx.dispatch_action(&Quit));
         cx.run_until_parked();
         assert_eq!(fallbacks.get(), 1);
+    }
+
+    /// A window that shows the in-window menu bar above its content.
+    struct WithMenuBar(Entity<AppMenuBar>);
+
+    impl Render for WithMenuBar {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            div().size_full().flex().flex_col().child(in_window_bar(&self.0, cx)).child(div().flex_1())
+        }
+    }
+
+    #[gpui_kit::test]
+    fn the_in_window_menu_bar_works_while_a_dialog_is_open(cx: &mut TestAppContext) {
+        use gpui_kit::test::TestWindowExt as _;
+
+        let settings = Rc::new(std::cell::Cell::new(0));
+        let window = cx.update(|cx| {
+            gpui_kit::init(cx);
+            crate::theme::install(cx);
+            set_menus(false, cx);
+            let opened = settings.clone();
+            cx.on_action(move |_: &OpenSettings, _| opened.set(opened.get() + 1));
+            gpui_kit::open_window(WindowOptions::default(), cx, |_, cx| cx.new(|cx| WithMenuBar(AppMenuBar::new(cx))))
+                .expect("open a window")
+                .0
+        });
+        let cx = VisualTestContext::from_window(window, cx).into_mut();
+        // A Kit dialog covers the whole window with its backdrop.
+        cx.update(|window, cx| window.open_dialog(cx, |dialog, _, _| dialog));
+        cx.run_until_parked();
+
+        // File, then Settings, with the pointer.
+        cx.update(|window, cx| window.within("app-menu-bar").within(0usize).click("menu", cx));
+        cx.run_until_parked();
+        cx.update(|window, cx| window.within("popup-menu").click(0usize, cx));
+        cx.run_until_parked();
+        assert_eq!(settings.get(), 1, "File > Settings ran");
+        assert!(cx.update(|window, cx| window.has_active_dialog(cx)), "the dialog stays open");
     }
 
     /// A focused terminal: the keys that reach it and the menu commands that ran instead.

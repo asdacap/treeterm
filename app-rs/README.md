@@ -175,6 +175,10 @@ are not ours). Its changes are marked `TreeTerm patch` (`grep -rn "TreeTerm patc
   `#lua-match?` rewritten as `#match?`: tree-sitter skips predicates it does not know, so as
   shipped it would colour every argument as a constant and every file's first comment as a
   `#!` line. GraphQL's crate ships none, so that one is written for it.
+- `src/menu/app_menu_bar.rs`: `AppMenuBar`'s menus paint at `POPUP_PRIORITY`, above
+  dialogs, as the Kit's other popups do; they painted under them. Off macOS the app draws
+  its menu bar above dialogs (Electron's GTK bar stays usable while a page modal is open),
+  so its menus must show there too.
 - `src/highlighter/highlighter.rs`: captures that no theme can colour (`@spell`,
   `@local.reference`, `@_name`, …) are dropped before captures of one range are merged.
   The merge keeps the first name, so Scala's `(comment) @spell @comment` left comments
@@ -195,8 +199,8 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   the editor has no minimap and cannot open space between lines, so the Files viewer lists
   its file's review comments (and the comment box) in a panel under the editor instead of
   Monaco's view zones; selects open a Kit menu, not the native popup; textareas have no
-  resize grip. Off macOS the menu bar is GPUI Kit's, drawn in the window (not GTK's), so
-  an open dialog covers it (its shortcuts still work).
+  resize grip. Off macOS the menu bar is GPUI Kit's, drawn in the window (not GTK's), above
+  dialogs so that it stays usable while one is open, as GTK's is.
 - With the sidebar collapsed the header keeps clear of the macOS window buttons (Electron's
   title runs under them).
 - Review's find: GPUI Kit's diff does not report the word under the pointer or the file at

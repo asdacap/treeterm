@@ -830,7 +830,7 @@ impl Render for AppView {
         }
         let menu_bar = match &self.menu_bar {
             MenuBar::System => None,
-            MenuBar::InWindow(bar) => Some(menu_bar_row(bar, cx)),
+            MenuBar::InWindow(bar) => Some(crate::menus::in_window_bar(bar, cx)),
         };
         div()
             .size_full()
@@ -846,20 +846,6 @@ impl Render for AppView {
             .child(div().flex().flex_1().min_h_0().child(content))
             .children(crate::keybinding_overlay::render(&self.keybindings, window, cx))
     }
-}
-
-/// The in-window menu bar: a row above everything else.
-fn menu_bar_row(bar: &Entity<gpui_kit::component::menu::AppMenuBar>, cx: &App) -> AnyElement {
-    let c = colors(cx);
-    div()
-        .flex_shrink_0()
-        .h(px(28.))
-        .px_1()
-        .bg(c.bg_secondary)
-        .border_b_1()
-        .border_color(c.border)
-        .child(bar.clone())
-        .into_any_element()
 }
 
 impl AppView {

@@ -304,7 +304,10 @@ impl Render for AppMenu {
                                 .top_1()
                                 .child(self.build_popup_menu(window, cx)),
                         ),
-                ))
+                )
+                // TreeTerm patch: above dialogs, as the Kit's other popups, so a menu bar
+                // drawn over a dialog shows its menus there.
+                .with_priority(gpui_base::POPUP_PRIORITY))
             })
     }
 }
