@@ -137,6 +137,16 @@ pub struct GitController {
     _open_github: Option<Task<()>>,
     _run: Option<Task<()>>,
     _timer: Option<Task<()>>,
+    lifecycle: Lifecycle,
+}
+
+/// Whether refreshes still start.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Lifecycle {
+    Live,
+    /// The workspace left the session, or the session was disposed: nothing new starts (a
+    /// run going on still finishes).
+    Disposed,
 }
 
 impl GitController {
@@ -155,6 +165,7 @@ impl GitController {
             _open_github: None,
             _run: None,
             _timer: None,
+            lifecycle: Lifecycle::Live,
         }
     }
 
@@ -221,11 +232,24 @@ impl GitController {
         }))
     }
 
-    /// `refreshGit`: run the checks now, or once the cooldown since the last run ends.
+    /// `refreshGit`: run the checks now, or once the cooldown since the last run ends. A
+    /// disposed controller refreshes no more (a pull finishing, the GitHub tab's Refresh).
     pub fn refresh(&mut self, cx: &mut Context<Self>) {
+        if self.lifecycle == Lifecycle::Disposed {
+            return;
+        }
         let now = cx.background_executor().now();
         let (_ticket, next) = self.scheduler.request(now);
         self.follow(next, cx);
+    }
+
+    /// `dispose`: cancel the refresh waiting for the cooldown and forget the requests queued
+    /// for it. A run going on still finishes; its status shows until the views drop it.
+    pub fn dispose(&mut self) {
+        self.lifecycle = Lifecycle::Disposed;
+        self._timer = None;
+        // Their tickets: nobody here waits for a refresh to complete.
+        self.scheduler.dispose();
     }
 
     fn follow(&mut self, next: Next, cx: &mut Context<Self>) {

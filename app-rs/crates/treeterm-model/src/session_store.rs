@@ -811,7 +811,9 @@ impl SessionStore {
         {
             store.update(cx, |store, _| store.dispose());
         }
-        self.git_controllers.remove(id);
+        if let Some(controller) = self.git_controllers.remove(id) {
+            controller.update(cx, |controller, _| controller.dispose());
+        }
         self.traffic.update(cx, |traffic, _| traffic.remove_workspace(id));
         self.forget_active(id);
         self.refresh_inherited(cx);
@@ -2572,9 +2574,10 @@ impl SessionStore {
         cx.notify();
     }
 
-    /// Stop every watch and write and detach every terminal. Explicit, because entities
-    /// are reference counted: a store kept alive by a stray handle must not keep writing
-    /// the same files as its replacement (the "ghost session writer").
+    /// Stop every watch, write and git refresh, and detach every terminal. Explicit,
+    /// because entities are reference counted: a store kept alive by a stray handle must not
+    /// keep writing the same files as its replacement (the "ghost session writer"). The git
+    /// controllers stay, so their last status shows until the views drop them.
     pub fn dispose(&mut self, cx: &mut Context<Self>) {
         tracing::info!(session = %self.session_id, "session store disposed");
         self.disposed = true;
@@ -2582,6 +2585,9 @@ impl SessionStore {
         self.ops.clear();
         self.op_runner = None;
         self.store_events.clear();
+        for controller in self.git_controllers.values() {
+            controller.update(cx, |controller, _| controller.dispose());
+        }
         for entry in self.entries.values() {
             if let Some(store) = entry.store() {
                 store.update(cx, |store, _| store.dispose());

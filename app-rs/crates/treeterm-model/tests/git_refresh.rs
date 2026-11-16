@@ -9,13 +9,13 @@
 //! The scheduler's clock is the test clock: within the cooldown since a run started,
 //! requests wait for [`cool_down`], so each check below sees what one trigger asked for.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
-use gpui_kit::{AppContext as _, Entity, Task, TestAppContext};
+use gpui_kit::{AppContext as _, Entity, Subscription, Task, TestAppContext};
 use treeterm_core::git::GitInfo;
 use treeterm_core::git_status::{
     GitStatus, ParentConflicts, ParentDiff, REFRESH_COOLDOWN, WorkingTree,
@@ -701,6 +701,98 @@ fn opening_github_for_a_workspace_that_goes_first_says_so(cx: &mut TestAppContex
     drop(git);
     cx.update(|_| {});
     assert_eq!(finish(cx, lookup), Err(OPEN_GITHUB_GONE.to_owned()));
+}
+
+/// A repo workspace whose status refresh waits for the cooldown since its load's run, with
+/// a change in its working tree for that refresh to find. Returns the workspace, its
+/// controller (held as the header and the GitHub tab hold it), and whether a refresh has run
+/// since (while the observation lives).
+fn refresh_waiting_for_the_cooldown(
+    cx: &mut TestAppContext,
+    h: &Harness,
+    store: &Entity<SessionStore>,
+) -> (String, Entity<GitController>, Rc<Cell<bool>>, Subscription) {
+    let repo = new_repo(h);
+    let id = open(cx, store, &repo);
+    settle(cx, store, &[&id]);
+    let git = controller(cx, store, &id);
+    assert_eq!(status(cx, store, &id).working_tree, WorkingTree::Clean);
+    let ran = Rc::new(Cell::new(false));
+    let seen = ran.clone();
+    let observing = cx.update(|cx| {
+        cx.observe(&git, move |git, cx| {
+            if git.read(cx).is_refreshing() {
+                seen.set(true);
+            }
+        })
+    });
+    std::fs::write(repo.join("untracked.txt"), "x\n").unwrap();
+    store.update(cx, |s, cx| s.refresh_git_status(&id, cx));
+    assert!(!ran.get(), "it waits for the cooldown");
+    (id, git, ran, observing)
+}
+
+/// The cooldown ends and a while passes: a refresh still waiting would have run by then.
+fn cool_down_and_wait(cx: &mut TestAppContext) {
+    cool_down(cx);
+    for _ in 0..30 {
+        cx.run_until_parked();
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[gpui_kit::test]
+fn disposing_the_session_cancels_the_git_refresh_waiting_for_the_cooldown(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    publish_empty(&h);
+    let store = open_store(cx, &h, "client-a");
+    let (id, git, ran, _observing) = refresh_waiting_for_the_cooldown(cx, &h, &store);
+
+    // The window's connection is replaced (`handleReconnected`), say.
+    store.update(cx, |s, cx| s.dispose(cx));
+    cool_down_and_wait(cx);
+    assert!(!ran.get(), "no refresh ran after the dispose");
+    // The status it had shows until the views let go of it.
+    assert_eq!(status(cx, &store, &id).working_tree, WorkingTree::Clean);
+
+    // Nothing refreshes it any more: the GitHub tab's Refresh, a pull finishing.
+    git.update(cx, |g, cx| g.refresh(cx));
+    cool_down_and_wait(cx);
+    assert!(!ran.get(), "no refresh ran after the dispose");
+}
+
+#[gpui_kit::test]
+fn a_removed_workspace_cancels_its_git_refresh_waiting_for_the_cooldown(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    publish_empty(&h);
+    let store = open_store(cx, &h, "client-a");
+    let (id, git, ran, _observing) = refresh_waiting_for_the_cooldown(cx, &h, &store);
+
+    // Another window removes it (`onWorkspaceRemoved`).
+    publish_empty(&h);
+    wait_until(cx, &store, |s| s.entry(&id).is_none());
+    cool_down_and_wait(cx);
+    assert!(!ran.get(), "no refresh ran after the removal");
+    git.update(cx, |g, cx| g.refresh(cx));
+    cool_down_and_wait(cx);
+    assert!(!ran.get(), "no refresh ran after the removal");
+}
+
+#[gpui_kit::test]
+fn a_git_refresh_running_when_the_session_is_disposed_still_finishes(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let h = harness();
+    publish_empty(&h);
+    let store = open_store(cx, &h, "client-a");
+    let (id, git, ran, _observing) = refresh_waiting_for_the_cooldown(cx, &h, &store);
+    cool_down(cx);
+    assert!(ran.get(), "the refresh started");
+
+    store.update(cx, |s, cx| s.dispose(cx));
+    wait_until(cx, &git, |g| !g.is_refreshing());
+    assert_eq!(status(cx, &store, &id).working_tree, WorkingTree::Dirty);
 }
 
 /// `(isGitRepo, gitBranch, gitRootPath)`.
