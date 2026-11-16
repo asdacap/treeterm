@@ -155,10 +155,11 @@ impl SessionInfo {
                     treeterm_core::settings::IdentityFile::Path(path) => lines.push(format!("Identity File: {path}")),
                     treeterm_core::settings::IdentityFile::SshDefault => {}
                 }
+                // The error only once the connection stopped (Electron: Error or Disconnected).
                 let (status, error) = match &slot.state {
                     ConnState::Connecting(_) => ("connecting", None),
                     ConnState::Connected(_) => ("connected", None),
-                    ConnState::Reconnecting { error, .. } => ("reconnecting", Some(error)),
+                    ConnState::Reconnecting { .. } => ("reconnecting", None),
                     ConnState::Failed { error, .. } => ("error", Some(error)),
                 };
                 lines.push(format!("Status: {status}"));

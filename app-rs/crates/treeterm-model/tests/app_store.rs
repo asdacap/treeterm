@@ -717,6 +717,10 @@ fn scrollback(cx: &mut TestAppContext, app: &App, kind: OutputKind) -> Vec<Strin
     })
 }
 
+fn info_lines(cx: &mut TestAppContext, info: &Entity<SessionInfo>) -> Vec<String> {
+    info.read_with(cx, |info, cx| info.info_lines(cx))
+}
+
 /// The host's refusal, as the bootstrap log shows it.
 fn refused(lines: &[String]) -> bool {
     lines
@@ -743,6 +747,12 @@ fn the_session_panes_logs_follow_the_connection_that_replaces_a_failed_one(
     let info = cx.new(|cx| SessionInfo::new(&app.app, remote_id(), cx));
     assert!(refused(&pane_log(cx, &info, OutputKind::Bootstrap)));
     assert!(pane_log(cx, &info, OutputKind::Daemon).is_empty());
+    let lines = info_lines(cx, &info);
+    assert!(lines.contains(&"Status: error".to_owned()), "{lines:?}");
+    assert!(
+        lines.iter().any(|line| line.starts_with("Error: ")),
+        "{lines:?}"
+    );
 
     // The pane's Retry: a new connect replaces the failed connection, whose logs end.
     app.refuse.store(false, Ordering::SeqCst);
@@ -763,7 +773,9 @@ fn the_session_panes_logs_follow_the_connection_that_replaces_a_failed_one(
 }
 
 #[gpui_kit::test]
-fn a_reconnect_attempt_starts_the_session_panes_logs_over(cx: &mut TestAppContext) {
+fn a_reconnect_attempt_starts_the_session_panes_logs_over_and_the_info_tab_shows_no_error(
+    cx: &mut TestAppContext,
+) {
     cx.executor().allow_parking();
     isolated_home();
     let h = harness();
@@ -808,4 +820,31 @@ fn a_reconnect_attempt_starts_the_session_panes_logs_over(cx: &mut TestAppContex
         );
     }
     assert_eq!(pane_log(cx, &info, OutputKind::Daemon), daemon);
+    // Electron shows the error once the connection stopped, not while it retries.
+    let lines = info_lines(cx, &info);
+    assert!(
+        lines.contains(&"Status: reconnecting".to_owned()),
+        "{lines:?}"
+    );
+    assert!(
+        !lines.iter().any(|line| line.starts_with("Error: ")),
+        "{lines:?}"
+    );
+
+    app.app
+        .read_with(cx, |a, _| a.cancel_reconnect(&remote_id()));
+    wait_until(cx, &app.app, |a| {
+        matches!(
+            remote(a).map(|slot| &slot.state),
+            Some(ConnState::Failed { .. })
+        )
+    });
+    let lines = info_lines(cx, &info);
+    assert!(lines.contains(&"Status: error".to_owned()), "{lines:?}");
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.starts_with("Error: SSH bootstrap failed")),
+        "{lines:?}"
+    );
 }
