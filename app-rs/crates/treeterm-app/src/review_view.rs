@@ -67,8 +67,8 @@ pub struct ReviewView {
     /// The "Filter files..." box, made on first render (it needs the window).
     search: Option<(Entity<InputState>, Subscription)>,
     query: String,
-    /// Directories folded in the file tree (all start open).
-    closed_dirs: HashSet<String>,
+    /// Each file tree's open directories (`expandedDirs`).
+    folds: treeterm_model::review_tree::DirFolds<files::Tree>,
     /// Files whose body the view draws (`review_patch::Placeholder`: an image, a binary file,
     /// a diff loading, failed or too large) folded in the diff (their `DiffState` entry stays
     /// collapsed).
@@ -148,7 +148,7 @@ impl ReviewView {
             dir_filter: None,
             search: None,
             query: String::new(),
-            closed_dirs: HashSet::new(),
+            folds: Default::default(),
             closed_drawn: HashSet::new(),
             forced: HashSet::new(),
             collapse_all: CollapseAll::Untouched,
@@ -1252,9 +1252,10 @@ impl ReviewView {
                 .child(self.toolbar((shown_viewed, listed.len()), comments, Some(order), cx));
         }
         let search = self.search_box(window, cx);
-        let tree = files::tree(self, files::Tree::Committed, &shown, &viewed, None, false, cx);
+        // `hasCommittedChanges && <CommittedDiffFileTree>`.
+        let tree = has_changes.then(|| files::tree(self, files::Tree::Committed, &shown, &viewed, None, false, cx));
         let favourites = files::favourites(self, &listed, cx);
-        let list = v_flex().child(search).children(favourites).when(has_changes, |d| d.child(tree)).into_any_element();
+        let list = v_flex().child(search).children(favourites).children(tree).into_any_element();
         // `hasCommittedChanges ? <StackedDiffList> : "No committed changes to show"`.
         if !has_changes {
             self.unmount_list();
@@ -1470,6 +1471,9 @@ impl ReviewView {
                         .child(div().flex_shrink_0().text_size(px(11.)).text_color(secondary).child(commit.author.clone()))
                         .child(div().flex_shrink_0().text_size(px(11.)).text_color(secondary).child(stacked::locale_date(&commit.date)))
                         .on_click(cx.listener(move |view, _: &ClickEvent, _, cx| {
+                            // `loadCommitDiff` draws "Loading..." in the tree's place, also for the
+                            // commit already picked: its tree starts afresh.
+                            view.folds.unmount(files::Tree::Commit);
                             view.model.update(cx, |m, cx| m.select_commit(&hash, cx));
                         })),
                 );
@@ -1644,6 +1648,8 @@ impl Render for ReviewView {
         let merge = self.merge_panel(cx);
         let tabs = self.view_tabs(mode, has_base, cx);
         let body = self.body(mode, window, cx);
+        // The file trees this frame did not draw were unmounted.
+        self.folds.end_frame();
         v_flex()
             .size_full()
             .min_w(px(0.))

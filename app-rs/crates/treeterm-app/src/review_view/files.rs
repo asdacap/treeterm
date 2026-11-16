@@ -18,8 +18,8 @@ use super::parts::{MONO, change_stats, outline_button, plain_icon, status_badge,
 use super::stacked::ListedFile;
 use crate::theme::colors;
 
-/// A file tree beside the diff.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// A file tree beside the diff, each with its own folded directories.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Tree {
     /// The Committed view's: a click is kept in the tab state (`selectedFilePath`).
     Committed,
@@ -163,7 +163,7 @@ pub fn favourites(view: &ReviewView, changed: &[ListedFile], cx: &mut Context<Re
 
 /// `CommittedDiffFileTree` (`staging: None`) or `UncommittedDiffFileTree` (`Some(busy)`).
 pub fn tree(
-    view: &ReviewView,
+    view: &mut ReviewView,
     tree: Tree,
     files: &[ListedFile],
     viewed: &HashSet<String>,
@@ -173,6 +173,8 @@ pub fn tree(
 ) -> AnyElement {
     let entries: Vec<(&str, treeterm_core::git::FileChangeStats)> = files.iter().map(|f| (f.path.as_str(), f.stats)).collect();
     let nodes = build_tree(&entries);
+    view.folds.show(tree, &nodes);
+    let view = &*view;
     // `selectedFile`: the file at the top of the diff (`activeFile`), else the first until
     // the diff reports it.
     let listed = view.model.read(cx).active_file().filter(|f| files.iter().any(|l| l.path == *f)).map(str::to_owned);
@@ -205,7 +207,7 @@ fn rows(
     let id = tree.id();
     match node {
         TreeNode::Dir { name, path, children, additions, deletions } => {
-            let open = !view.closed_dirs.contains(path);
+            let open = view.folds.is_open(tree, path);
             let (toggle, filter) = (path.clone(), path.clone());
             let this = cx.weak_entity();
             let row = div()
@@ -224,9 +226,7 @@ fn rows(
                 .child(div().flex_1().min_w_0().truncate().child(name.clone()))
                 .child(div().flex().gap(px(4.)).font_family(MONO).text_size(px(11.)).children(totals(*additions, *deletions)))
                 .on_click(cx.listener(move |view, _: &ClickEvent, _, cx| {
-                    if !view.closed_dirs.remove(&toggle) {
-                        view.closed_dirs.insert(toggle.clone());
-                    }
+                    view.folds.toggle(tree, &toggle);
                     cx.notify();
                 }))
                 .context_menu(move |menu, _, _| {

@@ -2,6 +2,8 @@
 //! directory chains collapsed (`src/renderer`), and the filters the list and the diff share.
 
 use std::cmp::Ordering;
+use std::collections::{HashMap, HashSet};
+use std::hash::Hash;
 
 use treeterm_core::git::FileChangeStats;
 use treeterm_core::locale;
@@ -138,6 +140,74 @@ pub fn tree_order(nodes: &[TreeNode]) -> Vec<usize> {
     order
 }
 
+/// `getAllDirPaths`: every directory row's path, nested ones included.
+fn dir_paths(nodes: &[TreeNode]) -> HashSet<String> {
+    let mut paths = HashSet::new();
+    fn walk(nodes: &[TreeNode], paths: &mut HashSet<String>) {
+        for node in nodes {
+            match node {
+                TreeNode::Dir { path, children, .. } => {
+                    paths.insert(path.clone());
+                    walk(children, paths);
+                }
+                TreeNode::File { .. } => {}
+            }
+        }
+    }
+    walk(nodes, &mut paths);
+    paths
+}
+
+/// The open directories of each file tree (`expandedDirs`, one per tree component), by
+/// tree. A tree shown for the first time opens every directory it has then; a directory
+/// that appears later starts folded. A tree not shown in a frame was unmounted: shown
+/// again, it starts afresh.
+#[derive(Debug)]
+pub struct DirFolds<K> {
+    open: HashMap<K, HashSet<String>>,
+    /// The trees shown since the last `end_frame`.
+    shown: HashSet<K>,
+}
+
+impl<K> Default for DirFolds<K> {
+    fn default() -> Self {
+        Self { open: HashMap::new(), shown: HashSet::new() }
+    }
+}
+
+impl<K: Copy + Eq + Hash> DirFolds<K> {
+    /// `tree` is drawn with `nodes`: mounted now, every directory starts open.
+    pub fn show(&mut self, tree: K, nodes: &[TreeNode]) {
+        self.open.entry(tree).or_insert_with(|| dir_paths(nodes));
+        self.shown.insert(tree);
+    }
+
+    pub fn is_open(&self, tree: K, dir: &str) -> bool {
+        self.open.get(&tree).is_some_and(|open| open.contains(dir))
+    }
+
+    /// A click on a directory row folds or unfolds it, in that tree only.
+    /// (A tree unmounted since the frame clicked in has nothing to fold.)
+    pub fn toggle(&mut self, tree: K, dir: &str) {
+        if let Some(open) = self.open.get_mut(&tree)
+            && !open.remove(dir)
+        {
+            open.insert(dir.to_owned());
+        }
+    }
+
+    /// `tree` is unmounted (Electron draws something else in its place in between).
+    pub fn unmount(&mut self, tree: K) {
+        self.open.remove(&tree);
+    }
+
+    /// A frame was drawn: the trees it did not show are unmounted.
+    pub fn end_frame(&mut self) {
+        let shown = std::mem::take(&mut self.shown);
+        self.open.retain(|tree, _| shown.contains(tree));
+    }
+}
+
 /// `filterFilesByDir` then `filterFilesBySearch`: under `dir` (or the path itself), and
 /// containing `query`, case-insensitively.
 pub fn file_matches(path: &str, dir: Option<&str>, query: &str) -> bool {
@@ -269,6 +339,85 @@ mod tests {
         let TreeNode::Dir { name, path, children, .. } = &tree[0] else { panic!() };
         assert_eq!((name.as_str(), path.as_str()), ("a/b/c", "a/b/c"));
         assert_eq!(children, &[TreeNode::File { name: "d.rs".into(), index: 0 }]);
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    enum Tree {
+        Staged,
+        Unstaged,
+    }
+
+    #[test]
+    fn a_tree_shown_first_opens_every_directory_nested_and_collapsed() {
+        let tree = build_tree(&[("a/b/c/d.rs", text(1, 0)), ("src/x/y.rs", text(1, 0)), ("src/z.rs", text(1, 0))]);
+        let mut folds = DirFolds::default();
+        folds.show(Tree::Staged, &tree);
+        assert_eq!(dir_paths(&tree), HashSet::from(["a/b/c".to_owned(), "src".to_owned(), "src/x".to_owned()]));
+        for dir in ["a/b/c", "src", "src/x"] {
+            assert!(folds.is_open(Tree::Staged, dir), "{dir}");
+        }
+        // Not a directory row: `a` and `a/b` are collapsed into `a/b/c`.
+        assert!(!folds.is_open(Tree::Staged, "a"));
+        // A tree never shown has nothing open.
+        assert!(!folds.is_open(Tree::Unstaged, "src"));
+    }
+
+    #[test]
+    fn a_fold_belongs_to_one_tree() {
+        let tree = build_tree(&[("src/a.rs", text(1, 0)), ("src/b.rs", text(1, 0))]);
+        let mut folds = DirFolds::default();
+        folds.show(Tree::Staged, &tree);
+        folds.show(Tree::Unstaged, &tree);
+        folds.toggle(Tree::Staged, "src");
+        assert!(!folds.is_open(Tree::Staged, "src"));
+        assert!(folds.is_open(Tree::Unstaged, "src"));
+        folds.toggle(Tree::Staged, "src");
+        assert!(folds.is_open(Tree::Staged, "src"));
+    }
+
+    #[test]
+    fn a_directory_that_appears_after_mount_starts_folded() {
+        let mut folds = DirFolds::default();
+        folds.show(Tree::Staged, &build_tree(&[("src/a.rs", text(1, 0))]));
+        folds.end_frame();
+        folds.toggle(Tree::Staged, "src");
+        // A refresh brings `lib` and keeps the tree mounted: `src` stays folded, `lib` starts so.
+        folds.show(Tree::Staged, &build_tree(&[("src/a.rs", text(1, 0)), ("lib/b.rs", text(1, 0))]));
+        folds.end_frame();
+        assert!(!folds.is_open(Tree::Staged, "src"));
+        assert!(!folds.is_open(Tree::Staged, "lib"));
+    }
+
+    #[test]
+    fn a_tree_not_shown_in_a_frame_starts_afresh() {
+        let tree = build_tree(&[("src/a.rs", text(1, 0)), ("lib/b.rs", text(1, 0))]);
+        let mut folds = DirFolds::default();
+        folds.show(Tree::Staged, &tree);
+        folds.show(Tree::Unstaged, &tree);
+        folds.end_frame();
+        folds.toggle(Tree::Staged, "src");
+        folds.toggle(Tree::Unstaged, "src");
+        // Unstaged is drawn again, Staged is not (its section emptied).
+        folds.show(Tree::Unstaged, &tree);
+        folds.end_frame();
+        assert!(!folds.is_open(Tree::Unstaged, "src"));
+        assert!(!folds.is_open(Tree::Staged, "lib"));
+        // A click from the frame before it unmounted does not mount it.
+        folds.toggle(Tree::Staged, "src");
+        folds.show(Tree::Staged, &tree);
+        assert!(folds.is_open(Tree::Staged, "src"));
+        assert!(folds.is_open(Tree::Staged, "lib"));
+    }
+
+    #[test]
+    fn an_unmounted_tree_starts_afresh() {
+        let tree = build_tree(&[("src/a.rs", text(1, 0))]);
+        let mut folds = DirFolds::default();
+        folds.show(Tree::Staged, &tree);
+        folds.toggle(Tree::Staged, "src");
+        folds.unmount(Tree::Staged);
+        folds.show(Tree::Staged, &tree);
+        assert!(folds.is_open(Tree::Staged, "src"));
     }
 
     #[test]
