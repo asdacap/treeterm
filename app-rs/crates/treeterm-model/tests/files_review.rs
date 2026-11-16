@@ -2594,6 +2594,8 @@ fn a_childs_review_with_its_own_base_checks_conflicts_once_the_parents_branch_is
     assert_eq!(conflicts.last.conflicted_files, ["a.txt"]);
 }
 
+/// A failure to bring the comments up to date is the tab's notice. It, a comment that cannot
+/// be added and a diff that cannot load are logged, as Electron's `console.error`s did.
 #[gpui_kit::test]
 fn review_state_that_cannot_load_shows_as_the_tabs_notice(cx: &mut TestAppContext) {
     let _serial = serial();
@@ -2607,16 +2609,37 @@ fn review_state_that_cannot_load_shows_as_the_tabs_notice(cx: &mut TestAppContex
     wait_review(cx, &review, "loaded", |r, _| !r.is_loading() && matches!(r.head(), Head::Known(_)));
     assert_eq!(review.read_with(cx, |r, _| r.notice().clone()), Notice::Clear);
 
-    // The comments cannot be brought up to date (`loadReviews` throws).
+    // The comments cannot be brought up to date (`loadReviews` throws): shown and logged.
+    let logs = treeterm_testkit::logs::capture();
     workspace.update(cx, |w, cx| w.update_metadata("reviewComments", "not json", cx));
     review.update(cx, |r, cx| r.refresh(cx));
     wait_review(cx, &review, "refreshed", |r, _| !r.is_refreshing());
     let notice = review.read_with(cx, |r, _| r.notice().clone());
     assert!(matches!(&notice, Notice::Error(e) if e.starts_with("Failed to load review state: ")), "{notice:?}");
+    let logged = logs.line("Failed to load reviews: ").unwrap_or_else(|| panic!("{}", logs.text()));
+    assert!(logged.contains("ERROR"), "{logged}");
     review.update(cx, |r, cx| r.dismiss_notice(cx));
 
-    // No commit to read `HEAD` from: no notice (Electron's `success: false`).
+    // Nor can a comment be added to them (`addReviewComment` throws): shown and logged.
+    review.update(cx, |r, cx| r.start_comment("a.txt", Side::Modified, 1, cx));
+    review.update(cx, |r, cx| r.submit_comment("why?", cx));
+    wait_review(cx, &review, "refused", |r, _| matches!(r.adding(), GitOp::Failed(_)));
+    let GitOp::Failed(shown) = review.read_with(cx, |r, _| r.adding().clone()) else { unreachable!() };
+    let logged = logs.line("Failed to add comment: ").unwrap_or_else(|| panic!("{}", logs.text()));
+    assert!(logged.contains("ERROR") && logged.contains(&shown), "{logged}");
+
+    // A base branch that does not exist: the diff does not load (`loadDiff`'s catch).
     workspace.update(cx, |w, cx| w.update_metadata("reviewComments", "[]", cx));
+    review.update(cx, |r, cx| r.set_base(Some("no-such-branch".into()), cx));
+    review.update(cx, |r, cx| r.set_mode(ReviewMode::Committed, cx));
+    wait_review(cx, &review, "diff failed", |r, _| matches!(r.content(), ReviewContent::Failed(_)));
+    let logged = logs.line("Error loading diff: ").unwrap_or_else(|| panic!("{}", logs.text()));
+    assert!(logged.contains("ERROR"), "{logged}");
+    // After git's own message, which may span lines.
+    assert!(logs.text().contains("base=no-such-branch"), "{}", logs.text());
+    drop(logs);
+
+    // No commit to read `HEAD` from: no notice (Electron's `success: false`).
     repo.git(&["update-ref", "-d", "HEAD"]);
     review.update(cx, |r, cx| r.refresh(cx));
     wait_review(cx, &review, "refreshed", |r, _| !r.is_refreshing());

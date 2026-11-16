@@ -1673,6 +1673,7 @@ impl ReviewModel {
             let diff = match git.get_diff(&path, &branch).await {
                 Ok(diff) => diff,
                 Err(error) => {
+                    tracing::error!(%path, base = %branch, "Error loading diff: {error}");
                     match this.update(cx, |model, cx| {
                         model.committed_load = None;
                         model.committed = Slot::Failed(format!("Failed to load diff: {error}"));
@@ -1957,7 +1958,10 @@ impl ReviewModel {
                 Ok(hash) => ReviewCommentStore::new(Later::new(workspace, cx.clone(), blame))
                     .update_outdated_review_comments(hash)
                     .await
-                    .map_err(|error| format!("Failed to load review state: {error}")),
+                    .map_err(|error| {
+                        tracing::error!(%path, "Failed to load reviews: {error}");
+                        format!("Failed to load review state: {error}")
+                    }),
                 Err(_) => Ok(()),
             };
             match this.update(cx, |model, cx| {
@@ -2559,7 +2563,10 @@ impl ReviewModel {
                         model.draft = None;
                         model.adding = GitOp::Idle;
                     }
-                    Err(error) => model.adding = GitOp::Failed(format!("Failed to add comment: {error}")),
+                    Err(error) => {
+                        tracing::error!(path = %model.path, "Failed to add comment: {error}");
+                        model.adding = GitOp::Failed(format!("Failed to add comment: {error}"));
+                    }
                 }
                 cx.notify();
             }) {
