@@ -420,6 +420,37 @@ fn the_search_panel_opens_on_the_selection_or_the_word_under_the_cursor(cx: &mut
 }
 
 #[gpui_kit::test]
+fn the_search_word_is_read_in_the_language_embedded_under_the_cursor(cx: &mut TestAppContext) {
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let repo = TempRepo::new(&h);
+    repo.write(
+        "card.vue",
+        "<template>\n  <p>{{ foo?.bar }}</p>\n</template>\n<script>\nexport default {\n  \
+         done() { this.$emit('done', foo?.bar) },\n}\n</script>\n<style scoped>\n.btn { color: red }\n</style>\n",
+    );
+    repo.commit_all("a");
+    let (_store, _workspace, browser) = open_browser(cx, &h, &repo, "card.vue");
+    let search_at = |cx: &mut TestAppContext, needle: &str, nth: usize, into: usize| {
+        let cursor = browser.read_with(cx, |b, _| offset_of(b, needle, nth)) + into;
+        let opened = browser.update(cx, |b, cx| b.open_search(SearchOpen::ContextMenu { selection: "", cursor }, cx));
+        assert_eq!(opened, SearchOpened::Focus);
+        browser.read_with(cx, |b, _| match b.search() {
+            SearchPanel::Open(search) => search.query.clone(),
+            SearchPanel::Closed => panic!("the panel is closed"),
+        })
+    };
+
+    // Monaco reads a Vue file as HTML, whose words hold `?`, and its script block as
+    // JavaScript, whose words end at `?` and hold `$`, and its style block as CSS.
+    assert_eq!(search_at(cx, "foo?.bar", 0, 1), "foo?");
+    assert_eq!(search_at(cx, "foo?.bar", 1, 1), "foo");
+    assert_eq!(search_at(cx, "$emit", 0, 2), "$emit");
+    assert_eq!(search_at(cx, ".btn", 0, 2), ".btn");
+}
+
+#[gpui_kit::test]
 fn searching_for_the_query_again_drops_the_selected_match(cx: &mut TestAppContext) {
     let _serial = serial();
     cx.executor().allow_parking();

@@ -11,11 +11,14 @@
 //!   JavaScript and PHP words hold `$`; Java and Kotlin words `@` and `$`; C# words `@`.
 //!   Other languages use Monaco's default pattern: a number with a decimal point (`3.14`,
 //!   `.5`), or a run of characters that are neither whitespace nor one of the default word
-//!   separators.
+//!   separators. [`word_at`] takes the pattern of the language at the cursor, which in an
+//!   HTML, PHP or Markdown file can be another one ([`embedded`]): JavaScript in a
+//!   `<script>` block, CSS in a `<style>` block, a code fence's language.
 //! - Change All Occurrences uses the editor's word separators (`editor.wordSeparators`,
 //!   through `getConfiguredWordAtPosition`) in every language: on `name` in PHP's `$name`
 //!   it also changes `$this->name`, as Monaco does.
 
+mod embedded;
 pub mod fuzzy;
 
 use std::collections::HashSet;
@@ -44,16 +47,20 @@ fn separated_words(allowed: &str) -> Regex {
     pattern(&format!(r"(-?[0-9]*\.[0-9][0-9A-Za-z_]*)|([^{separators}\s]+)"))
 }
 
-/// The word pattern of Monaco's `language` (as `detect_monaco_language` names it), from
-/// Monaco 0.55.1's language configurations; the default one for a language with none.
+/// The word pattern of Monaco's `language` (as `detect_monaco_language` names it, or a
+/// language embedded in a file), from Monaco 0.55.1's language configurations; the default
+/// one for a language with none.
 fn word_pattern(language: &str) -> &'static Regex {
     static DEFAULT: LazyLock<Regex> = LazyLock::new(|| separated_words(""));
     // TypeScript, JavaScript (which takes TypeScript's configuration) and PHP.
     static DOLLAR: LazyLock<Regex> = LazyLock::new(|| separated_words("$"));
-    // Java and Kotlin.
+    // Java, Kotlin, Apex and Pascal.
     static AT_DOLLAR: LazyLock<Regex> = LazyLock::new(|| separated_words("@$"));
     static CSHARP: LazyLock<Regex> = LazyLock::new(|| separated_words("@"));
+    // HTML, Handlebars, Liquid and Twig.
     static HTML: LazyLock<Regex> = LazyLock::new(|| separated_words("#%-?"));
+    static RAZOR: LazyLock<Regex> = LazyLock::new(|| separated_words("#%?"));
+    static POWERSHELL: LazyLock<Regex> = LazyLock::new(|| separated_words("$-"));
     // The JSON language service's configuration (`jsonMode`).
     static JSON: LazyLock<Regex> = LazyLock::new(|| pattern(r#"(-?[0-9]*\.[0-9][0-9A-Za-z_]*)|([^\[\{\]\}:",\s]+)"#));
     static CSS: LazyLock<Regex> = LazyLock::new(|| {
@@ -70,9 +77,11 @@ fn word_pattern(language: &str) -> &'static Regex {
     });
     match language {
         "typescript" | "javascript" | "php" => &DOLLAR,
-        "java" | "kotlin" => &AT_DOLLAR,
+        "java" | "kotlin" | "apex" | "pascal" => &AT_DOLLAR,
         "csharp" => &CSHARP,
-        "html" => &HTML,
+        "html" | "handlebars" | "liquid" | "twig" => &HTML,
+        "razor" => &RAZOR,
+        "powershell" => &POWERSHELL,
         "json" => &JSON,
         "css" => &CSS,
         "scss" => &SCSS,
@@ -97,6 +106,12 @@ fn pattern_words<'a>(pattern: &'a Regex, text: &'a str) -> impl Iterator<Item = 
     lines(text).flat_map(|(_, line)| pattern.find_iter(line).map(|found| found.as_str()))
 }
 
+/// The bytes of the first word `pattern` reads in `text` that touches byte `at` on either
+/// side (`getWordAtText`).
+fn word_touching(pattern: &Regex, text: &str, at: usize) -> Option<Range<usize>> {
+    pattern.find_iter(text).map(|found| found.range()).find(|found| found.start <= at && at <= found.end)
+}
+
 /// The bytes of the word `pattern` reads at byte `offset` of `text`, touching it on either
 /// side (the first such word: `getWordAtPosition`); empty when there is none.
 fn pattern_word_around(pattern: &Regex, text: &str, offset: usize) -> Range<usize> {
@@ -105,18 +120,35 @@ fn pattern_word_around(pattern: &Regex, text: &str, offset: usize) -> Range<usiz
     }
     let start = text[..offset].rfind('\n').map_or(0, |index| index + 1);
     let (_, line) = lines(&text[start..]).next().unwrap_or((0, ""));
-    let at = offset - start;
-    pattern
-        .find_iter(line)
-        .find(|found| found.start() <= at && at <= found.end())
-        .map_or(offset..offset, |found| start + found.start()..start + found.end())
+    word_touching(pattern, line, offset - start).map_or(offset..offset, |word| start + word.start..start + word.end)
 }
 
 /// The word at byte `offset` of `text`, a file of Monaco's `language`, as Monaco's
-/// `getWordAtPosition` reads it: by the language's word pattern, touching `offset` on either
-/// side. Empty when there is none, or when `offset` is not a character boundary of `text`.
+/// `getWordAtPosition` reads it: by the word pattern of the language at `offset` (in an
+/// HTML, PHP or Markdown file, perhaps one embedded there), within the part of the line in
+/// that language, touching `offset` on either side; or, at the start of that part, the word
+/// ending there in the language before it. Empty when there is none, or when `offset` is not
+/// a character boundary of `text`.
 pub fn word_at<'a>(text: &'a str, offset: usize, language: &str) -> &'a str {
-    text.get(pattern_word_around(word_pattern(language), text, offset)).unwrap_or_default()
+    if !text.is_char_boundary(offset) {
+        return "";
+    }
+    let start = text[..offset].rfind('\n').map_or(0, |index| index + 1);
+    let (_, line) = lines(&text[start..]).next().unwrap_or((0, ""));
+    let at = offset - start;
+    let parts = embedded::line_parts(text, start, line, language);
+    let Some(index) = parts.iter().rposition(|(part, _)| part.start <= at) else {
+        return "";
+    };
+    let word_in = |(part, language): &(Range<usize>, &str)| {
+        word_touching(word_pattern(language), &line[part.clone()], at - part.start)
+            .map(|word| part.start + word.start..part.start + word.end)
+    };
+    let word = word_in(&parts[index]).or_else(|| match index.checked_sub(1) {
+        Some(before) if parts[index].0.start == at => word_in(&parts[before]),
+        Some(_) | None => None,
+    });
+    word.map_or("", |word| &text[start + word.start..start + word.end])
 }
 
 /// Whether `c` can be part of a word, by the editor's word separators.
@@ -443,6 +475,79 @@ mod tests {
         // Inside a character, or past the end.
         assert_eq!(word_at("é", 1, "rust"), "");
         assert_eq!(word_at("ab", 3, "rust"), "");
+    }
+
+    #[test]
+    fn html_reads_a_script_block_as_javascript_and_a_style_block_as_css() {
+        // HTML (Vue and Svelte files too) keeps `?` and `-` in words and ends them at `$`.
+        let vue = "<template>\n  <p>{{ fo|o?.bar }}</p>\n</template>\n<script setup lang=\"ts\">\n";
+        assert_eq!(word_at_bar("html", vue), "foo?");
+        assert_eq!(word_at_bar("html", "<p>this.$em|it</p>"), "emit");
+        assert_eq!(word_at_bar("html", "<p>cou|nt-1</p>"), "count-1");
+        let script = "<template><p/></template>\n<script>\nexport default {\n  m() { return {} },\n}\n";
+        assert_eq!(word_at_bar("html", &format!("{script}const n = fo|o?.bar;\n</script>")), "foo");
+        assert_eq!(word_at_bar("html", &format!("{script}this.$em|it('done');\n</script>")), "$emit");
+        assert_eq!(word_at_bar("html", &format!("{script}let n = cou|nt-1;\n</script>")), "count");
+        assert_eq!(word_at_bar("html", "<style scoped>\n.b|tn { color: red }\n</style>"), ".btn");
+        // Tags in any case; not in a comment; and after the block, HTML again.
+        assert_eq!(word_at_bar("html", "<SCRIPT>\n$|x\n</SCRIPT>"), "$x");
+        assert_eq!(word_at_bar("html", "<!-- <script> -->\n$|x"), "x");
+        assert_eq!(word_at_bar("html", "<script>\n</script>\n$|x"), "x");
+    }
+
+    #[test]
+    fn a_script_or_style_type_names_the_language_of_its_block() {
+        assert_eq!(word_at_bar("html", "<script type=\"module\">$|x</script>"), "$x");
+        assert_eq!(word_at_bar("html", "<script type='text/typescript'>$|x</script>"), "$x");
+        // A language Monaco does not know reads words with its default pattern.
+        assert_eq!(word_at_bar("html", "<script type=\"text/x-template\">$|x</script>"), "x");
+        assert_eq!(word_at_bar("html", "<script type=\"text/x-handlebars-template\">{{fo|o-bar}}</script>"), "foo-bar");
+        assert_eq!(word_at_bar("html", "<style type=\"text/scss\">$base-co|lor: red;</style>"), "$base-color");
+        // HTML in a script block hands its own blocks on.
+        assert_eq!(word_at_bar("html", "<script type=\"text/html\">\n<style>.b|tn{}</style>\n</script>"), ".btn");
+    }
+
+    #[test]
+    fn a_word_is_read_within_the_part_of_the_line_in_its_language() {
+        assert_eq!(word_at_bar("html", "<style>.b|tn</style>"), ".btn");
+        assert_eq!(word_at_bar("html", "<script>|$x</script>"), "$x");
+        // At the start of a part, the word ending there in the part before.
+        assert_eq!(word_at_bar("html", "<script>$x|</script>"), "$x");
+        assert_eq!(word_at_bar("html", "<script>$x<|/script>"), "");
+    }
+
+    #[test]
+    fn php_hands_script_and_style_blocks_outside_its_code_on() {
+        assert_eq!(word_at_bar("php", "<style>\n.b|tn { }\n</style>"), ".btn");
+        assert_eq!(word_at_bar("php", "<style>\n<?php echo $co|lor ?>\n</style>"), "$color");
+        assert_eq!(word_at_bar("php", "<style>\n<?php echo $color ?> .b|tn\n</style>"), ".btn");
+        // In PHP's code, and in its strings, tags are text.
+        assert_eq!(word_at_bar("php", "<?php\necho \"<style>\";\n$na|me = 1;\n"), "$name");
+        assert_eq!(word_at_bar("php", "<?php $s = '?><style>';\n$na|me = 1;"), "$name");
+        assert_eq!(word_at_bar("php", "<?php $s = 1; ?>\n<style>\n.b|tn\n</style>"), ".btn");
+        // PHP's tags are in lower case only.
+        assert_eq!(word_at_bar("php", "<STYLE>\n.b|tn\n</STYLE>"), "btn");
+    }
+
+    #[test]
+    fn a_markdown_code_fence_is_read_in_its_language() {
+        assert_eq!(word_at_bar("markdown", "Text $x\n\n```ts\nconst $|x = 1;\n```\n"), "$x");
+        assert_eq!(word_at_bar("markdown", "```ts\nconst $x = 1;\n```\n\n$|x"), "x");
+        assert_eq!(word_at_bar("markdown", "  ```css title=\"a\"\n.b|tn {}\n  ```"), ".btn");
+        assert_eq!(word_at_bar("markdown", "```mermaid\n$|x\n```"), "x");
+        assert_eq!(word_at_bar("markdown", "```\n$|x\n```"), "x");
+        assert_eq!(word_at_bar("markdown", "```html\n<style>\n.b|tn {}\n</style>\n```"), ".btn");
+        // Raw HTML's script blocks too, but not one in inline code.
+        assert_eq!(word_at_bar("markdown", "<script>\n$|x\n</script>"), "$x");
+        assert_eq!(word_at_bar("markdown", "Add a `<script>` tag.\n\n$|x"), "x");
+    }
+
+    #[test]
+    fn a_line_too_long_to_tokenize_is_read_in_the_files_language() {
+        let long = format!("<script>\nlet $|x = 1; {}\n</script>", "a".repeat(20_000));
+        assert_eq!(word_at_bar("html", &long), "x");
+        let short = format!("<script>\nlet $|x = 1; {}\n</script>", "a".repeat(19_000));
+        assert_eq!(word_at_bar("html", &short), "$x");
     }
 
     #[test]

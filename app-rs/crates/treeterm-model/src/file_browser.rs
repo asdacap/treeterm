@@ -1005,7 +1005,7 @@ impl FileBrowser {
 
     /// Open the panel (`openSearch` in Electron's `FileViewer`) on a single-line `selection`,
     /// or, from the context menu, on the word under the cursor as Monaco reads it in the
-    /// file's language. Opened on the query it already has, the selected match is dropped
+    /// language there. Opened on the query it already has, the selected match is dropped
     /// (the counter goes back to "N found") and the repo search goes on. With nothing to
     /// search for, Cmd/Ctrl+F opens an empty panel (an open one keeps its query and match)
     /// and the context menu does nothing.
@@ -1043,8 +1043,9 @@ impl FileBrowser {
         SearchOpened::Focus
     }
 
-    /// The word at byte `cursor` of the shown text, by the file's language
-    /// ([`words::word_at`]); none when there is no word there or the file is not text.
+    /// The word at byte `cursor` of the shown text, by the language there: the file's, or
+    /// one embedded in it, such as a `<script>` block's ([`words::word_at`]); none when there
+    /// is no word there or the file is not text.
     fn word_at(&self, cursor: usize) -> Option<String> {
         match &self.view {
             FileView::Text { path, text } => {

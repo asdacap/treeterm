@@ -410,6 +410,12 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   peek in. Open Definition to the Side (Cmd/Ctrl+K F12) goes to the definition as F12
   does, as in Electron, whose editor opener opened it in a new Editor tab (there is no
   split editor in either app).
+- The Files viewer's right-click Search reads the word under the cursor in the language
+  there, as Monaco does (JavaScript or CSS in the `<script>` and `<style>` blocks of an HTML,
+  Vue, Svelte or PHP file, a Markdown code fence's language), except in Less's backquoted
+  JavaScript, read as Less, and in the `<script>` and `<style>` blocks of a Handlebars,
+  Razor, Twig or MDX block (a code fence, or a script block of that `type`), read as that
+  language.
 - With the sidebar collapsed the header keeps clear of the macOS window buttons (Electron's
   title runs under them).
 - GPUI cannot decode AVIF, so the Files viewer shows `.avif` images in a webview (WebKit
