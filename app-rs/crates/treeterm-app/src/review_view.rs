@@ -1354,7 +1354,16 @@ impl ReviewView {
             (model.selected_commit().cloned(), model.loading_more_commits(), model.overview().more_commits)
         };
         let pane = if commits.is_empty() {
-            Self::empty("No commits on this branch", secondary)
+            // `.diff-empty` in the block `.commits-pane`: centred.
+            div()
+                .w_full()
+                .flex()
+                .justify_center()
+                .p(px(20.))
+                .text_size(px(16.))
+                .text_color(secondary)
+                .child("No commits on this branch")
+                .into_any_element()
         } else {
             let mut list = v_flex().id("commits-list").track_scroll(&self.commits_scroll).max_h(px(160.)).overflow_y_scroll();
             for commit in &commits {
@@ -1411,9 +1420,11 @@ impl ReviewView {
             .child(div().flex_shrink_0().border_b_1().border_color(border).child(pane));
         if let Some(selected) = selected {
             let viewed = self.viewed(cx);
-            let (listed, body): (Vec<ListedFile>, Option<String>) = match &selected.diff {
-                Loaded::Ready(diff) => (diff.files.iter().map(ListedFile::committed).collect(), Some(diff.patch.clone())),
-                Loaded::Loading | Loaded::Failed(_) => (Vec::new(), None),
+            // While the commit's diff loads (or after it failed), the list is empty: its header
+            // reads "0/0 viewed" (`commitDiffFiles` is `[]`).
+            let (listed, patch): (Vec<ListedFile>, String) = match &selected.diff {
+                Loaded::Ready(diff) => (diff.files.iter().map(ListedFile::committed).collect(), diff.patch.clone()),
+                Loaded::Loading | Loaded::Failed(_) => (Vec::new(), String::new()),
             };
             let shown = self.filtered(&listed);
             let shown_viewed = listed.iter().filter(|f| viewed.contains(&f.path)).count();
@@ -1433,10 +1444,9 @@ impl ReviewView {
                 Loaded::Ready(_) => files::tree(self, "commit", &shown, &viewed, None, false, cx),
             };
             let list = v_flex().child(search).children(files::favourites(self, &listed, cx)).child(tree).into_any_element();
-            let right = match (self.favourite_pane(cx), body) {
-                (Some(pane), _) => pane,
-                (None, Some(patch)) => self.stacked(&patch, &shown, &viewed, false, window, cx),
-                (None, None) => div().into_any_element(),
+            let right = match self.favourite_pane(cx) {
+                Some(pane) => pane,
+                None => self.stacked(&patch, &shown, &viewed, false, window, cx),
             };
             column = column.child(self.content_row(list, right, cx));
         }

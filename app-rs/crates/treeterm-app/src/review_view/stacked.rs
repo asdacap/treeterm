@@ -127,6 +127,8 @@ impl ReviewView {
         let all_viewed = !order.is_empty() && shown_viewed == order.len();
         let paths: Vec<String> = order.iter().map(|f| f.path.clone()).collect();
         let listed = paths.clone();
+        // With no file listed (a commit's diff loading), both are disabled.
+        let enabled = !order.is_empty();
         // `.stacked-diff-list-header`; its bottom border is the first file's top border
         // (GPUI Kit borders every file header).
         let header = h_flex()
@@ -144,11 +146,13 @@ impl ReviewView {
                     .gap(px(6.))
                     .items_center()
                     .cursor_pointer()
-                    .child(checkbox(all_viewed, cx))
+                    .child(checkbox(all_viewed, cx).when(!enabled, |d| d.opacity(0.5)))
                     .child(format!("{shown_viewed}/{} viewed", order.len()))
-                    .on_click(cx.listener(move |view, _: &ClickEvent, _, cx| {
-                        view.model.update(cx, |m, cx| m.set_files_viewed(&paths, !all_viewed, cx));
-                    })),
+                    .when(enabled, |d| {
+                        d.on_click(cx.listener(move |view, _: &ClickEvent, _, cx| {
+                            view.model.update(cx, |m, cx| m.set_files_viewed(&paths, !all_viewed, cx));
+                        }))
+                    }),
             )
             .child(
                 div()
@@ -161,9 +165,11 @@ impl ReviewView {
                     .rounded(px(4.))
                     .bg(bg_primary)
                     .text_color(primary)
-                    .cursor_pointer()
                     .child(if self.all_collapsed { "Expand all" } else { "Collapse all" })
-                    .on_click(cx.listener(|view, _: &ClickEvent, _, cx| {
+                    // `:disabled { opacity: 0.5; cursor: default }`.
+                    .when(!enabled, |d| d.opacity(0.5))
+                    .when(enabled, |d| d.cursor_pointer())
+                    .when(enabled, |d| d.on_click(cx.listener(|view, _: &ClickEvent, _, cx| {
                         view.all_collapsed = !view.all_collapsed;
                         let collapsed = view.all_collapsed;
                         if let Some(diff) = &view.diff {
@@ -180,7 +186,7 @@ impl ReviewView {
                             }
                         }
                         cx.notify();
-                    })),
+                    }))),
             );
         let diff = self.diff_element(&state, patch, &order, viewed, comments, window, cx);
         let diff = self.with_diff_menu(diff, &state, cx);
