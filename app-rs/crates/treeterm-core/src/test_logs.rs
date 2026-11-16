@@ -16,7 +16,6 @@ use std::marker::PhantomData;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex, Once, PoisonError};
 
-use tracing_subscriber::Layer as _;
 use tracing_subscriber::fmt::MakeWriter;
 use tracing_subscriber::layer::SubscriberExt as _;
 
@@ -71,13 +70,15 @@ fn thread_capture() -> Option<Buffer> {
 pub fn capture() -> Captured {
     static SUBSCRIBER: Once = Once::new();
     SUBSCRIBER.call_once(|| {
-        let layer = tracing_subscriber::fmt::layer()
+        let format = tracing_subscriber::fmt::layer()
             .with_ansi(false)
-            .with_writer(ThreadWriter)
-            .with_filter(tracing_subscriber::filter::dynamic_filter_fn(|_, _| {
-                thread_capture().is_some()
-            }));
-        tracing::subscriber::set_global_default(tracing_subscriber::registry().with(layer))
+            .with_writer(ThreadWriter);
+        // A filter for the whole subscriber, not the layer's own, so that `tracing::enabled!`
+        // also says no on a thread that does not capture.
+        let capturing =
+            tracing_subscriber::filter::dynamic_filter_fn(|_, _| thread_capture().is_some());
+        let subscriber = tracing_subscriber::registry().with(format).with(capturing);
+        tracing::subscriber::set_global_default(subscriber)
             .expect("only test_logs sets the test binary's subscriber");
     });
     let buffer = Buffer::default();
@@ -144,6 +145,12 @@ mod tests {
         );
         assert_eq!(logs.line("another thread's line"), None, "{text}");
         assert!(!text.contains('\u{1b}'), "no colours: {text}");
+        assert!(tracing::enabled!(tracing::Level::TRACE));
+        let elsewhere = std::thread::spawn(|| tracing::enabled!(tracing::Level::ERROR));
+        assert!(
+            !elsewhere.join().unwrap(),
+            "nothing logs another thread's lines"
+        );
 
         drop(logs);
         tracing::info!("a line after");

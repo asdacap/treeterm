@@ -1,9 +1,12 @@
-//! The app's log (stdout) and its level.
+//! The app's log (stdout): its level, and panics reported through it.
 //!
 //! Electron's renderer took its log level from localStorage (`treeterm:logLevel`,
 //! `logger.ts`), so it could change without a rebuild and stayed set across launches. The
 //! native app keeps it as `logLevel` in `ui-state.json` ([`crate::ui_state::read_log_level`]),
 //! read at start-up. `RUST_LOG`, with tracing's own directives, still overrides it.
+
+use std::backtrace::{Backtrace, BacktraceStatus};
+use std::panic::Location;
 
 /// A level `logLevel` names (`logger.ts`'s `LEVEL_BY_NAME`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -78,6 +81,49 @@ impl StoredLevel {
     }
 }
 
+/// From now on a panic is logged as an error (target `panic`), as Electron's error boundary
+/// logged what it caught ("ErrorBoundary caught an error:"): the thread, where it panicked,
+/// its message and, when `RUST_BACKTRACE` asks for one, the backtrace. GPUI has no component
+/// stack to add. A panic the log would not show (level `silent`, or a `RUST_LOG` leaving out
+/// the target) goes to Rust's own hook instead, which prints it to stderr. Call it once the
+/// log runs; hooks set later can wrap it.
+pub fn install_panic_hook() {
+    let default = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        if tracing::enabled!(target: "panic", tracing::Level::ERROR) {
+            let thread = std::thread::current();
+            let text = panic_text(
+                thread.name().unwrap_or("<unnamed>"),
+                info.location(),
+                info.payload_as_str().unwrap_or("Box<dyn Any>"),
+                &Backtrace::capture(),
+            );
+            tracing::error!(target: "panic", "{text}");
+        } else {
+            default(info);
+        }
+    }));
+}
+
+/// The panic as Rust's own hook prints it, then the backtrace if one was captured (it is
+/// only when `RUST_BACKTRACE` asks for one).
+fn panic_text(
+    thread: &str,
+    location: Option<&Location<'_>>,
+    message: &str,
+    backtrace: &Backtrace,
+) -> String {
+    let at = match location {
+        Some(location) => format!(" at {location}"),
+        None => String::new(),
+    };
+    let mut text = format!("thread '{thread}' panicked{at}:\n{message}");
+    if backtrace.status() == BacktraceStatus::Captured {
+        text.push_str(&format!("\nstack backtrace:\n{backtrace}"));
+    }
+    text
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -126,5 +172,31 @@ mod tests {
         let unknown = StoredLevel::from_stored(Some("verbose"));
         assert_eq!(unknown, StoredLevel::Unknown("verbose".to_owned()));
         assert_eq!(unknown.level(), LogLevel::Info);
+    }
+
+    #[test]
+    fn a_panic_reads_as_rusts_own_message_with_the_backtrace_once_captured() {
+        let location = Location::caller();
+        let at = format!(
+            "{}:{}:{}",
+            location.file(),
+            location.line(),
+            location.column()
+        );
+        let no_backtrace = Backtrace::disabled();
+        assert_eq!(
+            panic_text("main", Some(location), "boom", &no_backtrace),
+            format!("thread 'main' panicked at {at}:\nboom")
+        );
+        assert_eq!(
+            panic_text("main", None, "boom", &no_backtrace),
+            "thread 'main' panicked:\nboom"
+        );
+
+        let backtrace = Backtrace::force_capture();
+        let text = panic_text("treeterm-io", Some(location), "boom", &backtrace);
+        let expected = format!("thread 'treeterm-io' panicked at {at}:\nboom\nstack backtrace:\n");
+        assert!(text.starts_with(&expected), "{text}");
+        assert!(text.len() > expected.len(), "{text}");
     }
 }

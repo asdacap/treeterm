@@ -49,7 +49,7 @@ use treeterm_model::keybinding_store::KeybindingStore;
 use treeterm_model::settings_store::{SettingsEvent, SettingsStore};
 use treeterm_core::crash_report::{self, CrashReport};
 use treeterm_core::local_daemon::LocalDaemonSpec;
-use treeterm_core::logging::StoredLevel;
+use treeterm_core::logging::{self, StoredLevel};
 use treeterm_core::paths::{self, process_env};
 use treeterm_core::ui_state;
 use treeterm_core::rt::Rt;
@@ -137,9 +137,10 @@ fn window_options(cx: &App) -> WindowOptions {
 }
 
 /// A panic on the UI thread ends the app: GPUI cannot carry on, and the panic would unwind
-/// into AppKit, which aborts with the system's crash dialog. After Rust's own message, hand
-/// off to a new process that shows Electron's "Application Error" screen, and exit. Panics
-/// elsewhere go on as before (a tokio task's panic is that task's `TaskLost`).
+/// into AppKit, which aborts with the system's crash dialog. Once the hook set before has
+/// logged the panic (`logging::install_panic_hook`), hand off to a new process that shows
+/// Electron's "Application Error" screen, and exit. Panics elsewhere go on as before (a
+/// tokio task's panic is that task's `TaskLost`).
 fn install_crash_hook() {
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
@@ -161,7 +162,8 @@ fn install_crash_hook() {
 
 /// Start the log, on stdout. Its level is `RUST_LOG` when that is set (tracing's directives),
 /// else the `logLevel` kept in `ui-state.json` (Electron's localStorage `treeterm:logLevel`),
-/// else info. What could not be read is logged once the log runs.
+/// else info. What could not be read is logged once the log runs, and so are panics from
+/// then on.
 fn start_logging() {
     let stored = paths::user_data_dir()
         .map_err(|error| error.to_string())
@@ -183,6 +185,7 @@ fn start_logging() {
         ),
         (Ok(_), StoredLevel::Absent | StoredLevel::Known(_)) => {}
     }
+    logging::install_panic_hook();
 }
 
 fn main() {

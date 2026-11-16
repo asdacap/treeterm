@@ -19,7 +19,9 @@ For an isolated sandbox (separate HOME, socket, daemon) and the automation socke
 The app logs to stdout. Its level is `RUST_LOG` when that is set (tracing's directives, such
 as `RUST_LOG=treeterm_core=debug`); else `"logLevel"` in `ui-state.json` beside
 `settings.json`: `debug`, `info`, `warn`, `error` or `silent`, in any case, read at start-up
-(Electron's renderer read it from its localStorage `treeterm:logLevel`); else `info`.
+(Electron's renderer read it from its localStorage `treeterm:logLevel`); else `info`. A panic
+is logged as an error (target `panic`, with a backtrace when `RUST_BACKTRACE` is set), or
+printed to stderr when the level leaves that out.
 
 End-to-end tests launch the real binary in such a sandbox (daemon lifecycle, terminal output
 across restarts). They open a window, so they only run when asked:
