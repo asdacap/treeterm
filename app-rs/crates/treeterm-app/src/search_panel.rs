@@ -98,13 +98,16 @@ fn row(row: SearchRow, index: usize, actions: &PanelActions, cx: &App) -> AnyEle
             .text_color(secondary)
             .child(title.to_uppercase())
             .into_any_element(),
+        // `direction: rtl`: a long path loses its start, so the file name stays in view.
         SearchRow::File(path) => div()
             .pt(px(4.))
             .px(px(8.))
             .pb(px(2.))
             .text_size(px(ui::SMALL))
             .text_color(primary)
-            .truncate()
+            .overflow_hidden()
+            .whitespace_nowrap()
+            .text_ellipsis_start()
             .child(path)
             .into_any_element(),
         SearchRow::Note(text) => h_flex()
