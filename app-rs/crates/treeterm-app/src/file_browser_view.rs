@@ -1058,6 +1058,9 @@ impl FileBrowserView {
     fn download_button(&self, path: &str, cx: &mut Context<Self>) -> Vec<AnyElement> {
         use treeterm_model::file_browser::DownloadState;
         let state = self.model.read(cx).download_state().clone();
+        // The read this button belongs to: another file may be picked while the save panel
+        // is open, and the download must not show on that file's button.
+        let read = self.model.read(cx).reads();
         let (label, busy) = match &state {
             DownloadState::Idle => ("Download", false),
             DownloadState::Downloading => ("Downloading…", true),
@@ -1100,7 +1103,7 @@ impl FileBrowserView {
                         Ok(Ok(None)) | Err(_) => return, // cancelled
                         Ok(Err(error)) => return tracing::error!(%error, "save dialog failed"),
                     };
-                    model.update(cx, |m, cx| m.download(&path, destination, cx));
+                    model.update(cx, |m, cx| m.download(&path, destination, read, cx));
                 })
                 .detach();
             }))

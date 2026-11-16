@@ -293,8 +293,12 @@ pub struct FileBrowser {
     /// Saving a copy of the shown file to this computer (`FileDownloadButton`). Every read
     /// starts it at Idle, as Electron's button is mounted afresh with each read.
     download: DownloadState,
-    /// Running downloads, by the read they were started from. One started from an earlier
-    /// read keeps going, unseen (its failure is logged).
+    /// The download `download` follows, while its read is the one shown.
+    shown_download: ShownDownload,
+    /// Downloads started so far (each gets the next number as its id).
+    downloads_started: u64,
+    /// Running downloads, by id. Each keeps going until it is done, unseen when another
+    /// download is shown (its failure is logged).
     downloads: HashMap<u64, Task<()>>,
     name_search: NameSearch,
     _name_search: Option<Task<()>>,
@@ -306,6 +310,14 @@ pub enum DownloadState {
     Idle,
     Downloading,
     Failed(String),
+}
+
+/// The download the Download button follows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ShownDownload {
+    None,
+    /// Download `id`, the latest started from read `read` ([`FileBrowser::reads`]).
+    Latest { read: u64, id: u64 },
 }
 
 /// A filesystem call's outcome, a lost background task counting as the call failing.
@@ -413,6 +425,8 @@ impl FileBrowser {
             loads: HashMap::new(),
             _read: None,
             download: DownloadState::Idle,
+            shown_download: ShownDownload::None,
+            downloads_started: 0,
             downloads: HashMap::new(),
             _search: None,
             _definition: None,
@@ -451,14 +465,22 @@ impl FileBrowser {
         &self.download
     }
 
-    /// Save `path` (on the daemon's host) to `destination` on this computer.
-    pub fn download(&mut self, path: &str, destination: std::path::PathBuf, cx: &mut Context<Self>) {
-        self.download = DownloadState::Downloading;
-        let read = self.fs.read_file(&self.root, path, u64::MAX);
+    /// Save `path` (on the daemon's host) to `destination` on this computer. `read` is the read
+    /// ([`Self::reads`]) whose Download button was clicked. The save panel does not block the
+    /// tab, so another file may be shown by now: the download then runs unseen, leaving that
+    /// file's button alone.
+    pub fn download(&mut self, path: &str, destination: std::path::PathBuf, read: u64, cx: &mut Context<Self>) {
+        self.downloads_started += 1;
+        let id = self.downloads_started;
+        if read == self.reads {
+            self.shown_download = ShownDownload::Latest { read, id };
+            self.download = DownloadState::Downloading;
+            cx.notify();
+        }
+        let file = self.fs.read_file(&self.root, path, u64::MAX);
         let executor = cx.background_executor().clone();
-        let started = self.reads;
         let task = cx.spawn(async move |this, cx| {
-            let result = match read.await {
+            let result = match file.await {
                 Ok(Ok(ReadOutcome::Read(file))) => {
                     let content = file.content;
                     executor
@@ -470,8 +492,9 @@ impl FileBrowser {
                 Err(lost) => Err(lost.to_string()),
             };
             match this.update(cx, |browser, cx| {
-                browser.downloads.remove(&started);
-                match (browser.reads == started, result) {
+                browser.downloads.remove(&id);
+                let shown = browser.shown_download == ShownDownload::Latest { read: browser.reads, id };
+                match (shown, result) {
                     (true, result) => {
                         browser.download = match result {
                             Ok(()) => DownloadState::Idle,
@@ -479,7 +502,8 @@ impl FileBrowser {
                         };
                         cx.notify();
                     }
-                    // Another file is shown now, with its own button.
+                    // Another file is shown, with its own button, or a later download of
+                    // this file is on the button.
                     (false, Ok(())) => {}
                     (false, Err(error)) => tracing::error!(%error, "download failed"),
                 }
@@ -487,9 +511,7 @@ impl FileBrowser {
                 Ok(()) | Err(_) => {} // Err: tab closed
             }
         });
-        // One per read: the read's button is disabled while its download runs.
-        self.downloads.insert(started, task);
-        cx.notify();
+        self.downloads.insert(id, task);
     }
 
     pub fn root(&self) -> &str {

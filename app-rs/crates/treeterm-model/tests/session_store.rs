@@ -1486,7 +1486,7 @@ fn a_file_downloads_to_a_local_path(cx: &mut TestAppContext) {
     };
     let out = tempfile::tempdir().unwrap();
     let destination = out.path().join("copy.bin");
-    files.update(cx, |f, cx| f.download(&source.to_string_lossy(), destination.clone(), cx));
+    files.update(cx, |f, cx| f.download(&source.to_string_lossy(), destination.clone(), f.reads(), cx));
     wait_until(cx, &files, |f| *f.download_state() == treeterm_model::file_browser::DownloadState::Idle && destination.exists());
     assert_eq!(std::fs::read(&destination).unwrap(), vec![0u8, 1, 2, 255, 7]);
 }
@@ -1514,7 +1514,7 @@ fn a_download_belongs_to_the_file_it_was_started_on(cx: &mut TestAppContext) {
 
     // A failure shows on its file only: the next file's button starts at Idle.
     files.update(cx, |f, cx| f.select_file(&a, cx));
-    files.update(cx, |f, cx| f.download(&a, out.path().join("missing/a.bin"), cx));
+    files.update(cx, |f, cx| f.download(&a, out.path().join("missing/a.bin"), f.reads(), cx));
     wait_until(cx, &files, |f| matches!(f.download_state(), DownloadState::Failed(_)));
     files.update(cx, |f, cx| f.select_file(&b, cx));
     assert_eq!(state(cx), DownloadState::Idle);
@@ -1522,11 +1522,11 @@ fn a_download_belongs_to_the_file_it_was_started_on(cx: &mut TestAppContext) {
     // So does a running download, which keeps going while the next file downloads; the
     // newer file's failure is the one shown.
     let b_copy = out.path().join("b.bin");
-    files.update(cx, |f, cx| f.download(&b, b_copy.clone(), cx));
+    files.update(cx, |f, cx| f.download(&b, b_copy.clone(), f.reads(), cx));
     assert_eq!(state(cx), DownloadState::Downloading);
     files.update(cx, |f, cx| f.select_file(&a, cx));
     assert_eq!(state(cx), DownloadState::Idle);
-    files.update(cx, |f, cx| f.download(&a, out.path().join("missing/a.bin"), cx));
+    files.update(cx, |f, cx| f.download(&a, out.path().join("missing/a.bin"), f.reads(), cx));
     wait_until(cx, &files, |f| matches!(f.download_state(), DownloadState::Failed(_)) && b_copy.exists());
     cx.run_until_parked();
     assert!(matches!(state(cx), DownloadState::Failed(error) if error.contains("missing/a.bin")));
@@ -1535,6 +1535,48 @@ fn a_download_belongs_to_the_file_it_was_started_on(cx: &mut TestAppContext) {
     // Picking the file shown keeps its state.
     files.update(cx, |f, cx| f.select_file(&a, cx));
     assert!(matches!(state(cx), DownloadState::Failed(_)));
+}
+
+#[gpui_kit::test]
+fn a_download_confirmed_later_keeps_to_the_read_it_was_clicked_on(cx: &mut TestAppContext) {
+    use treeterm_model::file_browser::DownloadState;
+    cx.executor().allow_parking();
+    let h = harness();
+    std::fs::write(h.daemon.workspaces_dir().join("a.json"), body("a", None)).unwrap();
+    publish(&h, &["a"]);
+    let (a, b) = (h.daemon.root().join("a.bin"), h.daemon.root().join("b.bin"));
+    std::fs::write(&a, b"a").unwrap();
+    std::fs::write(&b, b"b").unwrap();
+    let (a, b) = (a.to_string_lossy().into_owned(), b.to_string_lossy().into_owned());
+    let store = open_store(cx, &h, "client-a");
+    wait_until(cx, &store, |s| loaded(s, "a"));
+    let workspace = store.read_with(cx, |s, _| ws(s, "a"));
+    let tab = workspace.update(cx, |w, cx| w.add_tab("filesystem", cx)).unwrap();
+    let Some(TabContent::Files(files)) = workspace.read_with(cx, |w, _| w.tab_content(&tab)) else {
+        panic!("not a files tab");
+    };
+    let out = tempfile::tempdir().unwrap();
+    let state = |cx: &mut TestAppContext| files.read_with(cx, |f, _| f.download_state().clone());
+    let holds = |path: &std::path::Path, bytes: &[u8]| std::fs::read(path).is_ok_and(|read| read == bytes);
+
+    // Download clicked on a, b picked while the save panel is open, then the panel
+    // confirmed: a is saved, and b's button stays at Idle.
+    files.update(cx, |f, cx| f.select_file(&a, cx));
+    let clicked = files.read_with(cx, |f, _| f.reads());
+    files.update(cx, |f, cx| f.select_file(&b, cx));
+    let a_copy = out.path().join("a.bin");
+    files.update(cx, |f, cx| f.download(&a, a_copy.clone(), clicked, cx));
+    assert_eq!(state(cx), DownloadState::Idle);
+    wait_until(cx, &files, |_| holds(&a_copy, b"a"));
+    cx.run_until_parked();
+    assert_eq!(state(cx), DownloadState::Idle);
+
+    // Two save panels confirmed for one file: neither download cancels the other.
+    let (first, second) = (out.path().join("b1.bin"), out.path().join("b2.bin"));
+    files.update(cx, |f, cx| f.download(&b, first.clone(), f.reads(), cx));
+    files.update(cx, |f, cx| f.download(&b, second.clone(), f.reads(), cx));
+    assert_eq!(state(cx), DownloadState::Downloading);
+    wait_until(cx, &files, |f| *f.download_state() == DownloadState::Idle && holds(&first, b"b") && holds(&second, b"b"));
 }
 
 #[gpui_kit::test]
