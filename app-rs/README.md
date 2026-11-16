@@ -377,4 +377,5 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   CMakeLists.txt, `.toml`, `.markdown`, `.mjs`/`.cjs`/`.mts`/`.cts`, `.jsonc`,
   `.cc`/`.cxx`/`.hh`, `.zig`, `.ex`/`.exs`, `.proto` and `.diff`/`.patch`.
 - The SSH picker's Add trims the forward's remote host, so a blank one is ignored like an
-  empty one (Electron added a forward to " ").
+  empty one (Electron added a forward to " "). Enter on a focused button there presses only
+  that button; Electron's dialog then also ran Connect with the form as it was.

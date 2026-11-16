@@ -183,6 +183,7 @@ fn main() {
     gpui_kit::application().with_assets(assets::AppAssets).run(move |cx| {
         gpui_kit::init(cx);
         theme::install(cx);
+        ui::bind_keys(cx);
         terminal_view::bind_keys(cx);
         text_editor_view::bind_keys(cx);
         file_browser_view::bind_keys(cx);

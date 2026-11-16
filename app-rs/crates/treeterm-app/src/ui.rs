@@ -4,7 +4,10 @@
 use gpui_kit::assets::IconName;
 use gpui_kit::component::Icon;
 use gpui_kit::prelude::*;
-use gpui_kit::{App, ClickEvent, Div, ElementId, Hsla, Stateful, Window, div, px, rgb};
+use gpui_kit::{
+    App, ClickEvent, Div, ElementId, FocusHandle, Hsla, KeyBinding, KeyboardButton, KeyboardClickEvent, NoAction, Stateful,
+    Window, div, px, rgb,
+};
 
 use crate::theme::colors;
 
@@ -943,19 +946,69 @@ pub fn star_icon(size: f32, filled: bool) -> Icon {
     icon.size(px(size))
 }
 
+/// The key context of [`key_button`] and [`key_checkbox`].
+const KEY_CONTROL: &str = "KeyControl";
+
+/// Enter and Space reach a focused [`key_button`] or [`key_checkbox`]: GPUI runs key
+/// bindings before an element's own keys, so a GPUI Kit dialog's Enter (`Confirm`) would
+/// otherwise take the press, as a `<button>` in an Electron dialog takes it.
+pub fn bind_keys(cx: &mut App) {
+    cx.bind_keys([
+        KeyBinding::new("enter", NoAction, Some(KEY_CONTROL)),
+        KeyBinding::new("space", NoAction, Some(KEY_CONTROL)),
+    ]);
+}
+
+/// A focus handle kept for the element `id`, and whether it shows Chromium's focus ring
+/// (`:focus-visible`: focused from the keyboard).
+fn key_focus(id: &ElementId, window: &mut Window, cx: &mut App) -> (FocusHandle, bool) {
+    let focus = window.use_keyed_state(id.clone(), cx, |_, cx| cx.focus_handle()).read(cx).clone();
+    let ring = focus.is_focused(window) && window.last_input_was_keyboard();
+    (focus, ring)
+}
+
 /// A borderless `<button>`, rounded `radius`: Tab reaches it and Enter or Space presses it.
 /// Focused from the keyboard (`:focus-visible`), it shows Chromium's focus ring. Callers add
 /// its look, and an accessibility label when its content does not name it.
 pub fn key_button(id: impl Into<ElementId>, radius: f32, window: &mut Window, cx: &mut App) -> gpui_kit::base::Button {
     let id = id.into();
-    let focus = window.use_keyed_state(id.clone(), cx, |_, cx| cx.focus_handle()).read(cx).clone();
-    let ring = focus.is_focused(window) && window.last_input_was_keyboard();
+    let (focus, ring) = key_focus(&id, window, cx);
     gpui_kit::base::Button::new(id)
         .track_focus(&focus)
+        .key_context(KEY_CONTROL)
         // The line box the button inherits (the base button sets the font size's).
         .line_height(relative(1.2))
         .rounded(px(radius))
         .when(ring, |button| button.child(focus_outline(radius)))
+}
+
+/// A native `<input type="checkbox">` of `size` px ([`checkbox_box`]) with its `<label>`:
+/// Tab reaches it unless `disabled`, a click anywhere on it or Space toggles it. Focused from
+/// the keyboard, the box shows Chromium's focus ring. Callers add the label after the box,
+/// the row's look and `on_change`. Enter clicks it too: a native checkbox ignores Enter, so
+/// callers check [`pressed_enter`].
+pub fn key_checkbox(
+    id: impl Into<ElementId>,
+    checked: bool,
+    disabled: bool,
+    size: f32,
+    window: &mut Window,
+    cx: &mut App,
+) -> gpui_kit::base::Checkbox {
+    let id = id.into();
+    let (focus, ring) = key_focus(&id, window, cx);
+    let radius = (size / 6.).round();
+    gpui_kit::base::Checkbox::new(id)
+        .track_focus(&focus)
+        .key_context(KEY_CONTROL)
+        .checked(checked)
+        .disabled(disabled)
+        .child(checkbox_box(checked, disabled, size).when(ring, |b| b.child(focus_outline(radius))))
+}
+
+/// Whether a click came from Enter on the focused control.
+pub fn pressed_enter(event: &ClickEvent) -> bool {
+    matches!(event, ClickEvent::Keyboard(KeyboardClickEvent { button: KeyboardButton::Enter, .. }))
 }
 
 /// Chromium's focus ring on a borderless control: 2px of macOS orange across its edge, a
@@ -1097,15 +1150,38 @@ mod tests {
 
     use super::*;
 
-    /// A key button counting its presses.
-    struct Pressed {
+    gpui_kit::actions!(ui_test, [Submit]);
+
+    /// A key button counting its presses, a key checkbox and a disabled one, in a context
+    /// that binds Enter (as a GPUI Kit dialog binds it to `Confirm`).
+    struct Controls {
         presses: Rc<Cell<usize>>,
+        submits: Rc<Cell<usize>>,
+        checked: bool,
+        enters: usize,
     }
 
-    impl Render for Pressed {
+    impl Render for Controls {
         fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-            let presses = self.presses.clone();
-            div().child(key_button("pressed", 3., window, cx).child("x").on_click(move |_, _, _| presses.set(presses.get() + 1)))
+            let (presses, submits) = (self.presses.clone(), self.submits.clone());
+            let toggle = cx.listener(|controls, event: &ClickEvent, _, cx| {
+                if pressed_enter(event) {
+                    controls.enters += 1;
+                } else {
+                    controls.checked = !controls.checked;
+                }
+                cx.notify();
+            });
+            div()
+                .key_context("Outer")
+                .on_action(move |_: &Submit, _, _| submits.set(submits.get() + 1))
+                .child(key_button("pressed", 3., window, cx).child("x").on_click(move |_, _, _| presses.set(presses.get() + 1)))
+                .child(
+                    key_checkbox("check", self.checked, false, 13., window, cx)
+                        .child("Check")
+                        .on_change(move |_, event, window, cx| toggle(event, window, cx)),
+                )
+                .child(key_checkbox("disabled", false, true, 13., window, cx).child("Disabled"))
         }
     }
 
@@ -1115,21 +1191,43 @@ mod tests {
         cx.simulate_event(KeyUpEvent { keystroke });
     }
 
-    #[gpui_kit::test]
-    fn tab_reaches_a_key_button_and_enter_or_space_presses_it(cx: &mut TestAppContext) {
-        let presses = Rc::new(Cell::new(0));
-        let (_, cx) = cx.add_window_view({
-            let presses = presses.clone();
-            move |_, _| Pressed { presses }
-        });
+    fn focus_next(cx: &mut VisualTestContext) {
         cx.update(|window, cx| {
-            window.draw(cx).clear(cx);
             window.focus_next(cx);
             assert!(window.focused(cx).is_some(), "not a tab stop");
             window.draw(cx).clear(cx);
         });
+    }
+
+    /// Tab visits the button and the enabled checkbox; Enter and Space press the button even
+    /// where an ancestor binds Enter; Space toggles the checkbox, whose Enter callers see.
+    #[gpui_kit::test]
+    fn tab_reaches_key_controls_and_enter_or_space_presses_them(cx: &mut TestAppContext) {
+        let (presses, submits) = (Rc::new(Cell::new(0)), Rc::new(Cell::new(0)));
+        let (controls, cx) = cx.add_window_view({
+            let (presses, submits) = (presses.clone(), submits.clone());
+            move |_, _| Controls { presses, submits, checked: false, enters: 0 }
+        });
+        cx.update(|window, cx| {
+            bind_keys(cx);
+            cx.bind_keys([KeyBinding::new("enter", Submit, Some("Outer"))]);
+            window.draw(cx).clear(cx);
+        });
+
+        focus_next(cx);
         press("enter", cx);
         press("space", cx);
-        assert_eq!(presses.get(), 2);
+        assert_eq!((presses.get(), submits.get()), (2, 0));
+
+        focus_next(cx);
+        press("space", cx);
+        press("enter", cx);
+        controls.read_with(cx, |controls, _| assert_eq!((controls.checked, controls.enters), (true, 1)));
+        assert_eq!(submits.get(), 0);
+
+        // The disabled checkbox is skipped: back to the button.
+        focus_next(cx);
+        press("space", cx);
+        assert_eq!(presses.get(), 3);
     }
 }

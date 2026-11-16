@@ -5,7 +5,7 @@
 use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::prelude::*;
-use gpui_kit::{App, Context, Div, Entity, SharedString, Subscription, Window, div, px, rgb};
+use gpui_kit::{App, ClickEvent, Context, Div, ElementId, Entity, SharedString, Subscription, Window, div, px, rgb};
 use treeterm_core::settings::SshConnectionConfig;
 use treeterm_model::app_store::AppStore;
 use treeterm_model::ssh_connection_form::{ConnectionFields, ConnectionForm};
@@ -184,15 +184,19 @@ fn labelled(label: &'static str, input: Input) -> Div {
 }
 
 /// `smallButtonStyle`: 2px 8px, transparent with a #45475a border, 12px.
-fn small_button(id: impl Into<gpui_kit::ElementId>, label: &'static str, color: u32) -> gpui_kit::Stateful<Div> {
-    div()
-        .id(id)
+fn small_button(
+    id: impl Into<ElementId>,
+    label: &'static str,
+    color: u32,
+    window: &mut Window,
+    cx: &mut App,
+) -> gpui_kit::base::Button {
+    ui::key_button(id, 4., window, cx)
         .flex_shrink_0()
         .px(px(8.))
         .py(px(2.))
         .border_1()
         .border_color(rgb(look::FIELD_BORDER))
-        .rounded(px(4.))
         .text_size(px(12.))
         .line_height(px(14.))
         .text_color(rgb(color))
@@ -201,9 +205,15 @@ fn small_button(id: impl Into<gpui_kit::ElementId>, label: &'static str, color: 
 }
 
 /// The checkboxes: a 13px box, 8px gap, 13px label.
-fn check_row(id: &'static str, checked: bool, disabled: bool, label: &'static str) -> gpui_kit::Stateful<Div> {
-    div()
-        .id(id)
+fn check_row(
+    id: &'static str,
+    checked: bool,
+    disabled: bool,
+    label: &'static str,
+    window: &mut Window,
+    cx: &mut App,
+) -> gpui_kit::base::Checkbox {
+    ui::key_checkbox(id, checked, disabled, 13., window, cx)
         .mb(px(8.))
         .flex()
         .items_center()
@@ -213,12 +223,11 @@ fn check_row(id: &'static str, checked: bool, disabled: bool, label: &'static st
         .text_color(rgb(look::SUBTLE))
         .when(disabled, |d| d.opacity(0.5))
         .when(!disabled, |d| d.cursor_pointer())
-        .child(ui::checkbox_box(checked, disabled, 13.))
         .child(label)
 }
 
 impl Render for ConnectionPicker {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let saved = self.saved(cx);
         let mut saved_list = div();
         for (i, config) in saved.iter().cloned().enumerate() {
@@ -235,31 +244,36 @@ impl Render for ConnectionPicker {
                     .rounded(px(4.))
                     .bg(rgb(look::FIELD))
                     .child(
+                        // The name wraps, as Electron's row lets it.
                         div()
+                            .flex_1()
+                            .min_w_0()
                             .flex()
                             .items_baseline()
-                            .min_w_0()
-                            .child(div().truncate().child(config.display_name()))
+                            .child(div().min_w_0().child(config.display_name()))
                             .when(forwards > 0, |d| {
-                                d.child(div().ml(px(6.)).text_size(px(11.)).text_color(rgb(look::SUBTLE)).child(format!(
-                                    "({forwards} port fwd{})",
-                                    if forwards > 1 { "s" } else { "" }
-                                )))
+                                d.child(div().flex_shrink_0().ml(px(6.)).text_size(px(11.)).text_color(rgb(look::SUBTLE)).child(
+                                    format!("({forwards} port fwd{})", if forwards > 1 { "s" } else { "" }),
+                                ))
                             }),
                     )
                     .child(
                         div()
                             .flex()
+                            .flex_shrink_0()
                             .gap(px(4.))
                             .child(
-                                small_button(SharedString::from(format!("fill-{i}")), "Fill", look::TEXT)
+                                small_button(SharedString::from(format!("fill-{i}")), "Fill", look::TEXT, window, cx)
                                     .on_click(cx.listener(move |picker, _, window, cx| picker.fill(&fill, window, cx))),
                             )
-                            .child(small_button(SharedString::from(format!("connect-{i}")), "Connect", look::TEXT).on_click(
-                                cx.listener(move |picker, _, window, cx| picker.connect_saved(connect.clone(), window, cx)),
-                            ))
                             .child(
-                                small_button(SharedString::from(format!("remove-{i}")), "Remove", look::DANGER)
+                                small_button(SharedString::from(format!("connect-{i}")), "Connect", look::TEXT, window, cx)
+                                    .on_click(cx.listener(move |picker, _, window, cx| {
+                                        picker.connect_saved(connect.clone(), window, cx)
+                                    })),
+                            )
+                            .child(
+                                small_button(SharedString::from(format!("remove-{i}")), "Remove", look::DANGER, window, cx)
                                     .on_click(cx.listener(move |picker, _, _, cx| picker.remove_saved(remove.clone(), cx))),
                             ),
                     ),
@@ -287,17 +301,35 @@ impl Render for ConnectionPicker {
                         "localhost:{} → {}:{}",
                         forward.local_port, forward.remote_host, forward.remote_port
                     )))
-                    .child(small_button(SharedString::from(format!("pf-remove-{i}")), "x", look::DANGER).px(px(6.)).py_0().on_click(
-                        cx.listener(move |picker, _, _, cx| {
-                            picker.form.remove_forward(i);
-                            cx.notify();
-                        }),
-                    )),
+                    .child(
+                        small_button(SharedString::from(format!("pf-remove-{i}")), "x", look::DANGER, window, cx)
+                            .px(px(6.))
+                            .py_0()
+                            .on_click(cx.listener(move |picker, _, _, cx| {
+                                picker.form.remove_forward(i);
+                                cx.notify();
+                            })),
+                    ),
             );
         }
         let sep = |text: &'static str| div().text_size(px(12.)).text_color(rgb(look::SUBTLE)).child(text);
         let (refresh, allow) = (self.form.refresh_daemon(), self.form.allow_outdated());
         let missing = self.host.read(cx).value().is_empty() || self.user.read(cx).value().is_empty();
+        // Space toggles a focused checkbox; Enter connects, as anywhere in Electron's dialog.
+        let toggle_refresh = cx.listener(|picker, event: &ClickEvent, window, cx| {
+            if ui::pressed_enter(event) {
+                return picker.connect_new(window, cx);
+            }
+            picker.form.toggle_refresh_daemon();
+            cx.notify();
+        });
+        let toggle_allow = cx.listener(|picker, event: &ClickEvent, window, cx| {
+            if ui::pressed_enter(event) {
+                return picker.connect_new(window, cx);
+            }
+            picker.form.toggle_allow_outdated();
+            cx.notify();
+        });
         ui::dialog_root(cx)
             .p(px(24.))
             .text_color(rgb(look::TEXT))
@@ -316,8 +348,7 @@ impl Render for ConnectionPicker {
                             .child("SSH Connections"),
                     )
                     .child(
-                        div()
-                            .id("ssh-close")
+                        ui::key_button("ssh-close", 0., window, cx)
                             .px(px(4.))
                             .text_size(px(18.))
                             .line_height(px(21.))
@@ -367,34 +398,29 @@ impl Render for ConnectionPicker {
                             .child(div().w(px(120.)).child(field_input(&self.forward_host)))
                             .child(sep(":"))
                             .child(div().w(px(80.)).child(field_input(&self.forward_remote)))
-                            .child(small_button("pf-add", "Add", look::TEXT).on_click(
-                                cx.listener(|picker, _, window, cx| picker.add_forward(window, cx)),
-                            )),
+                            .child(
+                                small_button("pf-add", "Add", look::TEXT, window, cx)
+                                    .on_click(cx.listener(|picker, _, window, cx| picker.add_forward(window, cx))),
+                            ),
                     ),
             )
-            .child(check_row("refresh-daemon", refresh, false, "Refresh remote daemon").on_click(cx.listener(
-                |picker, _, _, cx| {
-                    picker.form.toggle_refresh_daemon();
-                    cx.notify();
-                },
-            )))
-            .child(check_row("allow-outdated", allow, refresh, "Allow outdated daemon").when(!refresh, |d| {
-                d.on_click(cx.listener(|picker, _, _, cx| {
-                    picker.form.toggle_allow_outdated();
-                    cx.notify();
-                }))
-            }))
+            .child(
+                check_row("refresh-daemon", refresh, false, "Refresh remote daemon", window, cx)
+                    .on_change(move |_, event, window, cx| toggle_refresh(event, window, cx)),
+            )
+            .child(
+                check_row("allow-outdated", allow, refresh, "Allow outdated daemon", window, cx)
+                    .on_change(move |_, event, window, cx| toggle_allow(event, window, cx)),
+            )
             .when_some(self.form.error().map(SharedString::from), |d, message| {
                 d.child(div().mb(px(8.)).text_size(px(13.)).text_color(rgb(look::DANGER)).child(message))
             })
             .child(
-                div()
-                    .id("ssh-connect")
-                    .flex()
-                    .justify_center()
+                ui::key_button("ssh-connect", 4., window, cx)
+                    .disabled(missing)
+                    .w_full()
                     .px(px(16.))
                     .py(px(8.))
-                    .rounded(px(4.))
                     // `opacity: 0.5` fades the button as one layer: the fill over the dialog,
                     // the text unchanged.
                     .bg(rgb(if missing { 0x54_69_94 } else { look::CONNECT }))
@@ -404,7 +430,7 @@ impl Render for ConnectionPicker {
                     .font_weight(gpui_kit::FontWeight::SEMIBOLD)
                     .when(!missing, |d| d.cursor_pointer())
                     .child("Connect")
-                    .when(!missing, |d| d.on_click(cx.listener(|picker, _, window, cx| picker.connect_new(window, cx)))),
+                    .on_click(cx.listener(|picker, _, window, cx| picker.connect_new(window, cx))),
             )
     }
 }
