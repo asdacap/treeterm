@@ -408,10 +408,14 @@ impl ReviewView {
                 .border_1()
                 .border_color(c.border)
                 .rounded(px(4.))
+                // `disabled={refreshing}`.
                 .when(refreshing, |d| d.opacity(0.5))
-                .when(!refreshing, |d| d.cursor_pointer().hover(move |d| d.bg(hover)))
-                .child(if refreshing { spinner(14., primary) } else { plain_icon(IconName::RefreshCw, 14.).into_any_element() })
-                .on_click(cx.listener(|view, _: &ClickEvent, _, cx| view.model.update(cx, |m, cx| m.refresh(cx)))),
+                .when(!refreshing, |d| {
+                    d.cursor_pointer()
+                        .hover(move |d| d.bg(hover))
+                        .on_click(cx.listener(|view, _: &ClickEvent, _, cx| view.model.update(cx, |m, cx| m.refresh(cx))))
+                })
+                .child(if refreshing { spinner(14., primary) } else { plain_icon(IconName::RefreshCw, 14.).into_any_element() }),
         );
         let prompt_commit = (has_uncommitted && header.harness).then(|| {
             action_button("review-prompt-commit", rgb(0x6366f1).into(), rgb(0x7c7ff7).into(), white, idle)
@@ -1450,7 +1454,7 @@ impl ReviewView {
 
     fn body(&mut self, mode: ReviewMode, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let secondary = colors(cx).text_secondary;
-        let content = self.model.read(cx).content().clone();
+        let content = self.model.read(cx).content();
         match content {
             ReviewContent::Loading => Self::message(
                 match mode {

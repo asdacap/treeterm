@@ -1595,7 +1595,7 @@ impl WorkspaceStore {
                 })
                 .collect();
             for review in reviews {
-                review.update(cx, |r, cx| r.refresh(cx));
+                review.update(cx, |r, cx| r.reload_changes(cx));
             }
         }
         cx.notify();

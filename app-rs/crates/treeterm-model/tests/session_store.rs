@@ -534,7 +534,7 @@ fn merging_a_child_brings_its_commits_into_the_parent_and_removes_it(cx: &mut Te
     };
     // As a user would: once the tab has loaded. Its git reads in the worktree would race
     // the auto-commit for the index lock.
-    wait_until(cx, &review, |r| !r.is_refreshing() && r.overview().uncommitted == 1);
+    wait_until(cx, &review, |r| !r.is_loading() && r.overview().uncommitted == 1);
     let (events, _events) = record_events(cx, &review);
     review.update(cx, |r, cx| r.merge(false, AfterMerge::Remove, cx));
     // After the conflict check, the uncommitted file is confirmed first.
@@ -978,7 +978,7 @@ fn close_and_clean_disables_the_review_until_the_workspace_is_gone(cx: &mut Test
     let child_ws = store.read_with(cx, |s, _| ws(s, &child));
     let child_dir = std::path::PathBuf::from(child_ws.read_with(cx, |w, _| w.workspace().path.clone()));
     let review = review_tab(cx, &child_ws, serde_json::json!({}));
-    wait_until(cx, &review, |r| !r.is_refreshing());
+    wait_until(cx, &review, |r| !r.is_loading());
     let header = review.read_with(cx, |r, cx| r.header(cx));
     assert!(header.has_parent && header.detached, "{header:?}");
 
@@ -1370,14 +1370,14 @@ fn the_review_tab_stages_and_commits_uncommitted_changes(cx: &mut TestAppContext
         }
         _ => Vec::new(),
     };
-    wait_until(cx, &review, |r| staged_files(r.content(), Staging::Unstaged) == vec!["new.txt".to_owned()]);
+    wait_until(cx, &review, |r| staged_files(&r.content(), Staging::Unstaged) == vec!["new.txt".to_owned()]);
     let ReviewContent::Uncommitted(uncommitted) = review.read_with(cx, |r, _| r.content().clone()) else {
         unreachable!()
     };
     assert!(uncommitted.patch.contains("+fresh"), "{}", uncommitted.patch);
 
     review.update(cx, |r, cx| r.stage(StageTarget::File("new.txt".into()), cx));
-    wait_until(cx, &review, |r| staged_files(r.content(), Staging::Staged) == vec!["new.txt".to_owned()]);
+    wait_until(cx, &review, |r| staged_files(&r.content(), Staging::Staged) == vec!["new.txt".to_owned()]);
 
     review.update(cx, |r, cx| r.commit("   ", cx));
     assert_eq!(

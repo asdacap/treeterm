@@ -18,7 +18,9 @@ use gpui_kit::{App, Context, Entity, EventEmitter, Subscription, Task, WeakEntit
 use indexmap::{IndexMap, IndexSet};
 use serde_json::{Value, json};
 use treeterm_core::exec::{ExecClient, ExecRequest, ExecTimeout};
-use treeterm_core::git::{ConflictInfo, DiffFile, GitApi, GitLogCommit, LogScope, Staging, UncommittedChanges};
+use treeterm_core::git::{
+    ConflictInfo, DiffFile, FileChangeStats, GitApi, GitLogCommit, LogScope, Staging, UncommittedChanges,
+};
 use treeterm_core::review::{
     CommitAnchor, MetadataError, NewReviewComment, REVIEW_COMMENTS_KEY, REVIEW_VIEWED_FILES_KEY, Resolution,
     ReviewComment, ReviewCommentStore, ReviewComments, Side, ViewedFile, ViewedFileStats, ViewedFiles,
@@ -59,6 +61,9 @@ impl ReviewMode {
     }
 }
 
+/// What the current view shows ([`ReviewModel::content`]). Each view keeps what it loaded
+/// while another is shown, and a reload keeps it on screen until the new answer arrives, so
+/// `Loading` shows only before a view's first answer.
 #[derive(Debug, Clone)]
 pub enum ReviewContent {
     Loading,
@@ -91,6 +96,50 @@ impl Uncommitted {
     pub fn has_staged(&self) -> bool {
         self.changes.files.iter().any(|f| f.entry.staged == Staging::Staged)
     }
+}
+
+/// One view's data (Electron's `diff`, `uncommitted`, `commits`), kept while another view
+/// is shown.
+#[derive(Debug, Clone)]
+enum Slot<T> {
+    /// Not asked for: the Commits list loads when first shown, and without a base there is
+    /// no committed diff.
+    NotLoaded,
+    Loading,
+    Ready(T),
+    Failed(String),
+}
+
+impl<T> Slot<T> {
+    /// A load starts: what is shown stays until the answer arrives.
+    fn start(&mut self) {
+        match self {
+            Slot::Ready(_) => {}
+            Slot::NotLoaded | Slot::Loading | Slot::Failed(_) => *self = Slot::Loading,
+        }
+    }
+
+    fn ready(&self) -> Option<&T> {
+        match self {
+            Slot::Ready(value) => Some(value),
+            Slot::NotLoaded | Slot::Loading | Slot::Failed(_) => None,
+        }
+    }
+
+    fn content(&self, ready: impl FnOnce(&T) -> ReviewContent) -> ReviewContent {
+        match self {
+            Slot::NotLoaded | Slot::Loading => ReviewContent::Loading,
+            Slot::Ready(value) => ready(value),
+            Slot::Failed(error) => ReviewContent::Failed(error.clone()),
+        }
+    }
+}
+
+/// The commits listed so far (pages appended as the list scrolls), and whether more exist.
+#[derive(Debug, Clone)]
+struct CommitList {
+    commits: Vec<GitLogCommit>,
+    has_more: bool,
 }
 
 /// A stage/unstage or commit in progress, or why the last one failed.
@@ -311,8 +360,7 @@ pub struct CommitDiff {
     pub patch: String,
 }
 
-/// What the view tabs count besides the current view (`hasUncommitted`, the tab badges).
-/// Loaded with every view.
+/// What the view tabs count (`hasUncommitted`, the tab badges), from what each view loaded.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Overview {
     /// Files the branch changed since its base.
@@ -355,7 +403,14 @@ pub struct ReviewModel {
     /// The tab state's `parentWorkspaceId` is set (Electron's `hasParent`).
     has_parent: bool,
     mode: ReviewMode,
-    content: ReviewContent,
+    /// Each view's data: the branch against its base, the working tree, the commits. The
+    /// first two load together whatever is shown; the commits when first shown.
+    committed: Slot<Committed>,
+    uncommitted: Slot<Uncommitted>,
+    commits: Slot<CommitList>,
+    committed_load: Option<Task<()>>,
+    uncommitted_load: Option<Task<()>>,
+    commits_load: Option<Task<()>>,
     staging: GitOp,
     commit: GitOp,
     /// The workspace whose metadata holds the comments and viewed marks.
@@ -382,25 +437,23 @@ pub struct ReviewModel {
     /// Both sides of each image file shown.
     images: HashMap<String, ImageSides>,
     _images: Vec<Task<()>>,
-    overview: Overview,
     conflicts: Conflicts,
     /// Local and remote branches for the base picker, loaded when it opens.
     branches: Loaded<Vec<String>>,
     selected_commit: Option<SelectedCommit>,
     /// `git diff -w`.
     ignore_whitespace: bool,
+    /// "Refresh changes" (or the tab shown again) runs until what it reloads has answered.
     refreshing: bool,
-    _overview: Option<Task<()>>,
-    _conflicts: Option<Task<()>>,
+    conflicts_load: Option<Task<()>>,
     /// The fresh conflict check before a merge, while it runs.
     pre_merge: Option<Task<()>>,
     _branches: Option<Task<()>>,
     _commit: Option<Task<()>>,
     _more: Option<Task<()>>,
     _image: Option<Task<()>>,
-    _load: Option<Task<()>>,
     _op: Option<Task<()>>,
-    _head: Option<Task<()>>,
+    head_load: Option<Task<()>>,
     _add: Option<Task<()>>,
     _workspace: Subscription,
 }
@@ -493,7 +546,12 @@ impl ReviewModel {
             base,
             has_parent,
             mode,
-            content: ReviewContent::Loading,
+            committed: Slot::NotLoaded,
+            uncommitted: Slot::NotLoaded,
+            commits: Slot::NotLoaded,
+            committed_load: None,
+            uncommitted_load: None,
+            commits_load: None,
             staging: GitOp::Idle,
             commit: GitOp::Idle,
             workspace: workspace.downgrade(),
@@ -512,26 +570,24 @@ impl ReviewModel {
             _favourites: None,
             images: HashMap::new(),
             _images: Vec::new(),
-            overview: Overview::default(),
             conflicts: Conflicts::default(),
             branches: Loaded::Loading,
             selected_commit: None,
             ignore_whitespace: false,
             refreshing: false,
-            _overview: None,
-            _conflicts: None,
+            conflicts_load: None,
             pre_merge: None,
             _branches: None,
             _commit: None,
             _more: None,
             _image: None,
-            _load: None,
             _op: None,
-            _head: None,
+            head_load: None,
             _add: None,
             _workspace: observe,
         };
-        model.load(cx);
+        model.load_favourites(cx);
+        model.reload_all(cx);
         model
     }
 
@@ -543,8 +599,20 @@ impl ReviewModel {
         &self.base
     }
 
-    pub fn content(&self) -> &ReviewContent {
-        &self.content
+    /// What the current view shows.
+    pub fn content(&self) -> ReviewContent {
+        match (self.mode, &self.base) {
+            (ReviewMode::Committed, ReviewBase::Branch(_)) => {
+                self.committed.content(|committed| ReviewContent::Committed(committed.clone()))
+            }
+            (ReviewMode::Committed, ReviewBase::None) => {
+                ReviewContent::Failed("This workspace has no parent to compare against".to_owned())
+            }
+            (ReviewMode::Uncommitted, _) => {
+                self.uncommitted.content(|uncommitted| ReviewContent::Uncommitted(uncommitted.clone()))
+            }
+            (ReviewMode::Commits, _) => self.commits.content(|list| ReviewContent::Commits(list.commits.clone())),
+        }
     }
 
     pub fn staging(&self) -> &GitOp {
@@ -576,7 +644,16 @@ impl ReviewModel {
     }
 
     pub fn overview(&self) -> Overview {
-        self.overview
+        let (commits, more_commits) = match &self.commits {
+            Slot::Ready(list) => (list.commits.len(), list.has_more),
+            Slot::NotLoaded | Slot::Loading | Slot::Failed(_) => (0, false),
+        };
+        Overview {
+            committed: self.committed.ready().map_or(0, |committed| committed.files.len()),
+            uncommitted: self.uncommitted.ready().map_or(0, |uncommitted| uncommitted.changes.files.len()),
+            commits,
+            more_commits,
+        }
     }
 
     pub fn conflicts(&self) -> &Conflicts {
@@ -646,14 +723,10 @@ impl ReviewModel {
             return;
         }
         self.base = base;
-        self.selected_commit = None;
-        self._commit = None;
-        self.overview.commits = 0;
-        self.overview.more_commits = false;
         if self.base == ReviewBase::None && self.mode == ReviewMode::Committed {
             self.mode = ReviewMode::Uncommitted;
         }
-        self.load(cx);
+        self.reload_all(cx);
     }
 
     /// Local then remote branches, each once, for the base picker.
@@ -685,7 +758,8 @@ impl ReviewModel {
             return;
         }
         self.ignore_whitespace = ignore;
-        self.reload_quietly(cx);
+        self.load_committed(cx);
+        self.load_uncommitted(cx);
         if let Some(hash) = self.selected_commit.as_ref().map(|s| s.commit.hash.clone()) {
             self.select_commit(&hash, cx);
         }
@@ -693,10 +767,10 @@ impl ReviewModel {
 
     /// Show a listed commit's changes below the list (`loadCommitDiff`).
     pub fn select_commit(&mut self, hash: &str, cx: &mut Context<Self>) {
-        let ReviewContent::Commits(commits) = &self.content else {
+        let Slot::Ready(list) = &self.commits else {
             return;
         };
-        let Some(commit) = commits.iter().find(|c| c.hash == hash).cloned() else {
+        let Some(commit) = list.commits.iter().find(|c| c.hash == hash).cloned() else {
             return;
         };
         let (git, path, hash) = (self.git.clone(), self.path.clone(), commit.hash.clone());
@@ -738,22 +812,21 @@ impl ReviewModel {
 
     /// The next page of commits, appended (the list's infinite scroll).
     pub fn load_more_commits(&mut self, cx: &mut Context<Self>) {
-        let ReviewContent::Commits(commits) = &self.content else {
+        let Slot::Ready(list) = &self.commits else {
             return;
         };
-        if !self.overview.more_commits || self._more.is_some() {
+        if !list.has_more || self._more.is_some() || self.commits_load.is_some() {
             return;
         }
-        let (git, path, scope, skip) = (self.git.clone(), self.path.clone(), log_scope(&self.base), commits.len());
+        let (git, path, scope, skip) = (self.git.clone(), self.path.clone(), log_scope(&self.base), list.commits.len());
         self._more = Some(cx.spawn(async move |this, cx| {
             let log = git.get_log(&path, scope, skip, COMMITS_PAGE).await;
             match this.update(cx, |model, cx| {
                 model._more = None;
-                match (log, &mut model.content) {
-                    (Ok(log), ReviewContent::Commits(commits)) if commits.len() == skip => {
-                        commits.extend(log.commits);
-                        model.overview.commits = commits.len();
-                        model.overview.more_commits = log.has_more;
+                match (log, &mut model.commits) {
+                    (Ok(log), Slot::Ready(list)) if list.commits.len() == skip => {
+                        list.commits.extend(log.commits);
+                        list.has_more = log.has_more;
                     }
                     (Ok(_), _) => {} // the list was reloaded meanwhile
                     (Err(error), _) => model.notice = Notice::Error(format!("Failed to load commits: {error}")),
@@ -846,7 +919,7 @@ impl ReviewModel {
 
     /// The merge passed its conflict check.
     fn merge_checked(&mut self, squash: bool, after: AfterMerge, cx: &mut Context<Self>) {
-        match (after, self.overview.uncommitted) {
+        match (after, self.overview().uncommitted) {
             (AfterMerge::Remove, files @ 1..) => cx.emit(ReviewEvent::ConfirmMerge { squash, files }),
             (AfterMerge::Remove, 0) | (AfterMerge::Keep, _) => cx.emit(ReviewEvent::MergeRequested { squash, after }),
         }
@@ -964,7 +1037,7 @@ impl ReviewModel {
             match result {
                 Ok(()) => {
                     model.staging = GitOp::Idle;
-                    model.reload_quietly(cx);
+                    model.load_uncommitted(cx);
                     cx.emit(ReviewEvent::GitChanged);
                 }
                 Err(error) => model.staging = GitOp::Failed(error),
@@ -995,7 +1068,10 @@ impl ReviewModel {
                     Ok(()) => {
                         model.commit = GitOp::Idle;
                         cx.emit(ReviewEvent::Committed);
-                        model.reload_quietly(cx);
+                        // `HEAD` moved: new comments anchor to the new commit.
+                        model.refresh_head(cx);
+                        model.load_uncommitted(cx);
+                        model.load_committed(cx);
                     }
                     Err(error) => model.commit = GitOp::Failed(format!("Failed to commit: {error}")),
                 }
@@ -1012,29 +1088,65 @@ impl ReviewModel {
             return;
         }
         self.mode = mode;
-        self.draft = None;
-        self.focused_file = None;
-        // Another view, another diff (Electron's find bar goes with its list).
+        // Another view, another diff (Electron's find bar goes with its list). The comment
+        // being written stays, as Electron's `commentInput`.
         self.find = DiffFind::Closed { query: String::new() };
         self._find = None;
         cx.emit(ReviewEvent::StateChanged(json!({ "viewMode": mode.as_str() })));
-        self.load(cx);
+        // The views keep what they loaded; the commits load when first shown (and again
+        // while none are listed: `commits.length === 0`).
+        let listed = matches!(&self.commits, Slot::Ready(list) if !list.commits.is_empty());
+        if mode == ReviewMode::Commits && !listed && self.commits_load.is_none() {
+            self.load_commits(COMMITS_PAGE, cx);
+        }
+        self.load_images(cx);
+        cx.notify();
     }
 
-    /// "Refresh changes": reload everything, keeping what is shown until the new content
-    /// arrives, and refresh the workspace's git status (`handleRefresh`).
+    /// "Refresh changes" (`handleRefresh`): reload everything, keeping what is shown until
+    /// the new content arrives; the favourites are resolved again and the workspace's git
+    /// status is refreshed. Commits already listed reload as many (Electron never reloaded
+    /// them).
     pub fn refresh(&mut self, cx: &mut Context<Self>) {
         if let FavouriteSelection::Selected { file, viewer } = &self.favourite {
             let path = file.path.clone();
             viewer.update(cx, |viewer, cx| viewer.open(&path, false, cx));
         }
-        self.reload_quietly(cx);
+        self.refreshing = true;
+        self.load_favourites(cx);
+        self.refresh_head(cx);
+        self.load_committed(cx);
+        self.load_uncommitted(cx);
+        self.check_conflicts(cx);
+        match &self.commits {
+            Slot::NotLoaded => {}
+            Slot::Ready(list) => self.load_commits(list.commits.len().max(COMMITS_PAGE), cx),
+            Slot::Loading | Slot::Failed(_) => self.load_commits(COMMITS_PAGE, cx),
+        }
         cx.emit(ReviewEvent::GitChanged);
+        cx.notify();
     }
 
-    /// A load is running (the refresh button spins).
+    /// "Refresh changes" runs (its button spins, disabled).
     pub fn is_refreshing(&self) -> bool {
         self.refreshing
+    }
+
+    /// Something is being read from git for the views: a view's data, `HEAD` or the
+    /// conflict check.
+    pub fn is_loading(&self) -> bool {
+        self.committed_load.is_some()
+            || self.uncommitted_load.is_some()
+            || self.commits_load.is_some()
+            || self.head_load.is_some()
+            || self.conflicts_load.is_some()
+    }
+
+    /// A load finished: a refresh is over once nothing it started still runs.
+    fn settle_refresh(&mut self) {
+        if !self.is_loading() {
+            self.refreshing = false;
+        }
     }
 
     fn git_request(&self, args: &[&str]) -> ExecRequest {
@@ -1047,94 +1159,141 @@ impl ReviewModel {
         }
     }
 
-    fn load(&mut self, cx: &mut Context<Self>) {
-        self.content = ReviewContent::Loading;
-        self.reload_quietly(cx);
+    /// What the review compares changed (the tab opened, the base or the workspace's own
+    /// branch moved): every view reloads against it, keeping what is shown until the answers
+    /// arrive (`ReviewBrowser`'s branch and base effect). The commits listed belong to the
+    /// old range: they are dropped, and load again only if shown.
+    fn reload_all(&mut self, cx: &mut Context<Self>) {
+        self.selected_commit = None;
+        self._commit = None;
+        self._more = None;
+        self.commits = Slot::NotLoaded;
+        self.commits_load = None;
+        self.refresh_head(cx);
+        self.load_committed(cx);
+        self.load_uncommitted(cx);
+        self.check_conflicts(cx);
+        if self.mode == ReviewMode::Commits {
+            self.load_commits(COMMITS_PAGE, cx);
+        }
+        cx.notify();
     }
 
-    /// Re-read the content, keeping the current one on screen until the new one arrives
-    /// (after staging, so the list does not flash "Loading…"). `HEAD` is re-read too and the
-    /// comments' outdated flags follow it (`loadReviews`).
-    fn reload_quietly(&mut self, cx: &mut Context<Self>) {
-        self.refreshing = true;
+    /// A merge that kept this workspace changed what it compares: the branch's and the
+    /// working tree's changes reload (`handleMergeAndKeep`).
+    pub(crate) fn reload_changes(&mut self, cx: &mut Context<Self>) {
+        self.load_committed(cx);
+        self.load_uncommitted(cx);
         cx.notify();
-        self.refresh_head(cx);
-        self.load_favourites(cx);
-        self.load_overview(cx);
-        self.check_conflicts(cx);
-        let exec = self.exec.clone();
-        let git = self.git.clone();
-        let path = self.path.clone();
-        let base = self.base.clone();
-        let mode = self.mode;
-        let committed = match &base {
-            ReviewBase::Branch(branch) => Some(self.diff_request(&[&format!("{branch}...HEAD")])),
-            ReviewBase::None => None,
+    }
+
+    /// `loadDiff`: the branch against its base (none without a base). Its viewed marks are
+    /// reconciled with it, whatever view is shown.
+    fn load_committed(&mut self, cx: &mut Context<Self>) {
+        let ReviewBase::Branch(branch) = self.base.clone() else {
+            self.committed = Slot::NotLoaded;
+            self.committed_load = None;
+            return;
         };
-        let staged = self.diff_request(&["--cached"]);
-        let unstaged = self.diff_request(&[]);
-        let untracked = self.git_request(&["ls-files", "--others", "--exclude-standard", "-z"]);
-        self._load = Some(cx.spawn(async move |this, cx| {
-            let (content, more) = match (mode, base) {
-                (ReviewMode::Commits, base) => match git.get_log(&path, log_scope(&base), 0, COMMITS_PAGE).await {
-                    Ok(log) => (ReviewContent::Commits(log.commits), log.has_more),
-                    Err(error) => (ReviewContent::Failed(format!("Failed to load commits: {error}")), false),
+        self.committed.start();
+        let (exec, git, path) = (self.exec.clone(), self.git.clone(), self.path.clone());
+        let request = self.diff_request(&[&format!("{branch}...HEAD")]);
+        self.committed_load = Some(cx.spawn(async move |this, cx| {
+            let loaded = match git.get_diff(&path, &branch).await {
+                Ok(diff) => match patch_of(exec.run(request).await) {
+                    Ok(patch) => Slot::Ready(Committed {
+                        files: diff.files,
+                        patch,
+                        base_branch: diff.base_branch,
+                        head_branch: diff.head_branch,
+                        total_additions: diff.total_additions,
+                        total_deletions: diff.total_deletions,
+                    }),
+                    Err(error) => Slot::Failed(error),
                 },
-                (ReviewMode::Committed, ReviewBase::Branch(branch)) => match committed {
-                    Some(request) => match git.get_diff(&path, &branch).await {
-                        Ok(diff) => match patch_of(exec.run(request).await) {
-                            Ok(patch) => (
-                                ReviewContent::Committed(Committed {
-                                    files: diff.files,
-                                    patch,
-                                    base_branch: diff.base_branch,
-                                    head_branch: diff.head_branch,
-                                    total_additions: diff.total_additions,
-                                    total_deletions: diff.total_deletions,
-                                }),
-                                false,
-                            ),
-                            Err(error) => (ReviewContent::Failed(error), false),
-                        },
-                        Err(error) => (ReviewContent::Failed(format!("Failed to load diff: {error}")), false),
-                    },
-                    None => (ReviewContent::Failed("No base branch".to_owned()), false),
-                },
-                (ReviewMode::Uncommitted, _) => match git.get_uncommitted_changes(&path).await {
-                    Ok(changes) => match uncommitted_patch(&exec, &path, staged, unstaged, untracked).await {
-                        Ok(patch) => (ReviewContent::Uncommitted(Uncommitted { changes, patch }), false),
-                        Err(error) => (ReviewContent::Failed(error), false),
-                    },
-                    Err(error) => {
-                        (ReviewContent::Failed(format!("Failed to load uncommitted changes: {error}")), false)
-                    }
-                },
-                (ReviewMode::Committed, ReviewBase::None) => {
-                    (ReviewContent::Failed("This workspace has no parent to compare against".to_owned()), false)
-                }
+                Err(error) => Slot::Failed(format!("Failed to load diff: {error}")),
             };
             match this.update(cx, |model, cx| {
-                // A later mode change replaced this load.
-                if model.mode == mode {
-                    if let ReviewContent::Commits(commits) = &content {
-                        model.overview.commits = commits.len();
-                        model.overview.more_commits = more;
-                        // The selection survives a reload while its commit is still listed.
-                        if model.selected_commit.as_ref().is_some_and(|s| !commits.iter().any(|c| c.hash == s.commit.hash)) {
-                            model.selected_commit = None;
-                            model._commit = None;
-                        }
-                    }
-                    model.content = content;
-                    model.refreshing = false;
-                    model.reconcile_viewed(cx);
-                    model.load_images(cx);
-                    cx.notify();
+                model.committed_load = None;
+                let files = loaded.ready().map(|committed| viewed_entries(committed.files.iter().map(ViewedFile::from)));
+                model.committed = loaded;
+                if let Some(files) = files {
+                    model.reconcile_viewed(&files, cx);
                 }
+                model.view_loaded(ReviewMode::Committed, cx);
             }) {
                 Ok(()) | Err(_) => {} // Err: tab closed
             }
         }));
+    }
+
+    /// `loadUncommittedChanges`: the working tree against `HEAD`, staged first, untracked
+    /// files as added. Its viewed marks are reconciled with it, whatever view is shown.
+    fn load_uncommitted(&mut self, cx: &mut Context<Self>) {
+        self.uncommitted.start();
+        let (exec, git, path) = (self.exec.clone(), self.git.clone(), self.path.clone());
+        let staged = self.diff_request(&["--cached"]);
+        let unstaged = self.diff_request(&[]);
+        let untracked = self.git_request(&["ls-files", "--others", "--exclude-standard", "-z"]);
+        self.uncommitted_load = Some(cx.spawn(async move |this, cx| {
+            let loaded = match git.get_uncommitted_changes(&path).await {
+                Ok(changes) => match uncommitted_patch(&exec, &path, staged, unstaged, untracked).await {
+                    Ok(patch) => Slot::Ready(Uncommitted { changes, patch }),
+                    Err(error) => Slot::Failed(error),
+                },
+                Err(error) => Slot::Failed(format!("Failed to load uncommitted changes: {error}")),
+            };
+            match this.update(cx, |model, cx| {
+                model.uncommitted_load = None;
+                let files = loaded
+                    .ready()
+                    .map(|uncommitted| viewed_entries(uncommitted.changes.files.iter().map(ViewedFile::from)));
+                model.uncommitted = loaded;
+                if let Some(files) = files {
+                    model.reconcile_viewed(&files, cx);
+                }
+                model.view_loaded(ReviewMode::Uncommitted, cx);
+            }) {
+                Ok(()) | Err(_) => {} // Err: tab closed
+            }
+        }));
+    }
+
+    /// `loadCommits`: the first `count` commits since the base. A picked commit stays while
+    /// it is still listed.
+    fn load_commits(&mut self, count: usize, cx: &mut Context<Self>) {
+        self.commits.start();
+        self._more = None;
+        let (git, path, scope) = (self.git.clone(), self.path.clone(), log_scope(&self.base));
+        self.commits_load = Some(cx.spawn(async move |this, cx| {
+            let log = git.get_log(&path, scope, 0, count).await;
+            match this.update(cx, |model, cx| {
+                model.commits_load = None;
+                model.commits = match log {
+                    Ok(log) => {
+                        if model.selected_commit.as_ref().is_some_and(|s| !log.commits.iter().any(|c| c.hash == s.commit.hash)) {
+                            model.selected_commit = None;
+                            model._commit = None;
+                        }
+                        Slot::Ready(CommitList { commits: log.commits, has_more: log.has_more })
+                    }
+                    Err(error) => Slot::Failed(format!("Failed to load commits: {error}")),
+                };
+                model.settle_refresh();
+                cx.notify();
+            }) {
+                Ok(()) | Err(_) => {} // Err: tab closed
+            }
+        }));
+    }
+
+    /// `mode`'s data arrived: shown, its image files load.
+    fn view_loaded(&mut self, mode: ReviewMode, cx: &mut Context<Self>) {
+        if self.mode == mode {
+            self.load_images(cx);
+        }
+        self.settle_refresh();
+        cx.notify();
     }
 
     /// `git diff` with the view's options: renames, whole files, `-w`.
@@ -1225,46 +1384,22 @@ impl ReviewModel {
         }));
     }
 
-    /// The tab counts and `hasUncommitted`, whatever the view.
-    fn load_overview(&mut self, cx: &mut Context<Self>) {
-        let (git, path, base) = (self.git.clone(), self.path.clone(), self.base.clone());
-        self._overview = Some(cx.spawn(async move |this, cx| {
-            let committed = match &base {
-                ReviewBase::Branch(branch) => git.get_diff(&path, branch).await.map(|diff| diff.files.len()),
-                ReviewBase::None => Ok(0),
-            };
-            let uncommitted = git.get_uncommitted_changes(&path).await.map(|changes| changes.files.len());
-            match this.update(cx, |model, cx| {
-                match committed {
-                    Ok(count) => model.overview.committed = count,
-                    // The Committed view shows this failure itself.
-                    Err(_) => model.overview.committed = 0,
-                }
-                match uncommitted {
-                    Ok(count) => model.overview.uncommitted = count,
-                    Err(error) => model.notice = Notice::Error(format!("Failed to load uncommitted changes: {error}")),
-                }
-                cx.notify();
-            }) {
-                Ok(()) | Err(_) => {} // Err: tab closed
-            }
-        }));
-    }
-
     /// `checkConflicts` for a child workspace: a dry-run merge into the parent's branch and
     /// whether the parent moved on. The last answers stay on screen while it runs.
     fn check_conflicts(&mut self, cx: &mut Context<Self>) {
         let (git, path) = (self.git.clone(), self.path.clone());
         // The workspace is read once this update is over: the first load runs while the
         // workspace store is making this tab.
-        self._conflicts = Some(cx.spawn(async move |this, cx| {
+        self.conflicts_load = Some(cx.spawn(async move |this, cx| {
             let Ok(header) = this.update(cx, |model, cx| model.header(cx)) else {
                 return; // the tab closed
             };
             let (Some(parent), false) = (header.parent_branch, header.branch.is_empty()) else {
                 // A check this one replaced may have been running.
                 match this.update(cx, |model, cx| {
+                    model.conflicts_load = None;
                     model.conflicts.check = ConflictCheck::Idle;
+                    model.settle_refresh();
                     cx.notify();
                 }) {
                     Ok(()) | Err(_) => {} // Err: tab closed
@@ -1283,7 +1418,9 @@ impl ReviewModel {
                 git.is_ancestor(&path, &parent, &branch)
             );
             match this.update(cx, |model, cx| {
+                model.conflicts_load = None;
                 model.conflicts.apply(conflicts.map_err(|e| e.to_string()), merged.map_err(|e| e.to_string()));
+                model.settle_refresh();
                 cx.notify();
             }) {
                 Ok(()) | Err(_) => {} // Err: tab closed
@@ -1295,7 +1432,7 @@ impl ReviewModel {
     fn refresh_head(&mut self, cx: &mut Context<Self>) {
         let (git, workspace, blame) = (self.git.clone(), self.workspace.clone(), self.blame());
         let path = self.path.clone();
-        self._head = Some(cx.spawn(async move |this, cx| {
+        self.head_load = Some(cx.spawn(async move |this, cx| {
             let head = git.get_head_commit_hash(&path).await;
             let outdated = match &head {
                 Ok(hash) => ReviewCommentStore::new(Later::new(workspace, cx.clone(), blame))
@@ -1305,6 +1442,7 @@ impl ReviewModel {
                 Err(_) => Ok(()),
             };
             match this.update(cx, |model, cx| {
+                model.head_load = None;
                 model.head = match head {
                     Ok(hash) => Head::Known(hash),
                     Err(error) => Head::Failed(error.to_string()),
@@ -1312,6 +1450,7 @@ impl ReviewModel {
                 if let Err(error) = outdated {
                     model.notice = Notice::Error(error);
                 }
+                model.settle_refresh();
                 cx.notify();
             }) {
                 Ok(()) | Err(_) => {} // Err: tab closed
@@ -1357,31 +1496,37 @@ impl ReviewModel {
 
     /// The files of what is shown, as the viewed marks key them.
     fn shown_files(&self) -> Vec<ViewedFile<'_>> {
-        match &self.content {
-            ReviewContent::Committed(committed) => committed.files.iter().map(ViewedFile::from).collect(),
-            ReviewContent::Uncommitted(uncommitted) => uncommitted.changes.files.iter().map(ViewedFile::from).collect(),
-            ReviewContent::Commits(_) => match self.selected_commit.as_ref().map(|s| &s.diff) {
+        match self.mode {
+            ReviewMode::Committed => match &self.committed {
+                Slot::Ready(committed) => committed.files.iter().map(ViewedFile::from).collect(),
+                Slot::NotLoaded | Slot::Loading | Slot::Failed(_) => Vec::new(),
+            },
+            ReviewMode::Uncommitted => match &self.uncommitted {
+                Slot::Ready(uncommitted) => uncommitted.changes.files.iter().map(ViewedFile::from).collect(),
+                Slot::NotLoaded | Slot::Loading | Slot::Failed(_) => Vec::new(),
+            },
+            ReviewMode::Commits => match self.selected_commit.as_ref().map(|s| &s.diff) {
                 Some(Loaded::Ready(diff)) => diff.files.iter().map(ViewedFile::from).collect(),
                 Some(Loaded::Loading | Loaded::Failed(_)) | None => Vec::new(),
             },
-            ReviewContent::Loading | ReviewContent::Failed(_) => Vec::new(),
         }
     }
 
     /// The shown files in list order (staged before unstaged), each once.
     pub fn file_order(&self) -> Vec<String> {
         let mut order: IndexSet<String> = IndexSet::new();
-        match &self.content {
-            ReviewContent::Committed(committed) => order.extend(committed.files.iter().map(|f| f.path.clone())),
-            ReviewContent::Uncommitted(uncommitted) => {
+        match (self.mode, &self.uncommitted) {
+            (ReviewMode::Uncommitted, Slot::Ready(uncommitted)) => {
                 for side in [Staging::Staged, Staging::Unstaged] {
                     order.extend(
                         uncommitted.changes.files.iter().filter(|f| f.entry.staged == side).map(|f| f.entry.path.clone()),
                     );
                 }
             }
-            ReviewContent::Commits(_) => order.extend(self.shown_files().iter().map(|f| f.path.to_owned())),
-            ReviewContent::Loading | ReviewContent::Failed(_) => {}
+            (ReviewMode::Uncommitted, Slot::NotLoaded | Slot::Loading | Slot::Failed(_))
+            | (ReviewMode::Committed | ReviewMode::Commits, _) => {
+                order.extend(self.shown_files().iter().map(|f| f.path.to_owned()));
+            }
         }
         order.into_iter().collect()
     }
@@ -1398,17 +1543,10 @@ impl ReviewModel {
         Ok((order.iter().filter(|path| viewed.contains_key(path.as_str())).count(), order.len()))
     }
 
-    /// Drop marks whose file changed since it was marked (`reconcileViewedFiles`), against the
-    /// files of the branch's or the working tree's diff. Never against a commit's: one commit
-    /// can change a file differently from the whole branch (`loadCommitDiff` does not
-    /// reconcile).
-    fn reconcile_viewed(&mut self, cx: &mut Context<Self>) {
-        let files: Vec<(String, treeterm_core::git::FileChangeStats)> = match &self.content {
-            ReviewContent::Committed(_) | ReviewContent::Uncommitted(_) => {
-                self.shown_files().iter().map(|file| (file.path.to_owned(), file.stats)).collect()
-            }
-            ReviewContent::Commits(_) | ReviewContent::Loading | ReviewContent::Failed(_) => return,
-        };
+    /// Drop marks whose file changed since it was marked (`reconcileViewedFiles`): `files`
+    /// are the branch's or the working tree's, as each loads. Never a commit's: one commit can
+    /// change a file differently from the whole branch (`loadCommitDiff` does not reconcile).
+    fn reconcile_viewed(&mut self, files: &[(String, FileChangeStats)], cx: &mut Context<Self>) {
         if files.is_empty() {
             return;
         }
@@ -1511,14 +1649,12 @@ impl ReviewModel {
     /// index / HEAD against the working tree in Uncommitted, the parent against the commit.
     fn image_sides(&self, path: &str) -> impl std::future::Future<Output = ImageSides> + use<> {
         use treeterm_core::git::FileDiffContents;
-        let staged = match &self.content {
-            ReviewContent::Uncommitted(u) => u
-                .changes
-                .files
-                .iter()
-                .find(|f| f.entry.path == path)
-                .map(|f| f.entry.staged),
-            ReviewContent::Loading | ReviewContent::Committed(_) | ReviewContent::Commits(_) | ReviewContent::Failed(_) => None,
+        let staged = match (self.mode, &self.uncommitted) {
+            (ReviewMode::Uncommitted, Slot::Ready(u)) => {
+                u.changes.files.iter().find(|f| f.entry.path == path).map(|f| f.entry.staged)
+            }
+            (ReviewMode::Uncommitted, Slot::NotLoaded | Slot::Loading | Slot::Failed(_))
+            | (ReviewMode::Committed | ReviewMode::Commits, _) => None,
         };
         let (git, repo, base, mode, file) = (self.git.clone(), self.path.clone(), self.base.clone(), self.mode, path.to_owned());
         let commit = self.selected_commit.as_ref().map(|s| s.commit.hash.clone());
@@ -1939,6 +2075,11 @@ impl ReviewModel {
     pub fn prompt_commit(&mut self, cx: &mut Context<Self>) {
         self.prompt_harness("commit", Vec::new(), cx);
     }
+}
+
+/// A diff's files as the viewed marks key them, owned (reconciled once the model is free).
+fn viewed_entries<'a>(files: impl Iterator<Item = ViewedFile<'a>>) -> Vec<(String, FileChangeStats)> {
+    files.map(|file| (file.path.to_owned(), file.stats)).collect()
 }
 
 /// The commits the Commits view lists: the branch's since its base, or all of `HEAD`'s.

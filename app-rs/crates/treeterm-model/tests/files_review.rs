@@ -1015,6 +1015,190 @@ fn selecting_a_commit_keeps_the_branchs_viewed_marks(cx: &mut TestAppContext) {
     assert_eq!(metadata(cx, &workspace, "reviewViewedFiles"), marked);
 }
 
+/// A repo on `feature`, whose commit changed `a.txt` since `main`, with `u.txt` changed in
+/// the working tree, and a Review of it comparing against `main`.
+fn feature_review(cx: &mut TestAppContext, h: &Harness, repo: &TempRepo, view: &str) -> (Entity<WorkspaceStore>, Entity<ReviewModel>) {
+    repo.write("a.txt", "one\n");
+    repo.write("u.txt", "u\n");
+    repo.commit_all("base");
+    repo.git(&["checkout", "-q", "-b", "feature"]);
+    repo.write("a.txt", "ONE\n");
+    repo.commit_all("feature");
+    repo.write("u.txt", "U\n");
+    let store = open_store(cx, h);
+    let workspace = open_repo_workspace(cx, h, &store, repo);
+    let (_, review) =
+        open_review_with(cx, &workspace, serde_json::json!({ "viewMode": view, "baseBranchOverride": "main" }));
+    (workspace, review)
+}
+
+#[gpui_kit::test]
+fn switching_review_views_shows_what_they_loaded_at_once(cx: &mut TestAppContext) {
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let repo = TempRepo::new(&h);
+    let (_workspace, review) = feature_review(cx, &h, &repo, "committed");
+    assert!(matches!(review.read_with(cx, |r, _| r.content()), ReviewContent::Loading));
+    // Both views load whatever is shown.
+    wait_review(cx, &review, "both views", |r, _| {
+        !r.is_loading() && r.overview().committed == 1 && r.overview().uncommitted == 1
+    });
+    assert!(matches!(review.read_with(cx, |r, _| r.content()), ReviewContent::Committed(_)));
+    assert!(!review.read_with(cx, |r, _| r.is_refreshing()));
+    review.update(cx, |r, cx| r.start_comment("a.txt", Side::Modified, 1, cx));
+
+    // A switch shows the other view's data at once, reads nothing from git, and keeps the
+    // comment being written (`commentInput`).
+    review.update(cx, |r, cx| r.set_mode(ReviewMode::Uncommitted, cx));
+    assert!(matches!(review.read_with(cx, |r, _| r.content()), ReviewContent::Uncommitted(u) if u.changes.files.len() == 1));
+    assert!(!review.read_with(cx, |r, _| r.is_loading()));
+    assert!(review.read_with(cx, |r, _| r.draft().is_some()));
+    review.update(cx, |r, cx| r.set_mode(ReviewMode::Committed, cx));
+    assert!(matches!(review.read_with(cx, |r, _| r.content()), ReviewContent::Committed(c) if c.files.len() == 1));
+    assert!(!review.read_with(cx, |r, _| r.is_loading()));
+
+    // Staging reloads the working tree only, keeping it on screen meanwhile.
+    review.update(cx, |r, cx| r.set_mode(ReviewMode::Uncommitted, cx));
+    review.update(cx, |r, cx| r.stage(treeterm_model::review::StageTarget::All, cx));
+    wait_review(cx, &review, "staged", |r, _| {
+        matches!(r.content(), ReviewContent::Uncommitted(u) if u.has_staged()) && !r.is_loading()
+    });
+}
+
+#[gpui_kit::test]
+fn the_commits_list_loads_once_and_keeps_its_pages_and_selection(cx: &mut TestAppContext) {
+    use treeterm_model::review::{Loaded, ReviewBase};
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let repo = TempRepo::new(&h);
+    repo.write("a.txt", "a\n");
+    repo.commit_all("base");
+    repo.git(&["checkout", "-q", "-b", "feature"]);
+    for index in 0..60 {
+        repo.git(&["commit", "-q", "--allow-empty", "-m", &format!("c{index}")]);
+    }
+    let store = open_store(cx, &h);
+    let workspace = open_repo_workspace(cx, &h, &store, &repo);
+    let (_, review) =
+        open_review_with(cx, &workspace, serde_json::json!({ "viewMode": "committed", "baseBranchOverride": "main" }));
+    wait_review(cx, &review, "loaded", |r, _| !r.is_loading());
+    // Not listed until shown.
+    assert_eq!(review.read_with(cx, |r, _| r.overview().commits), 0);
+    review.update(cx, |r, cx| r.set_mode(ReviewMode::Commits, cx));
+    assert!(matches!(review.read_with(cx, |r, _| r.content()), ReviewContent::Loading));
+    wait_review(cx, &review, "a page", |r, _| matches!(r.content(), ReviewContent::Commits(c) if c.len() == 50));
+    assert!(review.read_with(cx, |r, _| r.overview().more_commits));
+    review.update(cx, |r, cx| r.load_more_commits(cx));
+    wait_review(cx, &review, "two pages", |r, _| matches!(r.content(), ReviewContent::Commits(c) if c.len() == 60));
+    assert!(!review.read_with(cx, |r, _| r.overview().more_commits));
+    let listed = |r: &ReviewModel| match r.content() {
+        ReviewContent::Commits(commits) => commits,
+        other => panic!("{other:?}"),
+    };
+    let picked = review.read_with(cx, |r, _| listed(r)[55].hash.clone());
+    review.update(cx, |r, cx| r.select_commit(&picked, cx));
+    wait_review(cx, &review, "commit diff", |r, _| matches!(r.selected_commit().map(|s| &s.diff), Some(Loaded::Ready(_))));
+    let selected = |r: &ReviewModel| r.selected_commit().map(|s| s.commit.hash.clone());
+
+    // Back from another view: the same list at once, with the commit still picked.
+    review.update(cx, |r, cx| r.set_mode(ReviewMode::Committed, cx));
+    review.update(cx, |r, cx| r.set_mode(ReviewMode::Commits, cx));
+    assert!(!review.read_with(cx, |r, _| r.is_loading()));
+    assert_eq!(review.read_with(cx, |r, _| listed(r).len()), 60);
+    assert_eq!(review.read_with(cx, |r, _| selected(r)), Some(picked.clone()));
+
+    // "Refresh" reloads as many as are listed, the commit still picked.
+    review.update(cx, |r, cx| r.refresh(cx));
+    assert!(review.read_with(cx, |r, _| r.is_refreshing()));
+    assert_eq!(review.read_with(cx, |r, _| listed(r).len()), 60, "kept on screen meanwhile");
+    wait_review(cx, &review, "refreshed", |r, _| !r.is_refreshing());
+    assert_eq!(review.read_with(cx, |r, _| listed(r).len()), 60);
+    assert_eq!(review.read_with(cx, |r, _| selected(r)), Some(picked));
+
+    // Another base lists other commits: the list starts over.
+    review.update(cx, |r, cx| r.set_base(None, cx));
+    assert_eq!(review.read_with(cx, |r, _| r.base().clone()), ReviewBase::None);
+    assert!(matches!(review.read_with(cx, |r, _| r.content()), ReviewContent::Loading));
+    assert_eq!(review.read_with(cx, |r, _| selected(r)), None);
+    wait_review(cx, &review, "all commits", |r, _| matches!(r.content(), ReviewContent::Commits(c) if c.len() == 50));
+}
+
+#[gpui_kit::test]
+fn viewed_marks_follow_both_views_whatever_is_shown(cx: &mut TestAppContext) {
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let repo = TempRepo::new(&h);
+    let (workspace, review) = feature_review(cx, &h, &repo, "committed");
+    wait_review(cx, &review, "both views", |r, _| !r.is_loading() && r.overview().uncommitted == 1);
+    review.update(cx, |r, cx| r.toggle_viewed("a.txt", cx));
+    review.update(cx, |r, cx| r.set_mode(ReviewMode::Uncommitted, cx));
+    review.update(cx, |r, cx| r.toggle_viewed("u.txt", cx));
+    let marks = |cx: &mut TestAppContext| {
+        let mut marked: Vec<String> =
+            metadata(cx, &workspace, "reviewViewedFiles").unwrap().as_object().unwrap().keys().cloned().collect();
+        marked.sort();
+        marked
+    };
+    assert_eq!(marks(cx), ["a.txt", "u.txt"]);
+
+    // The branch changed `a.txt` again while the working tree is shown: its mark goes
+    // (`loadDiff` reconciles whatever the view).
+    repo.write("a.txt", "ONE\nTWO\n");
+    repo.git(&["add", "a.txt"]);
+    repo.git(&["commit", "-q", "-m", "more"]);
+    review.update(cx, |r, cx| r.refresh(cx));
+    wait_review(cx, &review, "refreshed", |r, _| !r.is_refreshing());
+    assert_eq!(marks(cx), ["u.txt"]);
+
+    // And the working tree's file while the branch is shown (`loadUncommittedChanges`).
+    review.update(cx, |r, cx| r.set_mode(ReviewMode::Committed, cx));
+    repo.write("u.txt", "U\nV\n");
+    review.update(cx, |r, cx| r.refresh(cx));
+    wait_review(cx, &review, "refreshed", |r, _| !r.is_refreshing());
+    assert_eq!(marks(cx), Vec::<String>::new());
+}
+
+#[gpui_kit::test]
+fn only_refresh_spins_and_resolves_the_favourites_again(cx: &mut TestAppContext) {
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let repo = TempRepo::new(&h);
+    repo.write("notes.md", "notes\n");
+    repo.commit_all("base");
+    repo.write("new.txt", "fresh\n");
+    let store = open_store(cx, &h);
+    let workspace = open_repo_workspace(cx, &h, &store, &repo);
+    workspace.update(cx, |w, cx| w.add_favourite_path("notes.md", cx));
+    let review = open_review(cx, &workspace);
+    wait_review(cx, &review, "loaded", |r, _| !r.is_loading() && matches!(r.favourites(), Favourites::Ready(_)));
+    let seen = std::rc::Rc::new(std::cell::RefCell::new(Vec::<(bool, bool)>::new()));
+    let record = seen.clone();
+    let _observe = cx.update(|cx| {
+        cx.observe(&review, move |review, cx| {
+            let review = review.read(cx);
+            record.borrow_mut().push((review.is_refreshing(), matches!(review.favourites(), Favourites::Loading)));
+        })
+    });
+
+    // Staging reloads the working tree, quietly.
+    review.update(cx, |r, cx| r.stage(treeterm_model::review::StageTarget::All, cx));
+    wait_review(cx, &review, "staged", |r, _| {
+        matches!(r.content(), ReviewContent::Uncommitted(u) if u.has_staged()) && !r.is_loading()
+    });
+    assert!(!seen.borrow().is_empty());
+    assert!(seen.take().iter().all(|states| *states == (false, false)));
+
+    // "Refresh" spins until done and resolves the favourites again.
+    review.update(cx, |r, cx| r.refresh(cx));
+    assert!(review.read_with(cx, |r, _| r.is_refreshing()));
+    wait_review(cx, &review, "refreshed", |r, _| !r.is_refreshing() && matches!(r.favourites(), Favourites::Ready(_)));
+    assert!(seen.borrow().iter().any(|(_, loading)| *loading), "{:?}", seen.borrow());
+}
+
 #[gpui_kit::test]
 fn the_review_header_takes_the_child_actions_from_the_tabs_parent_id(cx: &mut TestAppContext) {
     let _serial = serial();
@@ -1029,7 +1213,7 @@ fn the_review_header_takes_the_child_actions_from_the_tabs_parent_id(cx: &mut Te
     let (_, blank) = open_review_with(cx, &workspace, serde_json::json!({ "parentWorkspaceId": "" }));
     let (_, top) = open_review_with(cx, &workspace, serde_json::json!({}));
     for review in [&child, &blank, &top] {
-        wait_review(cx, review, "loaded", |r, _| !r.is_refreshing());
+        wait_review(cx, review, "loaded", |r, _| !r.is_loading());
     }
     let header = child.read_with(cx, |r, cx| r.header(cx));
     assert!(header.has_parent && header.parent_branch.is_none(), "{header:?}");
