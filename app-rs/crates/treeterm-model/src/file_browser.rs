@@ -4,9 +4,12 @@
 //!
 //! Tab state stays compatible with Electron's `FilesystemState`: `selectedPath` (absolute)
 //! and `expandedDirs` (absolute directory paths, in the order they were opened). A
-//! `scrollToLine` another app wrote (Electron's "open in file browser") is honoured on load.
-//! The tab follows its state as other windows and Electron change it
-//! ([`FileBrowser::follow_state`]), as Electron's components read it live.
+//! `scrollToLine` another app wrote (Electron's "open in file browser") is honoured on load,
+//! then removed once the viewer has moved there. The viewer's scroll offset is saved as
+//! `scrollTop` when the tab is hidden (Electron unmounts the viewer then) and shown again in
+//! the file once when the tab is built; selecting another file drops it. The tab follows its
+//! state as other windows and Electron change it ([`FileBrowser::follow_state`]), as
+//! Electron's components read it live.
 //!
 //! The search panel searches the open file ([`search::find_in_text`]) and the whole
 //! worktree ([`search::repo_search`]); go to definition greps for a definition of the word
@@ -251,13 +254,23 @@ pub enum Host {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum FileBrowserEvent {
-    /// Selection or expansion changed: persist it in the tab state.
+    /// Selection, expansion or scroll offset changed: persist it in the tab state.
     StateChanged(Value),
-    /// This key of the tab state was used up: remove it (`scrollToLine: undefined`).
+    /// This key of the tab state was used up or no longer applies: remove it
+    /// (`scrollToLine: undefined`).
     StateRemoved(&'static str),
 }
 
 impl EventEmitter<FileBrowserEvent> for FileBrowser {}
+
+/// The tab state's `scrollTop`, still to be shown in `path` (`FileViewer` applies
+/// `initialScrollTop` once per file, after it has loaded).
+#[derive(Debug, Clone, PartialEq)]
+struct ScrollRestore {
+    path: String,
+    /// Pixels from the top.
+    top: f32,
+}
 
 pub struct FileBrowser {
     fs: FsClient,
@@ -279,6 +292,11 @@ pub struct FileBrowser {
     /// The tab state's `scrollToLine` as last read, until used: another one arriving is
     /// revealed.
     scroll_to_line: Option<usize>,
+    /// The reveal (its `seq`) of the `scrollToLine` the tab was built with, until the viewer
+    /// has moved there and the key is removed (`onScrollToLineUsed`).
+    state_reveal: Option<u64>,
+    /// The saved offset to show when the file it is for is shown as text.
+    scroll_restore: Option<ScrollRestore>,
     /// The workspace whose favourite paths the tree stars.
     workspace: WeakEntity<WorkspaceStore>,
     /// The favourite paths `favourites` was resolved from, the ancestors' included.
@@ -395,6 +413,17 @@ fn scroll_to_line_of(state: &Value) -> Option<usize> {
     state.get("scrollToLine").and_then(Value::as_u64).map(|line| line as usize)
 }
 
+/// A tab state's `scrollTop` (Monaco's, in pixels) when there is somewhere to scroll to: 0
+/// or none leaves the viewer at the top (`initialScrollTop` is falsy).
+pub(crate) fn scroll_top_of(state: &Value) -> Option<f32> {
+    state.get("scrollTop").and_then(Value::as_f64).filter(|top| *top > 0.).map(|top| top as f32)
+}
+
+/// A scroll offset as Monaco reports `scrollTop`: whole pixels.
+pub(crate) fn scroll_top_value(top: f32) -> Value {
+    json!(top.max(0.).round() as u64)
+}
+
 impl FileBrowser {
     /// `state` is the tab's persisted `FilesystemState`; `favourite_paths` and `in_repo`
     /// (`isGitRepo`) the workspace's (it may be mid-update, so it is not read here).
@@ -429,6 +458,8 @@ impl FileBrowser {
             definition: DefinitionLookup::Idle,
             reveal: None,
             scroll_to_line: scroll_to_line_of(state),
+            state_reveal: None,
+            scroll_restore: None,
             workspace: workspace.downgrade(),
             favourite_paths,
             favourites: Favourites::Empty,
@@ -453,11 +484,60 @@ impl FileBrowser {
         browser.expand(expanded_dirs_of(state), cx);
         if let Some(path) = state.get("selectedPath").and_then(Value::as_str) {
             browser.show(path, false, cx);
+            browser.restore_scroll_top(path, state);
             if let Some(line) = browser.scroll_to_line {
                 browser.reveal_at(path, line, 1, 0);
+                browser.state_reveal = Some(browser.reveals);
             }
         }
         browser
+    }
+
+    /// Show the state's `scrollTop` in `path` once its text is shown, unless the state asks
+    /// for a line (`!scrollToLine && initialScrollTop`).
+    fn restore_scroll_top(&mut self, path: &str, state: &Value) {
+        self.scroll_restore = scroll_top_of(state)
+            .filter(|_| scroll_to_line_of(state).is_none())
+            .map(|top| ScrollRestore { path: path.to_owned(), top });
+    }
+
+    /// The saved offset still to be shown in `path`, whose text is shown.
+    pub fn scroll_restore(&self, path: &str) -> Option<f32> {
+        self.scroll_restore.as_ref().filter(|restore| restore.path == path).map(|restore| restore.top)
+    }
+
+    /// [`Self::scroll_restore`], taken once: the viewer scrolls there now.
+    pub fn take_scroll_restore(&mut self, path: &str) -> Option<f32> {
+        let top = self.scroll_restore(path)?;
+        self.scroll_restore = None;
+        Some(top)
+    }
+
+    /// The viewer was hidden (Electron unmounts it, `handleScrollPositionChange`) with the
+    /// selected file's text scrolled `top` pixels down: save that as `scrollTop`. Not while
+    /// the saved offset is still to be shown, which the viewer has not scrolled to yet: it
+    /// stays saved (`lastScrollTopRef` starts at `initialScrollTop`).
+    pub fn save_scroll_top(&mut self, top: f32, cx: &mut Context<Self>) {
+        if self.scroll_restore.is_some() {
+            return;
+        }
+        cx.emit(FileBrowserEvent::StateChanged(json!({ "scrollTop": scroll_top_value(top) })));
+    }
+
+    /// The viewer moved to reveal `seq`: if that was the tab state's `scrollToLine`, it is
+    /// used up and removed (`onScrollToLineUsed`), so the next build does not move there again.
+    pub fn reveal_applied(&mut self, seq: u64, cx: &mut Context<Self>) {
+        if self.state_reveal == Some(seq) {
+            self.drop_state_reveal(cx);
+        }
+    }
+
+    /// Remove the `scrollToLine` the tab was built with; the same line asked for again is new
+    /// again ([`Self::follow_state`]).
+    fn drop_state_reveal(&mut self, cx: &mut Context<Self>) {
+        self.state_reveal = None;
+        self.scroll_to_line = None;
+        cx.emit(FileBrowserEvent::StateRemoved("scrollToLine"));
     }
 
     /// The tab's state as another window or Electron left it (`FilesystemBrowser` reads it
@@ -475,6 +555,9 @@ impl FileBrowser {
             && self.selected.as_deref() != Some(path)
         {
             self.show(path, false, cx);
+            // Another file shows the offset the state has for it, once (`scrollRestoredFor`
+            // resets with the path).
+            self.restore_scroll_top(path, state);
         }
         let line = scroll_to_line_of(state);
         if line != self.scroll_to_line {
@@ -705,17 +788,29 @@ impl FileBrowser {
     /// Read a file and show it, even the one shown (Review's Refresh). `allow_large` reads
     /// past [`MAX_VIEW_BYTES`] ("Open anyway").
     pub fn open(&mut self, path: &str, allow_large: bool, cx: &mut Context<Self>) {
+        let another = self.selected.as_deref() != Some(path);
         self.show(path, allow_large, cx);
         self.persist(cx);
+        // `setSelectedPath`: the offset saved for the file shown before is not this one's.
+        if another {
+            cx.emit(FileBrowserEvent::StateRemoved("scrollTop"));
+        }
     }
 
     /// [`Self::open`] without saving the selection in the tab state.
     fn show(&mut self, path: &str, allow_large: bool, cx: &mut Context<Self>) {
         self.drop_draft_unless(path);
+        if self.scroll_restore.as_ref().is_some_and(|restore| restore.path != path) {
+            self.scroll_restore = None;
+        }
         self.selected = Some(path.to_owned());
         self.view = FileView::Loading(path.to_owned());
         self.reads += 1;
         self.download = DownloadState::Idle;
+        // The line the tab was built to show goes with the reveal, before the viewer got to it.
+        if self.state_reveal.is_some() {
+            self.drop_state_reveal(cx);
+        }
         self.reveal = None;
         if let SearchPanel::Open(search) = &mut self.search {
             search.active = None;
@@ -771,7 +866,10 @@ impl FileBrowser {
         cx.notify();
     }
 
+    /// Move to a place in `path` once it is shown; the saved offset is not shown then
+    /// (`FileViewer` restores `initialScrollTop` only without a `scrollToLine`).
     fn reveal_at(&mut self, path: &str, line_number: usize, column: usize, len: usize) {
+        self.scroll_restore = None;
         self.reveals += 1;
         self.reveal = Some(Reveal { path: path.to_owned(), line_number, column, len, seq: self.reveals });
     }

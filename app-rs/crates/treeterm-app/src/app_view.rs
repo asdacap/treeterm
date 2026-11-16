@@ -2261,7 +2261,8 @@ fn tabset_strip(
 
 /// No workspace's tabs are on screen (none picked, or the one picked was removed, is loading,
 /// failed or shows an operation's failure): the session's native webviews are hidden, and
-/// its Review views too, so they refresh when shown again.
+/// its Review views too, so they refresh when shown again; Files and Editor tabs save their
+/// scroll offset.
 fn hide_tab_views(connected: &Connected, cx: &mut Context<AppView>) {
     let browsers: Vec<Entity<crate::browser_view::BrowserView>> = connected.browser_views.values().cloned().collect();
     for view in browsers {
@@ -2269,7 +2270,14 @@ fn hide_tab_views(connected: &Connected, cx: &mut Context<AppView>) {
     }
     let files: Vec<Entity<crate::file_browser_view::FileBrowserView>> = connected.file_views.values().cloned().collect();
     for view in files {
-        view.update(cx, |v, cx| v.set_shown(false, cx));
+        view.update(cx, |v, cx| {
+            v.set_shown(false, cx);
+            v.set_visible(false, cx);
+        });
+    }
+    let editors: Vec<Entity<crate::text_editor_view::TextEditorView>> = connected.editor_views.values().cloned().collect();
+    for view in editors {
+        view.update(cx, |v, cx| v.set_visible(false, cx));
     }
     let reviews: Vec<Entity<crate::review_view::ReviewView>> = connected.review_views.values().cloned().collect();
     for view in reviews {
@@ -2498,8 +2506,22 @@ fn workspace_pane(
     let file_views: Vec<(EntityId, Entity<crate::file_browser_view::FileBrowserView>)> =
         connected.file_views.iter().map(|(k, v)| (*k, v.clone())).collect();
     for (model_id, view) in file_views {
-        let shown = !dialog_open && shown_files.contains(&model_id);
-        view.update(cx, |v, cx| v.set_shown(shown, cx));
+        let visible = shown_files.contains(&model_id);
+        view.update(cx, |v, cx| {
+            v.set_shown(!dialog_open && visible, cx);
+            v.set_visible(visible, cx);
+        });
+    }
+    // An Editor tab hidden saves its scroll offset, as a Files tab does (Electron unmounts
+    // both then).
+    let shown_editors: HashSet<EntityId> = contents
+        .iter()
+        .filter_map(|content| if let TabContent::Editor(model) = content { Some(model.entity_id()) } else { None })
+        .collect();
+    let editor_views: Vec<(EntityId, Entity<crate::text_editor_view::TextEditorView>)> =
+        connected.editor_views.iter().map(|(k, v)| (*k, v.clone())).collect();
+    for (model_id, view) in editor_views {
+        view.update(cx, |v, cx| v.set_visible(shown_editors.contains(&model_id), cx));
     }
     // Review shows a favourite's file (a PDF or model in a webview) in place of the diff, and
     // refreshes when it is shown again (whatever switched to it: the tab strip, a shortcut,

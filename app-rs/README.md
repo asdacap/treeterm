@@ -128,7 +128,9 @@ Done (tested against a real in-process daemon unless noted):
   properties, unknown at-rules, incomplete `@font-face`); they paint CSS, SCSS and Less
   colours, and underline links ("Follow link (cmd + click)" on hover): Cmd/Ctrl+click opens
   an `http(s)://` link in the browser and a `file://` link in an Editor tab, at the line its
-  `#L<n>` names.
+  `#L<n>` names. The Files viewer and the Editor tab save their scroll offset in the tab
+  state when the tab is hidden and open there again after a restart; a line they were opened
+  at is moved to once.
 - **Review (M7):** committed / uncommitted / commits views, stage/unstage/commit, inline
   comments (Electron's metadata format), viewed files, image diffs (before / after, SVG
   included), each file's diff read once its section comes within 1500px of the viewport

@@ -1111,13 +1111,19 @@ impl WorkspaceStore {
                     cx.new(|cx| crate::text_editor::TextEditor::new(fs, exec, workspace, root, &state, cx));
                 let owned_tab = tab_id.to_owned();
                 let events = cx.subscribe(&model, move |store, _, event: &crate::text_editor::TextEditorEvent, cx| {
-                    let crate::text_editor::TextEditorEvent::StateChanged(next) = event;
-                    store.merge_tab_state(&owned_tab, next.clone(), cx);
-                    // `FileEditor`: the title is the file name, marked while unsaved.
-                    if let Some(title) = crate::text_editor::tab_title_of_state(next)
-                        && store.workspace.file.app_states.get(&owned_tab).is_some_and(|tab| tab.title != title)
-                    {
-                        store.update_tab_title(&owned_tab, &title, cx);
+                    match event {
+                        crate::text_editor::TextEditorEvent::StateChanged(next) => {
+                            store.merge_tab_state(&owned_tab, next.clone(), cx);
+                            // `FileEditor`: the title is the file name, marked while unsaved.
+                            if let Some(title) = crate::text_editor::tab_title_of_state(next)
+                                && store.workspace.file.app_states.get(&owned_tab).is_some_and(|tab| tab.title != title)
+                            {
+                                store.update_tab_title(&owned_tab, &title, cx);
+                            }
+                        }
+                        crate::text_editor::TextEditorEvent::StateRemoved(key) => {
+                            store.remove_tab_state_key(&owned_tab, key, cx);
+                        }
                     }
                 });
                 self.tabs.insert(tab_id.to_owned(), TabRef::Editor { model, _events: events });

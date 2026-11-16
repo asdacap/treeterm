@@ -473,6 +473,8 @@ pub struct FileBrowserView {
     definition_clicked: Rc<Cell<bool>>,
     draft_input: Option<DraftInput>,
     comments_scroll: gpui_kit::ScrollHandle,
+    /// The Files tab is on screen ([`Self::set_visible`]).
+    visible: bool,
     _observe: Subscription,
     /// Review comments live in the workspace's metadata.
     _workspace: Subscription,
@@ -678,6 +680,7 @@ impl FileBrowserView {
             definition_clicked: Rc::new(Cell::new(false)),
             draft_input: None,
             comments_scroll: gpui_kit::ScrollHandle::new(),
+            visible: false,
             _observe: observe,
             _workspace: comments,
         }
@@ -699,6 +702,20 @@ impl FileBrowserView {
         if let Some((_, page)) = &self.page {
             page.update(cx, |p, cx| p.set_shown(shown, cx));
         }
+    }
+
+    /// Whether the Files tab is on screen. Hidden, it saves where the shown file's text was
+    /// scrolled to, as `FileViewer` does on unmount; the cached editor keeps that offset, in
+    /// the markdown preview too.
+    pub fn set_visible(&mut self, visible: bool, cx: &mut Context<Self>) {
+        if self.visible
+            && !visible
+            && let Some(editor) = self.shown_editor(cx)
+        {
+            let top = f32::from(-editor.read(cx).scroll_offset().y);
+            self.model.update(cx, |model, cx| model.save_scroll_top(top, cx));
+        }
+        self.visible = visible;
     }
 
     /// Drop the webview page once another file, or another read of the same file, is shown:
@@ -922,6 +939,22 @@ impl FileBrowserView {
         }
         self.revealed = seq;
         crate::file_browser_view::reveal_in_center(editor, range, cx);
+        self.model.update(cx, |model, cx| model.reveal_applied(seq, cx));
+    }
+
+    /// Scroll to the offset the tab state saved for the file, once the editor has a layout.
+    fn restore_scroll(&mut self, path: &str, editor: &Entity<EditorState>, window: &mut Window, cx: &mut Context<Self>) {
+        if self.model.read(cx).scroll_restore(path).is_none() {
+            return;
+        }
+        if editor.read(cx).line_height().is_none() {
+            window.request_animation_frame();
+            return;
+        }
+        let Some(top) = self.model.update(cx, |model, _| model.take_scroll_restore(path)) else {
+            return;
+        };
+        editor.update(cx, |editor, cx| editor.set_scroll_offset(gpui_kit::point(editor.scroll_offset().x, px(-top)), cx));
     }
 
     // ---- tree --------------------------------------------------------------------------
@@ -1545,6 +1578,7 @@ impl FileBrowserView {
         let editor = self.editor_for(path, text, window, cx);
         // Monaco shows the search panel's matches only by selecting the chosen one.
         self.apply_reveal(&editor, window, cx);
+        self.restore_scroll(path, &editor, window, cx);
         let overlay = definition_overlay(
             self.model.read(cx).definition().clone(),
             |view: &mut Self, index, cx| view.model.update(cx, |m, cx| m.choose_definition(index, cx)),

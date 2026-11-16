@@ -9,6 +9,10 @@
 //! it, and the editor follows the state other windows and Electron write
 //! ([`TextEditor::follow_state`]), as Monaco follows `value={state.currentContent}`.
 //!
+//! The editor's scroll offset is saved as `scrollTop` when the tab is hidden (Electron
+//! unmounts the editor then) and shown again when the tab is built from a loaded state; a
+//! `scrollToLine` is moved to instead, then removed ([`TextEditor::take_scroll_target`]).
+//!
 //! Go to definition searches the text as it is, unsaved edits included
 //! ([`crate::definition`]); a definition in another file opens in a new Editor tab at its
 //! line (`openFileAtLine`).
@@ -24,7 +28,7 @@ use treeterm_core::fs::{FsClient, FsError, ReadOutcome, WriteGuard, WriteOutcome
 use treeterm_core::search::{self, DefinitionLocation};
 
 use crate::definition::{Begin, DefinitionLookup, DefinitionProbe, Settled};
-use crate::file_browser::{fs_error_text, fs_outcome};
+use crate::file_browser::{fs_error_text, fs_outcome, scroll_top_of, scroll_top_value};
 use crate::workspace_store::WorkspaceStore;
 
 /// How many of the texts it last wrote the editor remembers ([`TextEditor::follow_state`]).
@@ -56,6 +60,17 @@ pub enum SaveState {
 pub enum TextEditorEvent {
     /// Persist this into the tab state (merged over it).
     StateChanged(Value),
+    /// This key of the tab state was used up: remove it (`scrollToLine: undefined`).
+    StateRemoved(&'static str),
+}
+
+/// Where the editor moves when it shows the text.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ScrollTarget {
+    /// Reveal this 1-based line in the middle (`scrollToLine`, go to definition).
+    Line(usize),
+    /// Scroll this many pixels down (the saved `scrollTop`).
+    Top(f32),
 }
 
 impl EventEmitter<TextEditorEvent> for TextEditor {}
@@ -107,6 +122,8 @@ pub struct TextEditor {
     view_mode: String,
     /// Where to move once the text is shown (go to definition), until the view has.
     scroll_to_line: Option<usize>,
+    /// The `scrollTop` of the loaded state the tab was built from, until the view has shown it.
+    scroll_restore: Option<f32>,
     definition: DefinitionLookup,
     /// The texts this editor last wrote to the tab state, newest last, each with when.
     written: VecDeque<(String, Instant)>,
@@ -139,6 +156,7 @@ impl TextEditor {
             save: SaveState::Idle,
             view_mode: view_mode_of(state).to_owned(),
             scroll_to_line: state.get("scrollToLine").and_then(Value::as_u64).map(|line| line as usize),
+            scroll_restore: None,
             definition: DefinitionLookup::Idle,
             written: VecDeque::new(),
             external_revision: 0,
@@ -147,7 +165,13 @@ impl TextEditor {
             _definition: None,
         };
         match ready_doc(state) {
-            Some(doc) => editor.doc = doc,
+            Some(doc) => {
+                editor.doc = doc;
+                // Only a loaded state's offset counts, and a line asked for wins over it.
+                if editor.scroll_to_line.is_none() {
+                    editor.scroll_restore = scroll_top_of(state);
+                }
+            }
             None if editor.path.is_empty() => editor.doc = EditorDoc::Error("Invalid tab".to_owned()),
             None => editor.load(cx),
         }
@@ -239,9 +263,27 @@ impl TextEditor {
         cx.notify();
     }
 
-    /// The line to reveal once the editor shows the text, taken once.
-    pub fn take_scroll_to_line(&mut self) -> Option<usize> {
-        self.scroll_to_line.take()
+    /// Where to move once the editor shows the text, taken once: a line asked for, which is
+    /// then removed from the tab state, or else the saved offset.
+    pub fn take_scroll_target(&mut self, cx: &mut Context<Self>) -> Option<ScrollTarget> {
+        if let Some(line) = self.scroll_to_line.take() {
+            cx.emit(TextEditorEvent::StateRemoved("scrollToLine"));
+            return Some(ScrollTarget::Line(line));
+        }
+        self.scroll_restore.take().map(ScrollTarget::Top)
+    }
+
+    /// The editor was hidden (Electron unmounts it) scrolled `top` pixels down: save that as
+    /// `scrollTop`, in a loaded state only. Not while the saved offset is still to be shown,
+    /// which the editor has not scrolled to yet: it stays saved.
+    pub fn save_scroll_top(&mut self, top: f32, cx: &mut Context<Self>) {
+        let EditorDoc::Ready { .. } = self.doc else {
+            return;
+        };
+        if self.scroll_restore.is_some() {
+            return;
+        }
+        cx.emit(TextEditorEvent::StateChanged(json!({ "scrollTop": scroll_top_value(top) })));
     }
 
     /// The tab title for the current state.

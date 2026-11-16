@@ -13,7 +13,7 @@ use treeterm_model::review::{
 use treeterm_model::review_find::DiffLayout;
 use treeterm_model::session_store::{SessionState, SessionStore, WorkspaceEntry};
 use treeterm_model::settings_store::SettingsStore;
-use treeterm_model::text_editor::{EditorDoc, TextEditor};
+use treeterm_model::text_editor::{EditorDoc, ScrollTarget, TextEditor};
 use treeterm_model::traffic::ConnectionTraffic;
 use treeterm_model::workspace_store::{TabContent, WorkspaceStore};
 use treeterm_proto::treeterm::WorkspaceRef;
@@ -513,7 +513,7 @@ fn go_to_definition_in_an_editor_tab_opens_other_files_and_moves_within_its_own(
     let call = text.find("local();").unwrap();
     editor.update(cx, |e, cx| e.go_to_definition(call, cx));
     wait_until(cx, &editor, |e| *e.definition() == DefinitionLookup::Idle);
-    assert_eq!(editor.update(cx, |e, _| e.take_scroll_to_line()), Some(1));
+    assert_eq!(editor.update(cx, |e, cx| e.take_scroll_target(cx)), Some(ScrollTarget::Line(1)));
     assert_eq!(editor_states(cx, &workspace).len(), 2);
 
     // Several: the chosen one opens.
@@ -559,6 +559,207 @@ fn go_to_definition_in_an_editor_tab_opens_other_files_and_moves_within_its_own(
     assert!(!notes.read_with(cx, |e, _| e.has_definitions()));
     notes.update(cx, |e, cx| e.go_to_definition(1, cx));
     assert_eq!(notes.read_with(cx, |e, _| e.definition().clone()), DefinitionLookup::Unavailable { language: "plaintext" });
+}
+
+/// A tab of `application_id` built from `state` (merged over the application's own), and
+/// its id.
+fn tab_from(cx: &mut TestAppContext, workspace: &Entity<WorkspaceStore>, application_id: &str, state: serde_json::Value) -> (String, TabContent) {
+    let tab = workspace.update(cx, |w, cx| w.add_tab_with(application_id, state, cx)).unwrap();
+    let content = workspace.read_with(cx, |w, _| w.tab_content(&tab)).unwrap();
+    (tab, content)
+}
+
+/// A Files tab built from `state`, once its file is shown as text.
+fn files_tab(cx: &mut TestAppContext, workspace: &Entity<WorkspaceStore>, state: serde_json::Value) -> (String, Entity<FileBrowser>) {
+    let (tab, TabContent::Files(browser)) = tab_from(cx, workspace, "filesystem", state) else {
+        panic!("not a files tab");
+    };
+    wait_until(cx, &browser, |b| matches!(b.view(), FileView::Text { .. }));
+    (tab, browser)
+}
+
+/// An Editor tab built from `state`, once its file is loaded or failed to load.
+fn editor_tab(cx: &mut TestAppContext, workspace: &Entity<WorkspaceStore>, state: serde_json::Value) -> (String, Entity<TextEditor>) {
+    let (tab, TabContent::Editor(editor)) = tab_from(cx, workspace, "editor", state) else {
+        panic!("not an editor tab");
+    };
+    wait_until(cx, &editor, |e| !matches!(e.doc(), EditorDoc::Loading));
+    (tab, editor)
+}
+
+#[gpui_kit::test]
+fn the_files_viewer_keeps_its_scroll_offset_for_the_file_it_was_left_on(cx: &mut TestAppContext) {
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let repo = TempRepo::new(&h);
+    repo.write("a.txt", &"line\n".repeat(200));
+    repo.write("b.txt", &"other\n".repeat(200));
+    repo.commit_all("files");
+    let store = open_store(cx, &h);
+    let workspace = open_repo_workspace(cx, &h, &store, &repo);
+    let (a, b) = (format!("{}/a.txt", repo.root()), format!("{}/b.txt", repo.root()));
+
+    // Built with a saved offset: shown once in its file, after it has loaded.
+    let (tab, browser) = files_tab(cx, &workspace, serde_json::json!({ "selectedPath": a, "expandedDirs": [], "scrollTop": 300 }));
+    assert_eq!(browser.read_with(cx, |m, _| m.scroll_restore(&b)), None);
+    assert_eq!(browser.read_with(cx, |m, _| m.scroll_restore(&a)), Some(300.));
+    // Hidden before the viewer got there: the saved offset stays.
+    browser.update(cx, |m, cx| m.save_scroll_top(0., cx));
+    cx.run_until_parked();
+    assert_eq!(tab_state(cx, &workspace, &tab)["scrollTop"], serde_json::json!(300));
+    assert_eq!(browser.update(cx, |m, _| m.take_scroll_restore(&a)), Some(300.));
+    assert_eq!(browser.update(cx, |m, _| m.take_scroll_restore(&a)), None);
+
+    // Hidden: where it was left is saved, in whole pixels.
+    browser.update(cx, |m, cx| m.save_scroll_top(120.4, cx));
+    cx.run_until_parked();
+    assert_eq!(tab_state(cx, &workspace, &tab)["scrollTop"], serde_json::json!(120));
+    // A tab built from that state scrolls there again.
+    let saved = tab_state(cx, &workspace, &tab);
+    let (_, rebuilt) = files_tab(cx, &workspace, saved);
+    assert_eq!(rebuilt.read_with(cx, |m, _| m.scroll_restore(&a)), Some(120.));
+
+    // Another file picked: the offset, which was the last file's, is dropped.
+    browser.update(cx, |m, cx| m.select_file(&b, cx));
+    cx.run_until_parked();
+    let state = tab_state(cx, &workspace, &tab);
+    assert_eq!(state["selectedPath"], serde_json::json!(b), "{state}");
+    assert!(state.get("scrollTop").is_none(), "{state}");
+    // The pending offset of the rebuilt tab goes with its file too.
+    rebuilt.update(cx, |m, cx| m.select_file(&b, cx));
+    assert_eq!(rebuilt.read_with(cx, |m, _| m.scroll_restore(&a)), None);
+    // Read again ("Open anyway"), the same file keeps its offset.
+    browser.update(cx, |m, cx| m.save_scroll_top(60., cx));
+    browser.update(cx, |m, cx| m.open(&b, true, cx));
+    cx.run_until_parked();
+    assert_eq!(tab_state(cx, &workspace, &tab)["scrollTop"], serde_json::json!(60));
+
+    // Another window picking another file: the offset the state has for it is shown there.
+    browser.update(cx, |m, cx| {
+        m.follow_state(&serde_json::json!({ "selectedPath": a, "expandedDirs": [], "scrollTop": 40 }), cx);
+    });
+    wait_until(cx, &browser, |m| matches!(m.view(), FileView::Text { path, .. } if *path == a));
+    assert_eq!(browser.read_with(cx, |m, _| m.scroll_restore(&a)), Some(40.));
+    // A place to move to (a search hit) wins over it.
+    browser.update(cx, |m, cx| m.open_location("a.txt", 150, 1, 0, cx));
+    assert_eq!(browser.read_with(cx, |m, _| m.scroll_restore(&a)), None);
+}
+
+#[gpui_kit::test]
+fn a_files_tab_opened_at_a_line_moves_there_once(cx: &mut TestAppContext) {
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let repo = TempRepo::new(&h);
+    repo.write("a.txt", &"line\n".repeat(20));
+    repo.write("b.txt", "other\n");
+    repo.commit_all("files");
+    let store = open_store(cx, &h);
+    let workspace = open_repo_workspace(cx, &h, &store, &repo);
+    let (a, b) = (format!("{}/a.txt", repo.root()), format!("{}/b.txt", repo.root()));
+
+    // The line wins over the saved offset.
+    let state = serde_json::json!({ "selectedPath": a, "expandedDirs": [], "scrollToLine": 5, "scrollTop": 120 });
+    let (tab, browser) = files_tab(cx, &workspace, state.clone());
+    let reveal = browser.read_with(cx, |m, _| m.reveal().cloned()).unwrap();
+    assert_eq!((reveal.path.as_str(), reveal.line_number), (a.as_str(), 5));
+    assert_eq!(browser.read_with(cx, |m, _| m.scroll_restore(&a)), None);
+    // Another move (a search hit) leaves the line in the state.
+    browser.update(cx, |m, cx| m.reveal_applied(reveal.seq + 1, cx));
+    cx.run_until_parked();
+    assert_eq!(tab_state(cx, &workspace, &tab)["scrollToLine"], serde_json::json!(5));
+    // Once the viewer has moved there it is used up, and a tab built again does not move.
+    browser.update(cx, |m, cx| m.reveal_applied(reveal.seq, cx));
+    cx.run_until_parked();
+    let after = tab_state(cx, &workspace, &tab);
+    assert!(after.get("scrollToLine").is_none(), "{after}");
+    assert_eq!(after["scrollTop"], serde_json::json!(120));
+    let (_, rebuilt) = files_tab(cx, &workspace, after);
+    assert_eq!(rebuilt.read_with(cx, |m, _| m.reveal().cloned()), None);
+    // The same line asked for again by another window moves there again.
+    browser.update(cx, |m, cx| m.follow_state(&state, cx));
+    let again = browser.read_with(cx, |m, _| m.reveal().cloned()).unwrap();
+    assert_eq!((again.line_number, again.seq > reveal.seq), (5, true));
+
+    // Another file picked before the viewer got to the line: the line goes with it.
+    let (tab, browser) = files_tab(cx, &workspace, state);
+    browser.update(cx, |m, cx| m.select_file(&b, cx));
+    cx.run_until_parked();
+    let after = tab_state(cx, &workspace, &tab);
+    assert!(after.get("scrollToLine").is_none() && after.get("scrollTop").is_none(), "{after}");
+    assert_eq!(browser.read_with(cx, |m, _| m.reveal().cloned()), None);
+}
+
+#[gpui_kit::test]
+fn an_editor_tab_keeps_its_scroll_offset_and_moves_to_its_line_once(cx: &mut TestAppContext) {
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let repo = TempRepo::new(&h);
+    repo.write("a.rs", &"fn a() {}\n".repeat(100));
+    repo.commit_all("files");
+    let store = open_store(cx, &h);
+    let workspace = open_repo_workspace(cx, &h, &store, &repo);
+    let a = format!("{}/a.rs", repo.root());
+    let text = "fn a() {}\n".repeat(100);
+    let ready = serde_json::json!({
+        "status": "ready", "filePath": a, "originalContent": text, "currentContent": text,
+        "language": "rust", "isDirty": false, "viewMode": "editor", "scrollTop": 200
+    });
+
+    // Built from a loaded state: its offset is shown once.
+    let (tab, editor) = editor_tab(cx, &workspace, ready.clone());
+    // Hidden before the editor got there: the saved offset stays.
+    editor.update(cx, |e, cx| e.save_scroll_top(0., cx));
+    cx.run_until_parked();
+    assert_eq!(tab_state(cx, &workspace, &tab)["scrollTop"], serde_json::json!(200));
+    assert_eq!(editor.update(cx, |e, cx| e.take_scroll_target(cx)), Some(ScrollTarget::Top(200.)));
+    assert_eq!(editor.update(cx, |e, cx| e.take_scroll_target(cx)), None);
+    // Hidden: where it was left is saved, the rest of the state kept.
+    editor.update(cx, |e, cx| e.save_scroll_top(150., cx));
+    cx.run_until_parked();
+    let state = tab_state(cx, &workspace, &tab);
+    assert_eq!((state["scrollTop"].clone(), state["status"].clone()), (serde_json::json!(150), serde_json::json!("ready")));
+
+    // A line asked for wins, and is then removed: a tab built again goes to the offset.
+    let mut at_line = ready.clone();
+    at_line["scrollToLine"] = serde_json::json!(3);
+    let (tab, editor) = editor_tab(cx, &workspace, at_line);
+    assert_eq!(editor.update(cx, |e, cx| e.take_scroll_target(cx)), Some(ScrollTarget::Line(3)));
+    assert_eq!(editor.update(cx, |e, cx| e.take_scroll_target(cx)), None);
+    cx.run_until_parked();
+    let state = tab_state(cx, &workspace, &tab);
+    assert!(state.get("scrollToLine").is_none(), "{state}");
+    let (_, rebuilt) = editor_tab(cx, &workspace, state);
+    assert_eq!(rebuilt.update(cx, |e, cx| e.take_scroll_target(cx)), Some(ScrollTarget::Top(200.)));
+
+    // Opened at a line (go to definition): moved there once it has loaded, then removed.
+    let tab = workspace.update(cx, |w, cx| w.open_in_editor_at(&a, 7, cx)).unwrap();
+    let Some(TabContent::Editor(editor)) = workspace.read_with(cx, |w, _| w.tab_content(&tab)) else {
+        panic!("not an editor tab");
+    };
+    wait_until(cx, &editor, |e| matches!(e.doc(), EditorDoc::Ready { .. }));
+    cx.run_until_parked();
+    assert_eq!(tab_state(cx, &workspace, &tab)["scrollToLine"], serde_json::json!(7));
+    assert_eq!(editor.update(cx, |e, cx| e.take_scroll_target(cx)), Some(ScrollTarget::Line(7)));
+    cx.run_until_parked();
+    let state = tab_state(cx, &workspace, &tab);
+    assert!(state.get("scrollToLine").is_none(), "{state}");
+    let (_, rebuilt) = editor_tab(cx, &workspace, state);
+    assert_eq!(rebuilt.update(cx, |e, cx| e.take_scroll_target(cx)), None);
+
+    // Only a loaded state's offset counts: one still loading opens at the top.
+    let (_, loaded) = editor_tab(cx, &workspace, serde_json::json!({ "status": "loading", "filePath": a, "scrollTop": 200 }));
+    assert!(matches!(loaded.read_with(cx, |e, _| e.doc().clone()), EditorDoc::Ready { .. }));
+    assert_eq!(loaded.update(cx, |e, cx| e.take_scroll_target(cx)), None);
+    // A file that failed to load saves no offset.
+    let missing = format!("{}/missing.rs", repo.root());
+    let (tab, failed) = editor_tab(cx, &workspace, serde_json::json!({ "status": "loading", "filePath": missing }));
+    assert!(matches!(failed.read_with(cx, |e, _| e.doc().clone()), EditorDoc::Error(_)));
+    failed.update(cx, |e, cx| e.save_scroll_top(80., cx));
+    cx.run_until_parked();
+    assert!(tab_state(cx, &workspace, &tab).get("scrollTop").is_none());
 }
 
 #[gpui_kit::test]

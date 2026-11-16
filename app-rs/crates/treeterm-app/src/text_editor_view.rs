@@ -28,7 +28,7 @@ use gpui_kit::{
     App, Context, Entity, FontWeight, KeyBinding, MouseButton, MouseUpEvent, PromptLevel, SharedString, Subscription,
     Window, actions, div, px, rgb,
 };
-use treeterm_model::text_editor::{EditorDoc, SaveState, TextEditor};
+use treeterm_model::text_editor::{EditorDoc, SaveState, ScrollTarget, TextEditor};
 
 use crate::editor_hooks::Follow;
 use crate::file_browser_view::{GoToDefinition, PointerOver, language_for};
@@ -77,6 +77,8 @@ pub struct TextEditorView {
     /// The language worker's problems in the file, marked again at every change.
     problems: crate::editor_hooks::ProblemMarks,
     preview_scroll: gpui_kit::ScrollHandle,
+    /// The tab is on screen ([`Self::set_visible`]).
+    visible: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -93,6 +95,7 @@ impl TextEditorView {
             definition_clicked: Rc::new(Cell::new(false)),
             problems,
             preview_scroll: gpui_kit::ScrollHandle::new(),
+            visible: false,
             _subscriptions: vec![observe],
         }
     }
@@ -169,21 +172,39 @@ impl TextEditorView {
         });
     }
 
-    /// Go to definition opened this tab at a line, or found the definition in this file:
-    /// move there once the editor has a layout.
+    /// Go to definition opened this tab at a line, or found the definition in this file, or
+    /// the tab was left scrolled: move there once the editor has a layout.
     fn reveal_line(&mut self, editor: &Entity<EditorState>, window: &mut Window, cx: &mut Context<Self>) {
         if editor.read(cx).line_height().is_none() {
             window.request_animation_frame();
             return;
         }
-        let Some(line) = self.model.update(cx, |model, _| model.take_scroll_to_line()) else {
-            return;
-        };
-        let text = editor.read(cx).value().to_string();
-        let Some(range) = treeterm_model::file_browser::line_range(&text, line, 1, 0) else {
-            return;
-        };
-        crate::file_browser_view::reveal_in_center(editor, range, cx);
+        match self.model.update(cx, |model, cx| model.take_scroll_target(cx)) {
+            None => {}
+            Some(ScrollTarget::Line(line)) => {
+                let text = editor.read(cx).value().to_string();
+                if let Some(range) = treeterm_model::file_browser::line_range(&text, line, 1, 0) {
+                    crate::file_browser_view::reveal_in_center(editor, range, cx);
+                }
+            }
+            Some(ScrollTarget::Top(top)) => editor.update(cx, |editor, cx| {
+                editor.set_scroll_offset(gpui_kit::point(editor.scroll_offset().x, px(-top)), cx);
+            }),
+        }
+    }
+
+    /// Whether the tab is on screen. Hidden, it saves where the editor was scrolled to, as
+    /// `FileEditor` does on unmount; the cached editor keeps that offset, in the markdown
+    /// preview too.
+    pub fn set_visible(&mut self, visible: bool, cx: &mut Context<Self>) {
+        if self.visible
+            && !visible
+            && let Some(editor) = &self.editor
+        {
+            let top = f32::from(-editor.read(cx).scroll_offset().y);
+            self.model.update(cx, |model, cx| model.save_scroll_top(top, cx));
+        }
+        self.visible = visible;
     }
 
     fn save(&mut self, _: &Save, _window: &mut Window, cx: &mut Context<Self>) {
