@@ -23,8 +23,9 @@ pub fn theme() -> Arc<HighlightTheme> {
     let style = &mut theme.style;
     style.editor_background = color(0x1e1e1e);
     style.editor_foreground = color(0xd4d4d4);
-    // `editor.lineHighlightBorder`: Monaco outlines the line; GPUI Kit fills it.
-    style.editor_active_line = color(0x242424);
+    // Monaco outlines the current line (`editor.lineHighlightBorder`, drawn by
+    // `current_line_outline`) where GPUI Kit would fill it and its line number.
+    style.editor_active_line = None;
     style.editor_line_number = color(0x858585);
     style.editor_active_line_number = color(0xc6c6c6);
     style.editor_invisible = Some(rgba(0xe3e4e229).into());

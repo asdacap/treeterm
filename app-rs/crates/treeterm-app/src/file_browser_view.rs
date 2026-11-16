@@ -197,6 +197,64 @@ pub(crate) fn pointer_over(frame: gpui_kit::Stateful<gpui_kit::Div>, over: &Poin
     })
 }
 
+/// Monaco's `renderLineHighlight: 'line'`: vs-dark's `editor.lineHighlightBorder`, a 2px
+/// `#282828` box around the caret's row of the code, while nothing is selected. Laid over
+/// the editor, after it, so it reads the caret the editor has just laid out and follows the
+/// cursor and the scroll in the same frame. It is drawn over the text (Monaco draws it
+/// under), so it stops at the scrollbar instead of running under it.
+pub(crate) fn current_line_outline(editor: &Entity<EditorState>, glyph_margin: bool) -> impl IntoElement {
+    let editor = editor.clone();
+    gpui_kit::canvas(
+        |_, _, _| {},
+        move |bounds, _, window, cx| {
+            let editor = editor.read(cx);
+            if !editor.selected_range().is_empty() {
+                return;
+            }
+            let Some(caret) = editor.prepaint_caret_geometry() else {
+                return;
+            };
+            let gutter = gutter_width(gpui_kit::component::input::RopeExt::lines_len(editor.text()), glyph_margin);
+            let (cursor, scroll) = (caret.cursor_bounds(), caret.scroll_offset());
+            let Some(row) = current_line_row(bounds, cursor, caret.line_height(), scroll, gutter) else {
+                return;
+            };
+            // Where the text scrolls: under the search panel, from the padding above the text.
+            let top = caret.input_bounds().top() - gpui_kit::component::Size::Medium.input_py();
+            let viewport = Bounds::from_corners(gpui_kit::point(bounds.left(), top), bounds.bottom_right());
+            window.with_content_mask(Some(gpui_kit::ContentMask { bounds: viewport }), |window| {
+                window.paint_quad(
+                    gpui_kit::outline(row, rgb(0x282828), gpui_kit::BorderStyle::Solid).border_widths(px(2.)),
+                );
+            });
+        },
+    )
+    .absolute()
+    .top_0()
+    .left_0()
+    .size_full()
+}
+
+/// The caret's row of the code in an editor laid out in `bounds` with `gutter` px before
+/// the code, up to the scrollbar, from its caret (as laid out, before the scroll; shorter
+/// than the row and centred in it), row height and scroll offset; `None` when the code has
+/// no width.
+fn current_line_row(
+    bounds: Bounds<Pixels>,
+    caret: Bounds<Pixels>,
+    line_height: Pixels,
+    scroll: Point<Pixels>,
+    gutter: f32,
+) -> Option<Bounds<Pixels>> {
+    let left = bounds.left() + px(gutter);
+    let right = bounds.right() - px(SCROLLBAR);
+    let top = caret.top() + scroll.y - (line_height - caret.size.height) / 2.;
+    (left < right).then(|| Bounds::from_corners(gpui_kit::point(left, top), gpui_kit::point(right, top + line_height)))
+}
+
+/// The code editors' scrollbar width (Monaco's `verticalScrollbarSize`).
+const SCROLLBAR: f32 = 14.;
+
 /// A code editor laid out as Monaco's: its gutter width (keep the returned collection with
 /// the editor) and its 14px scrollbar (`scrollbarSlider.*` of vs-dark, beside the overview
 /// ruler's border), `'auto'` as Electron sets it: shown while the pointer is `over` the
@@ -218,17 +276,23 @@ pub(crate) fn monaco_gutter(
                 .mode(if over.get() { ScrollbarMode::Always } else { ScrollbarMode::Scrolling })
                 .styles(|styles| {
                     styles
-                        .track(|track| track.width(px(14.)).bg(gpui_kit::transparent_black()).border_color(rgba(0x7f7f7f4d).into()))
-                        .thumb(|thumb| thumb.width(px(14.)).inset(px(0.)).radius(px(0.)).bg(rgba(0x79797966)))
+                        .track(|track| track.width(px(SCROLLBAR)).bg(gpui_kit::transparent_black()).border_color(rgba(0x7f7f7f4d).into()))
+                        .thumb(|thumb| thumb.width(px(SCROLLBAR)).inset(px(0.)).radius(px(0.)).bg(rgba(0x79797966)))
                         .thumb_hover(|thumb| thumb.bg(rgba(0x646464b3)))
                         .thumb_active(|thumb| thumb.bg(rgba(0xbfbfbf66)))
                 })
                 .into_any_element()
         })));
-        let lines = gpui_kit::component::input::RopeExt::lines_len(editor.text());
-        editor.set_gutter_decorations_width(px(glyph_strip(lines, glyph_margin)), cx);
+        fit_glyph_strip(editor, glyph_margin, cx);
         editor.create_gutter_decorations_collection(Vec::new(), cx)
     })
+}
+
+/// Size the strip ([`glyph_strip`]) for the editor's lines now: as lines are added or
+/// removed, the code stays where Monaco's starts (and under [`current_line_outline`]).
+pub(crate) fn fit_glyph_strip(editor: &mut EditorState, glyph_margin: bool, cx: &mut Context<EditorState>) {
+    let lines = gpui_kit::component::input::RopeExt::lines_len(editor.text());
+    editor.set_gutter_decorations_width(px(glyph_strip(lines, glyph_margin)), cx);
 }
 
 /// The tree's width (`treeWidth`): 250px by default, dragged between 150 and 500.
@@ -1473,7 +1537,8 @@ impl FileBrowserView {
                                             .separator()
                                             .menu("Select All", Box::new(SelectAll))
                                     }),
-                            ),
+                            )
+                            .child(current_line_outline(&editor, true)),
                     ),
             )
             .children(panel)
@@ -1780,6 +1845,19 @@ mod tests {
         assert_eq!(language_for("/w/plot.r"), "text");
     }
 
+    #[test]
+    fn the_current_line_outline_spans_the_carets_row_of_code() {
+        let bounds = Bounds::new(gpui_kit::point(px(100.), px(50.)), gpui_kit::size(px(400.), px(300.)));
+        // A 17.85px caret centred in its 21px row, three rows down; scrolled up a row.
+        let caret = Bounds::new(gpui_kit::point(px(190.), px(50. + 8. + 63. + 1.575)), gpui_kit::size(px(2.), px(17.85)));
+        let row = current_line_row(bounds, caret, px(21.), gpui_kit::point(px(0.), px(-21.)), 68.).unwrap();
+        // From the end of the gutter to the scrollbar.
+        assert_eq!((row.left(), row.right(), row.size.height), (px(168.), px(486.), px(21.)));
+        assert!((f32::from(row.top()) - 100.).abs() < 0.001, "{:?}", row.top());
+        // A gutter reaching the scrollbar leaves no code to outline.
+        assert_eq!(current_line_row(bounds, caret, px(21.), gpui_kit::point(px(0.), px(0.)), 386.), None);
+    }
+
     /// A 400 x 300 code editor, as the Editor tab lays it out.
     struct Host {
         editor: Entity<EditorState>,
@@ -1787,7 +1865,7 @@ mod tests {
 
     impl Render for Host {
         fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-            div().w(px(400.)).h(px(300.)).child(Editor::new(&self.editor).bordered(false).h_full())
+            div().w(px(400.)).h(px(300.)).child(Editor::new(&self.editor).bordered(false).h_full().font_family(MONO).text_size(px(14.)))
         }
     }
 
@@ -1844,6 +1922,49 @@ mod tests {
         // GPUI Kit's default leaves half the viewport; only its bottom padding is left.
         assert!(below_last_line <= px(16.), "{below_last_line:?} under the last line");
         assert!(-scroll > px(0.), "scrolled");
+    }
+
+    #[gpui_kit::test]
+    fn the_current_line_outline_follows_the_caret(cx: &mut gpui_kit::TestAppContext) {
+        cx.update(gpui_kit::init);
+        let text = numbered_lines(100);
+        let (editor, cx) = code_editor_host(&text, cx);
+        // The first line, one further down, and one the editor scrolls to.
+        for line in [0, 3, 60] {
+            let offset: usize = text.split_inclusive('\n').take(line).map(str::len).sum();
+            editor.update(cx, |editor, cx| editor.set_selected_range(offset..offset, cx));
+            draw(cx);
+            let (row, text_row) = cx.update(|_, cx| {
+                let editor = editor.read(cx);
+                let caret = editor.prepaint_caret_geometry().unwrap();
+                let row = current_line_row(caret.input_bounds(), caret.cursor_bounds(), caret.line_height(), caret.scroll_offset(), 0.);
+                (row.unwrap(), editor.range_to_bounds(&(offset..offset + 1)).unwrap())
+            });
+            assert!((f32::from(row.top() - text_row.top())).abs() < 0.01, "line {line}: {row:?} against {text_row:?}");
+            assert_eq!(row.size.height, text_row.size.height);
+        }
+    }
+
+    #[gpui_kit::test]
+    fn the_code_stays_put_as_lines_are_added(cx: &mut gpui_kit::TestAppContext) {
+        cx.update(gpui_kit::init);
+        let (editor, cx) = code_editor_host(&numbered_lines(98), cx);
+        let _gutter = cx.update(|_, cx| monaco_gutter(&editor, false, &PointerOver::default(), cx));
+        draw(cx);
+        let code_left = |cx: &mut gpui_kit::VisualTestContext| {
+            cx.update(|_, cx| editor.read(cx).range_to_bounds(&(0..1)).unwrap().left())
+        };
+        let before = code_left(cx);
+        // From 2 digits (GPUI Kit numbers at least 3) to 4: Monaco's 5-digit gutter holds both.
+        cx.update(|window, cx| {
+            editor.update(cx, |editor, cx| {
+                editor.set_value(numbered_lines(1000), window, cx);
+                fit_glyph_strip(editor, false, cx);
+            })
+        });
+        draw(cx);
+        draw(cx);
+        assert!((f32::from(code_left(cx) - before)).abs() < 0.5, "moved from {before:?} to {:?}", code_left(cx));
     }
 
     #[test]

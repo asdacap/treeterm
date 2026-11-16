@@ -71,6 +71,7 @@ impl TextEditorView {
             if let InputEvent::Change = event {
                 let text = editor.read(cx).value().to_string();
                 brackets.set(crate::file_browser_view::bracket_colors(&text, monaco_language), cx);
+                editor.update(cx, |editor, cx| crate::file_browser_view::fit_glyph_strip(editor, false, cx));
                 model.update(cx, |model, cx| model.set_content(text, cx));
             }
         });
@@ -143,8 +144,10 @@ impl Render for TextEditorView {
                 Some(editor) => {
                     self.reveal_line(&editor, window, cx);
                     crate::file_browser_view::pointer_over(div().id("text-editor"), &self.pointer_over)
+                        .relative()
                         .size_full()
                         .child(Editor::new(&editor).bordered(false).h_full().font_family("Menlo").text_size(px(14.)))
+                        .child(crate::file_browser_view::current_line_outline(&editor, false))
                         .into_any_element()
                 }
                 None => div().into_any_element(),

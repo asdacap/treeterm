@@ -211,10 +211,11 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   resize grip. Off macOS the menu bar is GPUI Kit's, drawn in the window (not GTK's), above
   dialogs so that it stays usable while one is open, as GTK's is.
 - The code editors (Files viewer, Editor tab), through GPUI Kit: Tab inserts a whole indent
-  step, not spaces up to the next tab stop; 8px of padding stays under the last line; a
-  scrollbar fades 2 s after scrolling stops (Monaco: 0.5 s). The Kit has no R, XML, Less or
-  Dockerfile grammar: `.r` files are plain, and `.xml`, `.less` and `.dockerfile` files are
-  coloured with the HTML, CSS and shell grammars.
+  step, not spaces up to the next tab stop; 8px of padding stays under the last line; the
+  current line's outline is drawn over the text, so it stops at the scrollbar; a scrollbar
+  fades 2 s after scrolling stops (Monaco: 0.5 s). The Kit has no R, XML, Less or Dockerfile
+  grammar: `.r` files are plain, and `.xml`, `.less` and `.dockerfile` files are coloured
+  with the HTML, CSS and shell grammars.
 - With the sidebar collapsed the header keeps clear of the macOS window buttons (Electron's
   title runs under them).
 - GPUI cannot decode AVIF, so the Files viewer shows `.avif` images in a webview (WebKit
