@@ -1717,13 +1717,7 @@ impl SessionStore {
     /// Drag and drop in the tree (`moveWorkspace`): reorder among siblings, or reparent
     /// (`Onto`). Moves that would put a workspace under itself are ignored.
     pub fn move_workspace(&mut self, drag: &str, target: &str, position: tree::DropPosition, cx: &mut Context<Self>) {
-        let placements: Vec<(String, Option<String>, i64)> = self
-            .entries
-            .iter()
-            .filter_map(|(id, entry)| entry.store().map(|s| (id.clone(), s.read(cx).file())))
-            .map(|(id, file)| (id, file.parent_id.clone(), tree::sort_order(file)))
-            .collect();
-        let Some(plan) = tree::plan_move(&placements, drag, target, position) else {
+        let Some(plan) = tree::plan_move(&self.placements(cx), drag, target, position) else {
             return;
         };
         for placement in plan {
@@ -1733,6 +1727,29 @@ impl SessionStore {
         }
         self.refresh_inherited(cx);
         cx.notify();
+    }
+
+    /// Whether the tree offers to drop `drag` on `target` at `position`, showing where it
+    /// would land (`handleDragOver`): both are loaded, they differ, and `Onto` is not offered
+    /// over `drag` or below it. Before or after one of its own descendants is offered;
+    /// [`Self::move_workspace`] ignores that drop.
+    pub fn can_drop(&self, drag: &str, target: &str, position: tree::DropPosition, cx: &App) -> bool {
+        if drag == target || self.workspace_store(drag).is_none() || self.workspace_store(target).is_none() {
+            return false;
+        }
+        match position {
+            tree::DropPosition::Before | tree::DropPosition::After => true,
+            tree::DropPosition::Onto => !tree::is_descendant_or_self(&self.placements(cx), drag, target),
+        }
+    }
+
+    /// The loaded workspaces' places in the tree, as `(id, parent, sort order)`.
+    fn placements(&self, cx: &App) -> Vec<(String, Option<String>, i64)> {
+        self.entries
+            .iter()
+            .filter_map(|(id, entry)| entry.store().map(|s| (id.clone(), s.read(cx).file())))
+            .map(|(id, file)| (id, file.parent_id.clone(), tree::sort_order(file)))
+            .collect()
     }
 
     /// One past the largest `sortOrder` among a parent's children (or the roots).

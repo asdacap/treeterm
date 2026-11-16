@@ -12,7 +12,7 @@ use treeterm_model::app_store::{AppStore, ConnState};
 use treeterm_model::keybinding_store::KeybindingStore;
 use treeterm_core::tree::DropPosition;
 use treeterm_model::session_store::{RemoveMode, SessionState, SessionStore, WorkspaceEntry};
-use treeterm_model::tree_view_state::TreeViewState;
+use treeterm_model::tree_view_state::{TreeDrag, TreeViewState};
 
 use crate::theme::colors;
 use crate::ui;
@@ -42,8 +42,8 @@ pub struct TreePane {
     remote: bool,
     /// The whole session's rows are hidden.
     folded: bool,
-    /// Where a workspace being dragged would land.
-    drop_hint: Option<(String, DropPosition)>,
+    /// A workspace dragged from this tree, and where it would land.
+    drag: TreeDrag,
     /// The row under the pointer: it and the rows under it are tinted (`.tree-subtree`).
     hovered: Option<String>,
     /// Per-window view state: which workspaces have their children hidden.
@@ -63,10 +63,10 @@ enum Shown {
 
 impl EventEmitter<WorkspaceSelected> for TreePane {}
 
-/// A workspace being dragged in the tree (and its drag preview).
+/// A workspace being dragged in the tree: the chip with its name that follows the pointer
+/// (which one is dragged is the dragging tree's [`TreeDrag`]).
 #[derive(Clone)]
 pub struct DraggedWorkspace {
-    id: String,
     label: SharedString,
 }
 
@@ -127,7 +127,7 @@ impl TreePane {
             renaming: None,
             remote,
             folded: false,
-            drop_hint: None,
+            drag: TreeDrag::Idle,
             hovered: None,
             view: TreeViewState::new(Default::default()),
         }
@@ -139,7 +139,8 @@ impl TreePane {
         if self.store() == session.as_ref() {
             return;
         }
-        self.drop_hint = None;
+        // A drag from the old store's rows lands nowhere in the new one's.
+        self.drag = TreeDrag::Idle;
         self.view.reload();
         self.session = match session {
             None => Shown::Nothing,
@@ -257,6 +258,11 @@ impl TreePane {
 
 impl Render for TreePane {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // `handleDragEnd`: a workspace dropped, or let go of where nothing takes it, is no
+        // longer dragged.
+        if !cx.has_active_drag() {
+            self.drag = TreeDrag::Idle;
+        }
         let c = colors(cx);
         let (text_secondary, hover, accent, primary, border) = (c.text_secondary, c.bg_hover, c.accent, c.text_primary, c.border);
         // The connection (`SessionPanel`'s `connection.status`); `None` only while this view
@@ -634,6 +640,9 @@ impl TreePane {
             hover,
         } = row;
         let busy = activity != treeterm_model::workspace_store::ActivityState::Idle;
+        // Only a loaded row drags (`draggable={ws !== undefined}`); pressing on another drags
+        // its session's section.
+        let draggable = matches!(label, Label::Name { .. });
         let c = colors(cx);
         let (secondary, primary) = (c.text_secondary, c.text_primary);
         // `WorkspaceIcon`: spinner while loading, alert on error, the activity glyph while
@@ -682,15 +691,14 @@ impl TreePane {
         let hover_id = id.clone();
         let select_id = id.clone();
         let fork_id = id.clone();
-        let (drag_value, move_id, drop_id) = (
-            DraggedWorkspace { id: id.clone(), label: label.clone() },
-            id.clone(),
-            id.clone(),
-        );
-        let hint = self.drop_hint.as_ref().filter(|(target, _)| *target == id).map(|(_, position)| *position);
+        let (drag_value, drag_id, move_id, drop_id) =
+            (DraggedWorkspace { label: label.clone() }, id.clone(), id.clone(), id.clone());
+        let hint = self.drag.hint(&id);
         let menu_id = id.clone();
-        let (session, drop_session, fork_session) = (session.clone(), session.clone(), session.clone());
+        let (session, move_session, drop_session, fork_session) =
+            (session.clone(), session.clone(), session.clone(), session.clone());
         let pane = cx.entity();
+        let drag_pane = pane.downgrade();
         let group = SharedString::from(format!("ws-row-group-{id}"));
         let root = depth == 0;
         // `.tree-item`: 36px rows, 6px 4px padding plus 8px per level.
@@ -722,34 +730,37 @@ impl TreePane {
                         }
                     }))
                     .when_some(tooltip, |row, tooltip| row.tooltip(ui::title_tooltip(tooltip)))
-                    .on_drag(drag_value, |dragged, _, _, cx| cx.new(|_| dragged.clone()))
+                    .when(draggable, |row| {
+                        row.on_drag(drag_value, move |dragged, _, _, cx| {
+                            // `handleDragStart`.
+                            if let Err(error) = drag_pane.update(cx, |pane, cx| {
+                                pane.drag.start(&drag_id);
+                                cx.notify();
+                            }) {
+                                tracing::debug!(%error, "window closed");
+                            }
+                            cx.new(|_| dragged.clone())
+                        })
+                    })
+                    // `handleDragOver`: only a drag from this tree, over a row that takes it.
                     .on_drag_move(cx.listener(move |pane, event: &gpui_kit::DragMoveEvent<DraggedWorkspace>, _, cx| {
                         let position = event.event.position;
-                        let next = if event.bounds.contains(&position) && event.drag(cx).id != move_id {
+                        let zone = event.bounds.contains(&position).then(|| {
                             let (top, height) = (f32::from(event.bounds.top()), f32::from(event.bounds.size.height));
-                            Some((move_id.clone(), drop_zone(f32::from(position.y), top, height)))
-                        } else {
-                            None
-                        };
-                        let changed = match (&pane.drop_hint, &next) {
-                            (Some((old, _)), None) => *old == move_id,
-                            (old, Some(_)) => old.as_ref() != next.as_ref(),
-                            (None, None) => false,
-                        };
-                        if changed {
-                            pane.drop_hint = next;
+                            drop_zone(f32::from(position.y), top, height)
+                        });
+                        let session = move_session.read(cx);
+                        if pane.drag.moved(&move_id, zone, |drag, zone| session.can_drop(drag, &move_id, zone, cx)) {
                             cx.notify();
                         }
                     }))
-                    .on_drop(cx.listener(move |pane, dragged: &DraggedWorkspace, _, cx| {
-                        let position = match pane.drop_hint.take() {
-                            Some((target, position)) if target == drop_id => position,
-                            Some(_) | None => DropPosition::Onto,
-                        };
-                        let (drag, target) = (dragged.id.clone(), drop_id.clone());
-                        drop_session.update(cx, |s, cx| s.move_workspace(&drag, &target, position, cx));
-                        if position == DropPosition::Onto {
-                            pane.view.expand(&target);
+                    // `handleDrop`: lands only where this row showed it would.
+                    .on_drop(cx.listener(move |pane, _: &DraggedWorkspace, _, cx| {
+                        if let Some((drag, position)) = pane.drag.drop_on(&drop_id) {
+                            drop_session.update(cx, |s, cx| s.move_workspace(&drag, &drop_id, position, cx));
+                            if position == DropPosition::Onto {
+                                pane.view.expand(&drop_id);
+                            }
                         }
                         cx.notify();
                     }))

@@ -1,7 +1,9 @@
-//! A window's view of its session's workspace tree (`SessionPanel`'s `expanded`): which
-//! workspaces have their children hidden.
+//! A window's view of its session's workspace tree (`SessionPanel`'s `expanded` and
+//! `dragState`): which workspaces have their children hidden, and a workspace being dragged.
 
 use std::collections::HashSet;
+
+use treeterm_core::tree::DropPosition;
 
 /// A workspace shown under another: `child` is loaded and its `parentId` is `parent`, a
 /// workspace of the same session (`SessionPanel`'s `getChildren`).
@@ -73,6 +75,81 @@ impl TreeViewState {
     /// there before the rebuild still opens its parent.
     pub fn reload(&mut self) {
         self.reloading.extend(self.edges.drain());
+    }
+}
+
+/// A workspace being dragged in this window's tree of a session (`SessionPanel`'s
+/// `dragState`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum TreeDrag {
+    /// No drag started in this tree: a workspace dragged from another session's tree shows
+    /// no hint here and lands nowhere (`!dragState`).
+    #[default]
+    Idle,
+    /// `over` is the row and the place there `dragged` would land (`drag-before`,
+    /// `drag-after`, `drag-onto`), none while over no row that takes it.
+    Dragging {
+        dragged: String,
+        over: Option<(String, DropPosition)>,
+    },
+}
+
+impl TreeDrag {
+    /// `handleDragStart`: `id`'s row is dragged.
+    pub fn start(&mut self, id: &str) {
+        *self = TreeDrag::Dragging {
+            dragged: id.to_owned(),
+            over: None,
+        };
+    }
+
+    /// Where on `row` the dragged workspace would land, if it shows there.
+    pub fn hint(&self, row: &str) -> Option<DropPosition> {
+        match self {
+            TreeDrag::Dragging {
+                over: Some((over, position)),
+                ..
+            } if over == row => Some(*position),
+            TreeDrag::Dragging { .. } | TreeDrag::Idle => None,
+        }
+    }
+
+    /// The pointer moved, over `row` in `zone`, or (`None`) not over it (`handleDragOver`;
+    /// every row hears every move). `takes` says whether the session takes the dragged
+    /// workspace there (`SessionStore::can_drop`). Whether the hint changed.
+    pub fn moved(
+        &mut self,
+        row: &str,
+        zone: Option<DropPosition>,
+        takes: impl FnOnce(&str, DropPosition) -> bool,
+    ) -> bool {
+        let TreeDrag::Dragging { dragged, over } = self else {
+            return false; // dragged from another session's tree
+        };
+        let next = zone
+            .filter(|zone| takes(dragged, *zone))
+            .map(|zone| (row.to_owned(), zone));
+        let changed = match (&*over, &next) {
+            (Some((old, _)), None) => old == row,
+            (old, Some(_)) => old.as_ref() != next.as_ref(),
+            (None, None) => false,
+        };
+        if changed {
+            *over = next;
+        }
+        changed
+    }
+
+    /// Dropped on `row` (`handleDrop`): the drag ends. The dragged workspace and where it
+    /// lands, if `row` shows where.
+    pub fn drop_on(&mut self, row: &str) -> Option<(String, DropPosition)> {
+        match std::mem::take(self) {
+            TreeDrag::Dragging {
+                dragged,
+                over: Some((over, position)),
+            } if over == row => Some((dragged, position)),
+            TreeDrag::Dragging { .. } | TreeDrag::Idle => None,
+        }
     }
 }
 
@@ -209,5 +286,75 @@ mod tests {
         view.observe(edges(&[("a", "root")]));
         assert!(!view.is_collapsed("root"));
         assert!(view.collapsed().is_empty());
+    }
+
+    #[test]
+    fn a_drag_started_elsewhere_shows_no_hint_and_lands_nowhere() {
+        let mut drag = TreeDrag::Idle;
+        assert!(!drag.moved("b", Some(DropPosition::Onto), |_, _| true));
+        assert_eq!(drag.hint("b"), None);
+        assert_eq!(drag.drop_on("b"), None);
+        assert_eq!(drag, TreeDrag::Idle);
+    }
+
+    #[test]
+    fn the_row_under_the_pointer_shows_where_the_dragged_workspace_lands() {
+        let mut drag = TreeDrag::default();
+        drag.start("a");
+        let mut asked = Vec::new();
+        assert!(
+            drag.moved("b", Some(DropPosition::Before), |dragged, zone| {
+                asked.push((dragged.to_owned(), zone));
+                true
+            })
+        );
+        assert_eq!(asked, vec![("a".to_owned(), DropPosition::Before)]);
+        assert_eq!(drag.hint("b"), Some(DropPosition::Before));
+        assert_eq!(drag.hint("a"), None);
+        // The same place again: no change. A row not under the pointer leaves it shown.
+        assert!(!drag.moved("b", Some(DropPosition::Before), |_, _| true));
+        assert!(!drag.moved("c", None, |_, _| true));
+        assert_eq!(drag.hint("b"), Some(DropPosition::Before));
+        assert!(drag.moved("b", Some(DropPosition::After), |_, _| true));
+        assert_eq!(drag.hint("b"), Some(DropPosition::After));
+        // On to the next row: it shows the hint instead.
+        assert!(drag.moved("c", Some(DropPosition::Onto), |_, _| true));
+        assert_eq!(drag.hint("b"), None);
+        assert_eq!(drag.hint("c"), Some(DropPosition::Onto));
+        // Off the row: no hint.
+        assert!(drag.moved("c", None, |_, _| true));
+        assert_eq!(drag.hint("c"), None);
+    }
+
+    #[test]
+    fn a_place_the_session_does_not_take_shows_no_hint() {
+        let mut drag = TreeDrag::default();
+        drag.start("a");
+        assert!(drag.moved("a1", Some(DropPosition::Before), |_, _| true));
+        // Onto its own child: the hint goes.
+        let not_onto = |_: &str, zone| zone != DropPosition::Onto;
+        assert!(drag.moved("a1", Some(DropPosition::Onto), not_onto));
+        assert_eq!(drag.hint("a1"), None);
+        assert!(!drag.moved("a1", Some(DropPosition::Onto), |_, _| false));
+        assert_eq!(drag.drop_on("a1"), None);
+        assert_eq!(drag, TreeDrag::Idle);
+    }
+
+    #[test]
+    fn a_drop_lands_where_the_row_showed_and_ends_the_drag() {
+        let mut drag = TreeDrag::default();
+        drag.start("a");
+        assert!(drag.moved("b", Some(DropPosition::Onto), |_, _| true));
+        assert_eq!(
+            drag.drop_on("b"),
+            Some(("a".to_owned(), DropPosition::Onto))
+        );
+        assert_eq!(drag, TreeDrag::Idle);
+
+        // Dropped on a row other than the one showing the hint: nothing lands.
+        drag.start("a");
+        assert!(drag.moved("b", Some(DropPosition::After), |_, _| true));
+        assert_eq!(drag.drop_on("c"), None);
+        assert_eq!(drag, TreeDrag::Idle);
     }
 }

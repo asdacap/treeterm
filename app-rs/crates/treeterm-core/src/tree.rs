@@ -232,6 +232,24 @@ pub struct Placement {
     pub sort_order: i64,
 }
 
+/// Whether `id` is `ancestor` or below it, following parent links up from `id` (the cycle
+/// check of `handleDragOver` and `moveWorkspace`); a parent missing from `workspaces` ends
+/// the walk. Parent links that loop count as below `ancestor`: nothing can move under them.
+/// `workspaces` is `(id, parent, sort order)`.
+pub fn is_descendant_or_self(workspaces: &[(String, Option<String>, i64)], ancestor: &str, id: &str) -> bool {
+    let parent_of = |id: &str| workspaces.iter().find(|(w, _, _)| w == id).and_then(|(_, parent, _)| parent.clone());
+    let mut current = Some(id.to_owned());
+    let mut steps = 0;
+    while let Some(id) = current {
+        if id == ancestor || steps > workspaces.len() {
+            return true;
+        }
+        current = parent_of(&id);
+        steps += 1;
+    }
+    false
+}
+
 /// `moveWorkspace`: the new parent and sort orders after dropping `drag` on `target` at
 /// `position`, for every workspace whose placement changes. `None` when the move is a no-op
 /// or would make a workspace its own ancestor. `workspaces` is `(id, parent, sort order)`.
@@ -252,14 +270,8 @@ pub fn plan_move(
         DropPosition::Before | DropPosition::After => target_parent,
     };
     // Cycle check: the new parent must not be the dragged workspace or below it.
-    let mut current = new_parent.clone();
-    let mut steps = 0;
-    while let Some(id) = current {
-        if id == drag || steps > workspaces.len() {
-            return None;
-        }
-        current = parent_of(&id).flatten();
-        steps += 1;
+    if new_parent.as_deref().is_some_and(|parent| is_descendant_or_self(workspaces, drag, parent)) {
+        return None;
     }
     let siblings = |parent: &Option<String>| {
         let mut list: Vec<&(String, Option<String>, i64)> =
@@ -331,5 +343,26 @@ mod move_tests {
         assert_eq!(plan_move(&sample(), "a", "a1", DropPosition::Onto), None);
         assert_eq!(plan_move(&sample(), "a", "a2", DropPosition::After), None);
         assert_eq!(plan_move(&sample(), "a", "a", DropPosition::Before), None);
+    }
+
+    #[test]
+    fn a_descendant_is_found_by_walking_up_its_parents() {
+        let mut workspaces = sample();
+        workspaces.push(ws("a1x", Some("a1"), 0));
+        assert!(is_descendant_or_self(&workspaces, "a", "a"));
+        assert!(is_descendant_or_self(&workspaces, "a", "a1"));
+        assert!(is_descendant_or_self(&workspaces, "a", "a1x"));
+        assert!(!is_descendant_or_self(&workspaces, "a", "b"));
+        assert!(!is_descendant_or_self(&workspaces, "a1", "a"));
+        // A parent that is not listed (not loaded) ends the walk.
+        workspaces.push(ws("orphan", Some("gone"), 0));
+        assert!(!is_descendant_or_self(&workspaces, "a", "orphan"));
+    }
+
+    #[test]
+    fn looping_parents_end_the_walk_as_a_descendant() {
+        let workspaces = vec![ws("x", Some("y"), 0), ws("y", Some("x"), 0), ws("d", None, 0)];
+        assert!(is_descendant_or_self(&workspaces, "d", "x"));
+        assert_eq!(plan_move(&workspaces, "d", "x", DropPosition::Onto), None);
     }
 }

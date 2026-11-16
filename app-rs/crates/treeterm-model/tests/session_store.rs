@@ -1613,6 +1613,42 @@ fn child_edges_link_loaded_workspaces_to_parents_in_the_session(cx: &mut TestApp
 }
 
 #[gpui_kit::test]
+fn a_drop_is_offered_between_loaded_workspaces_and_never_onto_the_dragged_ones_subtree(cx: &mut TestAppContext) {
+    use treeterm_core::tree::DropPosition::{After, Before, Onto};
+    cx.executor().allow_parking();
+    let h = harness();
+    let dir = h.daemon.workspaces_dir();
+    std::fs::write(dir.join("root.json"), body("root", None)).unwrap();
+    std::fs::write(dir.join("child.json"), body("child", Some("root"))).unwrap();
+    std::fs::write(dir.join("grandchild.json"), body("grandchild", Some("child"))).unwrap();
+    std::fs::write(dir.join("other.json"), body("other", None)).unwrap();
+    publish(&h, &["root", "child", "grandchild", "other", "broken"]);
+    let store = open_store(cx, &h, "client-a");
+    wait_until(cx, &store, |s| {
+        ["root", "child", "grandchild", "other"].iter().all(|id| loaded(s, id))
+            && matches!(s.entry("broken"), Some(WorkspaceEntry::Error { .. }))
+    });
+
+    cx.read(|cx| {
+        let s = store.read(cx);
+        // Not on itself, nor onto a workspace under it; before or after one is offered (and
+        // ignored on drop).
+        assert!(!s.can_drop("root", "root", Before, cx));
+        assert!(!s.can_drop("root", "child", Onto, cx));
+        assert!(!s.can_drop("root", "grandchild", Onto, cx));
+        assert!(s.can_drop("root", "child", Before, cx));
+        assert!(s.can_drop("root", "grandchild", After, cx));
+        // Onto a sibling, or up onto an ancestor.
+        assert!(s.can_drop("root", "other", Onto, cx));
+        assert!(s.can_drop("grandchild", "root", Onto, cx));
+        // A workspace that is not loaded neither drags nor takes a drop.
+        assert!(!s.can_drop("broken", "other", Before, cx));
+        assert!(!s.can_drop("other", "broken", Onto, cx));
+        assert!(!s.can_drop("other", "gone", After, cx));
+    });
+}
+
+#[gpui_kit::test]
 fn a_quick_fork_resolves_with_its_child_which_opens_a_collapsed_parent(cx: &mut TestAppContext) {
     cx.executor().allow_parking();
     let h = harness();
