@@ -17,5 +17,6 @@ pub use favourites::{
 };
 pub use language::detect_monaco_language;
 pub use limits::{
-    MAX_READ_FILE_BYTES, MAX_READ_MODEL_BYTES, MAX_READ_PDF_BYTES, max_read_bytes_for,
+    MAX_READ_FILE_BYTES, MAX_READ_MODEL_BYTES, MAX_READ_PDF_BYTES, format_megabytes,
+    max_read_bytes_for,
 };

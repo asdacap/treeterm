@@ -30,7 +30,9 @@ use gpui_kit::{
     MouseUpEvent, Pixels, Point, SharedString, Subscription, Window, actions, div, px, relative, rgb, rgba,
 };
 use treeterm_core::review::{Freshness, MetadataError, ReviewComment};
-use treeterm_core::files::{ImageFormat, detect_monaco_language, favourite_file_name, max_read_bytes_for};
+use treeterm_core::files::{
+    ImageFormat, detect_monaco_language, favourite_file_name, format_megabytes, max_read_bytes_for,
+};
 use treeterm_model::file_browser::{
     DefinitionLookup, Favourites, FileBrowser, FileView, LineDraft, Listing, NameResults, SearchPanel, Star,
 };
@@ -341,11 +343,6 @@ fn shows_page(view: &FileView, built: &std::sync::Arc<Vec<u8>>) -> bool {
         | FileView::TooLarge { .. }
         | FileView::Failed { .. } => false,
     }
-}
-
-/// `formatMegabytes`: `1.4MB`.
-fn format_megabytes(bytes: u64) -> String {
-    format!("{:.1}MB", bytes as f64 / (1024. * 1024.))
 }
 
 fn file_name(path: &str) -> &str {
@@ -1690,12 +1687,6 @@ mod tests {
         assert!(!shows_page(&FileView::Text { path: "/w/a.txt".into(), text: "a".into() }, &built));
         assert!(!shows_page(&FileView::Loading(path.clone()), &built));
         assert!(!shows_page(&FileView::Nothing, &built));
-    }
-
-    #[test]
-    fn sizes_read_in_megabytes_to_one_place() {
-        assert_eq!(format_megabytes(5_000_000), "4.8MB");
-        assert_eq!(format_megabytes(1024 * 1024), "1.0MB");
     }
 
     #[test]
