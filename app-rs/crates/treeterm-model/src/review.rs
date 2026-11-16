@@ -1010,9 +1010,14 @@ impl ReviewModel {
         }
     }
 
-    /// `git show` of a commit's changes (renames, whole files), limited to `paths`.
+    /// `git show` of a commit's changes (whole files), limited to `paths`. Without renames, as
+    /// the commit's list (`diff-tree`) has them: a renamed file is listed as its old path
+    /// deleted and its new one added (Electron read each listed path's two sides), and with
+    /// renames, git would pair the two halves into one rename whenever one command reads both
+    /// (a reload reads every file asked for at once), the deleted file then showing no section
+    /// and the added one no lines.
     fn show_request(&self, hash: &str, paths: &[&str]) -> ExecRequest {
-        let mut args = vec!["show", "--no-color", "-M", FULL_CONTEXT, "--format=", hash];
+        let mut args = vec!["show", "--no-color", "--no-renames", FULL_CONTEXT, "--format=", hash];
         args.extend_from_slice(paths);
         self.git_request(&args)
     }

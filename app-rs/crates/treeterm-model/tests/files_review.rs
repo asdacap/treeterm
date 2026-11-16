@@ -2590,6 +2590,53 @@ fn an_uncommitted_reload_reads_again_the_staged_unstaged_and_untracked_files_ask
 }
 
 #[gpui_kit::test]
+fn a_commits_rename_reads_as_a_deletion_and_an_addition_also_read_together(cx: &mut TestAppContext) {
+    use treeterm_model::review::{Loaded, ReviewMode};
+    use treeterm_model::review_patch::FileDiff;
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let repo = TempRepo::new(&h);
+    repo.write("c.txt", "a file moved\nwith its lines\n");
+    repo.write("w.txt", "x\n");
+    repo.commit_all("base");
+    repo.git(&["mv", "c.txt", "d.txt"]);
+    repo.write("w.txt", "x \n");
+    repo.commit_all("move");
+    let store = open_store(cx, &h);
+    let workspace = open_repo_workspace(cx, &h, &store, &repo);
+    let review = open_review(cx, &workspace);
+    review.update(cx, |r, cx| r.set_mode(ReviewMode::Commits, cx));
+    wait_review(cx, &review, "commits", |r, _| matches!(r.content(), ReviewContent::Commits(c) if !c.is_empty()));
+    let hash = review.read_with(cx, |r, _| match r.content() {
+        ReviewContent::Commits(commits) => commits[0].hash.clone(),
+        other => panic!("{other:?}"),
+    });
+    review.update(cx, |r, cx| r.select_commit(&hash, cx));
+    wait_review(cx, &review, "commit listed", |r, _| matches!(r.selected_commit().map(|s| &s.diff), Some(Loaded::Ready(_))));
+    let deleted = |diff: &Option<FileDiff>| {
+        matches!(diff, Some(FileDiff::Loaded(section)) if section.contains("deleted file mode") && section.contains("-a file moved"))
+    };
+    let added = |diff: &Option<FileDiff>| {
+        matches!(diff, Some(FileDiff::Loaded(section)) if section.contains("new file mode") && section.contains("+a file moved"))
+    };
+
+    // The commit lists its old path deleted and its new one added (`diff-tree`), and each
+    // reads so on its own, as in Electron.
+    read_all(cx, &review);
+    let (c, d) = (file_diff(cx, &review, "c.txt"), file_diff(cx, &review, "d.txt"));
+    assert!(deleted(&c) && added(&d), "{c:?} {d:?}");
+
+    // Read again together (a reload reads every file asked for in one command; here `-w`,
+    // which drops w.txt's whitespace change): still a deletion and an addition, not one rename.
+    review.update(cx, |r, cx| r.set_ignore_whitespace(true, cx));
+    wait_review(cx, &review, "read again with -w", |r, _| shown_diffs(r).get("w.txt") == Some(&FileDiff::Loaded(String::new())));
+    let (c, d) = (file_diff(cx, &review, "c.txt"), file_diff(cx, &review, "d.txt"));
+    assert!(deleted(&c) && added(&d), "{c:?} {d:?}");
+}
+
+
+#[gpui_kit::test]
 fn find_reads_every_file_a_few_at_a_time_and_counts_once_all_are_read(cx: &mut TestAppContext) {
     use treeterm_core::search::{DiffStyle, UnchangedRegions};
     use treeterm_model::review::MAX_SEARCH_LOADS;
