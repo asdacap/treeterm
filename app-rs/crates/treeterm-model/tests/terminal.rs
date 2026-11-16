@@ -22,7 +22,7 @@ use treeterm_term::palette::DEFAULT_BACKGROUND;
 use treeterm_term::view::ScrollPosition;
 
 mod common;
-use common::{Harness, Proxy, harness, wait_until};
+use common::{Harness, Proxy, harness, refusing_daemon, wait_until};
 
 /// A login shell with an empty config dir, so the user's dotfiles stay out of the test.
 fn spawn_shell(h: &Harness) -> String {
@@ -393,7 +393,8 @@ fn writes_after_a_stream_error_show_that_error(cx: &mut TestAppContext) {
     let model = cx.new(|cx| TerminalModel::new(conn, options(pty), cx));
     wait_until(cx, &model, |m| *m.overlay() == Overlay::Hidden && !m.screen_text().trim().is_empty());
 
-    // The connection drops mid-stream.
+    // The connection drops mid-stream: the stream's error shows as it is, not as an attach
+    // failure.
     drop(proxy);
     wait_until(cx, &model, |m| matches!(m.overlay(), Overlay::Error(_)));
     let failed = model.read_with(cx, |m, _| m.overlay().clone());
@@ -408,6 +409,19 @@ fn writes_after_a_stream_error_show_that_error(cx: &mut TestAppContext) {
     model.update(cx, |m, cx| m.dismiss_overlay(cx));
     model.update(cx, |m, cx| m.paste("y", cx));
     wait_until(cx, &model, |m| *m.overlay() == failed);
+}
+
+#[gpui_kit::test]
+fn an_attach_that_fails_says_so(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
+    let (_daemon, conn) = refusing_daemon(tonic::Status::unavailable("Connection refused"));
+    let model = cx.new(|cx| TerminalModel::new(conn, options("p1".into()), cx));
+    let failed = Overlay::AttachFailed("14 UNAVAILABLE: Connection refused".to_owned());
+    wait_until(cx, &model, |m| *m.overlay() == failed);
+    assert_eq!(
+        failed.message().as_deref(),
+        Some("Failed to reattach terminal: 14 UNAVAILABLE: Connection refused")
+    );
 }
 
 #[gpui_kit::test]

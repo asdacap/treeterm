@@ -733,6 +733,7 @@ impl Render for TerminalView {
                 Overlay::Loading => (rgba(0xffffff0d).into(), c.text_secondary),
                 Overlay::Hidden
                 | Overlay::Error(_)
+                | Overlay::AttachFailed(_)
                 | Overlay::ExitedImmediately(_)
                 | Overlay::Disconnected => (rgba(0xcd313126).into(), c.error),
             };

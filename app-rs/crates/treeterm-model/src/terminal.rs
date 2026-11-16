@@ -100,6 +100,9 @@ pub enum Overlay {
     Loading,
     Hidden,
     Error(String),
+    /// The attachment failed before the daemon answered (the connection is down): the
+    /// error, as Electron shows an attach call that throws.
+    AttachFailed(String),
     /// The program failed right after starting.
     ExitedImmediately(i32),
     Disconnected,
@@ -111,6 +114,9 @@ impl Overlay {
             Overlay::Loading => Some("Loading terminal...".to_owned()),
             Overlay::Hidden => None,
             Overlay::Error(message) => Some(message.clone()),
+            Overlay::AttachFailed(message) => {
+                Some(format!("Failed to reattach terminal: {message}"))
+            }
             Overlay::ExitedImmediately(code) => {
                 Some(format!("Process exited immediately with code {code}"))
             }
@@ -246,6 +252,8 @@ struct Batch {
 #[derive(Debug, Clone)]
 enum StreamEnd {
     Closed,
+    /// The stream failed before its first event: the attach call itself failed.
+    AttachFailed(String),
     Failed(String),
 }
 
@@ -1128,6 +1136,10 @@ impl TerminalModel {
             self.on_exit(code, cx);
         }
         match batch.end {
+            Some(StreamEnd::AttachFailed(message)) => {
+                tracing::error!(pty = %self.options.pty_id, %message, "failed to attach to PTY");
+                self.overlay = Overlay::AttachFailed(message);
+            }
             Some(StreamEnd::Failed(message)) => {
                 tracing::error!(pty = %self.options.pty_id, %message, "pty stream failed");
                 self.overlay = Overlay::Error(message);
@@ -1252,6 +1264,9 @@ async fn drive(
     mut wake: mpsc::Sender<()>,
     executor: BackgroundExecutor,
 ) {
+    // The daemon answers every attach with its replay before anything can fail, so an error
+    // before the first event is the attach call failing (the connection is down).
+    let mut opened = false;
     loop {
         // A synchronized update must be flushed by its deadline even if no output follows.
         let next = match core.sync_deadline() {
@@ -1273,9 +1288,17 @@ async fn drive(
                 let mut applied = 0;
                 loop {
                     match item {
-                        Some(Ok(event)) => apply(&mut core, event, &received, &mut batch),
+                        Some(Ok(event)) => {
+                            opened = true;
+                            apply(&mut core, event, &received, &mut batch);
+                        }
                         Some(Err(error)) => {
-                            batch.end = Some(StreamEnd::Failed(error.to_string()));
+                            let message = error.to_string();
+                            batch.end = Some(if opened {
+                                StreamEnd::Failed(message)
+                            } else {
+                                StreamEnd::AttachFailed(message)
+                            });
                             ended = true;
                             break;
                         }
