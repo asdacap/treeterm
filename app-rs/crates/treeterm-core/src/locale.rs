@@ -1,6 +1,6 @@
-//! Electron's locale, and dates, times and string order in it.
+//! Electron's locale, and dates, times, numbers and string order in it.
 //!
-//! Electron's renderer formats dates (`toLocaleString`, …) and compares strings
+//! Electron's renderer formats dates and numbers (`toLocaleString`, …) and compares strings
 //! (`localeCompare`) with ICU in its *application* locale: not the system's preferred
 //! language as is, but the closest of the UI languages Electron ships. On macOS that is the
 //! localization `NSBundle` picks for Electron.app from the preferred languages (English
@@ -26,7 +26,8 @@ use icu_locale_core::Locale;
 use crate::clock::LocalTime;
 use electron_locales::ELECTRON_LOCALES;
 
-/// One of the UI languages Electron ships, with the date formats its renderer prints there.
+/// One of the UI languages Electron ships, with the date and number formats its renderer
+/// prints there.
 #[derive(Debug, PartialEq, Eq)]
 pub struct ElectronLocale {
     /// The application locale (`app.getLocale()`), as Chromium spells it: `locales/<app>.pak`,
@@ -38,6 +39,7 @@ pub struct ElectronLocale {
     calendar: Calendar,
     /// The locale's zero; its other digits follow it.
     zero: char,
+    grouping: Grouping,
     day_periods: DayPeriods,
     /// `toLocaleString()`: numeric date with the full year, and the time with seconds.
     date_time: &'static str,
@@ -57,6 +59,17 @@ enum Calendar {
     Buddhist,
     /// Farsi: the solar Hijri calendar.
     Persian,
+}
+
+/// Where a locale puts a separator between the digits of a whole number, and which.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Grouping {
+    /// Between groups of three: `1,000`, `1,234,567`.
+    Threes(&'static str),
+    /// Between groups of three, from five digits on: `1000`, `10 000`.
+    ThreesFromTenThousand(&'static str),
+    /// Before the last three digits, then between pairs: `1,000`, `1,00,000`, `12,34,567`.
+    Indian(&'static str),
 }
 
 /// How a locale's clock names the halves of the day.
@@ -96,6 +109,29 @@ impl ElectronLocale {
     /// `toLocaleTimeString` with a 2-digit hour, minute and second.
     pub fn time_two_digit(&self, t: LocalTime) -> String {
         self.render(self.time_two_digit, t, (t.year, t.month, t.day))
+    }
+
+    /// `n.toLocaleString()`: in this locale's digits, grouped as it groups them (`25.003` in
+    /// German, `25 003` in French, `۲۵٬۰۰۳` in Farsi, `12,34,567` in Hindi).
+    pub fn number(&self, n: u64) -> String {
+        let digits = n.to_string();
+        let (separator, fewest_grouped) = match self.grouping {
+            Grouping::Threes(separator) | Grouping::Indian(separator) => (separator, 4),
+            Grouping::ThreesFromTenThousand(separator) => (separator, 5),
+        };
+        // Whether a group starts `from_end` digits before the end.
+        let starts_group = |from_end: usize| match self.grouping {
+            Grouping::Threes(_) | Grouping::ThreesFromTenThousand(_) => from_end.is_multiple_of(3),
+            Grouping::Indian(_) => from_end == 3 || (from_end > 3 && (from_end - 3).is_multiple_of(2)),
+        };
+        let mut out = String::new();
+        for (index, c) in digits.chars().enumerate() {
+            if index > 0 && digits.len() >= fewest_grouped && starts_group(digits.len() - index) {
+                out.push_str(separator);
+            }
+            out.push(self.digit(c));
+        }
+        out
     }
 
     /// Year, month and day of `t` in this locale's calendar.
@@ -148,11 +184,15 @@ impl ElectronLocale {
 
     /// `value` padded with zeros to `width` digits, in this locale's digits.
     fn push_number(&self, out: &mut String, value: i64, width: usize) {
-        let zero = u32::from(self.zero);
-        out.extend(format!("{value:0width$}").chars().map(|c| match c.to_digit(10) {
-            Some(digit) => char::from_u32(zero + digit).expect("a locale's ten digits are consecutive"),
+        out.extend(format!("{value:0width$}").chars().map(|c| self.digit(c)));
+    }
+
+    /// ASCII digit `c` as this locale writes it; any other character as it is.
+    fn digit(&self, c: char) -> char {
+        match c.to_digit(10) {
+            Some(digit) => char::from_u32(u32::from(self.zero) + digit).expect("a locale's ten digits are consecutive"),
             None => c,
-        }));
+        }
     }
 }
 
@@ -444,6 +484,31 @@ mod tests {
         assert_eq!(en_us.time_two_digit(at(2026, 1, 5, 12, 0, 0)), "12:00:00 PM");
         assert_eq!(en_us.time_two_digit(at(2026, 1, 5, 9, 5, 7)), "09:05:07 AM");
         assert_eq!(locale("en-GB").time_two_digit(at(2026, 1, 5, 0, 0, 5)), "00:00:05");
+    }
+
+    #[test]
+    fn numbers_follow_the_locale_as_to_locale_string_does() {
+        // `n.toLocaleString(<icu>)` in Electron 33 for 999, 1000, 25003, 100000 and 1234567.
+        let cases = [
+            ("en-US", ["999", "1,000", "25,003", "100,000", "1,234,567"]),
+            ("de", ["999", "1.000", "25.003", "100.000", "1.234.567"]),
+            ("fr", ["999", "1\u{202f}000", "25\u{202f}003", "100\u{202f}000", "1\u{202f}234\u{202f}567"]),
+            ("ru", ["999", "1\u{a0}000", "25\u{a0}003", "100\u{a0}000", "1\u{a0}234\u{a0}567"]),
+            // CLDR 44's minimum grouping digits: four digits stay together.
+            ("es", ["999", "1000", "25.003", "100.000", "1.234.567"]),
+            ("pl", ["999", "1000", "25\u{a0}003", "100\u{a0}000", "1\u{a0}234\u{a0}567"]),
+            // Later CLDR keeps Italian's four digits together too; Electron 33's does not.
+            ("it", ["999", "1.000", "25.003", "100.000", "1.234.567"]),
+            ("hi", ["999", "1,000", "25,003", "1,00,000", "12,34,567"]),
+            ("bn", ["৯৯৯", "১,০০০", "২৫,০০৩", "১,০০,০০০", "১২,৩৪,৫৬৭"]),
+            ("fa", ["۹۹۹", "۱٬۰۰۰", "۲۵٬۰۰۳", "۱۰۰٬۰۰۰", "۱٬۲۳۴٬۵۶۷"]),
+            ("ar", ["999", "1,000", "25,003", "100,000", "1,234,567"]),
+        ];
+        for (app, texts) in cases {
+            assert_eq!([999, 1_000, 25_003, 100_000, 1_234_567].map(|n| locale(app).number(n)), texts, "{app}");
+        }
+        assert_eq!(locale("de").number(0), "0");
+        assert_eq!(locale("mr").number(7), "७");
     }
 
     #[test]

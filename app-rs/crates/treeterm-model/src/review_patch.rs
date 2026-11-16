@@ -14,6 +14,7 @@
 
 use indexmap::IndexMap;
 use treeterm_core::files::is_image_path;
+use treeterm_core::locale::ElectronLocale;
 
 /// One listed file's diff (`FileLoadState`).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -192,30 +193,18 @@ impl DiffSize {
         }
     }
 
-    /// `.file-diff-too-large`'s text, its numbers grouped as `toLocaleString()` groups them
-    /// in en-US.
+    /// `.file-diff-too-large`'s text, its numbers written as `toLocaleString()` writes them
+    /// in Electron's locale.
     pub fn notice(&self) -> String {
+        let locale = ElectronLocale::current();
         // `Math.round`: halves round up.
-        let kilobytes = (self.bytes as f64 / 1024.).round() as usize;
+        let kilobytes = (self.bytes as f64 / 1024.).round() as u64;
         format!(
             "This diff is large ({} lines, {} KB) and may slow down or crash the app.",
-            grouped(self.lines),
-            grouped(kilobytes)
+            locale.number(self.lines as u64),
+            locale.number(kilobytes)
         )
     }
-}
-
-/// `n` with a comma between each group of three digits.
-fn grouped(n: usize) -> String {
-    let digits = n.to_string();
-    let mut out = String::new();
-    for (index, digit) in digits.chars().enumerate() {
-        if index > 0 && (digits.len() - index).is_multiple_of(3) {
-            out.push(',');
-        }
-        out.push(digit);
-    }
-    out
 }
 
 /// `measureDiff` of a file's section: both of its sides, rebuilt from its hunks (the patches
@@ -789,24 +778,21 @@ mod tests {
     }
 
     #[test]
-    fn the_notice_gives_lines_and_rounded_kilobytes_grouped_in_threes() {
-        assert_eq!(
-            size(25_001, 1_536_000).notice(),
-            "This diff is large (25,001 lines, 1,500 KB) and may slow down or crash the app."
-        );
+    fn the_notice_gives_lines_and_rounded_kilobytes_in_electrons_locale() {
+        // `toLocaleString()` in Electron's locale (`25,001` in en-US, `25.001` in German; see
+        // `ElectronLocale::number`).
+        let notice = |lines: u64, kilobytes: u64| {
+            let locale = ElectronLocale::current();
+            format!(
+                "This diff is large ({} lines, {} KB) and may slow down or crash the app.",
+                locale.number(lines),
+                locale.number(kilobytes)
+            )
+        };
+        assert_eq!(size(25_001, 1_536_000).notice(), notice(25_001, 1_500));
         // Half a kilobyte rounds up.
-        assert_eq!(
-            size(1, 512).notice(),
-            "This diff is large (1 lines, 1 KB) and may slow down or crash the app."
-        );
-        assert_eq!(
-            size(0, 511).notice(),
-            "This diff is large (0 lines, 0 KB) and may slow down or crash the app."
-        );
-        assert_eq!(
-            [0, 999, 1000, 100_000, 1_234_567].map(grouped),
-            ["0", "999", "1,000", "100,000", "1,234,567"].map(String::from)
-        );
+        assert_eq!(size(1, 512).notice(), notice(1, 1));
+        assert_eq!(size(0, 511).notice(), notice(0, 0));
     }
 
     #[test]

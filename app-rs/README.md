@@ -553,9 +553,6 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   does (a change of indentation, trailing spaces or line ending is unchanged; one of spacing
   within a line still shows). A line that is unchanged only once trimmed shows its new text
   on both sides of the split view; Pierre showed each side's own.
-- Review's "This diff is large (N lines, K KB)" groups digits the en-US way (`25,003`) whatever
-  Electron's locale; Electron's `toLocaleString` grouped them as its locale does (`25.003` in
-  German, Persian digits in Farsi).
 - Review's fresh conflict check before a merge shows "Checking for conflicts..." and disables
   the header's actions while it runs (Electron showed nothing and left them clickable).
 - A failed merge's output ends with `Merge failed: <error>` once (Electron doubled the prefix
