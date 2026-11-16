@@ -12,7 +12,7 @@ use gpui_kit::{AsyncApp, Context, EventEmitter, Task, WeakEntity};
 use treeterm_core::connection::{
     ConnectionId, Persistence, PortForwardConfig, PortForwardId, PortForwardStatus,
 };
-use treeterm_core::exec::{ExecClient, ExecRequest, ExecTimeout};
+use treeterm_core::exec::{DEFAULT_EXEC_TIMEOUT, ExecClient, ExecRequest, ExecTimeout};
 use treeterm_core::settings::PortForwardSpec;
 
 use crate::app_store::AppStore;
@@ -82,9 +82,10 @@ pub struct WebAppModel {
     _run: Option<Task<()>>,
 }
 
-/// curl's exit code for `http://localhost:<port>/` on the daemon's host.
-async fn probe(exec: &ExecClient, port: u16) -> Result<i32, String> {
-    let request = ExecRequest {
+/// The curl run for `http://localhost:<port>/` (`createHttpProbe`): curl gives up after 2s,
+/// the daemon after the usual exec timeout.
+fn probe_request(port: u16) -> ExecRequest {
+    ExecRequest {
         cwd: "/".to_owned(),
         command: "curl".to_owned(),
         args: ["-s", "-o", "/dev/null", "--connect-timeout", "1", "--max-time", "2"]
@@ -93,9 +94,13 @@ async fn probe(exec: &ExecClient, port: u16) -> Result<i32, String> {
             .chain([format!("http://localhost:{port}/")])
             .collect(),
         env: HashMap::new(),
-        timeout: ExecTimeout::After(Duration::from_secs(10)),
-    };
-    exec.run(request).await.map(|output| output.exit_code).map_err(|e| format!("curl: {e}"))
+        timeout: ExecTimeout::After(DEFAULT_EXEC_TIMEOUT),
+    }
+}
+
+/// curl's exit code for `http://localhost:<port>/` on the daemon's host.
+async fn probe(exec: &ExecClient, port: u16) -> Result<i32, String> {
+    exec.run(probe_request(port)).await.map(|output| output.exit_code).map_err(|e| format!("curl: {e}"))
 }
 
 impl WebAppModel {
@@ -314,5 +319,13 @@ mod tests {
         assert_eq!(port_from(24999), 44999);
         assert_eq!(port_from(25000), 20000);
         assert_eq!(forward_id_for_tab("tab-1").as_str(), "webapp-tab-1");
+    }
+
+    #[test]
+    fn a_probe_is_curl_on_the_port_with_the_usual_exec_timeout() {
+        let request = probe_request(4321);
+        assert_eq!(request.display(), "curl -s -o /dev/null --connect-timeout 1 --max-time 2 http://localhost:4321/");
+        assert_eq!(request.cwd, "/");
+        assert_eq!(request.timeout, ExecTimeout::After(Duration::from_secs(30)));
     }
 }
