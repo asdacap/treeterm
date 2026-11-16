@@ -156,7 +156,13 @@ Done (tested against a real in-process daemon unless noted):
   the diff, then the repo; the diff's menu searches or copies the selected text or the word
   under the pointer), prompting the AI harness; live merge
   output; git status (uncommitted / conflicts / behind, Pull) and PR indicators.
-- **Web (M8):** Browser tabs in a native webview (localhost guard); Web App tabs (free port
+- **Web (M8):** Browser tabs in a native webview (localhost guard). The toolbar follows the
+  webview's own history (Back / Forward),
+  loading (Stop and the progress line from the request on) and navigations within the page
+  (`pushState`, fragments), which the tab also remembers; Reload bypasses the cache. A load
+  that ends without a page (server down) shows "This site can’t be reached" and its URL in
+  the page's place until the next load (WKWebView draws no error page; the reason, Chromium's
+  error code, is not known); Web App tabs (free port
   probed on the daemon's host, dev server with `$PORT`, page once it answers); both reopen
   on the page they last showed (its path on the start page, whatever port the page is on
   this time), and show it only while it is ready; on remote sessions both reach their page

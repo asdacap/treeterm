@@ -2,6 +2,11 @@
 //! the toolbar of `PageViews.tsx` (back, forward, reload / stop, home, the address bar, open
 //! externally), plus the navigation guard of `src/main/webviewGuard.ts`.
 //!
+//! The toolbar follows the webview's own navigation state ([`webview_native`], [`PageNav`]):
+//! its history, a load from its request on, navigations within the page. A load that ends
+//! without a page (server down) shows a message in the page's place, where Chromium shows its
+//! error page and WKWebView nothing.
+//!
 //! Without GPUI Fast composition the native view is drawn above GPUI content in its bounds,
 //! so the owner hides it whenever its tab is not shown or a dialog is open
 //! ([`BrowserView::set_shown`]).
@@ -28,9 +33,11 @@ use treeterm_model::apps::{
     MarkdownLink, PAGE_PROBE_SCRIPT, PageContent, is_allowed_webview_url, is_markdown_page, markdown_link, page_content,
     proxied_url, resolve_address, unproxied_url,
 };
+use treeterm_model::page_nav::{NavInput, PageNav, PageState, Reload};
 use treeterm_model::workspace_store::WorkspaceStore;
 
 use crate::theme::colors;
+use crate::webview_native;
 
 enum Page {
     /// Built on first render (it needs the window).
@@ -39,23 +46,14 @@ enum Page {
     Failed(String),
 }
 
-/// What the webview reports (from its own callbacks, so through a channel).
+/// What the webview reports (from its own callbacks, so through a channel), and what the tab
+/// asks of it, in the order it happened.
 enum PageEvent {
-    Started(String),
-    Finished(String),
+    Nav(NavInput),
     /// [`PAGE_PROBE_SCRIPT`]'s result.
     Probed(String),
     /// A page the webview cannot display (it wanted to download it).
     Undisplayable(String),
-}
-
-/// A back / forward the toolbar asked for: the next load moves along the history instead
-/// of starting a new entry.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Pending {
-    None,
-    Back,
-    Forward,
 }
 
 /// The address bar while it is being edited (`Draft`): navigation must not clobber it.
@@ -69,11 +67,7 @@ pub struct BrowserView {
     url: String,
     page: Page,
     shown: bool,
-    current: String,
-    loading: bool,
-    back: Vec<String>,
-    forward: Vec<String>,
-    pending: Pending,
+    nav: PageNav,
     address: Option<Entity<InputState>>,
     draft: Draft,
     /// The tab whose state remembers the page shown (`path`): its workspace and id.
@@ -81,10 +75,11 @@ pub struct BrowserView {
     /// The page as last probed; the previous one stays until the next load is probed.
     content: PageContent,
     markdown_scroll: gpui_kit::ScrollHandle,
-    /// Where probe results go (the webview's callback runs off the main thread).
-    probes: Option<tokio::sync::mpsc::UnboundedSender<PageEvent>>,
+    /// Where the webview's reports go (its callbacks cannot reach the view).
+    events: Option<tokio::sync::mpsc::UnboundedSender<PageEvent>>,
     /// This tab's URL scheme for pages the webview cannot display ([`proxied_url`]).
     proxy: String,
+    _observer: Option<webview_native::NavObserver>,
     _events: Option<Task<()>>,
     _address: Vec<Subscription>,
 }
@@ -101,27 +96,23 @@ impl BrowserView {
     /// A page opening `url`, under Home going to `home`. Each page it shows is remembered in
     /// the state of the tab `tab_id` (Electron's page memory), so the tab reopens there.
     pub fn new(url: String, home: String, workspace: WeakEntity<WorkspaceStore>, tab_id: String) -> Self {
+        // One scheme per tab: WebKitGTK registers schemes per web context.
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        let proxy = format!("treeterm-page{}", NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
         Self {
             // As a URL reads back (`http://localhost:8765/`); an address it cannot read stays as given.
-            current: resolve_address(&url, &url).unwrap_or(url),
+            nav: PageNav::new(resolve_address(&url, &url).unwrap_or(url), proxy.clone()),
             url: home,
             page: Page::NotBuilt,
             shown: true,
-            loading: false,
-            back: Vec::new(),
-            forward: Vec::new(),
-            pending: Pending::None,
             address: None,
             draft: Draft::Idle,
             memory: (workspace, tab_id),
             content: PageContent::Web,
             markdown_scroll: gpui_kit::ScrollHandle::new(),
-            probes: None,
-            proxy: {
-                // One scheme per tab: WebKitGTK registers schemes per web context.
-                static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-                format!("treeterm-page{}", NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
-            },
+            events: None,
+            proxy,
+            _observer: None,
             _events: None,
             _address: Vec::new(),
         }
@@ -136,9 +127,10 @@ impl BrowserView {
         self.sync_visibility(cx);
     }
 
-    /// The native view shows while the tab does, unless rendered markdown covers it.
+    /// The native view shows while the tab does, unless rendered markdown or a failed load
+    /// covers it.
     fn sync_visibility(&mut self, cx: &mut Context<Self>) {
-        let visible = self.shown && self.content == PageContent::Web;
+        let visible = self.shown && self.content == PageContent::Web && *self.nav.page() == PageState::Shown;
         if let Page::Live(webview) = &self.page {
             webview.update(cx, |w, _| if visible { w.show() } else { w.hide() });
         }
@@ -146,12 +138,12 @@ impl BrowserView {
 
     /// Ask the page what it is ([`PAGE_PROBE_SCRIPT`]).
     fn probe(&mut self, cx: &mut Context<Self>) {
-        let Some(probes) = self.probes.clone() else {
+        let Some(events) = self.events.clone() else {
             return;
         };
         self.webview(cx, |w| {
             let sent = w.raw().evaluate_script_with_callback(PAGE_PROBE_SCRIPT, move |result| {
-                if probes.send(PageEvent::Probed(result)).is_err() {
+                if events.send(PageEvent::Probed(result)).is_err() {
                     tracing::debug!("browser tab closed while its page was probed");
                 }
             });
@@ -163,7 +155,7 @@ impl BrowserView {
 
     /// A link clicked in rendered markdown.
     fn follow_markdown_link(&mut self, href: &str, cx: &mut Context<Self>) {
-        match markdown_link(href, &self.current) {
+        match markdown_link(href, self.nav.current()) {
             Ok(MarkdownLink::InTab(url)) => self.load(url, cx),
             Ok(MarkdownLink::External(url)) => open_externally(&url),
             Err(error) => tracing::error!(%error, "markdown link"),
@@ -171,16 +163,16 @@ impl BrowserView {
     }
 
     fn build(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if !is_allowed_webview_url(&self.current) {
-            self.page = Page::Failed(format!("Only localhost pages can be shown: {}", self.current));
+        if !is_allowed_webview_url(self.nav.current()) {
+            self.page = Page::Failed(format!("Only localhost pages can be shown: {}", self.nav.current()));
             return;
         }
         let (events, mut updates) = tokio::sync::mpsc::unbounded_channel();
-        self.probes = Some(events.clone());
-        let undisplayable = events.clone();
+        self.events = Some(events.clone());
+        let (undisplayable, observed) = (events.clone(), events.clone());
         let (proxy, guard_proxy) = (self.proxy.clone(), self.proxy.clone());
         let builder = wry::WebViewBuilder::new()
-            .with_url(self.current.clone())
+            .with_url(self.nav.current())
             // In-page navigation stays on localhost; anything else goes to the system browser.
             .with_navigation_handler(move |url| {
                 let allowed = is_allowed_webview_url(&url) || url == "about:blank" || unproxied_url(&guard_proxy, &url).is_some();
@@ -203,17 +195,22 @@ impl BrowserView {
                 open_externally(&url);
                 wry::NewWindowResponse::Deny
             })
-            .with_on_page_load_handler(move |event, url| {
-                let event = match event {
-                    wry::PageLoadEvent::Started => PageEvent::Started(url),
-                    wry::PageLoadEvent::Finished => PageEvent::Finished(url),
-                };
-                if events.send(event).is_err() {
-                    tracing::debug!("browser tab closed while its page loaded");
+            // A load's end is the webview's own loading state ([`webview_native`]).
+            .with_on_page_load_handler(move |event, url| match event {
+                wry::PageLoadEvent::Started => {
+                    if events.send(PageEvent::Nav(NavInput::Committed(url))).is_err() {
+                        tracing::debug!("browser tab closed while its page loaded");
+                    }
                 }
+                wry::PageLoadEvent::Finished => {}
             });
         self.page = match WebView::build(builder, window, cx) {
             Ok(webview) => {
+                self._observer = Some(webview_native::observe(webview.raw(), move |native| {
+                    if observed.send(PageEvent::Nav(NavInput::Native(native))).is_err() {
+                        tracing::debug!("browser tab closed while its page navigated");
+                    }
+                }));
                 self._events = Some(cx.spawn(async move |view, cx| {
                     while let Some(event) = updates.recv().await {
                         if view.update(cx, |view, cx| view.on_page(event, cx)).is_err() {
@@ -227,63 +224,37 @@ impl BrowserView {
         };
     }
 
-    /// Follow the page: history, loading state, the address shown and the remembered page.
+    /// Follow the page: history, loading state, the address shown, the remembered page and
+    /// what the page is.
     fn on_page(&mut self, event: PageEvent, cx: &mut Context<Self>) {
-        // A proxied page is shown (and remembered) as the page it stands for.
-        let shown = |url: String| unproxied_url(&self.proxy, &url).unwrap_or(url);
-        let event = match event {
-            PageEvent::Started(url) => PageEvent::Started(shown(url)),
-            PageEvent::Finished(url) => PageEvent::Finished(shown(url)),
-            other @ (PageEvent::Probed(_) | PageEvent::Undisplayable(_)) => other,
-        };
         match event {
-            PageEvent::Started(url) => {
-                self.loading = true;
-                match std::mem::replace(&mut self.pending, Pending::None) {
-                    Pending::Back => {
-                        self.back.pop();
-                        self.forward.push(std::mem::replace(&mut self.current, url));
-                    }
-                    Pending::Forward => {
-                        self.forward.pop();
-                        self.back.push(std::mem::replace(&mut self.current, url));
-                    }
-                    Pending::None if url != self.current => {
-                        self.back.push(std::mem::replace(&mut self.current, url));
-                        self.forward.clear();
-                    }
-                    Pending::None => {}
+            PageEvent::Nav(input) => {
+                tracing::debug!(?input, "browser tab navigation");
+                let effects = self.nav.apply(input);
+                // No workspace: the tab went with it, so there is nothing to remember the page in.
+                if effects.navigated
+                    && let Some(workspace) = self.memory.0.upgrade()
+                {
+                    workspace.update(cx, |w, cx| w.remember_page(&self.memory.1, &self.url, self.nav.current(), cx));
+                }
+                if effects.load_ended {
+                    self.probe(cx);
                 }
             }
-            PageEvent::Finished(url) => {
-                self.loading = false;
-                self.current = url;
-                self.probe(cx);
-            }
             PageEvent::Undisplayable(url) => {
+                self.nav.apply(NavInput::Downloaded);
                 match proxied_url(&self.proxy, &url) {
                     Some(proxied) if is_allowed_webview_url(&url) => self.load(proxied, cx),
                     Some(_) | None => tracing::error!(%url, "the browser tab cannot show this page"),
                 }
-                return;
             }
-            PageEvent::Probed(result) => {
-                self.content = match page_content(&result, &self.proxy) {
-                    Ok(content) => content,
-                    Err(error) => {
-                        tracing::error!(%error, "browser page probe");
-                        PageContent::Web
-                    }
-                };
-                self.sync_visibility(cx);
-                cx.notify();
-                return;
-            }
+            // A probe that fails keeps the page's content, as Electron only logs it.
+            PageEvent::Probed(result) => match page_content(&result, &self.proxy) {
+                Ok(content) => self.content = content,
+                Err(error) => tracing::error!(%error, "browser page probe"),
+            },
         }
-        // No workspace: the tab went with it, so there is nothing to remember the page in.
-        if let Some(workspace) = self.memory.0.upgrade() {
-            workspace.update(cx, |w, cx| w.remember_page(&self.memory.1, &self.url, &self.current, cx));
-        }
+        self.sync_visibility(cx);
         cx.notify();
     }
 
@@ -293,40 +264,47 @@ impl BrowserView {
         }
     }
 
+    /// Tell the page's navigation what the tab asks of the webview, before asking: the
+    /// webview reports what it does from within the call, and those reports come after.
+    fn send(&self, input: NavInput) {
+        if let Some(events) = &self.events
+            && events.send(PageEvent::Nav(input)).is_err()
+        {
+            tracing::debug!("browser tab closed while it navigated");
+        }
+    }
+
     fn load(&mut self, url: String, cx: &mut Context<Self>) {
-        self.webview(cx, |w| w.load_url(&url));
-    }
-
-    fn go(&mut self, pending: Pending, cx: &mut Context<Self>) {
-        self.pending = pending;
+        self.send(NavInput::Requested(url.clone()));
         self.webview(cx, |w| {
-            let result = match pending {
-                Pending::Back => w.back(),
-                Pending::Forward => w.forward(),
-                Pending::None => Ok(()),
-            };
-            if let Err(error) = result {
-                tracing::error!(%error, "browser history");
+            if let Err(error) = w.raw().load_url(&url) {
+                tracing::error!(%error, %url, "browser load");
             }
         });
     }
 
+    fn back(&mut self, cx: &mut Context<Self>) {
+        self.webview(cx, |w| webview_native::go_back(w.raw()));
+    }
+
+    fn forward(&mut self, cx: &mut Context<Self>) {
+        self.webview(cx, |w| webview_native::go_forward(w.raw()));
+    }
+
+    /// `reloadIgnoringCache`; a page that could not be loaded is loaded again.
     fn reload(&mut self, cx: &mut Context<Self>) {
-        self.webview(cx, |w| {
-            if let Err(error) = w.raw().reload() {
-                tracing::error!(%error, "browser reload");
+        match self.nav.reload() {
+            Reload::FromOrigin => {
+                self.send(NavInput::Reloading);
+                self.webview(cx, |w| webview_native::reload_from_origin(w.raw()));
             }
-        });
+            Reload::Retry(url) => self.load(url, cx),
+        }
     }
 
     fn stop(&mut self, cx: &mut Context<Self>) {
-        self.webview(cx, |w| {
-            if let Err(error) = w.raw().evaluate_script("window.stop()") {
-                tracing::error!(%error, "browser stop");
-            }
-        });
-        self.loading = false;
-        cx.notify();
+        self.send(NavInput::Stopped);
+        self.webview(cx, |w| webview_native::stop_loading(w.raw()));
     }
 
     /// The address bar, made on first render (it needs the window).
@@ -334,22 +312,17 @@ impl BrowserView {
         if let Some(address) = &self.address {
             return address.clone();
         }
-        let current = self.current.clone();
+        let current = self.nav.current().to_owned();
         let address = cx.new(|cx| InputState::new(window, cx).default_value(current));
         self._address = vec![cx.subscribe_in(&address, window, |view, input, event: &InputEvent, window, cx| match event {
             InputEvent::Focus => input.update(cx, |input, cx| input.select_all(window, cx)),
             InputEvent::Change => {
-                let error = None;
-                if let Draft::Idle = view.draft {
-                    view.draft = Draft::Editing { error };
-                } else {
-                    view.draft = Draft::Editing { error: None };
-                }
+                view.draft = Draft::Editing { error: None };
                 cx.notify();
             }
             InputEvent::PressEnter { .. } => {
                 let typed = input.read(cx).value().to_string();
-                match resolve_address(&typed, &view.current) {
+                match resolve_address(&typed, view.nav.current()) {
                     Ok(target) => {
                         view.draft = Draft::Idle;
                         window.blur(cx);
@@ -424,6 +397,22 @@ fn toolbar_button(id: &'static str, glyph: &'static str, title: &'static str, en
         .when(!enabled, |d| d.opacity(0.35))
 }
 
+/// A load that ended before any page came, in Chromium's error page's place (WKWebView
+/// shows nothing; the reason is not known).
+fn load_failure(url: &str, cx: &gpui_kit::App) -> impl IntoElement {
+    let c = colors(cx);
+    div().size_full().bg(c.bg_primary).child(
+        v_flex()
+            .max_w(px(600.))
+            .mx_auto()
+            .mt(px(80.))
+            .px(px(24.))
+            .gap(px(12.))
+            .child(div().text_size(px(24.)).text_color(c.text_primary).child("This site can’t be reached"))
+            .child(div().text_size(px(14.)).text_color(c.text_secondary).child(format!("Could not load {url}"))),
+    )
+}
+
 impl Render for BrowserView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if let Page::NotBuilt = self.page {
@@ -432,8 +421,8 @@ impl Render for BrowserView {
         let address = self.address(window, cx);
         // While not editing, the bar shows the page.
         let editing = matches!(self.draft, Draft::Editing { .. });
-        if !editing && address.read(cx).value() != self.current.as_str() {
-            let current = self.current.clone();
+        if !editing && address.read(cx).value() != self.nav.current() {
+            let current = self.nav.current().to_owned();
             address.update(cx, |input, cx| input.set_value(current, window, cx));
         }
         let c = colors(cx);
@@ -446,13 +435,22 @@ impl Render for BrowserView {
         let body: AnyElement = match &self.page {
             Page::NotBuilt => div().into_any_element(),
             Page::Failed(message) => div().p_4().text_color(error).child(message.clone()).into_any_element(),
-            Page::Live(webview) => match &self.content {
-                PageContent::Web => div().size_full().bg(gpui_kit::white()).child(webview.clone()).into_any_element(),
+            Page::Live(webview) => match (self.nav.page(), &self.content) {
+                // The webview keeps its place (hidden) under the message.
+                (PageState::Failed { url }, _) => div()
+                    .relative()
+                    .size_full()
+                    .child(webview.clone())
+                    .child(div().absolute().inset_0().child(load_failure(url, cx)))
+                    .into_any_element(),
+                (PageState::Shown, PageContent::Web) => {
+                    div().size_full().bg(gpui_kit::white()).child(webview.clone()).into_any_element()
+                }
                 // `.webapp-markdown`: the webview keeps its place (hidden) under the page.
-                PageContent::Markdown(text) => {
+                (PageState::Shown, PageContent::Markdown(text)) => {
                     let this = cx.weak_entity();
                     let preview = crate::file_browser_view::markdown_preview_linked(
-                        SharedString::from(format!("page-markdown-{}", self.current)),
+                        SharedString::from(format!("page-markdown-{}", self.nav.current())),
                         text.clone(),
                         &self.markdown_scroll,
                         move |href, _, cx| match this.update(cx, |view, cx| view.follow_markdown_link(href, cx)) {
@@ -465,7 +463,7 @@ impl Render for BrowserView {
                 }
             },
         };
-        let (can_back, can_forward, loading) = (!self.back.is_empty(), !self.forward.is_empty(), self.loading);
+        let (can_back, can_forward, loading) = (self.nav.can_go_back(), self.nav.can_go_forward(), self.nav.loading());
         let tip: SharedString = invalid.clone().unwrap_or_else(|| address.read(cx).value().to_string()).into();
         let field = div()
             .id("webapp-address")
@@ -501,10 +499,10 @@ impl Render for BrowserView {
             .bg(bg_secondary)
             .text_size(px(12.))
             .child(toolbar_button("page-back", "←", "Back", can_back, cx).when(can_back, |d| {
-                d.on_click(cx.listener(|view, _, _, cx| view.go(Pending::Back, cx)))
+                d.on_click(cx.listener(|view, _, _, cx| view.back(cx)))
             }))
             .child(toolbar_button("page-forward", "→", "Forward", can_forward, cx).when(can_forward, |d| {
-                d.on_click(cx.listener(|view, _, _, cx| view.go(Pending::Forward, cx)))
+                d.on_click(cx.listener(|view, _, _, cx| view.forward(cx)))
             }));
         toolbar = if loading {
             toolbar.child(toolbar_button("page-stop", "✕", "Stop", true, cx).on_click(cx.listener(|view, _, _, cx| view.stop(cx))))
@@ -512,7 +510,7 @@ impl Render for BrowserView {
             toolbar.child(toolbar_button("page-reload", "⟳", "Reload", true, cx).on_click(cx.listener(|view, _, _, cx| view.reload(cx))))
         };
         let home = self.url.clone();
-        let external = self.current.clone();
+        let external = self.nav.current().to_owned();
         toolbar = toolbar
             .child(toolbar_button("page-home", "⌂", "Home", true, cx).on_click(cx.listener(move |view, _, _, cx| {
                 view.load(home.clone(), cx);

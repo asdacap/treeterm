@@ -16,6 +16,7 @@ mod comment_ui;
 mod automation;
 mod crash_view;
 mod browser_view;
+mod webview_native;
 mod daemon_binary;
 mod editor_hooks;
 mod file_browser_view;
