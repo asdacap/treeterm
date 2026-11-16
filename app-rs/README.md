@@ -92,6 +92,9 @@ Done (tested against a real in-process daemon unless noted):
 - **Connections (M4):** local + SSH sessions on the core connection manager (bootstrap,
   tunnel, reconnect with backoff, outdated-daemon refresh/accept), SSH connection picker with
   saved connections, remote directory browser, session pane with logs and port forwards.
+  While a connection is down its session stays in the sidebar, dimmed under the connection's
+  banner, and its workspace stays open; workspace changes whose writes were deferred or failed
+  meanwhile are written on the new connection before the session is rebuilt from it.
   (SSH tested in core with a fake ssh host and contract tests; not yet against a real host.)
 - **AI harness (M5):** per-tab LLM analyzer (classification, auto-approve, titles, branch
   names), activity states with transitions, unread attention markers with the ding.
@@ -218,11 +221,13 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   Review and can be pushed to GitHub. Comments with Electron's absolute paths still show in
   the Files viewer and the Comments tab; Electron's Files tab does not show the relative ones.
 
-- When a connection goes to reconnecting, the commands its session was running (a git
-  operation in progress, say) are cancelled with the session, which is rebuilt on the new
-  connection, instead of failing with "connection … lost while command was running"
-  (Electron kept the old session until the reconnect). Other commands on the lost
-  connection fail with that error, as in Electron.
+- After a reconnect the window shows the workspace it showed before (the first one if it is
+  gone) and leaves other sessions' views alone; Electron always jumps to the reconnected
+  session's first workspace.
+- A workspace write still in flight when the connection drops is written after the reconnect
+  too (Electron's flush waited for it to fail and then dropped it).
+- The session's force-unlock button hides once the lock has expired (the daemon ignores an
+  expired lock); Electron shows it as long as the daemon still reports the lock.
 - A stale local daemon socket is replaced at once (Electron waited up to 5 s for it to
   answer). Connections to use still wait up to 5 s for the daemon, as in Electron.
 - Placeholders for refs another window removed are dropped with the ref.

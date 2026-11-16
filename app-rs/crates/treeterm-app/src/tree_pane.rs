@@ -7,10 +7,13 @@ use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::{Sizable as _, WindowExt as _, h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{AnyElement, ClickEvent, Context, Entity, EventEmitter, SharedString, Window, div, px};
+use treeterm_core::connection::{ConnectionId, OutdatedDaemon};
+use treeterm_model::app_store::{AppStore, ConnState};
 use treeterm_model::keybinding_store::KeybindingStore;
 use treeterm_core::tree::DropPosition;
 use treeterm_model::session_store::{RemoveMode, SessionState, SessionStore, WorkspaceEntry};
 
+use crate::app_view::{BannerAction, BannerKind, SessionIcon, connect_phase_label, connection_banner, session_icon};
 use crate::theme::colors;
 use crate::ui;
 use gpui_kit::assets::IconName;
@@ -20,6 +23,10 @@ pub struct WorkspaceSelected(pub String);
 
 pub struct TreePane {
     session: Entity<SessionStore>,
+    /// The session's connection: the header shows its status, and while it is down the
+    /// tree shows its banner and dims the rows.
+    app: Entity<AppStore>,
+    connection: ConnectionId,
     keybindings: Entity<KeybindingStore>,
     /// The session's name: custom, else "Local" or the ssh label.
     names: Entity<treeterm_model::session_names::SessionNames>,
@@ -86,20 +93,25 @@ impl EventEmitter<DisconnectRequested> for TreePane {}
 impl TreePane {
     pub fn new(
         session: Entity<SessionStore>,
+        app: Entity<AppStore>,
+        connection: ConnectionId,
         keybindings: Entity<KeybindingStore>,
         names: Entity<treeterm_model::session_names::SessionNames>,
         target: treeterm_core::connection::ConnectionTarget,
-        remote: bool,
         cx: &mut Context<Self>,
     ) -> Self {
         cx.observe(&session, |_, _, cx| cx.notify()).detach();
+        cx.observe(&app, |_, _, cx| cx.notify()).detach();
         cx.observe(&keybindings, |_, _, cx| cx.notify()).detach();
         cx.observe(&names, |_, _, cx| cx.notify()).detach();
         let meter = session.read(cx).traffic().clone();
         let traffic = cx.new(|cx| crate::traffic_badge::TrafficBadge::new(meter, "connection-traffic", cx));
+        let remote = matches!(target, treeterm_core::connection::ConnectionTarget::Remote(_));
         Self {
             traffic,
             session,
+            app,
+            connection,
             keybindings,
             names,
             target,
@@ -227,23 +239,54 @@ impl Render for TreePane {
                 })
                 .collect()),
         };
-        let body = match rows {
-            Err(status) => status,
+        // The connection (`SessionPanel`'s `connection.status`); `None` only while this view
+        // is being dropped with its connection.
+        let link = self.app.read(cx).session_slot(&self.connection).map(|slot| slot.state.clone());
+        let body = match (&link, rows) {
+            // `renderStatusContent`: the connect phase in place of the rows.
+            (Some(ConnState::Connecting(phase)), _) => div()
+                .px(px(8.))
+                .py(px(4.))
+                .text_size(px(12.))
+                .text_color(text_secondary)
+                .child(connect_phase_label(*phase))
+                .into_any_element(),
+            (_, Err(status)) => status,
             // `.tree-empty`: 16px padding, 12px secondary text.
-            Ok(rows) if rows.is_empty() => div()
+            (_, Ok(rows)) if rows.is_empty() => div()
                 .p(px(16.))
                 .text_size(px(12.))
                 .text_color(text_secondary)
                 .child("No workspaces. Click + to add one.")
                 .into_any_element(),
-            Ok(rows) => {
+            (_, Ok(rows)) => {
                 let mut list = v_flex().w_full();
                 for row in rows {
                     list = list.child(self.render_row(row, cx));
                 }
-                list.into_any_element()
+                match &link {
+                    // `isDegraded`: the rows stay, dimmed, and take no clicks, drags or menus
+                    // (`opacity: 0.6; pointer-events: none`).
+                    Some(ConnState::Reconnecting { .. } | ConnState::Failed { .. }) => div()
+                        .relative()
+                        .opacity(0.6)
+                        .child(list)
+                        .child(div().id("tree-inert").absolute().inset_0().occlude())
+                        .into_any_element(),
+                    Some(ConnState::Connected(_) | ConnState::Connecting(_)) | None => list.into_any_element(),
+                }
             }
         };
+        let banner = self.connection_banner(link.as_ref(), cx);
+        let status_icon = match &link {
+            Some(ConnState::Connected(_)) | None => {
+                div().size(px(8.)).flex_shrink_0().rounded_full().bg(gpui_kit::rgb(0x4caf50)).into_any_element()
+            }
+            Some(ConnState::Connecting(_)) => session_icon(SessionIcon::Connecting, cx),
+            Some(ConnState::Reconnecting { .. }) => session_icon(SessionIcon::Reconnecting, cx),
+            Some(ConnState::Failed { .. }) => session_icon(SessionIcon::Failed, cx),
+        };
+        let connected = matches!(link, Some(ConnState::Connected(_)));
         let locked = self.session.read(cx).is_locked();
         let title = match &self.renaming {
             Some((input, _)) => div()
@@ -270,7 +313,7 @@ impl Render for TreePane {
                 .text_size(px(ui::SMALL))
                 .font_weight(gpui_kit::FontWeight::SEMIBOLD)
                 .text_color(text_secondary)
-                .child(div().size(px(8.)).flex_shrink_0().rounded_full().bg(gpui_kit::rgb(0x4caf50)))
+                .child(status_icon)
                 .child(div().truncate().child(self.names.read(cx).name(&self.target).to_uppercase()))
                 .child(self.traffic.clone())
                 .when(locked, |d| {
@@ -344,18 +387,57 @@ impl Render for TreePane {
                             }))
                         }
                     })
-                    .child(
-                        ui::icon_button("open-workspace", cx)
-                            .text_size(px(18.))
-                            .tooltip(|window, cx| gpui_kit::component::tooltip::Tooltip::new("Add workspace").build(window, cx))
-                            .child("+")
-                            .on_click(cx.listener(move |pane, _: &ClickEvent, window, cx| {
-                                cx.stop_propagation();
-                                pane.open_workspace(window, cx);
-                            })),
-                    ),
+                    .when(connected, |d| {
+                        d.child(
+                            ui::icon_button("open-workspace", cx)
+                                .text_size(px(18.))
+                                .tooltip(|window, cx| gpui_kit::component::tooltip::Tooltip::new("Add workspace").build(window, cx))
+                                .child("+")
+                                .on_click(cx.listener(move |pane, _: &ClickEvent, window, cx| {
+                                    cx.stop_propagation();
+                                    pane.open_workspace(window, cx);
+                                })),
+                        )
+                    }),
             )
-            .when(!self.folded, |d| d.child(div().pb(px(4.)).child(body)))
+            .when(!self.folded, |d| d.child(div().pb(px(4.)).children(banner).child(body)))
+    }
+}
+
+impl TreePane {
+    /// `renderConnectionBanner`: while the connection is down, what happened and what to do.
+    fn connection_banner(&self, link: Option<&ConnState>, cx: &mut Context<Self>) -> Option<AnyElement> {
+        match link? {
+            ConnState::Reconnecting { attempt, error } => Some(connection_banner(
+                BannerKind::Reconnecting,
+                format!("Reconnecting (attempt {attempt})... {error}"),
+                vec![
+                    ("Retry now", Box::new(|pane: &mut Self, cx: &mut Context<Self>| pane.app.read(cx).reconnect_now(&pane.connection))),
+                    ("Stop", Box::new(|pane: &mut Self, cx: &mut Context<Self>| pane.app.read(cx).cancel_reconnect(&pane.connection))),
+                ],
+                cx,
+            )),
+            ConnState::Failed { error, hash_mismatch } => {
+                let mut buttons: Vec<(&'static str, BannerAction<Self>)> = vec![
+                    ("Reconnect", Box::new(|pane: &mut Self, cx: &mut Context<Self>| pane.app.read(cx).reconnect(&pane.connection))),
+                    ("Disconnect", Box::new(|_: &mut Self, cx: &mut Context<Self>| cx.emit(DisconnectRequested))),
+                ];
+                if *hash_mismatch {
+                    // Electron offers these in the session pane's Daemon Mismatch tab.
+                    for (label, outdated) in [("Refresh daemon", OutdatedDaemon::Refresh), ("Connect anyway", OutdatedDaemon::Accept)] {
+                        buttons.push((
+                            label,
+                            Box::new(move |pane: &mut Self, cx: &mut Context<Self>| {
+                                let (app, id) = (pane.app.clone(), pane.connection.clone());
+                                app.update(cx, |s, cx| s.reconnect_outdated(&id, outdated, cx));
+                            }),
+                        ));
+                    }
+                }
+                Some(connection_banner(BannerKind::Error, error.clone(), buttons, cx))
+            }
+            ConnState::Connected(_) | ConnState::Connecting(_) => None,
+        }
     }
 }
 

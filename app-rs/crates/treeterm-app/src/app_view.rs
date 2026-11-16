@@ -133,7 +133,16 @@ struct Connected {
     focus_pending: bool,
     /// The terminal model the last render showed: a terminal coming into view fits again.
     shown_terminal: Option<EntityId>,
+    reselect: Reselect,
     _selection: Subscription,
+}
+
+/// What a session view selects once its session is live.
+enum Reselect {
+    Nothing,
+    /// The view replaces the last connection generation's, which showed this workspace: show
+    /// it again, or the first one if it is gone (`handleReconnected`'s `workspaceRefs[0]`).
+    Workspace(String),
 }
 
 /// What the workspace header is editing in place (`workspace-edit-input` / `-textarea`).
@@ -206,21 +215,33 @@ impl AppView {
         view
     }
 
-    /// Follow the store: a view per connected session (rebuilt for each new connection
-    /// generation), none for the others.
+    /// Follow the store: a view per session shown (rebuilt for each new connection
+    /// generation; a lost connection's last session stays, dimmed), none for the others.
     fn sync(&mut self, store: &Entity<AppStore>, cx: &mut Context<Self>) {
-        let wanted: Vec<(ConnectionId, Entity<SessionStore>, treeterm_core::connection::ConnectionTarget, bool)> = store
+        let wanted: Vec<(ConnectionId, Entity<SessionStore>, treeterm_core::connection::ConnectionTarget)> = store
             .read(cx)
             .sessions()
-            .filter_map(|slot| match &slot.state {
-                ConnState::Connected(session) => Some((slot.id.clone(), session.clone(), slot.target.clone(), !slot.is_local())),
-                ConnState::Connecting(_) | ConnState::Reconnecting { .. } | ConnState::Failed { .. } => None,
-            })
+            .filter_map(|slot| Some((slot.id.clone(), slot.shown_session()?.clone(), slot.target.clone())))
             .collect();
-        self.sessions.retain(|id, connected| wanted.iter().any(|(w, session, ..)| w == id && *session == connected.session));
-        for (id, session, target, remote) in wanted {
+        // A replaced view showing a workspace on the right hands it to its successor.
+        let shown = if self.info.is_none() { self.active.clone() } else { None };
+        let mut carried: HashMap<ConnectionId, String> = HashMap::new();
+        self.sessions.retain(|id, connected| {
+            let keep = wanted.iter().any(|(w, session, ..)| w == id && *session == connected.session);
+            if !keep
+                && shown.as_ref() == Some(id)
+                && let ActiveView::Workspace(workspace) = &connected.active
+            {
+                carried.insert(id.clone(), workspace.clone());
+            }
+            keep
+        });
+        for (id, session, target) in wanted {
             if !self.sessions.contains_key(&id) {
-                let connected = self.connect(id.clone(), session, target, remote, cx);
+                let mut connected = self.connect(id.clone(), session, target, cx);
+                if let Some(workspace) = carried.remove(&id) {
+                    connected.reselect = Reselect::Workspace(workspace);
+                }
                 self.sessions.insert(id, connected);
             }
         }
@@ -235,8 +256,34 @@ impl AppView {
         if self.active.as_ref().is_none_or(|id| !self.sessions.contains_key(id)) {
             self.active = self.sessions.keys().next().cloned();
         }
+        self.reselect_workspaces(cx);
         self.open_pending_workspace(cx);
         cx.notify();
+    }
+
+    /// Select each rebuilt view's carried-over workspace once its session is live.
+    fn reselect_workspaces(&mut self, cx: &mut Context<Self>) {
+        let mut picks = Vec::new();
+        for connected in self.sessions.values_mut() {
+            let Reselect::Workspace(previous) = &connected.reselect else {
+                continue;
+            };
+            let session = connected.session.read(cx);
+            if !matches!(session.state(), treeterm_model::session_store::SessionState::Live) {
+                continue;
+            }
+            let pick = match session.entry(previous) {
+                Some(_) => Some(previous.clone()),
+                None => session.workspace_ids().next().cloned(),
+            };
+            connected.reselect = Reselect::Nothing;
+            if let Some(workspace) = pick {
+                picks.push((connected.tree.clone(), workspace));
+            }
+        }
+        for (tree, workspace) in picks {
+            tree.update(cx, |tree, cx| tree.select(workspace, cx));
+        }
     }
 
     /// Open `path` in the local session as soon as it is live (the CLI's directory).
@@ -251,7 +298,8 @@ impl AppView {
         let Some(path) = self.open_on_start.clone() else {
             return;
         };
-        let local = self.store.read(cx).sessions().find(|slot| slot.is_local()).map(|slot| slot.id.clone());
+        // Connected: a session kept while the connection is down takes no new workspace.
+        let local = self.store.read(cx).sessions().find(|slot| slot.is_local()).filter(|slot| slot.session().is_some()).map(|slot| slot.id.clone());
         let Some(connected) = local.and_then(|id| self.sessions.get(&id)) else {
             return;
         };
@@ -274,12 +322,12 @@ impl AppView {
         id: ConnectionId,
         session: Entity<SessionStore>,
         target: treeterm_core::connection::ConnectionTarget,
-        remote: bool,
         cx: &mut Context<Self>,
     ) -> Connected {
         cx.observe(&session, |_, _, cx| cx.notify()).detach();
-        let (keybindings, names) = (self.keybindings.clone(), self.names.clone());
-        let tree = cx.new(|cx| TreePane::new(session.clone(), keybindings, names, target, remote, cx));
+        let (keybindings, names, app) = (self.keybindings.clone(), self.names.clone(), self.store.clone());
+        let link = id.clone();
+        let tree = cx.new(|cx| TreePane::new(session.clone(), app, link, keybindings, names, target, cx));
         let info_id = id.clone();
         let disconnect_id = id.clone();
         cx.subscribe(&tree, move |view, _, _: &crate::tree_pane::DisconnectRequested, cx| {
@@ -320,6 +368,7 @@ impl AppView {
             tool_views: crate::tool_views::ToolViews::new(self.settings.clone()),
             focus_pending: false,
             shown_terminal: None,
+            reselect: Reselect::Nothing,
             _selection: selection,
         }
     }
@@ -454,22 +503,17 @@ impl AppView {
             slots.into_iter().map(|slot| (slot.id.clone(), names.name(&slot.target), slot.state.clone())).collect();
         let mut list = v_flex().w_full();
         for (id, name, state) in slots {
-            let section = match state {
-                ConnState::Connected(_) => match self.sessions.get(&id) {
-                    Some(connected) => connected.tree.clone().into_any_element(),
-                    None => session_panel(&id, &name, SessionIcon::Connecting, None, None, cx),
-                },
-                ConnState::Connecting(phase) => {
-                    let what = match phase {
-                        treeterm_core::connection::ConnectPhase::Bootstrap => "Bootstrapping...",
-                        treeterm_core::connection::ConnectPhase::Tunnel => "Establishing tunnel...",
-                        treeterm_core::connection::ConnectPhase::Daemon => "Connecting to daemon...",
-                    };
+            let section = match (self.sessions.get(&id), state) {
+                // Connected, or down with its last session kept (the tree shows the status).
+                (Some(connected), _) => connected.tree.clone().into_any_element(),
+                (None, ConnState::Connected(_)) => session_panel(&id, &name, SessionIcon::Connecting, None, None, cx),
+                (None, ConnState::Connecting(phase)) => {
                     // `.tree-empty` with 12px text and 4px 8px padding.
-                    let status = div().px(px(8.)).py(px(4.)).text_size(px(12.)).text_color(secondary).child(what);
+                    let status =
+                        div().px(px(8.)).py(px(4.)).text_size(px(12.)).text_color(secondary).child(connect_phase_label(phase));
                     session_panel(&id, &name, SessionIcon::Connecting, None, Some(status.into_any_element()), cx)
                 }
-                ConnState::Reconnecting { attempt, error: reason } => {
+                (None, ConnState::Reconnecting { attempt, error: reason }) => {
                     let (now, stop) = (id.clone(), id.clone());
                     let banner = connection_banner(
                         BannerKind::Reconnecting,
@@ -482,9 +526,9 @@ impl AppView {
                     );
                     session_panel(&id, &name, SessionIcon::Reconnecting, Some(banner), None, cx)
                 }
-                ConnState::Failed { error: reason, hash_mismatch } => {
+                (None, ConnState::Failed { error: reason, hash_mismatch }) => {
                     let (again, gone) = (id.clone(), id.clone());
-                    let mut buttons: Vec<(&'static str, BannerAction)> = vec![
+                    let mut buttons: Vec<(&'static str, BannerAction<AppView>)> = vec![
                         ("Reconnect", Box::new(move |view: &mut AppView, cx: &mut Context<AppView>| view.store.read(cx).reconnect(&again))),
                         ("Disconnect", Box::new(move |view: &mut AppView, cx: &mut Context<AppView>| view.store.update(cx, |s, cx| s.disconnect(&gone, cx)))),
                     ];
@@ -492,10 +536,10 @@ impl AppView {
                         // Electron offers these in the session pane's Daemon Mismatch tab.
                         let (refresh, accept) = (id.clone(), id.clone());
                         buttons.push(("Refresh daemon", Box::new(move |view: &mut AppView, cx: &mut Context<AppView>| {
-                            view.reconnect_outdated(&refresh, treeterm_core::connection::OutdatedDaemon::Refresh, cx)
+                            view.store.update(cx, |s, cx| s.reconnect_outdated(&refresh, treeterm_core::connection::OutdatedDaemon::Refresh, cx))
                         })));
                         buttons.push(("Connect anyway", Box::new(move |view: &mut AppView, cx: &mut Context<AppView>| {
-                            view.reconnect_outdated(&accept, treeterm_core::connection::OutdatedDaemon::Accept, cx)
+                            view.store.update(cx, |s, cx| s.reconnect_outdated(&accept, treeterm_core::connection::OutdatedDaemon::Accept, cx))
                         })));
                     }
                     let banner = connection_banner(BannerKind::Error, reason, buttons, cx);
@@ -708,19 +752,6 @@ impl AppView {
         }
     }
 
-    /// Connect again to an outdated remote daemon, refreshing it or accepting it.
-    fn reconnect_outdated(
-        &mut self,
-        id: &ConnectionId,
-        outdated: treeterm_core::connection::OutdatedDaemon,
-        cx: &mut Context<Self>,
-    ) {
-        let config = match self.store.read(cx).session_slot(id).map(|slot| slot.target.clone()) {
-            Some(treeterm_core::connection::ConnectionTarget::Remote(config)) => (*config).clone(),
-            Some(treeterm_core::connection::ConnectionTarget::Local) | None => return,
-        };
-        self.store.update(cx, |s, cx| s.connect_remote(config, outdated, cx));
-    }
 }
 
 impl Render for AppView {
@@ -1462,23 +1493,52 @@ fn git_status_items(
     items
 }
 
-/// A session's name in the sidebar; clicking it opens the session pane.
-/// The status icon in a session header (`renderStatusIcon`).
-enum SessionIcon {
+/// The status icon in a session header (`renderStatusIcon`) of a session that is not
+/// connected.
+pub(crate) enum SessionIcon {
     Connecting,
     Reconnecting,
     Failed,
 }
 
-enum BannerKind {
+/// 14px: a spinner while connecting (orange while reconnecting), a red alert once failed.
+pub(crate) fn session_icon(icon: SessionIcon, cx: &App) -> AnyElement {
+    match icon {
+        SessionIcon::Connecting | SessionIcon::Reconnecting => Spinner::new()
+            .icon(gpui_kit::component::Icon::new(IconName::LoaderCircle))
+            .with_size(px(14.))
+            .color(match icon {
+                SessionIcon::Reconnecting => gpui_kit::rgb(0xff9800).into(),
+                SessionIcon::Connecting | SessionIcon::Failed => colors(cx).text_secondary,
+            })
+            .into_any_element(),
+        SessionIcon::Failed => crate::ui::icon(IconName::CircleAlert, 14., gpui_kit::rgb(0xf44336)).into_any_element(),
+    }
+}
+
+/// What a connection that is still connecting shows in place of its tree.
+pub(crate) fn connect_phase_label(phase: treeterm_core::connection::ConnectPhase) -> &'static str {
+    match phase {
+        treeterm_core::connection::ConnectPhase::Bootstrap => "Bootstrapping...",
+        treeterm_core::connection::ConnectPhase::Tunnel => "Establishing tunnel...",
+        treeterm_core::connection::ConnectPhase::Daemon => "Connecting to daemon...",
+    }
+}
+
+pub(crate) enum BannerKind {
     Reconnecting,
     Error,
 }
 
-type BannerAction = Box<dyn Fn(&mut AppView, &mut Context<AppView>)>;
+pub(crate) type BannerAction<V> = Box<dyn Fn(&mut V, &mut Context<V>)>;
 
 /// `.connection-banner`: an 11px coloured strip with small outlined buttons.
-fn connection_banner(kind: BannerKind, text: String, buttons: Vec<(&'static str, BannerAction)>, cx: &mut Context<AppView>) -> AnyElement {
+pub(crate) fn connection_banner<V: 'static>(
+    kind: BannerKind,
+    text: String,
+    buttons: Vec<(&'static str, BannerAction<V>)>,
+    cx: &mut Context<V>,
+) -> AnyElement {
     let (color, background, icon): (u32, u32, AnyElement) = match kind {
         BannerKind::Reconnecting => (
             0xff9800,
@@ -1537,17 +1597,7 @@ fn session_panel(
 ) -> AnyElement {
     let c = colors(cx);
     let (secondary, primary, accent, hover, border) = (c.text_secondary, c.text_primary, c.accent, c.bg_hover, c.border);
-    let icon: AnyElement = match icon {
-        SessionIcon::Connecting | SessionIcon::Reconnecting => Spinner::new()
-            .icon(gpui_kit::component::Icon::new(IconName::LoaderCircle))
-            .with_size(px(14.))
-            .color(match icon {
-                SessionIcon::Reconnecting => gpui_kit::rgb(0xff9800).into(),
-                SessionIcon::Connecting | SessionIcon::Failed => secondary,
-            })
-            .into_any_element(),
-        SessionIcon::Failed => crate::ui::icon(IconName::CircleAlert, 14., gpui_kit::rgb(0xf44336)).into_any_element(),
-    };
+    let icon = session_icon(icon, cx);
     let open = id.clone();
     v_flex()
         .w_full()

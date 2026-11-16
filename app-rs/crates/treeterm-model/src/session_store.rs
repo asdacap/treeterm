@@ -10,6 +10,11 @@
 //!   (`parentHash`), so hashes never repeat and a watch echo of our own write is recognised
 //!   by sha alone. A write that loses a race is rewritten on top of the winner.
 //!
+//! The connection layer tells the store when its connection is lost: it then stays alive
+//! (its tree shown dimmed), defers every body write and drops the errors the dying connection
+//! raised. When the next generation connects, [`SessionStore::hand_over`] writes the deferred
+//! and failed bodies on it before the store is disposed and rebuilt from disk.
+//!
 //! Constants and names follow the TypeScript so the two can be read side by side.
 
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -43,12 +48,17 @@ const MAX_CONFLICT_STREAK: u32 = 5;
 /// Reopens of a failed watch stream before the workspace is surfaced as broken.
 const MAX_WATCH_RETRIES: u32 = 3;
 const WATCH_RETRY_BASE: Duration = Duration::from_secs(1);
+/// Rounds of writing the deferred bodies in [`SessionStore::hand_over`].
+const HAND_OVER_ROUNDS: u32 = 3;
 
 pub enum SessionState {
     /// Waiting for the first SessionWatch event.
     Waiting,
+    /// Has the session. It stays live when the session watch fails later: the connection
+    /// layer replaces the store after the reconnect, and its rows stay on screen until then.
     Live,
-    /// The session watch failed or ended; the connection layer must rebuild this store.
+    /// The session watch failed or ended before the first event; the connection layer must
+    /// rebuild this store.
     Failed(String),
 }
 
@@ -575,8 +585,11 @@ impl SessionStore {
             return;
         }
         tracing::error!(reason, "session store failed");
-        self.state = SessionState::Failed(reason.to_owned());
-        self.connection = ConnectionStatus::Disconnected;
+        match self.state {
+            SessionState::Waiting | SessionState::Failed(_) => self.state = SessionState::Failed(reason.to_owned()),
+            SessionState::Live => {}
+        }
+        self.set_connection_status(ConnectionStatus::Disconnected, cx);
         cx.emit(SessionEvent::Failed(reason.to_owned()));
         cx.notify();
     }
@@ -2290,21 +2303,57 @@ impl SessionStore {
         rx
     }
 
-    /// Write every body whose write was deferred while disconnected, and wait for those
-    /// writes. Run before a reconnect replaces this store, so the flush cannot race the
-    /// new store's first read.
-    pub fn flush_deferred_writes(&mut self, cx: &mut Context<Self>) -> Vec<oneshot::Receiver<()>> {
-        let dirty: Vec<String> = self
-            .syncs
+    /// Workspaces whose body holds changes the daemon's copy lacks (deferred or failed).
+    fn dirty_workspaces(&self) -> Vec<String> {
+        self.syncs
             .iter()
             .filter(|(_, sync)| sync.dirty)
             .map(|(id, _)| id.clone())
-            .collect();
-        for id in &dirty {
-            self.enqueue_content_sync(id, cx);
+            .collect()
+    }
+
+    /// Write every body whose write was deferred or failed, and wait for every body write
+    /// (`flushDeferredWrites`).
+    fn flush_deferred_writes(&mut self, cx: &mut Context<Self>) -> Vec<oneshot::Receiver<()>> {
+        for id in self.dirty_workspaces() {
+            self.enqueue_content_sync(&id, cx);
         }
         let ids: Vec<String> = self.syncs.keys().cloned().collect();
         ids.iter().map(|id| self.when_written(id)).collect()
+    }
+
+    /// The connection is back on a new generation, `conn`, and this store is about to be
+    /// replaced by one built on it (`handleReconnected`): write every body whose write was
+    /// deferred or failed, on `conn`, and resolve once those writes are done. The
+    /// replacement rebuilds from disk, so a change not written by then is lost.
+    ///
+    /// A write still in flight on the lost connection fails (within the call deadline) and
+    /// marks its body dirty again; the next round writes it (Electron's single flush missed
+    /// it). A write that loses a CAS race keeps the other writer's body, as in Electron.
+    pub fn hand_over(&mut self, conn: DaemonConnection, cx: &mut Context<Self>) -> Task<()> {
+        self.conn = conn;
+        self.set_connection_status(ConnectionStatus::Connected, cx);
+        cx.spawn(async move |this, cx| {
+            let mut dirty = Vec::new();
+            for _ in 0..HAND_OVER_ROUNDS {
+                let Ok(writes) = this.update(cx, |store, cx| store.flush_deferred_writes(cx)) else {
+                    return; // store dropped
+                };
+                for written in writes {
+                    if written.await.is_err() {
+                        tracing::debug!("a workspace's body sync went away during the hand-over");
+                    }
+                }
+                let Ok(left) = this.update(cx, |store, _| store.dirty_workspaces()) else {
+                    return;
+                };
+                if left.is_empty() {
+                    return;
+                }
+                dirty = left;
+            }
+            tracing::error!(workspaces = ?dirty, "unsaved workspace changes could not be written after the reconnect");
+        })
     }
 
     /// The connection came back or went away (driven by the connection layer).
@@ -2321,13 +2370,7 @@ impl SessionStore {
             }
         }
         if status == ConnectionStatus::Connected && previous == ConnectionStatus::Disconnected {
-            let dirty: Vec<String> = self
-                .syncs
-                .iter()
-                .filter(|(_, sync)| sync.dirty)
-                .map(|(id, _)| id.clone())
-                .collect();
-            for id in dirty {
+            for id in self.dirty_workspaces() {
                 self.enqueue_content_sync(&id, cx);
             }
         }

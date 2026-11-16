@@ -4,8 +4,10 @@
 //!
 //! The manager owns connecting, liveness and reconnecting. Each `Connected` status carries a
 //! new connection generation; its session store is built on it. When a connection is lost
-//! the store is disposed explicitly — a ghost store left alive keeps writing the same files
-//! as its replacement — and a fresh one is built on the next generation.
+//! the store is kept, told it is disconnected: it is shown dimmed and defers its body
+//! writes. When the next generation connects, the kept store writes those bodies on it
+//! (`handleReconnected`'s flush) and is then disposed explicitly — a ghost store left alive
+//! keeps writing the same files as its replacement — before a fresh one is built.
 
 use std::sync::Arc;
 
@@ -24,7 +26,7 @@ use treeterm_core::local_daemon::LocalDaemonSpec;
 use treeterm_core::rt::Rt;
 use treeterm_core::settings::SshConnectionConfig;
 
-use crate::session_store::{SessionEvent, SessionStore};
+use crate::session_store::{ConnectionStatus as SessionConnection, SessionEvent, SessionStore};
 use crate::settings_store::SettingsStore;
 
 /// What a connection is doing, with its session store once connected.
@@ -43,11 +45,25 @@ pub enum ConnState {
 pub struct SessionSlot {
     pub id: ConnectionId,
     pub target: ConnectionTarget,
+    /// While a kept store hands over to the next generation, the state stays the one the
+    /// connection was lost with.
     pub state: ConnState,
+    previous: Previous,
     /// The saved port forwards were started (once per connection; the manager restarts
     /// them after reconnects).
     forwards_started: bool,
     _events: Option<Subscription>,
+}
+
+/// The last connection generation's session store, kept while the connection is down, as
+/// Electron keeps the store and dims its tree.
+enum Previous {
+    Nothing,
+    /// Disconnected: shown dimmed and inert; its body writes are deferred.
+    Kept(Entity<SessionStore>),
+    /// The next generation is up: the store writes its deferred bodies on it
+    /// ([`SessionStore::hand_over`]), then it is disposed and replaced.
+    HandingOver { session: Entity<SessionStore>, task: Task<()> },
 }
 
 impl SessionSlot {
@@ -63,11 +79,21 @@ impl SessionSlot {
         matches!(self.target, ConnectionTarget::Local)
     }
 
+    /// The session store of the connected generation.
     pub fn session(&self) -> Option<&Entity<SessionStore>> {
         match &self.state {
             ConnState::Connected(session) => Some(session),
             ConnState::Connecting(_) | ConnState::Reconnecting { .. } | ConnState::Failed { .. } => None,
         }
+    }
+
+    /// The session store the window shows: the connected one, else the last generation's
+    /// while the connection is down (dimmed and inert).
+    pub fn shown_session(&self) -> Option<&Entity<SessionStore>> {
+        self.session().or(match &self.previous {
+            Previous::Nothing => None,
+            Previous::Kept(session) | Previous::HandingOver { session, .. } => Some(session),
+        })
     }
 }
 
@@ -142,6 +168,7 @@ impl AppStore {
             id,
             target,
             state: ConnState::Connecting(ConnectPhase::Daemon),
+            previous: Previous::Nothing,
             forwards_started: false,
             _events: None,
         });
@@ -189,9 +216,18 @@ impl AppStore {
     pub fn disconnect(&mut self, id: &ConnectionId, cx: &mut Context<Self>) {
         self.manager.disconnect(id);
         if let Some(slot) = self.sessions.shift_remove(id) {
-            Self::retire(slot.state, cx);
+            Self::retire(slot, cx);
         }
         cx.notify();
+    }
+
+    /// Connect again to an outdated remote daemon, refreshing it or accepting it.
+    pub fn reconnect_outdated(&mut self, id: &ConnectionId, outdated: OutdatedDaemon, cx: &mut Context<Self>) {
+        let config = match self.sessions.get(id).map(|slot| &slot.target) {
+            Some(ConnectionTarget::Remote(config)) => (**config).clone(),
+            Some(ConnectionTarget::Local) | None => return,
+        };
+        self.connect_remote(config, outdated, cx);
     }
 
     /// Retry a failed connection.
@@ -209,9 +245,39 @@ impl AppStore {
         self.manager.cancel_reconnect(id);
     }
 
-    fn retire(state: ConnState, cx: &mut Context<Self>) {
-        if let ConnState::Connected(session) = state {
+    /// The connection is closed for good: dispose its stores. A kept store's unsaved bodies
+    /// go with it, as with Electron's `disconnectSession`.
+    fn retire(slot: SessionSlot, cx: &mut Context<Self>) {
+        if let ConnState::Connected(session) = slot.state {
             session.update(cx, |session, cx| session.dispose(cx));
+        }
+        match slot.previous {
+            Previous::Nothing => {}
+            Previous::Kept(session) | Previous::HandingOver { session, .. } => {
+                session.update(cx, |session, cx| session.dispose(cx));
+            }
+        }
+    }
+
+    /// The connected generation, if any, is gone: keep its store, told it is disconnected
+    /// (`handleConnectionStatusChange`). A hand-over in progress stops (its task is
+    /// dropped); the store defers its writes again until the next generation. The caller
+    /// sets the state the new status carries.
+    fn keep_previous(slot: &mut SessionSlot, cx: &mut Context<Self>) {
+        let kept = match std::mem::replace(&mut slot.previous, Previous::Nothing) {
+            Previous::Nothing => None,
+            Previous::Kept(session) | Previous::HandingOver { session, .. } => Some(session),
+        };
+        let kept = match &slot.state {
+            ConnState::Connected(session) => {
+                slot._events = None;
+                Some(session.clone())
+            }
+            ConnState::Connecting(_) | ConnState::Reconnecting { .. } | ConnState::Failed { .. } => kept,
+        };
+        if let Some(session) = kept {
+            session.update(cx, |s, cx| s.set_connection_status(SessionConnection::Disconnected, cx));
+            slot.previous = Previous::Kept(session);
         }
     }
 
@@ -219,78 +285,115 @@ impl AppStore {
         let ConnectionInfo { id, target, status } = info;
         if matches!(status, ConnectionStatus::Disconnected) {
             if let Some(slot) = self.sessions.shift_remove(&id) {
-                Self::retire(slot.state, cx);
+                Self::retire(slot, cx);
             }
             cx.notify();
             return;
         }
-        let remote_target = matches!(target, ConnectionTarget::Remote(_));
         self.insert_slot(id.clone(), target);
         let Some(slot) = self.sessions.get_mut(&id) else {
             return;
         };
-        let previous = std::mem::replace(&mut slot.state, ConnState::Connecting(ConnectPhase::Daemon));
-        slot._events = None;
         // Every status change after Connected means that generation is gone.
-        Self::retire(previous, cx);
-        let next = match status {
-            ConnectionStatus::Connecting { phase } => ConnState::Connecting(phase),
+        Self::keep_previous(slot, cx);
+        match status {
+            ConnectionStatus::Connecting { phase } => slot.state = ConnState::Connecting(phase),
             ConnectionStatus::Connected { daemon } => {
                 tracing::info!(%id, "connected");
-                let (client_id, settings, llm) = (self.client_id.clone(), self.settings.clone(), self.llm.clone());
-                let remote = remote_target
-                    .then(|| crate::web_app::RemoteHost { app: cx.weak_entity(), connection: id.clone() });
-                let session = cx.new(|cx| {
-                    let mut session = SessionStore::new(daemon, client_id, settings, llm, cx);
-                    session.use_worktree_registry();
-                    if let Some(remote) = remote {
-                        session.set_remote_host(remote);
-                    }
-                    session
-                });
-                cx.observe(&session, |_, _, cx| cx.notify()).detach();
-                let owned = id.clone();
-                let events = cx.subscribe(&session, move |store, session, event: &SessionEvent, cx| match event {
-                    SessionEvent::Failed(reason) => store.on_session_failed(&owned, session, reason, cx),
-                    SessionEvent::WorkspaceRemoved(_) => {}
-                    SessionEvent::AttentionRecorded(workspace) => {
-                        cx.emit(AppEvent::Attention { workspace: workspace.clone() });
-                    }
-                });
-                let Some(slot) = self.sessions.get_mut(&id) else {
-                    return;
-                };
-                slot._events = Some(events);
-                // `autoStartPortForwards`: a remote's saved forwards start on its first connect.
-                if !slot.forwards_started && !slot.is_local() {
-                    slot.forwards_started = true;
-                    if let Err(error) = self.manager.start_saved_port_forwards(&id) {
-                        tracing::error!(%error, "cannot start saved port forwards");
+                match std::mem::replace(&mut slot.previous, Previous::Nothing) {
+                    Previous::Nothing => self.connect_session(&id, daemon, cx),
+                    Previous::Kept(session) | Previous::HandingOver { session, .. } => {
+                        self.hand_over(&id, session, daemon, cx);
                     }
                 }
-                ConnState::Connected(session)
             }
             ConnectionStatus::Reconnecting { attempt, error } => {
                 tracing::warn!(%id, attempt, %error, "reconnecting");
-                ConnState::Reconnecting { attempt, error: error.to_string() }
+                slot.state = ConnState::Reconnecting { attempt, error: error.to_string() };
             }
             ConnectionStatus::Error { error } => {
                 tracing::error!(%id, %error, "connection failed");
-                ConnState::Failed {
+                slot.state = ConnState::Failed {
                     hash_mismatch: error.kind() == ConnectionErrorKind::DaemonHashMismatch,
                     error: error.to_string(),
-                }
+                };
             }
-            ConnectionStatus::Disconnected => return, // handled above
-        };
-        if let Some(slot) = self.sessions.get_mut(&id) {
-            slot.state = next;
+            ConnectionStatus::Disconnected => {} // handled above
         }
         cx.notify();
     }
 
+    /// Build the session store of a new connection generation.
+    fn connect_session(&mut self, id: &ConnectionId, daemon: DaemonConnection, cx: &mut Context<Self>) {
+        let Some(slot) = self.sessions.get(id) else {
+            return;
+        };
+        let (client_id, settings, llm) = (self.client_id.clone(), self.settings.clone(), self.llm.clone());
+        let remote = (!slot.is_local()).then(|| crate::web_app::RemoteHost { app: cx.weak_entity(), connection: id.clone() });
+        let session = cx.new(|cx| {
+            let mut session = SessionStore::new(daemon, client_id, settings, llm, cx);
+            session.use_worktree_registry();
+            if let Some(remote) = remote {
+                session.set_remote_host(remote);
+            }
+            session
+        });
+        cx.observe(&session, |_, _, cx| cx.notify()).detach();
+        let owned = id.clone();
+        let events = cx.subscribe(&session, move |store, session, event: &SessionEvent, cx| match event {
+            SessionEvent::Failed(reason) => store.on_session_failed(&owned, session, reason, cx),
+            SessionEvent::WorkspaceRemoved(_) => {}
+            SessionEvent::AttentionRecorded(workspace) => {
+                cx.emit(AppEvent::Attention { workspace: workspace.clone() });
+            }
+        });
+        let Some(slot) = self.sessions.get_mut(id) else {
+            return;
+        };
+        slot._events = Some(events);
+        slot.state = ConnState::Connected(session);
+        // `autoStartPortForwards`: a remote's saved forwards start on its first connect.
+        if !slot.forwards_started && !slot.is_local() {
+            slot.forwards_started = true;
+            if let Err(error) = self.manager.start_saved_port_forwards(id) {
+                tracing::error!(%error, "cannot start saved port forwards");
+            }
+        }
+    }
+
+    /// The next generation is up while the last one's store is kept (`handleReconnected`):
+    /// the kept store writes its deferred bodies on the new connection, then a fresh store
+    /// replaces it. Until then the slot keeps the state the connection was lost with.
+    fn hand_over(&mut self, id: &ConnectionId, session: Entity<SessionStore>, daemon: DaemonConnection, cx: &mut Context<Self>) {
+        let flush = session.update(cx, |s, cx| s.hand_over(daemon.clone(), cx));
+        let owned = id.clone();
+        let task = cx.spawn(async move |this, cx| {
+            flush.await;
+            match this.update(cx, |store, cx| store.finish_hand_over(&owned, daemon, cx)) {
+                Ok(()) | Err(_) => {} // Err: the app is shutting down
+            }
+        });
+        if let Some(slot) = self.sessions.get_mut(id) {
+            slot.previous = Previous::HandingOver { session, task };
+        }
+    }
+
+    fn finish_hand_over(&mut self, id: &ConnectionId, daemon: DaemonConnection, cx: &mut Context<Self>) {
+        let Some(slot) = self.sessions.get_mut(id) else {
+            return;
+        };
+        let Previous::HandingOver { session, task } = std::mem::replace(&mut slot.previous, Previous::Nothing) else {
+            unreachable!("a hand-over that is replaced is cancelled with its task");
+        };
+        // This very task is finishing: detach it rather than cancel it mid-poll.
+        task.detach();
+        session.update(cx, |session, cx| session.dispose(cx));
+        self.connect_session(id, daemon, cx);
+        cx.notify();
+    }
+
     /// The session store's own watch died before the manager noticed: force a new
-    /// generation (the store is retired when the status changes).
+    /// generation (the store is kept when the status changes, and hands over to it).
     fn on_session_failed(&mut self, id: &ConnectionId, session: Entity<SessionStore>, reason: &str, cx: &mut Context<Self>) {
         let current = self.sessions.get(id).and_then(SessionSlot::session);
         if current != Some(&session) {

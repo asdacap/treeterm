@@ -41,6 +41,53 @@ impl Drop for Harness {
     }
 }
 
+/// Forwards connections on `listen` to `target` until dropped; dropping it cuts them all, as
+/// a crashed daemon or a dead tunnel would.
+pub struct Proxy {
+    task: tokio::task::JoinHandle<()>,
+}
+
+impl Proxy {
+    pub fn start(listen: &std::path::Path, target: &std::path::Path) -> Self {
+        match std::fs::remove_file(listen) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => panic!("cannot clear {listen:?}: {error}"),
+        }
+        let tokio = runtime();
+        let listener = {
+            let _enter = tokio.enter();
+            tokio::net::UnixListener::bind(listen).expect("bind proxy")
+        };
+        let target = target.to_owned();
+        let task = tokio.spawn(async move {
+            // Dropped with the task: aborts every proxied connection.
+            let mut connections = tokio::task::JoinSet::new();
+            loop {
+                let (mut inbound, _) = listener.accept().await.expect("proxy accept");
+                let target = target.clone();
+                connections.spawn(async move {
+                    let mut outbound = tokio::net::UnixStream::connect(&target)
+                        .await
+                        .expect("proxy dial");
+                    // Ends when either side closes; nothing to report then.
+                    if tokio::io::copy_bidirectional(&mut inbound, &mut outbound)
+                        .await
+                        .is_err()
+                    {}
+                });
+            }
+        });
+        Self { task }
+    }
+}
+
+impl Drop for Proxy {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
+}
+
 pub fn harness() -> Harness {
     let tokio = runtime();
     let daemon = {
