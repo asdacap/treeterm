@@ -446,6 +446,28 @@ mod tests {
         assert_eq!(offsets(&panes, cx), [px(-87.), px(0.)]);
     }
 
+    /// `.search-panel-results`' scrollbar is part of it, as in Chromium: a wheel or trackpad
+    /// scroll over one list's bar scrolls that list, and not the other one.
+    #[gpui_kit::test]
+    fn a_wheel_over_a_bar_scrolls_its_own_results(cx: &mut TestAppContext) {
+        use gpui_kit::{Modifiers, ScrollDelta, ScrollEvent, ScrollSource, TouchPhase};
+        let (panes, cx) = open_panes(cx);
+        let wheel = |at: gpui_kit::Point<gpui_kit::Pixels>, dy: f32, cx: &mut VisualTestContext| {
+            cx.simulate_mouse_move(at, None, Modifiers::default());
+            cx.simulate_event(ScrollEvent {
+                position: at,
+                delta: ScrollDelta::Pixels(point(px(0.), px(dy))),
+                modifiers: Modifiers::default(),
+                touch_phase: TouchPhase::Moved,
+                source: ScrollSource::Pointer,
+            });
+        };
+        wheel(point(px(PANE - 5.), px(50.)), -100., cx);
+        assert_eq!(offsets(&panes, cx), [px(-100.), px(0.)]);
+        wheel(point(px(2. * PANE - 5.), px(50.)), -30., cx);
+        assert_eq!(offsets(&panes, cx), [px(-100.), px(-30.)]);
+    }
+
     /// Rows arriving off screen reach the thumb in the frame its bar asks for after the one
     /// that laid them out, with nothing else drawing the window: dragging it to the bottom
     /// then reaches the last of them.

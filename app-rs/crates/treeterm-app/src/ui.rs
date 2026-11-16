@@ -1621,14 +1621,31 @@ const TRACK_REPEAT: std::time::Duration = std::time::Duration::from_millis(50);
 #[derive(Default)]
 struct TrackPress(Option<gpui_kit::Task<()>>);
 
-/// Presses on the `track` of the [`scrollbar`] `id` along `axis`, its thumb too. A left press
-/// there starts no text selection, as in Chromium (GPUI Kit's buttons do the same). Off the
-/// thumb, as Chromium's (`Scrollbar::AutoscrollPressedPart`), one pages toward the pointer at
-/// once, then again after [`TRACK_FIRST_REPEAT`] and every [`TRACK_REPEAT`] while the button
-/// is held and the pointer is on that side of the thumb, so the thumb stops where it reaches
-/// the pointer.
-fn track_presses<H: gpui_kit::base::ScrollbarHandle + Clone>(id: ElementId, axis: Axis, handle: H) -> impl IntoElement {
-    use gpui_kit::{DispatchPhase, HitboxBehavior, MouseButton, MouseDownEvent, MouseUpEvent};
+/// Where a wheel or trackpad scroll by `delta` takes what `handle` scrolls; nothing when it
+/// leaves it where it is. As over GPUI's scroll containers, the scroll goes only along the
+/// axis it mostly goes along (vertically when even), within the range of that axis.
+fn wheeled(handle: &impl gpui_kit::base::ScrollbarHandle, delta: Point<Pixels>) -> Option<Point<Pixels>> {
+    let axis = if delta.x.abs() > delta.y.abs() { Axis::Horizontal } else { Axis::Vertical };
+    let extent = Extent::of(handle, axis)?;
+    let offset = handle.offset();
+    let moved = (offset.along(axis) + delta.along(axis)).clamp(px(-extent.max), px(0.));
+    (moved != offset.along(axis)).then(|| offset.apply_along(axis, |_| moved))
+}
+
+/// The pointer on the `track` of the [`scrollbar`] `id` along `axis`, its thumb too.
+///
+/// A left press there starts no text selection, as in Chromium (GPUI Kit's buttons do the
+/// same). Off the thumb, as Chromium's (`Scrollbar::AutoscrollPressedPart`), it pages toward
+/// the pointer at once, then again after [`TRACK_FIRST_REPEAT`] and every [`TRACK_REPEAT`]
+/// while the button is held and the pointer is on that side of the thumb, so the thumb stops
+/// where it reaches the pointer.
+///
+/// The bar is drawn beside what it scrolls, and GPUI scrolls a container only under the
+/// pointer, but Chromium's bar is part of its scroller: a wheel or trackpad scroll over the
+/// bar scrolls what `handle` scrolls (see [`wheeled`]). It goes on to what holds the bar only
+/// when that moves nothing: a vertical wheel over a horizontal bar, or one at its end.
+fn track_input<H: gpui_kit::base::ScrollbarHandle + Clone>(id: ElementId, axis: Axis, handle: H) -> impl IntoElement {
+    use gpui_kit::{DispatchPhase, HitboxBehavior, MouseButton, MouseDownEvent, MouseUpEvent, ScrollEvent};
     gpui_kit::canvas(
         move |track, window, cx| {
             let press = window.use_keyed_state((id, "track"), cx, |_, _| TrackPress::default());
@@ -1636,6 +1653,19 @@ fn track_presses<H: gpui_kit::base::ScrollbarHandle + Clone>(id: ElementId, axis
         },
         move |track, (press, hitbox), window, _| {
             let released = press.clone();
+            // A wheel's notch scrolls a line of the text around the bar, as a GPUI scroller
+            // beside it would.
+            let (wheel_hitbox, wheel_handle, line_height) = (hitbox.clone(), handle.clone(), window.line_height());
+            window.on_mouse_event(move |event: &ScrollEvent, phase, window, cx| {
+                if phase != DispatchPhase::Bubble || !wheel_hitbox.should_handle_scroll(window) {
+                    return;
+                }
+                if let Some(offset) = wheeled(&wheel_handle, event.delta.pixel_delta(line_height)) {
+                    wheel_handle.set_offset(offset);
+                    window.refresh();
+                    cx.stop_propagation();
+                }
+            });
             window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
                 if phase != DispatchPhase::Bubble || event.button != MouseButton::Left || !hitbox.is_hovered(window) {
                     return;
@@ -1689,7 +1719,7 @@ pub fn overflows(handle: &impl gpui_kit::base::ScrollbarHandle, axis: Axis) -> b
 /// on a clear track, `--bg-hover` under the pointer) for what `handle` scrolls along `axis`,
 /// to follow it in a row (vertical) or a column (horizontal). While there is something to
 /// scroll, the bar takes its 10px from the content, as Chromium's does; its thumb can be
-/// dragged, and a press on its track pages (see [`track_presses`]).
+/// dragged, a press on its track pages, and the wheel over it scrolls (see [`track_input`]).
 pub fn scrollbar<H: gpui_kit::base::ScrollbarHandle + Clone>(
     id: impl Into<ElementId>,
     axis: Axis,
@@ -1754,7 +1784,7 @@ pub fn scrollbar<H: gpui_kit::base::ScrollbarHandle + Clone>(
                 window.refresh();
             })
             .child(thumb)
-            .child(track_presses(id, axis, handle.clone()))
+            .child(track_input(id, axis, handle.clone()))
             .into_any_element()
     });
     let mut parts = vec![probe.into_any_element()];
@@ -2642,9 +2672,30 @@ mod tests {
         assert_eq!(ellipsized_copy(text, text, 4..14), "components");
     }
 
-    /// A 100×100 box scrolling 1000px of content along `axis`, with its [`scrollbar`], over a
-    /// line of selectable text: the thumb is 20px long (the shortest), travels 80px over the
-    /// 900px scrolled, and a page is 87px.
+    /// A 100×100 box scrolling 1000px of content along `axis`, with its [`scrollbar`]: the
+    /// thumb is 20px long (the shortest), travels 80px over the 900px scrolled, and a page is
+    /// 87px.
+    fn scrolled_box(axis: Axis, handle: &gpui_kit::ScrollHandle, cx: &App) -> Div {
+        match axis {
+            Axis::Vertical => div().size(px(100.)).child(scroll_area("scrolled", handle, div().w_full().h(px(1000.)), cx)),
+            Axis::Horizontal => div().size(px(100.)).flex().flex_col().child(
+                div()
+                    .id("scrolled")
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_x_scroll()
+                    .track_scroll(handle)
+                    .child(div().h_full().w(px(1000.)).flex_none()),
+            ),
+        }
+        .flex_none()
+        .children(match axis {
+            Axis::Vertical => Vec::new(),
+            Axis::Horizontal => scrollbar("scrolled", axis, handle, cx),
+        })
+    }
+
+    /// A [`scrolled_box`] over a line of selectable text.
     struct Scrolled {
         axis: Axis,
         handle: gpui_kit::ScrollHandle,
@@ -2652,26 +2703,68 @@ mod tests {
 
     impl Render for Scrolled {
         fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-            let (axis, handle) = (self.axis, &self.handle);
-            let scroller = match axis {
-                Axis::Vertical => div().size(px(100.)).child(scroll_area("scrolled", handle, div().w_full().h(px(1000.)), cx)),
-                Axis::Horizontal => div().size(px(100.)).flex().flex_col().child(
-                    div()
-                        .id("scrolled")
-                        .flex_1()
-                        .min_h_0()
-                        .overflow_x_scroll()
-                        .track_scroll(handle)
-                        .child(div().h_full().w(px(1000.)).flex_none()),
-                ),
-            }
-            .children(match axis {
-                Axis::Vertical => Vec::new(),
-                Axis::Horizontal => scrollbar("scrolled", axis, handle, cx),
-            });
             let text = gpui_kit::base::SelectableText::new("text", "Some selectable text");
-            div().flex().flex_col().child(scroller).child(div().debug_selector(|| "text".to_owned()).child(text))
+            div()
+                .flex()
+                .flex_col()
+                .child(scrolled_box(self.axis, &self.handle, cx))
+                .child(div().debug_selector(|| "text".to_owned()).child(text))
         }
+    }
+
+    /// A [`scrolled_box`] at the top of a 100px column scrolling 1000px more under it, as a
+    /// tab scrolls the boxes on it.
+    struct Nested {
+        axis: Axis,
+        inner: gpui_kit::ScrollHandle,
+        outer: gpui_kit::ScrollHandle,
+    }
+
+    impl Render for Nested {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            div().id("outer").size(px(100.)).overflow_y_scroll().track_scroll(&self.outer).child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .child(scrolled_box(self.axis, &self.inner, cx))
+                    .child(div().w_full().h(px(1000.)).flex_none()),
+            )
+        }
+    }
+
+    fn nested(axis: Axis, cx: &mut TestAppContext) -> (Entity<Nested>, &mut VisualTestContext) {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            crate::theme::install(cx);
+        });
+        let (view, cx) = cx.add_window_view(|_, _| Nested {
+            axis,
+            inner: gpui_kit::ScrollHandle::new(),
+            outer: gpui_kit::ScrollHandle::new(),
+        });
+        draw_settled(cx);
+        (view, cx)
+    }
+
+    /// How far the box of a [`Nested`] is scrolled along its axis, and the column around it.
+    fn nested_by(view: &Entity<Nested>, cx: &mut VisualTestContext) -> (f32, f32) {
+        view.read_with(cx, |view, _| {
+            (-f32::from(view.inner.offset().along(view.axis)), -f32::from(view.outer.offset().y))
+        })
+    }
+
+    /// A wheel or trackpad scroll by (`dx`, `dy`) over `at`.
+    fn wheel(at: Point<Pixels>, dx: f32, dy: f32, cx: &mut VisualTestContext) {
+        use gpui_kit::{Modifiers, ScrollDelta, ScrollEvent, ScrollSource, TouchPhase, point};
+        cx.simulate_mouse_move(at, None, Modifiers::none());
+        cx.simulate_event(ScrollEvent {
+            position: at,
+            delta: ScrollDelta::Pixels(point(px(dx), px(dy))),
+            modifiers: Modifiers::none(),
+            touch_phase: TouchPhase::Moved,
+            source: ScrollSource::Pointer,
+        });
+        draw_settled(cx);
     }
 
     fn scrolled(axis: Axis, cx: &mut TestAppContext) -> (Entity<Scrolled>, &mut VisualTestContext) {
@@ -2847,5 +2940,41 @@ mod tests {
         assert_eq!(scrolled_by(&view, cx), 813., "paged up");
 
         assert_eq!(drag(start, end, cx), "Some selectable text", "a drag over the text selects it");
+    }
+
+    /// Chromium's bar is part of its scroller: the wheel over a vertical bar scrolls what it
+    /// scrolls, within its range, and not the column around it, until it is at its end; the
+    /// wheel then goes on to the column.
+    #[gpui_kit::test]
+    fn a_wheel_over_a_vertical_bar_scrolls_what_it_scrolls_then_what_holds_it(cx: &mut TestAppContext) {
+        let (view, cx) = nested(Axis::Vertical, cx);
+        let bar = on_bar(Axis::Vertical, 50.);
+        wheel(bar, 0., -100., cx);
+        assert_eq!(nested_by(&view, cx), (100., 0.));
+        wheel(bar, 0., -2000., cx);
+        assert_eq!(nested_by(&view, cx), (900., 0.), "as far as it scrolls");
+        wheel(bar, 0., 300., cx);
+        assert_eq!(nested_by(&view, cx), (600., 0.), "back");
+        wheel(bar, 0., -1000., cx);
+        assert_eq!(nested_by(&view, cx), (900., 0.), "to the end, and no further");
+        wheel(bar, 0., -100., cx);
+        assert_eq!(nested_by(&view, cx), (900., 100.), "at its end, the column scrolls");
+    }
+
+    /// The wheel over a horizontal bar scrolls what it scrolls sideways; a scroll going
+    /// mostly downwards (a vertical wheel, or a trackpad drifting sideways) leaves it and
+    /// scrolls the column around it, as over the box itself.
+    #[gpui_kit::test]
+    fn a_wheel_over_a_horizontal_bar_scrolls_sideways_and_leaves_a_vertical_one(cx: &mut TestAppContext) {
+        let (view, cx) = nested(Axis::Horizontal, cx);
+        let bar = on_bar(Axis::Horizontal, 50.);
+        wheel(bar, -100., 0., cx);
+        assert_eq!(nested_by(&view, cx), (100., 0.));
+        wheel(bar, -2000., 0., cx);
+        assert_eq!(nested_by(&view, cx), (900., 0.), "as far as it scrolls");
+        wheel(bar, 300., -100., cx);
+        assert_eq!(nested_by(&view, cx), (600., 0.), "mostly sideways: sideways only");
+        wheel(bar, -10., -30., cx);
+        assert_eq!(nested_by(&view, cx), (600., 30.), "mostly downwards: the column");
     }
 }

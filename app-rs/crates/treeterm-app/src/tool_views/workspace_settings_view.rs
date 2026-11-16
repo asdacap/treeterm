@@ -646,6 +646,32 @@ mod tests {
         assert_eq!(bounds("workspace-json-text", cx).origin, point(text.origin.x, text.origin.y - px(339.)));
     }
 
+    /// The box's scrollbars are part of it, as Chromium's are part of the `<pre>`: a wheel over
+    /// the right one scrolls the JSON, not the page around it, until the JSON is at its end;
+    /// the wheel then goes on to the page.
+    #[gpui_kit::test]
+    fn a_wheel_over_the_json_boxs_bar_scrolls_the_json_not_the_page(cx: &mut TestAppContext) {
+        let (_, cx) = page(&long_json(), cx);
+        // Too short for the whole page.
+        cx.simulate_resize(gpui_kit::size(px(800.), px(600.)));
+        draw(cx);
+        // How far the JSON is scrolled in its box (less its padding).
+        let json_scrolled = |cx: &mut VisualTestContext| bounds("workspace-json", cx).top() - bounds("workspace-json-text", cx).top();
+        let (outer, top, toggle) = (bounds("workspace-json", cx), json_scrolled(cx), bounds("workspace-json-toggle", cx));
+        let bar = point(outer.right() - px(1. + 5.), outer.top() + px(30.));
+        assert!(bar.y < px(600.), "the bar is in the window: {outer:?}");
+
+        scroll(bar, 0., -100., cx);
+        assert_eq!(json_scrolled(cx), top + px(100.), "the JSON");
+        assert_eq!(bounds("workspace-json-toggle", cx), toggle, "not the page");
+
+        scroll(bar, 0., -5000., cx);
+        assert_eq!(bounds("workspace-json-toggle", cx), toggle, "the JSON to its end, and not the page");
+        scroll(bar, 0., -50., cx);
+        let moved = bounds("workspace-json-toggle", cx);
+        assert_eq!(moved.origin, point(toggle.origin.x, toggle.origin.y - px(50.)), "at its end, the page");
+    }
+
     /// Electron mounts a new `<pre>` each time the JSON is shown: opened again, it is back at
     /// the top.
     #[gpui_kit::test]
