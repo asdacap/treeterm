@@ -48,6 +48,53 @@ async fn file_watch_reports_present_then_absent_files() {
     ));
 }
 
+/// Electron's `grpcByteCounter.ts`: a connection counts the size of each response message,
+/// not the HTTP/2 and gRPC framing around it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_connection_counts_the_size_of_each_response_message() {
+    use prost::Message as _;
+    use treeterm_core::pty::CreatePty;
+    use treeterm_proto::treeterm::{CreatePtyResponse, ListPtySessionsResponse};
+    let daemon = TestDaemon::start();
+    let conn = DaemonConnection::open(&rt(), daemon.socket_path()).await.unwrap().unwrap();
+    let received = conn.received().clone();
+    // The handshakes' SETTINGS frames carry no message.
+    assert_eq!(received.total(), 0);
+    // Nor do a response's headers, message prefix and trailers.
+    assert!(conn.list_pty_sessions().await.unwrap().unwrap().is_empty());
+    assert_eq!(received.total(), 0);
+
+    let mut env = std::collections::HashMap::new();
+    env.insert("ZDOTDIR".to_owned(), daemon.root().to_string_lossy().into_owned());
+    let session_id = conn
+        .create_pty(CreatePty {
+            cwd: daemon.root().to_string_lossy().into_owned(),
+            env,
+            ..CreatePty::default()
+        })
+        .await
+        .unwrap()
+        .unwrap();
+    let created = CreatePtyResponse { session_id: session_id.clone() }.encoded_len() as u64;
+    assert!(created > 0);
+    assert_eq!(received.total(), created);
+
+    let sessions = conn.list_pty_sessions().await.unwrap().unwrap();
+    assert_eq!(sessions.len(), 1);
+    let listed = ListPtySessionsResponse { sessions }.encoded_len() as u64;
+    assert_eq!(received.total(), created + listed);
+
+    // A streamed message counts the same way.
+    let mut watch = conn.watch_session("listener-1");
+    let first = watch.next().await.unwrap().unwrap();
+    let total = created + listed + first.encoded_len() as u64;
+    assert_eq!(received.total(), total);
+    drop(watch);
+
+    conn.kill_pty(&session_id).await.unwrap().unwrap();
+    assert_eq!(received.total(), total);
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn opening_a_missing_socket_fails_loudly() {
     let missing = std::path::Path::new("/tmp/treeterm-no-such-daemon.sock");

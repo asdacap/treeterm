@@ -187,8 +187,9 @@ Done (tested against a real in-process daemon unless noted):
   the activity badge's right-click menu), Chat, TTY list with orphan kill, workspace
   settings (also from the Settings item of a tree row or favourite), SSH upload (ssh
   sessions only; not yet run against a real host).
-- **Traffic:** download rate per connection (session header) and per workspace (PTY output,
-  workspace header), counted at the daemon socket. Totals and rates are kept across
+- **Traffic:** download rate per connection (session header: the gRPC messages received,
+  without HTTP/2 framing or message prefixes, as Electron counts them) and per workspace (PTY
+  output, workspace header). Totals and rates are kept across
   reconnects and a failed connection connected again, until the connection is disconnected
   or the workspace removed.
 - **CLI:** `treeterm [dir]`, `treeterm ssh user@host[:port]`, `treeterm shutdown-daemon`.

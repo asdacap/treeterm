@@ -1,7 +1,7 @@
-//! Download metering (`createTrafficMeterStore.ts`): byte counters fed by the daemon socket
-//! and by PTY streams, and the rolling rate the traffic badges show.
+//! Download metering (`createTrafficMeterStore.ts`): byte counters fed by the gRPC messages
+//! received from the daemon and by PTY streams, and the rolling rate the traffic badges show.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::io;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -84,29 +84,271 @@ pub fn format_rate(bytes_per_sec: f64) -> String {
     format!("{}/s", format_bytes(bytes_per_sec.round().max(0.0) as u64))
 }
 
-/// A stream that adds every byte read from it to a [`ByteCounter`].
+/// RFC 9113 §4.1: a frame header is a 24-bit length, a type, flags and a 31-bit stream id.
+const FRAME_HEADER_LEN: usize = 9;
+const FRAME_DATA: u8 = 0x0;
+const FRAME_HEADERS: u8 = 0x1;
+const FRAME_RST_STREAM: u8 = 0x3;
+/// On DATA and HEADERS frames.
+const FLAG_END_STREAM: u8 = 0x1;
+/// On DATA frames: a pad length byte leads the payload, and that much padding ends it.
+const FLAG_PADDED: u8 = 0x8;
+/// gRPC's message prefix: a compressed flag and the message's big-endian u32 length.
+const MESSAGE_PREFIX_LEN: usize = 5;
+
+/// Sizes the gRPC messages in what a client reads from its HTTP/2 connection to a server,
+/// as grpc-js's `responseDeserialize` sees them (`grpcByteCounter.ts`): each message once it
+/// is complete, without its prefix, the frames around it, padding, or any other frame
+/// (HEADERS and trailers, SETTINGS, PING, WINDOW_UPDATE). A read may end anywhere. A server
+/// sends no connection preface, so the first byte is a frame header.
+#[derive(Debug, Default)]
+pub struct GrpcMessageMeter {
+    frame: FrameState,
+    /// Streams in the middle of a message; a stream between messages has no entry.
+    messages: HashMap<u32, MessageState>,
+}
+
+#[derive(Debug)]
+enum FrameState {
+    /// `have` bytes of a frame header read.
+    Header {
+        header: [u8; FRAME_HEADER_LEN],
+        have: usize,
+    },
+    /// A padded DATA frame's pad length is next, and `len` bytes of the frame after it.
+    PadLength { frame: DataFrame, len: usize },
+    /// In a DATA frame: `data` bytes of the stream's messages are left, then `padding`.
+    Data {
+        frame: DataFrame,
+        data: usize,
+        padding: usize,
+    },
+    /// In any other frame, `left` bytes from its end.
+    Skip { left: usize },
+}
+
+impl Default for FrameState {
+    fn default() -> Self {
+        Self::Header {
+            header: [0; FRAME_HEADER_LEN],
+            have: 0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct DataFrame {
+    stream: u32,
+    end_stream: bool,
+}
+
+#[derive(Debug)]
+enum MessageState {
+    /// `have` bytes of a message prefix read.
+    Prefix {
+        prefix: [u8; MESSAGE_PREFIX_LEN],
+        have: usize,
+    },
+    /// In a message of `len` bytes, `left` bytes from its end.
+    Body { len: usize, left: usize },
+}
+
+impl Default for MessageState {
+    fn default() -> Self {
+        Self::Prefix {
+            prefix: [0; MESSAGE_PREFIX_LEN],
+            have: 0,
+        }
+    }
+}
+
+impl MessageState {
+    fn is_between_messages(&self) -> bool {
+        matches!(self, Self::Prefix { have: 0, .. })
+    }
+}
+
+impl GrpcMessageMeter {
+    /// Read the next `bytes` from the server; returns the size of the messages they complete.
+    pub fn feed(&mut self, mut bytes: &[u8]) -> u64 {
+        let mut completed = 0;
+        while !bytes.is_empty() {
+            let (next, used) = match std::mem::take(&mut self.frame) {
+                FrameState::Header { mut header, have } => {
+                    let used = (FRAME_HEADER_LEN - have).min(bytes.len());
+                    header[have..have + used].copy_from_slice(&bytes[..used]);
+                    let have = have + used;
+                    let next = if have == FRAME_HEADER_LEN {
+                        self.start_frame(header)
+                    } else {
+                        FrameState::Header { header, have }
+                    };
+                    (next, used)
+                }
+                FrameState::PadLength { frame, len } => {
+                    let padding = usize::from(bytes[0]).min(len);
+                    (self.in_data(frame, len - padding, padding), 1)
+                }
+                FrameState::Data {
+                    frame,
+                    data,
+                    padding,
+                } if data > 0 => {
+                    let used = data.min(bytes.len());
+                    completed += self.feed_stream(frame.stream, &bytes[..used]);
+                    (self.in_data(frame, data - used, padding), used)
+                }
+                FrameState::Data {
+                    frame,
+                    data,
+                    padding,
+                } => {
+                    let used = padding.min(bytes.len());
+                    (self.in_data(frame, data, padding - used), used)
+                }
+                FrameState::Skip { left } => {
+                    let used = left.min(bytes.len());
+                    (skipping(left - used), used)
+                }
+            };
+            self.frame = next;
+            bytes = &bytes[used..];
+        }
+        completed
+    }
+
+    fn start_frame(&mut self, header: [u8; FRAME_HEADER_LEN]) -> FrameState {
+        let len = usize::from(header[0]) << 16 | usize::from(header[1]) << 8;
+        let len = len | usize::from(header[2]);
+        let (kind, flags) = (header[3], header[4]);
+        let stream = u32::from_be_bytes([header[5], header[6], header[7], header[8]]) & 0x7fff_ffff;
+        let end_stream = flags & FLAG_END_STREAM != 0;
+        match kind {
+            FRAME_DATA => {
+                let frame = DataFrame { stream, end_stream };
+                if flags & FLAG_PADDED != 0 && len > 0 {
+                    FrameState::PadLength {
+                        frame,
+                        len: len - 1,
+                    }
+                } else {
+                    self.in_data(frame, len, 0)
+                }
+            }
+            FRAME_HEADERS if end_stream => {
+                self.messages.remove(&stream);
+                skipping(len)
+            }
+            FRAME_RST_STREAM => {
+                self.messages.remove(&stream);
+                skipping(len)
+            }
+            _ => skipping(len),
+        }
+    }
+
+    /// Where a DATA frame with `data` and then `padding` bytes left is: at the next frame
+    /// once nothing is left, with the stream forgotten if the frame ended it.
+    fn in_data(&mut self, frame: DataFrame, data: usize, padding: usize) -> FrameState {
+        if data > 0 || padding > 0 {
+            return FrameState::Data {
+                frame,
+                data,
+                padding,
+            };
+        }
+        if frame.end_stream {
+            self.messages.remove(&frame.stream);
+        }
+        FrameState::default()
+    }
+
+    /// Read the next `bytes` of `stream`'s messages; returns the size of those they complete.
+    fn feed_stream(&mut self, stream: u32, mut bytes: &[u8]) -> u64 {
+        let mut completed = 0;
+        let mut message = self.messages.remove(&stream).unwrap_or_default();
+        while !bytes.is_empty() {
+            let used;
+            (message, used) = match message {
+                MessageState::Prefix { mut prefix, have } => {
+                    let used = (MESSAGE_PREFIX_LEN - have).min(bytes.len());
+                    prefix[have..have + used].copy_from_slice(&bytes[..used]);
+                    let have = have + used;
+                    if have < MESSAGE_PREFIX_LEN {
+                        (MessageState::Prefix { prefix, have }, used)
+                    } else {
+                        let len = u32::from_be_bytes([prefix[1], prefix[2], prefix[3], prefix[4]]);
+                        (body(len as usize), used)
+                    }
+                }
+                MessageState::Body { len, left } => {
+                    let used = left.min(bytes.len());
+                    if used == left {
+                        completed += len as u64;
+                        (MessageState::default(), used)
+                    } else {
+                        let left = left - used;
+                        (MessageState::Body { len, left }, used)
+                    }
+                }
+            };
+            bytes = &bytes[used..];
+        }
+        if !message.is_between_messages() {
+            self.messages.insert(stream, message);
+        }
+        completed
+    }
+}
+
+/// In a frame, `left` bytes from its end: at the next frame if that is none.
+fn skipping(left: usize) -> FrameState {
+    if left == 0 {
+        FrameState::default()
+    } else {
+        FrameState::Skip { left }
+    }
+}
+
+/// A message of `len` bytes is next. An empty one is complete already, and counts nothing.
+fn body(len: usize) -> MessageState {
+    if len == 0 {
+        MessageState::default()
+    } else {
+        MessageState::Body { len, left: len }
+    }
+}
+
+/// The client end of a gRPC connection, which adds the size of every message read from it to
+/// a [`ByteCounter`] (see [`GrpcMessageMeter`]). What is read passes through unchanged.
 #[derive(Debug)]
 pub struct CountingStream<S> {
     inner: S,
+    meter: GrpcMessageMeter,
     received: ByteCounter,
 }
 
 impl<S> CountingStream<S> {
     pub fn new(inner: S, received: ByteCounter) -> Self {
-        Self { inner, received }
+        Self {
+            inner,
+            meter: GrpcMessageMeter::default(),
+            received,
+        }
     }
 }
 
 impl<S: AsyncRead + Unpin> AsyncRead for CountingStream<S> {
     fn poll_read(
-        mut self: Pin<&mut Self>,
+        self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         buf: &mut ReadBuf<'_>,
     ) -> Poll<io::Result<()>> {
+        let this = self.get_mut();
         let before = buf.filled().len();
-        let poll = Pin::new(&mut self.inner).poll_read(cx, buf);
+        let poll = Pin::new(&mut this.inner).poll_read(cx, buf);
         if let Poll::Ready(Ok(())) = &poll {
-            self.received.add((buf.filled().len() - before) as u64);
+            this.received.add(this.meter.feed(&buf.filled()[before..]));
         }
         poll
     }
@@ -201,16 +443,113 @@ mod tests {
         assert_eq!(format_rate(12.4), "12 B/s");
     }
 
+    const SETTINGS: u8 = 0x4;
+    const PING: u8 = 0x6;
+    const WINDOW_UPDATE: u8 = 0x8;
+    const END_HEADERS: u8 = 0x4;
+    const ACK: u8 = 0x1;
+    const TRAILERS: u8 = END_HEADERS | FLAG_END_STREAM;
+
+    fn frame(kind: u8, flags: u8, stream: u32, payload: &[u8]) -> Vec<u8> {
+        let len = u32::try_from(payload.len()).unwrap();
+        let mut out = len.to_be_bytes()[1..].to_vec();
+        out.extend([kind, flags]);
+        out.extend(stream.to_be_bytes());
+        out.extend(payload);
+        out
+    }
+
+    /// A gRPC message of `len` bytes, with its prefix.
+    fn message(len: usize) -> Vec<u8> {
+        let mut out = vec![0];
+        out.extend(u32::try_from(len).unwrap().to_be_bytes());
+        out.extend(std::iter::repeat_n(b'm', len));
+        out
+    }
+
+    fn padded(pad: u8, data: &[u8]) -> Vec<u8> {
+        let mut out = vec![pad];
+        out.extend(data);
+        out.extend(std::iter::repeat_n(0, usize::from(pad)));
+        out
+    }
+
+    /// What a server might send on one connection, and the size of the messages in it.
+    fn server_bytes() -> (Vec<u8>, u64) {
+        let mut out = Vec::new();
+        // The connection's settings, and the ack of the client's.
+        out.extend(frame(SETTINGS, 0, 0, &[0, 4, 0, 0x10, 0, 0]));
+        out.extend(frame(SETTINGS, ACK, 0, &[]));
+        // Stream 1: response headers, then two messages in one DATA frame.
+        out.extend(frame(FRAME_HEADERS, END_HEADERS, 1, b"response headers"));
+        let two = [message(10), message(300)].concat();
+        out.extend(frame(FRAME_DATA, 0, 1, &two));
+        // Stream 3 starts a 50-byte message whose prefix and body span three frames, with
+        // stream 1's frames in between.
+        let fifty = message(50);
+        out.extend(frame(FRAME_HEADERS, END_HEADERS, 3, b"headers"));
+        out.extend(frame(FRAME_DATA, 0, 3, &fifty[..3]));
+        out.extend(frame(FRAME_DATA, FLAG_PADDED, 1, &padded(7, &message(20))));
+        out.extend(frame(FRAME_DATA, 0, 3, &fifty[3..30]));
+        out.extend(frame(PING, 0, 0, &[1; 8]));
+        out.extend(frame(WINDOW_UPDATE, 0, 0, &[0, 1, 0, 0]));
+        out.extend(frame(FRAME_DATA, 0, 3, &fifty[30..]));
+        // Trailers end stream 1; stream 3 sends an empty message and ends with its DATA.
+        out.extend(frame(FRAME_HEADERS, TRAILERS, 1, b"grpc-status: 0"));
+        out.extend(frame(FRAME_DATA, FLAG_END_STREAM, 3, &message(0)));
+        // A padded frame without data, and one with padding only.
+        out.extend(frame(FRAME_DATA, FLAG_PADDED, 5, &padded(0, &[])));
+        out.extend(frame(FRAME_DATA, FLAG_PADDED, 5, &padded(4, &[])));
+        // Stream 5 is reset in the middle of a message, which never counts.
+        out.extend(frame(FRAME_DATA, 0, 5, &message(100)[..40]));
+        out.extend(frame(FRAME_RST_STREAM, 0, 5, &[0, 0, 0, 8]));
+        // Stream 7 is cut off by trailers in the middle of a message.
+        out.extend(frame(FRAME_DATA, 0, 7, &message(100)[..2]));
+        out.extend(frame(FRAME_HEADERS, TRAILERS, 7, b"grpc-status: 13"));
+        (out, 10 + 300 + 20 + 50)
+    }
+
+    #[test]
+    fn the_meter_counts_message_bytes_however_reads_split_them() {
+        let (bytes, expected) = server_bytes();
+        for size in 1..=bytes.len() {
+            let mut meter = GrpcMessageMeter::default();
+            let counted: u64 = bytes.chunks(size).map(|chunk| meter.feed(chunk)).sum();
+            assert_eq!(counted, expected, "reads of {size} bytes");
+            assert!(meter.messages.is_empty(), "{size}-byte reads");
+            assert!(matches!(meter.frame, FrameState::Header { have: 0, .. }));
+        }
+    }
+
+    #[test]
+    fn a_message_counts_once_it_is_complete() {
+        let mut bytes = frame(FRAME_DATA, 0, 1, &message(1000));
+        bytes.extend(frame(FRAME_DATA, 0, 1, &message(24)));
+        let mut meter = GrpcMessageMeter::default();
+        // The frame header, the prefix and all but the last byte of the first message.
+        assert_eq!(meter.feed(&bytes[..9 + 5 + 999]), 0);
+        assert_eq!(meter.feed(&bytes[9 + 5 + 999..9 + 5 + 1000]), 1000);
+        assert_eq!(meter.feed(&bytes[9 + 5 + 1000..]), 24);
+    }
+
     #[tokio::test]
-    async fn counting_stream_counts_bytes_read_not_written() {
-        let (ours, mut theirs) = tokio::io::duplex(64);
+    async fn counting_stream_counts_messages_read_not_written() {
+        let (ours, mut theirs) = tokio::io::duplex(1024);
         let counter = ByteCounter::default();
         let mut stream = CountingStream::new(ours, counter.clone());
-        stream.write_all(b"outgoing").await.unwrap();
-        theirs.write_all(b"hello").await.unwrap();
-        let mut buf = [0u8; 5];
-        stream.read_exact(&mut buf).await.unwrap();
-        assert_eq!(&buf, b"hello");
-        assert_eq!(counter.total(), 5);
+        let request = frame(FRAME_DATA, 0, 1, &message(8));
+        stream.write_all(&request).await.unwrap();
+        let mut sent = frame(SETTINGS, 0, 0, &[]);
+        sent.extend(frame(FRAME_HEADERS, END_HEADERS, 1, b"headers"));
+        sent.extend(frame(FRAME_DATA, 0, 1, &[message(5), message(12)].concat()));
+        theirs.write_all(&sent).await.unwrap();
+        let mut read = vec![0; sent.len()];
+        stream.read_exact(&mut read).await.unwrap();
+        assert_eq!(read, sent, "bytes pass through unchanged");
+        assert_eq!(counter.total(), 5 + 12);
+
+        let mut written = vec![0; 9 + 5 + 8];
+        theirs.read_exact(&mut written).await.unwrap();
+        assert_eq!(counter.total(), 5 + 12, "writes don't count");
     }
 }

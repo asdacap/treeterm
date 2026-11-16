@@ -66,8 +66,8 @@ pub async fn connect_unix(path: &Path) -> Result<Channel, ConnectError> {
 /// a failed handshake is retried on grpc-js's connect backoff until `deadline`, so a daemon
 /// that starts accepting meanwhile (behind a fresh tunnel, say) is reached. Fails with the
 /// last attempt's error once no attempt can start before `deadline`, or with
-/// [`ConnectError::Timeout`] if the last attempt hangs past it. Every byte received from the
-/// daemon is added to `received`.
+/// [`ConnectError::Timeout`] if the last attempt hangs past it. The size of every gRPC message
+/// received from the daemon is added to `received` (see [`crate::traffic::GrpcMessageMeter`]).
 pub async fn connect_unix_ready(
     path: &Path,
     received: ByteCounter,

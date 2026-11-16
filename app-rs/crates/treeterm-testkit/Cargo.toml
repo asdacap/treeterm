@@ -18,6 +18,8 @@ tokio-stream.workspace = true
 
 [dev-dependencies]
 treeterm-proto.workspace = true
+# Encoded message sizes, to check the connection's byte counter against.
+prost.workspace = true
 futures.workspace = true
 tempfile.workspace = true
 libc.workspace = true

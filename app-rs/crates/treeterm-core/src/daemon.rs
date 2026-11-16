@@ -111,7 +111,7 @@ pub struct DaemonConnection {
     socket_path: PathBuf,
     pub(crate) main: DaemonClient,
     session: DaemonClient,
-    /// Every byte received over both connections.
+    /// The size of every gRPC message received over both connections.
     received: ByteCounter,
     /// Set once the connection manager gives this generation up; its execs then fail.
     lost: Arc<watch::Sender<Option<ConnectionId>>>,
@@ -270,7 +270,7 @@ impl DaemonConnection {
         &self.socket_path
     }
 
-    /// Bytes received from the daemon so far on this connection generation.
+    /// The gRPC message bytes received from the daemon so far on this connection generation.
     pub fn received(&self) -> &ByteCounter {
         &self.received
     }

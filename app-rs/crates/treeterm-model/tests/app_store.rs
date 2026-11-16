@@ -933,7 +933,9 @@ fn a_failed_connection_replaced_by_a_new_connect_keeps_its_download_meter(cx: &m
     });
     tick(cx);
     let (traffic, meter, before) = remote_traffic(cx, &app);
-    assert!(before.total_bytes > 0, "the refusal was received");
+    // A refusal carries no response message, so it counts nothing (`grpcByteCounter.ts`).
+    assert_eq!(before.total_bytes, 0);
+    assert!(meter.read_with(cx, |m, _| m.is_sampled()));
 
     // Connect again: the failed connection is replaced (`connectionManager.ts`: a replaced
     // stale entry hands over its counter).

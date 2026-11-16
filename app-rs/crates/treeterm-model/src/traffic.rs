@@ -10,8 +10,8 @@ use treeterm_core::traffic::{ByteCounter, RateWindow, TRAFFIC_TICK, TrafficRate}
 /// What a meter counts, which decides when it starts sampling.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MeterKind {
-    /// Every byte received from a connection's daemon: sampled from the start, as Electron
-    /// polls every listed connection (its badge reads "↓ …" until then).
+    /// The gRPC message bytes received from a connection's daemon: sampled from the start, as
+    /// Electron polls every listed connection (its badge reads "↓ …" until then).
     Connection,
     /// The PTY bytes of a workspace's terminals: no sample until some arrive, so the first
     /// sample (rate 0) absorbs the first burst, as Electron samples only the workspaces it
