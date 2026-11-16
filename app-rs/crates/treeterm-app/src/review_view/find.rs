@@ -186,18 +186,21 @@ impl ReviewView {
 
     /// The diff with its right-click menu (`contextTarget`): "Search “…”" for a one-line
     /// selection, else the word under the pointer, its "In this file" the file right-clicked;
-    /// "Copy" for the selection, else that word. With neither, or below the files, there is
-    /// no menu; file headers and comments have none (they keep the right button).
-    pub(super) fn with_diff_menu(&self, diff: AnyElement, state: &Entity<DiffState>) -> AnyElement {
+    /// "Copy" for the selection, else that word. The chosen match's line is no selection here.
+    /// With neither, or below the files, there is no menu; file headers and comments have none
+    /// (they keep the right button).
+    pub(super) fn with_diff_menu(&self, diff: AnyElement, state: &Entity<DiffState>, cx: &Context<Self>) -> AnyElement {
         // What the press under way points at, for the menu the Kit builds after it.
         let pressed: Rc<Cell<Option<(SharedString, DiffMenu)>>> = Rc::default();
-        let (target, state, model) = (pressed.clone(), state.clone(), self.model.clone());
+        let (target, state, model, this) = (pressed.clone(), state.clone(), self.model.clone(), cx.weak_entity());
         div()
             .id("review-diff")
             .size_full()
             .child(diff)
             .on_mouse_down(MouseButton::Right, move |event: &MouseDownEvent, _, cx| {
-                let found = diff_menu_at(&state, event.position, cx);
+                // Read now: the match is chosen after this render builds the diff.
+                let find_selection = this.upgrade().and_then(|view| view.read(cx).find_selection.clone());
+                let found = diff_menu_at(&state, event.position, find_selection.as_ref(), cx);
                 if found.is_none() {
                     // No menu: the Kit's would open empty, and hold focus unseen.
                     cx.stop_propagation();
@@ -225,10 +228,22 @@ impl ReviewView {
 }
 
 /// The diff's menu for a right-click at `point` (window coordinates), and the file it is
-/// on: the selection and the word under the pointer, on a file's rows.
-pub(super) fn diff_menu_at(state: &Entity<DiffState>, point: Point<Pixels>, cx: &App) -> Option<(SharedString, DiffMenu)> {
+/// on: the selection and the word under the pointer, on a file's rows. `find_selection` is
+/// the line the find's chosen match selected: while it is still the diff's selection it is
+/// no selection of the user's (Electron highlights the match through Pierre's
+/// `selectedLines`, not the page's selection), so the word under the pointer is offered.
+pub(super) fn diff_menu_at(
+    state: &Entity<DiffState>,
+    point: Point<Pixels>,
+    find_selection: Option<&DiffLineRange>,
+    cx: &App,
+) -> Option<(SharedString, DiffMenu)> {
     let state = state.read(cx);
     let file = state.file_at(point)?;
     let word = state.text_at(point).map(|(_, text, offset)| word_at(&text, offset).to_owned()).unwrap_or_default();
-    DiffMenu::new(&state.selected_text(cx), &word).map(|menu| (file, menu))
+    let selected = match (state.selected_lines(), find_selection) {
+        (Some(lines), Some(found)) if &lines == found => String::new(),
+        _ => state.selected_text(cx),
+    };
+    DiffMenu::new(&selected, &word).map(|menu| (file, menu))
 }

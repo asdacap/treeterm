@@ -308,7 +308,7 @@ impl ReviewView {
                     }))),
             );
         let diff = self.diff_element(&state, &patch, diffs, &order, viewed, comments, window, cx);
-        let diff = self.with_diff_menu(diff, &state);
+        let diff = self.with_diff_menu(diff, &state, cx);
         let find = self.find_panel(&state, &patch, &listed, window, cx);
         v_flex().size_full().child(header).child(div().flex_1().min_h_0().child(diff)).children(find).into_any_element()
     }
@@ -1487,27 +1487,42 @@ mod tests {
         let after = row[end + 20].0;
         assert_eq!(row[end + 20].1, None);
         let below = gpui_kit::point(px(200.), px(295.));
-        let menu = |at, cx: &mut gpui_kit::VisualTestContext| cx.update(|_, cx| super::super::find::diff_menu_at(&state, at, cx));
+        let menu = |at, found: Option<&DiffLineRange>, cx: &mut gpui_kit::VisualTestContext| {
+            cx.update(|_, cx| super::super::find::diff_menu_at(&state, at, found, cx))
+        };
         let offer = |copy: &str, search: &str| Some((SharedString::from("file.txt"), DiffMenu { copy: copy.into(), search: search.into() }));
         let selected = |cx: &mut gpui_kit::VisualTestContext| cx.update(|_, cx| state.read(cx).selected_text(cx));
+        // Selects `range`, and gives the diff's selection back (as the find keeps it).
+        let select = |range: DiffLineRange, cx: &mut gpui_kit::VisualTestContext| {
+            state.update(cx, |s, cx| s.set_selected_lines(Some(range), cx));
+            cx.update(|_, cx| state.read(cx).selected_lines()).expect("selected")
+        };
 
         // Nothing selected: the word under the pointer, else no menu.
-        assert_eq!(menu(on_words, cx), offer("words", "words"));
-        assert_eq!(menu(after, cx), None);
-        assert_eq!(menu(below, cx), None);
+        assert_eq!(menu(on_words, None, cx), offer("words", "words"));
+        assert_eq!(menu(after, None, cx), None);
+        assert_eq!(menu(below, None, cx), None);
 
         // Lines selected: copied wherever the file's rows are right-clicked; the word is searched.
-        state.update(cx, |s, cx| s.set_selected_lines(Some(DiffLineRange::new("file.txt", DiffSide::Modified, 1, 2)), cx));
+        let two_lines = select(DiffLineRange::new("file.txt", DiffSide::Modified, 1, 2), cx);
         let lines = selected(cx);
         assert!(lines.trim().contains('\n'), "{lines:?}");
-        assert_eq!(menu(after, cx), offer(&lines, ""));
-        assert_eq!(menu(on_words, cx), offer(&lines, "words"));
-        assert_eq!(menu(below, cx), None, "below the files");
+        assert_eq!(menu(after, None, cx), offer(&lines, ""));
+        assert_eq!(menu(on_words, None, cx), offer(&lines, "words"));
+        assert_eq!(menu(below, None, cx), None, "below the files");
 
         // One line selected: searched too.
-        state.update(cx, |s, cx| s.set_selected_lines(Some(DiffLineRange::new("file.txt", DiffSide::Modified, 2, 2)), cx));
+        let one_line = select(DiffLineRange::new("file.txt", DiffSide::Modified, 2, 2), cx);
         let line = selected(cx);
-        assert_eq!(menu(on_words, cx), offer(&line, "fresh words"));
+        assert_eq!(menu(on_words, None, cx), offer(&line, "fresh words"));
+
+        // The line the find's chosen match selected only highlights it: the word under the
+        // pointer, for both, else no menu.
+        assert_eq!(menu(on_words, Some(&one_line), cx), offer("words", "words"));
+        assert_eq!(menu(after, Some(&one_line), cx), None);
+        // Lines selected since are the user's.
+        select(two_lines, cx);
+        assert_eq!(menu(on_words, Some(&one_line), cx), offer(&lines, "words"));
     }
 
     #[gpui_kit::test]
