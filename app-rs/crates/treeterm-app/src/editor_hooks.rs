@@ -6,9 +6,9 @@
 //!   Cmd/Ctrl+click opens a web link in the browser and a `file:` link in an Editor tab);
 //!   the language workers' problems (squiggles, their message on hover); and CSS colours;
 //! - the Editor tab: suggestions while typing, the language's (CSS properties, HTML elements
-//!   and attributes) or else the words of the file and of the other open files of its
-//!   language; none while typing in a comment or a string, unless the character typed asks
-//!   the language's worker.
+//!   and attributes, JSON keys and values) or else the words of the file and of the other
+//!   open files of its language; none while typing in a comment or a string, unless the
+//!   character typed asks the language's worker.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -21,10 +21,10 @@ use gpui_kit::component::input::{
 use gpui_kit::{App, Entity, Task, Window};
 use lsp_types::{
     Color, ColorInformation, CompletionContext, CompletionItem, CompletionItemKind, CompletionResponse,
-    CompletionTextEdit, CompletionTriggerKind, Hover, HoverContents, LocationLink, MarkupContent, MarkupKind, Range,
-    ShowDocumentParams, TextEdit, Uri,
+    CompletionTextEdit, CompletionTriggerKind, Hover, HoverContents, InsertTextFormat, LocationLink, MarkupContent,
+    MarkupKind, Range, ShowDocumentParams, TextEdit, Uri,
 };
-use treeterm_model::code_intel::{self, Asked, Severity, Suggested, links};
+use treeterm_model::code_intel::{self, Asked, Insert, Severity, Suggested, links};
 use treeterm_model::definition::DefinitionProbe;
 use treeterm_model::words;
 
@@ -329,10 +329,11 @@ pub(crate) fn install_colors(editor: &Entity<EditorState>, language: &'static st
 pub(crate) type OtherTexts = Rc<dyn Fn(&App) -> Vec<String>>;
 
 /// Monaco's suggestions in a file of Monaco's `language` ([`code_intel::suggest`]): its
-/// language worker's (CSS properties, HTML elements and attributes) where it offers some,
-/// else the words of the file and of the other open files of its language (the base editor
-/// worker's `textualSuggest`); typing in a comment or a string suggests nothing unless it
-/// asks the worker.
+/// language worker's (CSS properties, HTML elements and attributes, JSON keys and values)
+/// where it offers some, else the words of the file and of the other open files of its
+/// language (the base editor worker's `textualSuggest`); typing in a comment or a string
+/// suggests nothing unless it asks the worker. A worker's snippet is inserted with the cursor
+/// at its first tab stop.
 struct Suggestions {
     language: &'static str,
     /// The GPUI Kit grammar the editor highlights the file with, which tells comments and
@@ -387,14 +388,14 @@ impl CompletionProvider for Suggestions {
             } else {
                 Asked::Invoked
             };
-                let (replace, items, kind): (_, Vec<(String, String)>, _) =
+            let (replace, items, kind): (_, Vec<(String, Insert)>, _) =
                 match code_intel::suggest(language, &string, &others, offset, asked) {
                     Suggested::Language(found) => {
                         let items = found.items.into_iter().map(|item| (item.label, item.insert)).collect();
                         (found.replace, items, CompletionItemKind::PROPERTY)
                     }
                     Suggested::Words(found) => {
-                        let items = found.words.into_iter().map(|word| (word.clone(), word)).collect();
+                        let items = found.words.into_iter().map(|word| (word.clone(), Insert::Text(word))).collect();
                         (found.replace, items, CompletionItemKind::TEXT)
                     }
                     Suggested::Nothing => return Vec::new(),
@@ -402,11 +403,18 @@ impl CompletionProvider for Suggestions {
             let replace = lsp_range(&text, replace);
             items
                 .into_iter()
-                .map(|(label, insert)| CompletionItem {
-                    label,
-                    kind: Some(kind),
-                    text_edit: Some(CompletionTextEdit::Edit(TextEdit { range: replace, new_text: insert })),
-                    ..CompletionItem::default()
+                .map(|(label, insert)| {
+                    let (new_text, format) = match insert {
+                        Insert::Text(text) => (text, InsertTextFormat::PLAIN_TEXT),
+                        Insert::Snippet(snippet) => (snippet, InsertTextFormat::SNIPPET),
+                    };
+                    CompletionItem {
+                        label,
+                        kind: Some(kind),
+                        text_edit: Some(CompletionTextEdit::Edit(TextEdit { range: replace, new_text })),
+                        insert_text_format: Some(format),
+                        ..CompletionItem::default()
+                    }
                 })
                 .collect::<Vec<_>>()
         });

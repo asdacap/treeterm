@@ -11,7 +11,7 @@
 use std::ops::Range;
 
 use super::web_data::{CSS_COLORS, CSS_PROPERTIES};
-use super::{Completion, Completions, Problem, Severity};
+use super::{Completion, Completions, Insert, Problem, Severity};
 use crate::words::{self, Trigger};
 
 /// The style sheet languages the CSS worker reads.
@@ -749,7 +749,7 @@ pub fn property_completions(language: &str, text: &str, offset: usize, trigger: 
     });
     let items = ranked
         .into_iter()
-        .map(|(_, _, name)| Completion { label: name.to_owned(), insert: format!("{name}{suffix}") })
+        .map(|(_, _, name)| Completion { label: name.to_owned(), insert: Insert::Text(format!("{name}{suffix}")) })
         .collect();
     Some(Completions { replace: start..end, items })
 }
@@ -870,7 +870,7 @@ mod tests {
         let offset = text.find('|').expect("a cursor");
         let text = text.replace('|', "");
         let completions = property_completions(language, &text, offset, trigger)?;
-        let (labels, inserts) = completions.items.into_iter().take(3).map(|item| (item.label, item.insert)).unzip();
+        let (labels, inserts) = completions.items.into_iter().take(3).map(|item| (item.label, item.insert.source().to_owned())).unzip();
         Some((text[completions.replace].to_owned(), labels, inserts))
     }
 

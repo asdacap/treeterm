@@ -6,13 +6,13 @@
 //! As in Monaco: F12, Cmd/Ctrl+click and the context menu go to the definition of the word
 //! under the cursor (holding Cmd/Ctrl over a word with one underlines it); Cmd/Ctrl+F2
 //! puts a cursor on every occurrence of the word or selection (Change All Occurrences);
-//! typing suggests CSS property names or HTML element and attribute names where the
-//! language's worker offers them, else the words of the document and of the other open files
-//! of its language that have the typed letters in order, the first at a word start or
-//! camelCase hump, but nothing while typing in a comment or string (Ctrl+Space asks); Enter
-//! or Tab takes the selected one. The language workers' problems are marked again as the
-//! text changes, CSS colours are painted and links underlined; Cmd/Ctrl+click opens a link
-//! ([`crate::editor_hooks`]).
+//! typing suggests CSS property names, HTML element and attribute names, or JSON keys and
+//! values where the language's worker offers them, else the words of the document and of the
+//! other open files of its language that have the typed letters in order, the first at a word
+//! start or camelCase hump, but nothing while typing in a comment or string (Ctrl+Space
+//! asks); Enter or Tab takes the selected one. The language workers' problems are marked
+//! again as the text changes, CSS colours are painted and links underlined; Cmd/Ctrl+click
+//! opens a link ([`crate::editor_hooks`]).
 //!
 //! Text another window or Electron writes to the tab replaces the editor's, as Monaco's
 //! `value` prop does: undoably, keeping the cursor and the scroll position where they were.
@@ -690,6 +690,74 @@ food");
         });
         // `b` at a hump matches better than inside a word.
         assert_eq!(shown, [("fooBar".to_owned(), vec![0..1, 3..4]), ("foobar".to_owned(), vec![0..1, 3..4])]);
+    }
+
+    /// An Editor tab's editor on `text` of Monaco's `language` (in a file at `path`), with
+    /// Monaco's suggestions, focused with the cursor at the end.
+    fn suggesting_editor<'a>(
+        cx: &'a mut gpui_kit::TestAppContext,
+        path: &str,
+        language: &'static str,
+        text: &str,
+    ) -> (Entity<EditorState>, &'a mut gpui_kit::VisualTestContext) {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            bind_keys(cx);
+        });
+        let kit_language = crate::file_browser_view::language_for(path);
+        let (host, cx) = cx.add_window_view(|window, cx| Host {
+            editor: cx.new(|cx| EditorState::new(window, cx).language(kit_language).default_value(text)),
+        });
+        let editor = cx.update(|_, cx| host.read(cx).editor.clone());
+        cx.update(|window, cx| {
+            crate::editor_hooks::install_suggestions(&editor, path, language, no_others(), cx);
+            editor.update(cx, |editor, cx| {
+                editor.focus(window, cx);
+                editor.set_selected_range(text.len()..text.len(), cx);
+            });
+        });
+        cx.run_until_parked();
+        (editor, cx)
+    }
+
+    /// The editor's text and where its cursor (or selection) is.
+    fn text_and_cursor(editor: &Entity<EditorState>, cx: &mut gpui_kit::VisualTestContext) -> (String, std::ops::Range<usize>) {
+        cx.update(|_, cx| (editor.read(cx).value().to_string(), editor.read(cx).selected_range()))
+    }
+
+    #[gpui_kit::test]
+    fn json_offers_the_keys_and_values_used_elsewhere_and_an_empty_object_takes_the_cursor_inside(
+        cx: &mut gpui_kit::TestAppContext,
+    ) {
+        let text = "[{\"name\": {\"a\": 1}}, {\"name\": ";
+        let (editor, cx) = suggesting_editor(cx, "/w/a.json", "json", text);
+        cx.simulate_keystrokes("ctrl-space");
+        cx.run_until_parked();
+        assert_eq!(shown(&editor, cx), Some(vec!["{}".to_owned()]));
+        cx.simulate_keystrokes("enter");
+        cx.run_until_parked();
+        let at = text.len() + 1;
+        assert_eq!(text_and_cursor(&editor, cx), (format!("{text}{{}}"), at..at));
+        // A key: those of the similar object, typed after a quote, which asks for them.
+        cx.simulate_keystrokes("\"");
+        cx.run_until_parked();
+        assert_eq!(shown(&editor, cx), Some(vec!["a".to_owned()]));
+        cx.simulate_keystrokes("enter");
+        cx.run_until_parked();
+        let (now, _) = text_and_cursor(&editor, cx);
+        assert!(now.starts_with(&format!("{text}{{\"a\"")), "{now}");
+    }
+
+    #[gpui_kit::test]
+    fn an_html_attribute_is_completed_with_the_cursor_between_its_quotes(cx: &mut gpui_kit::TestAppContext) {
+        let text = "<a hre";
+        let (editor, cx) = suggesting_editor(cx, "/w/a.html", "html", text);
+        cx.simulate_keystrokes("f");
+        cx.run_until_parked();
+        assert_eq!(shown(&editor, cx).map(|labels| labels[0].clone()), Some("href".to_owned()));
+        cx.simulate_keystrokes("enter");
+        cx.run_until_parked();
+        assert_eq!(text_and_cursor(&editor, cx), ("<a href=\"\"".to_owned(), 9..9));
     }
 
     #[gpui_kit::test]

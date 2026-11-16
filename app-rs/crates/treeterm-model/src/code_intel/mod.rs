@@ -3,7 +3,8 @@
 //! links. Pure functions over a file's text; the code editors install them through GPUI
 //! Kit's LSP hooks.
 //!
-//! - JSON ([`json`]): the JSON worker's problems, ported.
+//! - JSON ([`json`]): the JSON worker's problems, and its completions without a schema,
+//!   ported.
 //! - TypeScript and JavaScript ([`syntax`]): syntax errors, read from the tree-sitter
 //!   grammars GPUI Kit highlights them with.
 //! - CSS, SCSS and Less ([`css`]): colours, property completions, and (CSS) the lint
@@ -43,10 +44,30 @@ pub struct Problem {
 /// A completion a language worker offers.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Completion {
-    /// What the list shows, and what is typed is matched with.
+    /// What the list shows.
     pub label: String,
-    /// The text a pick puts in place of [`Completions::replace`].
-    pub insert: String,
+    /// What a pick puts in place of [`Completions::replace`].
+    pub insert: Insert,
+}
+
+/// What a picked completion inserts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Insert {
+    /// This text, the cursor after it.
+    Text(String),
+    /// A snippet, as Monaco's language workers write one: the cursor goes to its first tab
+    /// stop (`$1`, else `$0`, else the end), and `\$`, `\}` and `\\` stand for those
+    /// characters.
+    Snippet(String),
+}
+
+impl Insert {
+    /// The text or snippet as written.
+    pub fn source(&self) -> &str {
+        match self {
+            Self::Text(source) | Self::Snippet(source) => source,
+        }
+    }
 }
 
 /// The completions at the cursor, best matches first.
@@ -58,23 +79,25 @@ pub struct Completions {
 }
 
 /// The completions a language worker of Monaco's `language` offers at byte `offset` of
-/// `text`: CSS, SCSS and Less property names, HTML element and attribute names. `None`
-/// where it offers none, and in other languages: Monaco's word suggestions are offered
-/// there ([`crate::words::suggestions`]).
+/// `text`: CSS, SCSS and Less property names, HTML element and attribute names, JSON keys
+/// and values. `None` where it offers none, and in other languages: Monaco's word suggestions
+/// are offered there ([`crate::words::suggestions`]). Where what was typed matches none of the
+/// JSON worker's proposals the list is empty: Monaco asks no other provider then.
 pub fn completions(language: &str, text: &str, offset: usize, trigger: Trigger) -> Option<Completions> {
-    let found = match language {
-        "css" | "scss" | "less" => css::property_completions(language, text, offset, trigger),
-        "html" => html::completions(text, offset, trigger),
+    let offered = |found: &Completions| !found.items.is_empty();
+    match language {
+        "css" | "scss" | "less" => css::property_completions(language, text, offset, trigger).filter(offered),
+        "html" => html::completions(text, offset, trigger).filter(offered),
+        "json" => json::completions(text, offset, trigger),
         _ => None,
-    }?;
-    (!found.items.is_empty()).then_some(found)
+    }
 }
 
 /// The characters that ask a language worker for its completions as they are typed (its
 /// `triggerCharacters`), in comments and strings too.
 fn trigger_characters(language: &str) -> &'static [char] {
     match language {
-        "json" => &[' ', ':', '"'],
+        "json" => &json::TRIGGER_CHARACTERS,
         "css" | "scss" | "less" => &['/', '-', ':'],
         "html" => &['.', ':', '<', '"', '=', '/'],
         _ => &[],

@@ -7,7 +7,7 @@
 use std::ops::Range;
 
 use super::web_data::{HTML_GLOBAL_ATTRIBUTES, HTML_TAGS, HtmlAttribute};
-use super::{Completion, Completions};
+use super::{Completion, Completions, Insert};
 use crate::words::{self, Trigger};
 
 /// `nextElementName`: `[_:\w][_:\w\-.\d]*`.
@@ -293,16 +293,16 @@ pub fn completions(text: &str, offset: usize, trigger: Trigger) -> Option<Comple
     let (place, open) = place(text, offset)?;
     let end_tag = |name: &str, replace_end: usize| {
         let close = if followed_by(text, replace_end, '>') { "" } else { ">" };
-        Completion { label: format!("/{name}"), insert: format!("/{name}{close}") }
+        Completion { label: format!("/{name}"), insert: Insert::Text(format!("/{name}{close}")) }
     };
     let (replace, items): (Range<usize>, Vec<Completion>) = match place {
         Place::StartTag { replace, bare } => {
             let mut items: Vec<Completion> =
-                HTML_TAGS.iter().map(|(name, _, _)| Completion { label: (*name).to_owned(), insert: (*name).to_owned() }).collect();
+                HTML_TAGS.iter().map(|(name, _, _)| Completion { label: (*name).to_owned(), insert: Insert::Text((*name).to_owned()) }).collect();
             if bare {
                 items.extend(open.last().map(|tag| end_tag(tag, replace.end)));
                 if !text[..replace.start].contains('\n') {
-                    items.push(Completion { label: "!DOCTYPE".to_owned(), insert: "!DOCTYPE html>".to_owned() });
+                    items.push(Completion { label: "!DOCTYPE".to_owned(), insert: Insert::Text("!DOCTYPE html>".to_owned()) });
                 }
             }
             (replace, items)
@@ -328,10 +328,15 @@ pub fn completions(text: &str, offset: usize, trigger: Trigger) -> Option<Comple
                     continue;
                 }
                 seen.push(name);
-                let value = if assigned || *valueless { "" } else { "=\"\"" };
-                items.push(Completion { label: (*name).to_owned(), insert: format!("{name}{value}") });
+                // Monaco's snippet puts the cursor between the quotes.
+                let insert = if assigned || *valueless {
+                    Insert::Text((*name).to_owned())
+                } else {
+                    Insert::Snippet(format!("{name}=\"$1\""))
+                };
+                items.push(Completion { label: (*name).to_owned(), insert });
             }
-            items.push(Completion { label: "data-".to_owned(), insert: "data-".to_owned() });
+            items.push(Completion { label: "data-".to_owned(), insert: Insert::Snippet("data-$1=\"$2\"".to_owned()) });
             (replace, items)
         }
     };
@@ -358,7 +363,7 @@ mod tests {
         let offset = text.find('|').expect("a cursor");
         let text = text.replace('|', "");
         let found = completions(&text, offset, trigger)?;
-        let items = found.items.into_iter().take(count).map(|item| (item.label, item.insert)).collect();
+        let items = found.items.into_iter().take(count).map(|item| (item.label, item.insert.source().to_owned())).collect();
         Some((text[found.replace].to_owned(), items))
     }
 
@@ -400,7 +405,7 @@ mod tests {
     #[test]
     fn in_a_start_tag_the_attributes_it_does_not_have_are_offered() {
         let (replace, items) = offered("<a hr|", Trigger::Typing, 1).expect("attributes");
-        assert_eq!((replace.as_str(), &items[..]), ("hr", &[item("href", "href=\"\"")][..]));
+        assert_eq!((replace.as_str(), &items[..]), ("hr", &[item("href", "href=\"$1\"")][..]));
         // Valueless ones, and those followed by `=`, take no value.
         let (_, items) = offered("<div hidd|", Trigger::Typing, 1).expect("attributes");
         assert_eq!(items, [item("hidden", "hidden")]);
@@ -410,8 +415,8 @@ mod tests {
         let (replace, items) = offered("<a href=\"x\" | title=\"y\">", Trigger::Invoked, 500).expect("attributes");
         assert_eq!(replace, "");
         assert!(!items.iter().any(|(label, _)| label == "href" || label == "title"));
-        assert!(items.contains(&item("download", "download=\"\"")));
-        assert!(items.contains(&item("data-", "data-")));
+        assert!(items.contains(&item("download", "download=\"$1\"")));
+        assert!(items.contains(&item("data-", "data-$1=\"$2\"")));
         assert_eq!(offered("<a href=\"x\" |", Trigger::Typing, 1), None);
     }
 
@@ -422,7 +427,7 @@ mod tests {
     fn unicode_whitespace_in_a_start_tag_is_read_as_the_scanner_reads_it() {
         // Before the cursor.
         let (replace, items) = offered("<div\u{3000}class=\"x\">\n<a\u{a0}href=y>\n<a hr|", Trigger::Typing, 1).expect("attributes");
-        assert_eq!((replace.as_str(), &items[..]), ("hr", &[item("href", "href=\"\"")][..]));
+        assert_eq!((replace.as_str(), &items[..]), ("hr", &[item("href", "href=\"$1\"")][..]));
         let (replace, items) = offered("<ul\u{a0}id=x>\n</|", Trigger::Typing, 5).expect("end tag");
         assert_eq!((replace.as_str(), &items[..]), ("/", &[item("/ul", "/ul>")][..]));
         let (_, items) = offered("<ul\u{3000}id=x>\n<|", Trigger::Typing, 1).expect("tags");
@@ -433,14 +438,14 @@ mod tests {
         assert_eq!(offered("<a\u{3000}|", Trigger::Invoked, 1), None);
         assert_eq!(offered("<div\u{3000}|class=\"x\">", Trigger::Invoked, 1), None);
         let (replace, items) = offered("<a \u{a0}hr|", Trigger::Typing, 1).expect("attributes");
-        assert_eq!((replace.as_str(), &items[..]), ("hr", &[item("href", "href=\"\"")][..]));
+        assert_eq!((replace.as_str(), &items[..]), ("hr", &[item("href", "href=\"$1\"")][..]));
         let (replace, _) = offered("<a hr| \u{a0}", Trigger::Typing, 1).expect("attributes");
         assert_eq!(replace, "hr");
         // A value cannot start with one: what follows is not an attribute.
         let (replace, items) = offered("<a href=\u{3000}x |", Trigger::Invoked, 500).expect("attributes");
         assert_eq!(replace, "");
         assert!(!items.iter().any(|(label, _)| label == "href"));
-        assert!(items.contains(&item("target", "target=\"\"")));
+        assert!(items.contains(&item("target", "target=\"$1\"")));
     }
 
     #[test]
@@ -448,13 +453,13 @@ mod tests {
         // No attribute right after a value; a name after whitespace is not the one typed.
         let (replace, items) = offered("<a href=\"x\"title=\"y\" |", Trigger::Invoked, 500).expect("attributes");
         assert_eq!(replace, "");
-        assert!(items.contains(&item("title", "title=\"\"")) && !items.iter().any(|(label, _)| label == "href"));
+        assert!(items.contains(&item("title", "title=\"$1\"")) && !items.iter().any(|(label, _)| label == "href"));
         let (replace, items) = offered("<a |href=\"x\">", Trigger::Invoked, 500).expect("attributes");
         assert_eq!(replace, "");
         assert!(!items.iter().any(|(label, _)| label == "href"));
         // `=` without a name is a stray character; `/>` after an unquoted value closes the tag.
         let (_, items) = offered("<a =\"x\" |", Trigger::Invoked, 1).expect("attributes");
-        assert_eq!(items, [item("accesskey", "accesskey=\"\"")]);
+        assert_eq!(items, [item("accesskey", "accesskey=\"$1\"")]);
         let (_, items) = offered("<ul><a href=/>\n<|", Trigger::Typing, 1).expect("tags");
         assert_eq!(items, [item("/ul", "/ul>")]);
         // Script text whose lower case is longer.

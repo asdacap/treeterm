@@ -345,6 +345,10 @@ are not ours). Its changes are marked `TreeTerm patch` (`grep -rn "TreeTerm patc
   Escape, Up, Down) stops there, as in Monaco's suggest widget. The Kit let it propagate,
   so the window went on to type it: Enter took the Editor tab's suggestion and also typed a
   newline.
+- `src/input/popovers/completion_menu.rs`: a snippet completion (`InsertTextFormat::SNIPPET`)
+  inserts the text it stands for with its first tab stop selected, as Monaco's snippet
+  controller leaves it (a JSON `{}` with the cursor between the braces, an HTML attribute's
+  between its quotes). The Kit inserted the snippet's source, `$1` and all.
 - `src/menu/popup_menu.rs`: a custom element item (`PopupMenuItem::element`) can be
   narrower than its content, so in a menu given a max width its text can ellipsise, as the
   Run menu's long script names do in Electron. The Kit's row grew with its content and the
@@ -435,10 +439,10 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   text's colour (Monaco's link is `#4E94CE`).
 - There are no language servers behind the code editors. Monaco's TypeScript / JavaScript
   service (semantic errors such as unresolved imports, IntelliSense, hover types, signature
-  help, references), JSON schemas (validation, completion, hover), JSON completion without
-  a schema (the keys and values the file uses elsewhere, empty objects and arrays, the other
-  boolean), hover documentation, CSS value and selector completion, HTML attribute value and
-  entity completion, and formatting are missing. A problem's hover shows its message without
+  help, references), JSON schemas (validation, completion, hover: a file whose root object
+  names a `$schema` gets no JSON completions, where Monaco's completes the keywords of the
+  JSON Schema drafts it has built in), hover documentation, CSS value and selector
+  completion, HTML attribute value and entity completion, and formatting are missing. A problem's hover shows its message without
   the source and code Monaco adds after it (`json(513)`, `(1005)`). Picking an HTML end
   tag typed on a line of its own does not move it to its start tag's indentation, as
   Monaco's does. TypeScript and JavaScript syntax errors are read from GPUI Kit's tree-sitter
@@ -450,8 +454,7 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   blocks do, get no marks or colours (Monaco's workers give up only where JavaScript's stack
   runs out, a few thousand and about a thousand levels deep). Colours are painted behind
   their text, not as a swatch before it. A completed CSS property is inserted as `name: `
-  and an HTML attribute as `name=""` with the cursor after it (Monaco's snippets put it
-  between `:` and `;`, or the quotes). Other suggestions are the words of the file and of
+  with the cursor after it (Monaco's snippet puts it between `:` and `;`). Other suggestions are the words of the file and of
   the Editor tabs and Files viewers of the workspace with a file of its language open; what
   is a comment or a string, where typing suggests nothing, is read from GPUI Kit's
   tree-sitter grammars, not Monaco's tokenizers. The right-click menu has no Go to

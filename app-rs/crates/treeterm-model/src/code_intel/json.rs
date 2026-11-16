@@ -16,6 +16,11 @@ use std::ops::Range;
 use super::uri::{Uri, is_scheme};
 use super::{Problem, Severity};
 
+mod completion;
+
+pub use completion::completions;
+pub(super) use completion::TRIGGER_CHARACTERS;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Token {
     OpenBrace,
@@ -312,13 +317,15 @@ impl<'a> Scanner<'a> {
     }
 }
 
-/// What a node holds that the schema lookup reads.
+/// What a value is, as jsonParser's AST holds it.
 #[derive(Debug, Clone)]
 enum NodeKind {
     Object(Vec<PropertyNode>),
+    Array(Vec<Node>),
     String(Vec<u16>),
-    /// An array, number or literal.
-    Other,
+    Number,
+    Boolean(bool),
+    Null,
 }
 
 /// A value, and the bytes it spans as jsonParser measures them (an unclosed object or array
@@ -340,6 +347,8 @@ struct Key {
 struct PropertyNode {
     range: Range<usize>,
     key: Key,
+    /// Where its `:` is, when it has one.
+    colon: Option<usize>,
     value: Option<Node>,
 }
 
@@ -464,6 +473,7 @@ impl<'a> Parser<'a> {
         }
         let start = self.scanner.token_offset;
         self.scan_next();
+        let mut items = Vec::new();
         let mut needs_comma = false;
         while self.token() != Token::CloseBracket && self.token() != Token::Eof {
             if self.token() == Token::Comma {
@@ -481,18 +491,19 @@ impl<'a> Parser<'a> {
             } else if needs_comma {
                 self.error("Expected comma", &[], &[]);
             }
-            if self.parse_value().is_none() {
-                self.error("Value expected", &[], &[Token::CloseBracket, Token::Comma]);
+            match self.parse_value() {
+                Some(item) => items.push(item),
+                None => self.error("Value expected", &[], &[Token::CloseBracket, Token::Comma]),
             }
             needs_comma = true;
         }
         if self.token() != Token::CloseBracket {
             self.error("Expected comma or closing bracket", &[], &[]);
-            return Some(Node { range: start..self.token_end(), kind: NodeKind::Other });
+            return Some(Node { range: start..self.token_end(), kind: NodeKind::Array(items) });
         }
         let end = self.token_end();
         self.scan_next();
-        Some(Node { range: start..end, kind: NodeKind::Other })
+        Some(Node { range: start..end, kind: NodeKind::Array(items) })
     }
 
     fn parse_property(&mut self, keys_seen: &mut HashMap<Vec<u16>, Seen>) -> Option<PropertyNode> {
@@ -524,22 +535,24 @@ impl<'a> Parser<'a> {
                 }
             }
         }
+        let mut colon = None;
         if self.token() == Token::Colon {
+            colon = Some(self.scanner.token_offset);
             self.scan_next();
         } else {
             self.error("Colon expected", &[], &[]);
             let next = self.scanner.token_offset;
             if self.token() == Token::String && self.text[key.range.end..next].contains(['\n', '\r']) {
-                return Some(PropertyNode { range: start..key.range.end, key, value: None });
+                return Some(PropertyNode { range: start..key.range.end, key, colon, value: None });
             }
         }
         match self.parse_value() {
-            Some(value) => Some(PropertyNode { range: start..value.range.end, key, value: Some(value) }),
+            Some(value) => Some(PropertyNode { range: start..value.range.end, key, colon, value: Some(value) }),
             None => {
                 // The property ends with the token the error is reported at.
                 let end = self.token_end();
                 self.error("Value expected", &[], &[Token::CloseBrace, Token::Comma]);
-                Some(PropertyNode { range: start..end, key, value: None })
+                Some(PropertyNode { range: start..end, key, colon, value: None })
             }
         }
     }
@@ -623,8 +636,14 @@ impl<'a> Parser<'a> {
             // A number token always reads as a JSON number, or its scan error was reported.
             Token::Number | Token::Null | Token::True | Token::False => {
                 let range = self.scanner.token_offset..self.token_end();
+                let kind = match self.token() {
+                    Token::True => NodeKind::Boolean(true),
+                    Token::False => NodeKind::Boolean(false),
+                    Token::Null => NodeKind::Null,
+                    _ => NodeKind::Number,
+                };
                 self.scan_next();
-                Some(Node { range, kind: NodeKind::Other })
+                Some(Node { range, kind })
             }
             Token::CloseBrace
             | Token::CloseBracket
@@ -690,9 +709,17 @@ fn schema_display(url: &str) -> String {
     }
 }
 
-/// The problems Monaco marks in `text`, a `json` file, by start; none when its arrays and
-/// objects nest deeper than the worker can read.
-pub fn problems(text: &str) -> Vec<Problem> {
+/// A JSON document as jsonParser reads it.
+struct Parsed {
+    /// Its value; `None` for an empty text, or one that starts with no value.
+    root: Option<Node>,
+    syntax_errors: Vec<Problem>,
+    comments: Vec<Range<usize>>,
+}
+
+/// jsonParser's `parse` of `text`; `None` when its arrays and objects nest deeper than the
+/// worker can read.
+fn parse(text: &str) -> Option<Parsed> {
     let mut parser = Parser {
         text,
         scanner: Scanner::new(text),
@@ -712,9 +739,29 @@ pub fn problems(text: &str) -> Vec<Problem> {
     }
     let Parser { problems: syntax_errors, comments, reading, .. } = parser;
     match reading {
-        Reading::Nested(_) => {}
-        Reading::TooDeep => return Vec::new(),
+        Reading::Nested(_) => Some(Parsed { root, syntax_errors, comments }),
+        Reading::TooDeep => None,
     }
+}
+
+/// The `$schema` of a document, which Monaco's worker reads it with: the root object's first
+/// `$schema` property whose value is a string (the schema service's `getSchemaFromProperty`).
+fn schema_of(root: Option<&Node>) -> Option<&[u16]> {
+    let Some(Node { kind: NodeKind::Object(properties), .. }) = root else {
+        return None;
+    };
+    properties.iter().find_map(|property| match &property.value {
+        Some(Node { kind: NodeKind::String(value), .. }) if property.key.value == utf16(b"$schema") => Some(value.as_slice()),
+        Some(_) | None => None,
+    })
+}
+
+/// The problems Monaco marks in `text`, a `json` file, by start; none when its arrays and
+/// objects nest deeper than the worker can read.
+pub fn problems(text: &str) -> Vec<Problem> {
+    let Some(Parsed { root, syntax_errors, comments }) = parse(text) else {
+        return Vec::new();
+    };
     let mut problems: Vec<Problem> = Vec::new();
     let mut add = |problem: Problem| {
         if !problems.iter().any(|added| added.range.start == problem.range.start && added.message == problem.message) {
@@ -725,11 +772,7 @@ pub fn problems(text: &str) -> Vec<Problem> {
     // property's value when that is `$schema`, else at the root's first character.
     if let Some(Node { range: root_range, kind: NodeKind::Object(properties) }) = &root {
         let is_schema = |key: &Key| key.value == utf16(b"$schema");
-        let schema = properties.iter().find_map(|property| match &property.value {
-            Some(Node { kind: NodeKind::String(value), .. }) if is_schema(&property.key) => Some(value),
-            Some(_) | None => None,
-        });
-        if let Some(schema) = schema {
+        if let Some(schema) = schema_of(root.as_ref()) {
             let id = schema_id(&String::from_utf16_lossy(schema));
             if !BUILT_IN_SCHEMAS.iter().any(|built_in| normalize_id(built_in) == id) {
                 let range = match properties.first() {

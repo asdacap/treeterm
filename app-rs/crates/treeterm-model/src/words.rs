@@ -281,10 +281,21 @@ pub fn suggestions(text: &str, others: &[String], offset: usize, trigger: Trigge
     Suggestions { replace, words: ranked.into_iter().map(|(_, word)| word.to_owned()).collect() }
 }
 
+/// Whether typing the character before byte `offset` of `text`, a file of Monaco's
+/// `language`, starts Monaco's quick suggestions (`LineContext.shouldAutoTrigger`): it ends a
+/// word, by the language's word pattern, that is not a number.
+pub fn ends_word(text: &str, offset: usize, language: &str) -> bool {
+    let word = pattern_word_around(word_pattern(language), text, offset);
+    !word.is_empty() && word.end == offset && !is_number(&text[word])
+}
+
 /// The bytes of a suggested `word` that match what was `typed`, as the suggest widget
-/// highlights them; none when they do not match.
+/// highlights them; none when they do not match. A suggestion matched by other text than its
+/// label (a JSON key, by its quoted form) is highlighted where the typed text matches it from
+/// one of its first characters on (`anyScore`).
 pub fn highlights(typed: &str, word: &str) -> Vec<Range<usize>> {
-    let Some(found) = fuzzy::score(typed, word) else {
+    let tails = typed.char_indices().map(|(at, _)| &typed[at..]).take(13);
+    let Some(found) = tails.filter_map(|tail| fuzzy::score(tail, word)).next() else {
         return Vec::new();
     };
     let starts: Vec<(usize, char)> = word.char_indices().collect();
@@ -394,6 +405,18 @@ mod tests {
         assert_eq!(highlights("fo", "foobar"), vec![0..2]);
         assert_eq!(highlights("éb", "éBar"), vec![0..3]);
         assert_eq!(highlights("oo", "foobar"), Vec::<Range<usize>>::new());
+        // From a later character of what was typed: a JSON key typed with its quote.
+        assert_eq!(highlights("\"na", "name"), vec![0..2]);
+        assert_eq!(highlights("xyz", "name"), Vec::<Range<usize>>::new());
+    }
+
+    #[test]
+    fn typing_the_end_of_a_word_that_is_no_number_starts_quick_suggestions() {
+        assert!(ends_word("let foo", 7, "rust"));
+        assert!(!ends_word("let foo", 6, "rust"));
+        assert!(!ends_word("let x = 12", 10, "rust"));
+        assert!(!ends_word("let x = ", 8, "rust"));
+        assert!(ends_word("{\"a\": tr", 8, "json"));
     }
 
     #[test]

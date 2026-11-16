@@ -8,7 +8,108 @@ use gpui::{
 };
 use gpui_base::TestSupportExt as _;
 use gpui_base::input::CompletionHighlighter;
+use gpui_base::input::RopeExt as _;
 use lsp_types::CompletionItem;
+
+/// TreeTerm patch: `item` with its snippet (`InsertTextFormat::SNIPPET`) expanded to the text
+/// it inserts, and the bytes of that text its first tab stop spans. `None` for plain text.
+fn expand_snippet_item(item: &CompletionItem) -> Option<(CompletionItem, Range<usize>)> {
+    if item.insert_text_format != Some(lsp_types::InsertTextFormat::SNIPPET) {
+        return None;
+    }
+    let mut item = item.clone();
+    let source = match &mut item.text_edit {
+        Some(lsp_types::CompletionTextEdit::Edit(edit)) => &mut edit.new_text,
+        Some(lsp_types::CompletionTextEdit::InsertAndReplace(edit)) => &mut edit.new_text,
+        None => match &mut item.insert_text {
+            Some(text) => text,
+            None => &mut item.label,
+        },
+    };
+    let (text, selection) = expand_snippet(source);
+    *source = text;
+    Some((item, selection))
+}
+
+/// TreeTerm patch: the text a snippet inserts, and the bytes of it its first tab stop spans:
+/// `$1` (or the lowest above 0, as `${2}` or `${2:placeholder}`, which spans its
+/// placeholder), else `$0`, else the end. `\$`, `\}` and `\\` stand for those characters;
+/// a choice (`${1|a,b|}`) inserts its first.
+fn expand_snippet(snippet: &str) -> (String, Range<usize>) {
+    let mut text = String::with_capacity(snippet.len());
+    // The first stop of each number, by number.
+    let mut stops: Vec<(usize, Range<usize>)> = Vec::new();
+    let mut stop = |number: usize, range: Range<usize>| {
+        if !stops.iter().any(|(seen, _)| *seen == number) {
+            stops.push((number, range));
+        }
+    };
+    let mut chars = snippet.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' => match chars.next_if(|next| matches!(next, '$' | '}' | '\\')) {
+                Some(escaped) => text.push(escaped),
+                None => text.push('\\'),
+            },
+            '$' if chars.peek().is_some_and(char::is_ascii_digit) => {
+                let mut number = String::new();
+                while let Some(digit) = chars.next_if(char::is_ascii_digit) {
+                    number.push(digit);
+                }
+                stop(number.parse().unwrap_or(usize::MAX), text.len()..text.len());
+            }
+            '$' if chars.peek() == Some(&'{') => {
+                let rest: String = chars.clone().collect();
+                let digits = rest[1..].chars().take_while(char::is_ascii_digit).count();
+                let after = rest[1 + digits..].chars().next();
+                if digits == 0 || !matches!(after, Some('}' | ':' | '|')) {
+                    text.push('$');
+                    continue;
+                }
+                let number = rest[1..1 + digits].parse().unwrap_or(usize::MAX);
+                for _ in 0..1 + digits + 1 {
+                    chars.next();
+                }
+                let start = text.len();
+                match after {
+                    Some(':') => {
+                        while let Some(c) = chars.next() {
+                            match c {
+                                '}' => break,
+                                '\\' => match chars.next_if(|next| matches!(next, '$' | '}' | '\\')) {
+                                    Some(escaped) => text.push(escaped),
+                                    None => text.push('\\'),
+                                },
+                                c => text.push(c),
+                            }
+                        }
+                    }
+                    Some('|') => {
+                        let mut first = true;
+                        while let Some(c) = chars.next() {
+                            match c {
+                                '|' if chars.peek() == Some(&'}') => {
+                                    chars.next();
+                                    break;
+                                }
+                                ',' => first = false,
+                                c if first => text.push(c),
+                                _ => {}
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                stop(number, start..text.len());
+            }
+            c => text.push(c),
+        }
+    }
+    let first = stops.iter().filter(|(number, _)| *number > 0).min_by_key(|(number, _)| *number);
+    let last = stops.iter().find(|(number, _)| *number == 0);
+    let selection = first.or(last).map_or(text.len()..text.len(), |(_, range)| range.clone());
+    (text, selection)
+}
 
 const MAX_MENU_HEIGHT: Pixels = px(240.);
 const POPOVER_GAP: Pixels = px(4.);
@@ -283,7 +384,25 @@ impl CompletionMenu {
 
         cx.spawn_in(window, async move |_, cx| {
             editor.update_in(cx, |editor, window, cx| {
+                // TreeTerm patch: a snippet is inserted as the text it stands for, its first
+                // tab stop selected (the cursor there), as Monaco's snippet controller
+                // leaves it. The Kit inserted the snippet's source, `$1` and all.
+                let Some((item, selection)) = expand_snippet_item(&item) else {
+                    editor.insert_completion(&item, range, window, cx);
+                    return;
+                };
+                let start = match &item.text_edit {
+                    Some(lsp_types::CompletionTextEdit::Edit(edit)) => {
+                        editor.text().position_to_offset(&edit.range.start)
+                    }
+                    Some(lsp_types::CompletionTextEdit::InsertAndReplace(edit)) => {
+                        editor.text().position_to_offset(&edit.replace.start)
+                    }
+                    None if item.insert_text.is_some() => range.end,
+                    None => range.start,
+                };
                 editor.insert_completion(&item, range, window, cx);
+                editor.set_selected_range(start + selection.start..start + selection.end, cx);
             })
         })
         .detach();
