@@ -30,9 +30,11 @@ pub(super) const CONTEXT: &str = "Review";
 /// header.
 const MATCH_AT: f32 = 1. / 3.;
 
+/// `isFindShortcut`: Cmd+F or Ctrl+F on every platform.
 pub fn bind_keys(cx: &mut App) {
     cx.bind_keys([
-        KeyBinding::new(if cfg!(target_os = "macos") { "cmd-f" } else { "ctrl-f" }, FindInDiff, Some(CONTEXT)),
+        KeyBinding::new("cmd-f", FindInDiff, Some(CONTEXT)),
+        KeyBinding::new("ctrl-f", FindInDiff, Some(CONTEXT)),
     ]);
 }
 
@@ -252,4 +254,30 @@ pub(super) fn diff_menu_at(
         _ => state.selected_text(cx),
     };
     DiffMenu::new(&selected, &word).map(|menu| (file, menu))
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui_kit::{Keystroke, TestAppContext};
+
+    use super::*;
+
+    /// `isFindShortcut` takes Cmd+F and Ctrl+F alike, on macOS and elsewhere, in the Review tab.
+    #[gpui_kit::test]
+    fn cmd_f_and_ctrl_f_both_find_on_every_platform(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            bind_keys(cx);
+            let keymap = cx.key_bindings();
+            let keymap = keymap.borrow();
+            for keys in ["cmd-f", "ctrl-f"] {
+                let typed = [Keystroke::parse(keys).expect("a keystroke")];
+                let finds = keymap
+                    .bindings_for_action(&FindInDiff)
+                    .any(|binding| binding.match_keystrokes(&typed) == Some(false));
+                assert!(finds, "{keys}");
+            }
+            let shift = [Keystroke::parse("cmd-shift-f").expect("a keystroke")];
+            assert!(!keymap.bindings_for_action(&FindInDiff).any(|binding| binding.match_keystrokes(&shift).is_some()));
+        });
+    }
 }
