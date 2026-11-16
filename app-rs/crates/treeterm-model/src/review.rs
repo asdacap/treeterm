@@ -555,6 +555,11 @@ pub fn unviewed_from<'a>(
     .map(String::as_str)
 }
 
+/// The tab state names a parent workspace (`parentWorkspaceId`, Electron's `hasParent`).
+fn names_parent(state: &Value) -> bool {
+    state.get("parentWorkspaceId").and_then(Value::as_str).is_some_and(|id| !id.is_empty())
+}
+
 /// The file Electron ends up making active when the diff's top band goes from `previous`
 /// to `band` (both in list order): the band's last file. A file entering the band is
 /// reported by `StackedDiffList`'s `IntersectionObserver`, but making it active renders
@@ -637,7 +642,7 @@ impl ReviewModel {
         cx: &mut Context<Self>,
     ) -> Self {
         let requested = ReviewMode::parse(state.get("viewMode").and_then(Value::as_str).unwrap_or(""));
-        let has_parent = state.get("parentWorkspaceId").and_then(Value::as_str).is_some_and(|id| !id.is_empty());
+        let has_parent = names_parent(state);
         // No base: nothing to diff the branch against (Uncommitted shows until there is one);
         // Commits lists the whole history.
         let (mode, fallback) = match (&base, requested) {
@@ -894,6 +899,21 @@ impl ReviewModel {
     /// The workspace is on another branch (a checkout, a rename): everything reloads.
     pub(crate) fn branch_changed(&mut self, cx: &mut Context<Self>) {
         self.reload_all(cx);
+    }
+
+    /// The tab's state as another window or Electron wrote it: its `parentWorkspaceId` picks
+    /// the header's actions (`hasParent`), and `base` (its `baseBranchOverride`, else the
+    /// parent's branch) is what it compares against. A change of either reloads everything,
+    /// as `ReviewBrowser`'s effect on `parentWorkspaceId` and `effectiveBaseBranch` does.
+    pub(crate) fn follow_state(&mut self, state: &Value, base: ReviewBase, cx: &mut Context<Self>) {
+        let has_parent = names_parent(state);
+        let parent_changed = has_parent != self.has_parent;
+        self.has_parent = has_parent;
+        if base != self.base {
+            self.compare_against(base, cx);
+        } else if parent_changed {
+            self.reload_all(cx);
+        }
     }
 
     /// Local then remote branches, each once, for the base picker.

@@ -1,7 +1,8 @@
 //! Open tabs follow the tab state another window (or Electron) writes, as Electron's
 //! components read it live: the Files tab's selection, expanded directories and
-//! `scrollToLine`, the Editor tab's text, unsaved mark and view mode, and the ports Web App
-//! and Browser tabs saved. Two windows on one workspace of a real in-process daemon.
+//! `scrollToLine`, the Editor tab's text, unsaved mark and view mode, a Review tab's base
+//! and parent, and the ports Web App and Browser tabs saved. Two windows on one workspace of
+//! a real in-process daemon.
 
 use std::time::Duration;
 
@@ -10,6 +11,7 @@ use serde_json::{Value, json};
 use treeterm_core::wire::stable_json::sha256_hex;
 use treeterm_model::browser_page::{BrowserPageModel, BrowserPhase};
 use treeterm_model::file_browser::{FileBrowser, FileView, Listing};
+use treeterm_model::review::{ReviewBase, ReviewContent, ReviewModel};
 use treeterm_model::session_store::{SessionState, SessionStore, WorkspaceEntry};
 use treeterm_model::settings_store::SettingsStore;
 use treeterm_model::text_editor::{EditorDoc, TextEditor};
@@ -19,7 +21,7 @@ use treeterm_model::workspace_store::{TabContent, WorkspaceStore};
 use treeterm_proto::treeterm::WorkspaceRef;
 
 mod common;
-use common::{Harness, harness, wait_until};
+use common::{Harness, harness, wait_until, wait_until_app};
 
 const ID: &str = "ws";
 
@@ -225,6 +227,17 @@ fn page_of(
     match workspace.read_with(cx, |w, _| w.tab_content(tab)) {
         Some(TabContent::Browser { page, .. }) => page,
         _ => panic!("not a Browser tab"),
+    }
+}
+
+fn review_of(
+    cx: &mut TestAppContext,
+    workspace: &Entity<WorkspaceStore>,
+    tab: &str,
+) -> Entity<ReviewModel> {
+    match workspace.read_with(cx, |w, _| w.tab_content(tab)) {
+        Some(TabContent::Review(review)) => review,
+        _ => panic!("not a Review tab"),
     }
 }
 
@@ -629,4 +642,99 @@ fn web_app_and_browser_tabs_take_the_ports_another_window_saves(cx: &mut TestApp
     wait_until(cx, &browser, |p| p.local_port().is_none());
     assert_eq!(ports(cx), ((Some(2), None), None));
     assert_eq!(phases(cx), before_phases);
+}
+
+#[gpui_kit::test]
+fn a_review_follows_the_base_and_the_parent_another_window_gives_its_tab(cx: &mut TestAppContext) {
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let w = open_windows(cx, &[("a.txt", "one\n")]);
+    // The workspace's directory as a repo on `feature`, a commit past `main`.
+    let git = |args: &[&str]| {
+        let out = std::process::Command::new("git")
+            .args(args)
+            .current_dir(&w.dir)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+    git(&["init", "-q", "-b", "main"]);
+    git(&["config", "user.email", "t@t"]);
+    git(&["config", "user.name", "t"]);
+    git(&["add", "-A"]);
+    git(&["commit", "-q", "-m", "on main"]);
+    git(&["checkout", "-q", "-b", "feature"]);
+    std::fs::write(w.path("a.txt"), "ONE\n").unwrap();
+    git(&["commit", "-q", "-am", "on feature"]);
+    let tab = w.add_tab(cx, "review", json!({ "viewMode": "commits" }));
+    let review = review_of(cx, &w.a, &tab);
+    let commits = |r: &ReviewModel| match r.content() {
+        ReviewContent::Commits(commits) => commits.into_iter().map(|c| c.message).collect(),
+        _ => Vec::new(),
+    };
+    // A top-level workspace's: no base (the whole history), the top-level actions.
+    wait_until(cx, &review, |r| {
+        commits(r) == ["on feature", "on main"] && !r.is_loading()
+    });
+    assert_eq!(
+        review.read_with(cx, |r, _| r.base().clone()),
+        ReviewBase::None
+    );
+    assert!(!review.read_with(cx, |r, cx| r.header(cx).has_parent));
+
+    // Another window picks `main` as the base: this one compares against it too.
+    w.b_writes(cx, &tab, |state| {
+        state["baseBranchOverride"] = json!("main")
+    });
+    wait_until(cx, &review, |r| {
+        *r.base() == ReviewBase::Branch("main".into())
+            && commits(r) == ["on feature"]
+            && !r.is_loading()
+    });
+
+    // A commit is picked here; the other window names a parent: the child's actions show,
+    // and everything reloads (the commit picked goes), the base staying.
+    let hash = review.read_with(cx, |r, _| match r.content() {
+        ReviewContent::Commits(commits) => commits[0].hash.clone(),
+        other => panic!("{other:?}"),
+    });
+    review.update(cx, |r, cx| r.select_commit(&hash, cx));
+    w.quiet(cx);
+    assert!(review.read_with(cx, |r, _| r.selected_commit().is_some()));
+    w.b_writes(cx, &tab, |state| {
+        state["parentWorkspaceId"] = json!("parent")
+    });
+    wait_until_app(cx, &review, |r, cx| r.header(cx).has_parent);
+    assert!(review.read_with(cx, |r, _| r.selected_commit().is_none()));
+    assert_eq!(
+        review.read_with(cx, |r, _| r.base().clone()),
+        ReviewBase::Branch("main".into())
+    );
+
+    // It resets the base and drops the parent: back to the whole history, top-level.
+    w.b_writes(cx, &tab, |state| {
+        let state = state.as_object_mut().unwrap();
+        state.remove("baseBranchOverride");
+        state.remove("parentWorkspaceId");
+    });
+    wait_until_app(cx, &review, |r, cx| {
+        *r.base() == ReviewBase::None
+            && !r.header(cx).has_parent
+            && commits(r) == ["on feature", "on main"]
+            && !r.is_loading()
+    });
+    // Following it wrote nothing back.
+    w.quiet(cx);
+    let state = w.disk_state(&tab);
+    assert_eq!(
+        (
+            state.get("baseBranchOverride"),
+            state.get("parentWorkspaceId")
+        ),
+        (None, None)
+    );
 }

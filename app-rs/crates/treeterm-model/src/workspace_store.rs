@@ -1009,10 +1009,11 @@ impl WorkspaceStore {
     }
 
     /// Tabs whose components read their state live in Electron follow it as another writer
-    /// left it: the Files tab (`FilesystemBrowser`), the Editor tab (`FileEditor`) and System
+    /// left it: the Files tab (`FilesystemBrowser`), the Editor tab (`FileEditor`), System
     /// Prompt Debuggers (`bufferText`, which SystemPromptDebugger re-reads on every store
-    /// change). Web App and Browser tabs take its saved ports, which Electron re-reads as
-    /// they start (`readState`).
+    /// change) and Review tabs (`parentWorkspaceId` and `baseBranchOverride`, which
+    /// `ReviewBrowser` reads from the tab's state). Web App and Browser tabs take its saved
+    /// ports, which Electron re-reads as they start (`readState`).
     fn follow_tab_states(&self, cx: &mut Context<Self>) {
         for (tab_id, tab) in &self.tabs {
             let state = &self.workspace.file.app_states[tab_id].state;
@@ -1023,7 +1024,11 @@ impl WorkspaceStore {
                     model.update(cx, |model, cx| model.follow_state(state, cx));
                 }
                 TabRef::Browser { page, .. } => page.update(cx, |page, _| page.follow_state(state)),
-                TabRef::Terminal(_) | TabRef::Review { .. } | TabRef::Tool(_) => {}
+                TabRef::Review { model, .. } => {
+                    let base = review_base(state, self.parent_branch.as_deref());
+                    model.update(cx, |model, cx| model.follow_state(state, base, cx));
+                }
+                TabRef::Terminal(_) | TabRef::Tool(_) => {}
             }
         }
         for (tab_id, web_app) in &self.web_apps {
@@ -2211,9 +2216,9 @@ impl WorkspaceStore {
 
     /// A body written elsewhere, with hash `sha`, replaces ours (`applyWorkspaceFile`): tabs
     /// it dropped are detached, new tabs initialised, a terminal whose tab now names
-    /// another PTY re-attaches, the others take their tab's width limit, and Files, Editor
-    /// and debugger tabs follow their tab's state. Emits no change: the body is already on
-    /// disk.
+    /// another PTY re-attaches, the others take their tab's width limit, and Files, Editor,
+    /// debugger and Review tabs follow their tab's state. Emits no change: the body is
+    /// already on disk.
     pub fn apply_external(&mut self, mut file: WorkspaceFile, sha: &str, cx: &mut Context<Self>) {
         let removed: Vec<String> = self
             .workspace
