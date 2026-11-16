@@ -590,7 +590,9 @@ impl Render for SessionInfoView {
         if active != Tab::Tty {
             self.ttys = None;
         }
-        if !(ssh && connected) {
+        // Electron keeps the dialog, and what was typed into it, while the session is remote,
+        // whatever the tab and the connection do meanwhile.
+        if !remote {
             self.forward_dialog = None;
         }
         let body = match active {
@@ -625,7 +627,134 @@ impl Render for SessionInfoView {
 
 #[cfg(test)]
 mod tests {
-    use super::electron_order;
+    use std::path::Path;
+    use std::sync::{Arc, LazyLock};
+
+    use gpui_kit::{App, AppContext as _, Entity, TestAppContext, VisualTestContext};
+    use treeterm_core::connection::fake::FakeSpawner;
+    use treeterm_core::connection::ssh::DaemonBinaries;
+    use treeterm_core::connection::{ConnectionId, OutdatedDaemon, SshEnvironment};
+    use treeterm_core::settings::{ConnectionLabel, Extra, IdentityFile, SshConnectionConfig};
+    use treeterm_model::app_store::{AppStore, ConnState};
+    use treeterm_model::session_names::SessionNames;
+    use treeterm_model::settings_store::SettingsStore;
+
+    use super::forward_dialog::ForwardDialog;
+    use super::{SessionInfoView, electron_order};
+
+    /// A store whose local daemon is nowhere (its connection fails at once) and whose ssh
+    /// never answers (a remote connection stays connecting), on a runtime that outlives the
+    /// test, with a saved connection to `test@example.com` (`remote-1`) under way.
+    fn app_store(cx: &mut App, dir: &Path) -> Entity<AppStore> {
+        static RUNTIME: LazyLock<tokio::runtime::Runtime> =
+            LazyLock::new(|| tokio::runtime::Runtime::new().expect("a tokio runtime"));
+        let rt = treeterm_core::rt::Rt::new(RUNTIME.handle().clone());
+        let spec = treeterm_core::local_daemon::LocalDaemonSpec {
+            socket_path: dir.join("none.sock"),
+            binary: dir.join("never-spawned"),
+            log_path: dir.join("daemon.log"),
+            pid_file: dir.join("daemon.pid"),
+        };
+        let ssh = SshEnvironment { daemon_binaries: DaemonBinaries::new(dir.to_owned()), forward_socket_dir: dir.join("s") };
+        let settings = cx.new(|_| SettingsStore::in_memory(Default::default()));
+        let store = cx.new(|cx| AppStore::with_ssh(rt, spec, Arc::new(FakeSpawner::new()), ssh, settings, cx));
+        let config = SshConnectionConfig {
+            id: "remote-1".to_owned(),
+            host: "example.com".to_owned(),
+            user: "test".to_owned(),
+            port: 22,
+            identity_file: IdentityFile::SshDefault,
+            label: ConnectionLabel::UserAtHost,
+            port_forwards: Vec::new(),
+            extra: Extra::new(),
+        };
+        store.update(cx, |store, cx| store.connect_remote(config, OutdatedDaemon::Report, cx));
+        store
+    }
+
+    pub(super) fn draw(cx: &mut VisualTestContext) {
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+    }
+
+    /// Which session a test's pane is of.
+    pub(super) enum Session {
+        /// `remote-1`, connecting.
+        Remote,
+        Local,
+    }
+
+    /// The pane of `session`, drawn.
+    pub(super) fn pane<'a>(
+        cx: &'a mut TestAppContext,
+        dir: &Path,
+        session: Session,
+    ) -> (Entity<SessionInfoView>, Entity<AppStore>, &'a mut VisualTestContext) {
+        // The store's connections are driven on tokio, which wakes their status tasks from there.
+        cx.executor().allow_parking();
+        let (store, names) = cx.update(|cx| {
+            gpui_kit::init(cx);
+            crate::theme::install(cx);
+            (app_store(cx, dir), cx.new(|_| SessionNames::new(None)))
+        });
+        let id = match session {
+            Session::Remote => ConnectionId::new("remote-1"),
+            Session::Local => {
+                cx.update(|cx| store.read(cx).sessions().find(|slot| slot.is_local()).expect("local").id.clone())
+            }
+        };
+        let (view, cx) = cx.add_window_view({
+            let store = store.clone();
+            move |window, cx| SessionInfoView::new(store, names, id, window, cx)
+        });
+        draw(cx);
+        (view, store, cx)
+    }
+
+    /// The pane's "+ Add Port Forward", then a frame.
+    pub(super) fn open_dialog(view: &Entity<SessionInfoView>, cx: &mut VisualTestContext) {
+        cx.update(|window, cx| view.update(cx, |view, cx| view.open_forward_dialog(window, cx)));
+        draw(cx);
+    }
+
+    pub(super) fn dialog(view: &Entity<SessionInfoView>, cx: &mut VisualTestContext) -> Option<Entity<ForwardDialog>> {
+        cx.update(|_, cx| view.read(cx).forward_dialog.clone())
+    }
+
+    /// `showPortForwardDialog && isRemote`: while the session is remote the dialog stays, and
+    /// what was typed into it with it, whatever the connection does (here it is not
+    /// connected, as after a drop) and whatever tab is shown.
+    #[gpui_kit::test]
+    fn the_port_forward_dialog_stays_while_the_session_is_remote(cx: &mut TestAppContext) {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let (view, store, cx) = pane(cx, dir.path(), Session::Remote);
+        let connecting = cx.update(|_, cx| {
+            let slot = store.read(cx).session_slot(&ConnectionId::new("remote-1"));
+            matches!(slot.map(|slot| &slot.state), Some(ConnState::Connecting(_)))
+        });
+        assert!(connecting, "not connected");
+
+        open_dialog(&view, cx);
+        let opened = dialog(&view, cx).expect("open");
+        cx.update(|_, cx| {
+            view.update(cx, |view, cx| {
+                view.selected = Some(super::Tab::Info);
+                cx.notify();
+            })
+        });
+        draw(cx);
+        draw(cx);
+        assert_eq!(dialog(&view, cx), Some(opened), "the same dialog");
+    }
+
+    /// A local session has no port forwards: the dialog goes.
+    #[gpui_kit::test]
+    fn a_local_session_drops_the_port_forward_dialog(cx: &mut TestAppContext) {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let (view, _, cx) = pane(cx, dir.path(), Session::Local);
+        open_dialog(&view, cx);
+        assert_eq!(dialog(&view, cx), None);
+    }
 
     #[test]
     fn the_json_tab_lists_keys_in_electrons_order() {
