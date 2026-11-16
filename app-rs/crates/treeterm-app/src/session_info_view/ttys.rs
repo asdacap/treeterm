@@ -4,9 +4,12 @@
 
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::*;
-use gpui_kit::{AnyElement, Context, Entity, FontWeight, SharedString, Subscription, Window, div, px, rgb};
+use gpui_kit::{
+    AnyElement, App, AvailableSpace, ContentMask, Context, Div, Entity, FontWeight, Pixels, ScrollHandle, SharedString,
+    Subscription, Window, canvas, div, point, px, rgb, size,
+};
 use treeterm_core::connection::ConnectionId;
-use treeterm_model::active_processes::relative_time;
+use treeterm_model::active_processes::{PtyGroup, relative_time};
 use treeterm_model::app_store::AppStore;
 use treeterm_model::session_tty_list::{SessionTtyList, TtyListBody};
 use treeterm_model::terminal::TerminalModel;
@@ -22,6 +25,8 @@ pub struct SessionTtys {
     list: Entity<SessionTtyList>,
     /// The viewer of the selected PTY's terminal.
     viewer: Option<(Entity<TerminalModel>, Entity<TerminalView>)>,
+    /// `.tty-list-rows`, one child per workspace group: where the pinned header goes.
+    scroll: ScrollHandle,
     _observe: Subscription,
 }
 
@@ -29,7 +34,7 @@ impl SessionTtys {
     pub fn new(app: &Entity<AppStore>, id: ConnectionId, cx: &mut Context<Self>) -> Self {
         let list = cx.new(|cx| SessionTtyList::new(app, id, cx));
         let observe = cx.observe(&list, |_, _, cx| cx.notify());
-        Self { list, viewer: None, _observe: observe }
+        Self { list, viewer: None, scroll: ScrollHandle::new(), _observe: observe }
     }
 
     /// `.tty-list-refresh-btn` / `.tty-list-open-btn`.
@@ -62,6 +67,7 @@ impl SessionTtys {
     fn body(&self, body: TtyListBody, cx: &mut Context<Self>) -> AnyElement {
         let c = colors(cx);
         let (secondary, primary, border) = (c.text_secondary, c.text_primary, c.border);
+        // `.tty-list-empty` / `.tty-list-error`: wrapped lines are centred too.
         let centered = |child: AnyElement| {
             v_flex()
                 .flex_1()
@@ -69,6 +75,7 @@ impl SessionTtys {
                 .justify_center()
                 .p(px(32.))
                 .text_size(px(13.)).line_height(normal_line(13.))
+                .text_center()
                 .text_color(secondary)
                 .child(child)
                 .into_any_element()
@@ -97,24 +104,15 @@ impl SessionTtys {
             return centered(div().child("No TTY sessions").into_any_element());
         }
         let now = treeterm_model::tool_tabs::tty_list::now_millis();
-        let mut rows = v_flex().id("session-tty-rows").flex_1().min_h_0().overflow_y_scroll();
+        let labels: Vec<SharedString> = groups.iter().map(header_label).collect();
+        let mut rows = v_flex().id("session-tty-rows").flex_1().min_h_0().overflow_y_scroll().track_scroll(&self.scroll);
         for (g, group) in groups.into_iter().enumerate() {
-            rows = rows.child(
-                div()
-                    .px(px(16.))
-                    .py(px(6.))
-                    .bg(c.bg_secondary)
-                    .border_b_1()
-                    .border_color(border)
-                    .text_size(px(11.)).line_height(normal_line(11.))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(secondary)
-                    .child(format!("{} ({})", group.label, group.sessions.len()).to_uppercase()),
-            );
+            // `.tty-list-group`: the header and its rows.
+            let mut section = v_flex().child(group_header(labels[g].clone(), cx));
             for (i, session) in group.sessions.into_iter().enumerate() {
                 let (open, kill) = (session.id.clone(), session.id.clone());
                 let short: String = session.id.chars().take(8).collect();
-                rows = rows.child(
+                section = section.child(
                     h_flex()
                         .justify_between()
                         .gap(px(16.))
@@ -149,14 +147,87 @@ impl SessionTtys {
                         ),
                 );
             }
+            rows = rows.child(section);
         }
-        rows.into_any_element()
+        v_flex()
+            .relative()
+            .flex_1()
+            .min_h_0()
+            .child(rows)
+            .child(pinned_header(self.scroll.clone(), labels))
+            .into_any_element()
     }
+}
+
+/// `.tty-list-group-header`'s text: `Name (count)`, uppercased.
+fn header_label(group: &PtyGroup) -> SharedString {
+    format!("{} ({})", group.label, group.sessions.len()).to_uppercase().into()
+}
+
+/// `.tty-list-group-header`.
+fn group_header(label: SharedString, cx: &App) -> Div {
+    let c = colors(cx);
+    div()
+        .px(px(16.))
+        .py(px(6.))
+        .bg(c.bg_secondary)
+        .border_b_1()
+        .border_color(c.border)
+        .text_size(px(11.)).line_height(normal_line(11.))
+        .font_weight(FontWeight::SEMIBOLD)
+        .text_color(c.text_secondary)
+        .child(label)
+}
+
+/// The group headers are `position: sticky; top: 0` in their group: a copy of the top
+/// group's header is drawn over the rows once its own has scrolled above the top, until the
+/// end of the group pushes it out. It is placed after the rows have laid out in the same
+/// frame, so it never lags the scroll.
+fn pinned_header(scroll: ScrollHandle, labels: Vec<SharedString>) -> impl IntoElement {
+    canvas(
+        move |_, window, cx| {
+            let ix = scroll.top_item();
+            let (label, group) = (labels.get(ix)?, scroll.bounds_for_item(ix)?);
+            let viewport = scroll.bounds();
+            // A group's bounds are where it lies unscrolled.
+            let offset = scroll.offset().y;
+            // Blocks clicks and hovers on the rows beneath, but not the wheel.
+            let mut header = group_header(label.clone(), cx)
+                .w(viewport.size.width)
+                .block_mouse_except_scroll()
+                .into_any_element();
+            let available = size(AvailableSpace::Definite(viewport.size.width), AvailableSpace::MinContent);
+            let height = header.layout_as_root(available, window, cx).height;
+            let top = pinned_top(viewport.top(), (group.top() + offset, group.bottom() + offset), height)?;
+            let mask = ContentMask { bounds: viewport };
+            window.with_content_mask(Some(mask), |window| header.prepaint_at(point(viewport.left(), top), window, cx));
+            Some((header, mask))
+        },
+        |_, pinned, window, cx| {
+            if let Some((mut header, mask)) = pinned {
+                window.with_content_mask(Some(mask), |window| header.paint(window, cx));
+            }
+        },
+    )
+    .absolute()
+    .inset_0()
+}
+
+/// Where the pinned header goes for a group spanning `group` (top, bottom) under a list
+/// whose top is `viewport_top`: `None` while the group's own header is still in view; else
+/// at the top, or above it once the group ends within a header's height of the top.
+fn pinned_top(viewport_top: Pixels, group: (Pixels, Pixels), header: Pixels) -> Option<Pixels> {
+    let (top, bottom) = group;
+    (top < viewport_top).then(|| viewport_top.min(bottom - header))
 }
 
 impl Render for SessionTtys {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let body = self.list.read(cx).body(cx);
+        if !matches!(body, TtyListBody::Loaded(_)) {
+            // `.tty-list-rows` is not mounted: listed again, it starts at the top.
+            self.scroll = ScrollHandle::new();
+        }
         if body == TtyListBody::NotConnected {
             self.viewer = None;
             return self.body(body, cx);
@@ -227,5 +298,24 @@ impl Render for SessionTtys {
             .child(self.body(body, cx))
             .children(dialog)
             .into_any_element()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::pinned_top;
+    use gpui_kit::px;
+
+    #[test]
+    fn the_pinned_header_follows_css_sticky() {
+        let header = px(26.);
+        // The group's own header is still in view: nothing is pinned.
+        assert_eq!(pinned_top(px(100.), (px(100.), px(400.)), header), None);
+        assert_eq!(pinned_top(px(100.), (px(150.), px(400.)), header), None);
+        // Scrolled into the group: pinned at the top.
+        assert_eq!(pinned_top(px(100.), (px(40.), px(400.)), header), Some(px(100.)));
+        // The group ends within a header's height of the top: pushed up by its end.
+        assert_eq!(pinned_top(px(100.), (px(40.), px(110.)), header), Some(px(84.)));
+        assert_eq!(pinned_top(px(100.), (px(40.), px(100.)), header), Some(px(74.)));
     }
 }
