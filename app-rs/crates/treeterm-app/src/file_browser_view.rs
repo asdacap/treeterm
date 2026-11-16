@@ -7,7 +7,9 @@
 //!
 //! In the viewer, Cmd/Ctrl+F opens the search panel with the selection, Cmd/Ctrl+click or
 //! F12 goes to the definition of the word under the cursor, and the context menu offers
-//! both. Holding Cmd/Ctrl over a word with a definition underlines it.
+//! both. Holding Cmd/Ctrl over a word with a definition underlines it. The language
+//! workers' problems are marked, CSS colours painted and links underlined; Cmd/Ctrl+click
+//! opens a link ([`crate::editor_hooks`]).
 //!
 //! A click on a line number starts a review comment on that line. Commented lines are
 //! tinted with a bar in the glyph margin (Monaco's `.comment-line` / `.comment-glyph`);
@@ -440,6 +442,10 @@ pub struct FileBrowserView {
     gutter: Option<gpui_kit::component::input::GutterDecorationCollection>,
     /// The editor's bracket pair colours ([`bracket_colors`]).
     brackets: Option<gpui_kit::component::input::TextDecorationCollection>,
+    /// The editor's links, underlined ([`crate::editor_hooks::link_underlines`]).
+    links: Option<gpui_kit::component::input::TextDecorationCollection>,
+    /// The language worker's problems in the editor's file.
+    problems: Option<crate::editor_hooks::ProblemMarks>,
     /// The model's last [`treeterm_model::file_browser::Reveal`] applied to the editor.
     revealed: u64,
     /// The search panel's query box, made when the panel first opens (it needs the window).
@@ -654,6 +660,8 @@ impl FileBrowserView {
             editor: None,
             gutter: None,
             brackets: None,
+            links: None,
+            problems: None,
             revealed: 0,
             search_input: None,
             search_results: crate::search_panel::ResultsList::new(),
@@ -730,12 +738,19 @@ impl FileBrowserView {
             return editor.clone();
         }
         let language = language_for(path);
-        let brackets = bracket_colors(text, detect_monaco_language(path));
+        let monaco_language = detect_monaco_language(path);
+        let brackets = bracket_colors(text, monaco_language);
+        let links = crate::editor_hooks::link_underlines(text);
         let text = text.to_owned();
         // Not searchable: Cmd/Ctrl+F reaches this view's search panel instead.
         let editor = cx.new(|cx| code_editor(language, text, window, cx).searchable(false));
         self.gutter = Some(monaco_gutter(&editor, true, &self.pointer_over, cx));
         self.brackets = Some(editor.update(cx, |editor, cx| editor.create_decorations_collection(brackets, cx)));
+        self.links = Some(editor.update(cx, |editor, cx| editor.create_decorations_collection(links, cx)));
+        let mut problems = crate::editor_hooks::ProblemMarks::new(monaco_language, path.to_owned());
+        problems.mark(&editor, cx);
+        self.problems = Some(problems);
+        crate::editor_hooks::install_colors(&editor, monaco_language, cx);
         self.comment_lines = Some(editor.update(cx, |editor, cx| editor.create_range_decorations_collection(Vec::new(), cx)));
         if let Some(probe) = self.model.read(cx).definition_probe() {
             let model = self.model.downgrade();

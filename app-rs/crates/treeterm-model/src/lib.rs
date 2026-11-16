@@ -9,6 +9,7 @@ pub mod analyzer;
 pub mod app_store;
 pub mod auto_open;
 pub mod bracket_pairs;
+pub mod code_intel;
 pub mod browser_page;
 pub mod apps;
 pub mod child_dialog;

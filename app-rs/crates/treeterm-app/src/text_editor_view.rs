@@ -7,7 +7,9 @@
 //! under the cursor (holding Cmd/Ctrl over a word with one underlines it); Cmd/Ctrl+F2
 //! puts a cursor on every occurrence of the word or selection (Change All Occurrences);
 //! typing a word suggests the document's words that have its letters in order, the first
-//! at a word start or camelCase hump (Ctrl+Space asks).
+//! at a word start or camelCase hump (Ctrl+Space asks). The language
+//! workers' problems are marked again as the text changes, CSS colours are painted and
+//! links underlined; Cmd/Ctrl+click opens a link ([`crate::editor_hooks`]).
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -65,6 +67,8 @@ pub struct TextEditorView {
     pointer_over: PointerOver,
     /// The current press went to an underlined definition ([`crate::editor_hooks::definition_frame`]).
     definition_clicked: Rc<Cell<bool>>,
+    /// The language worker's problems in the file, marked again at every change.
+    problems: crate::editor_hooks::ProblemMarks,
     preview_scroll: gpui_kit::ScrollHandle,
     _subscriptions: Vec<Subscription>,
 }
@@ -72,12 +76,14 @@ pub struct TextEditorView {
 impl TextEditorView {
     pub fn new(model: Entity<TextEditor>, cx: &mut Context<Self>) -> Self {
         let observe = cx.observe(&model, |_, _, cx| cx.notify());
+        let problems = crate::editor_hooks::ProblemMarks::new(model.read(cx).language(), model.read(cx).path().to_owned());
         Self {
             model,
             editor: None,
             gutter: None,
             pointer_over: PointerOver::default(),
             definition_clicked: Rc::new(Cell::new(false)),
+            problems,
             preview_scroll: gpui_kit::ScrollHandle::new(),
             _subscriptions: vec![observe],
         }
@@ -94,14 +100,20 @@ impl TextEditorView {
         let language = language_for(self.model.read(cx).path());
         let monaco_language = self.model.read(cx).language();
         let brackets = crate::file_browser_view::bracket_colors(&current, monaco_language);
+        let links = crate::editor_hooks::link_underlines(&current);
         let editor = cx.new(|cx| crate::file_browser_view::code_editor(language, current, window, cx));
         self.gutter = Some(crate::file_browser_view::monaco_gutter(&editor, false, &self.pointer_over, cx));
         let brackets = editor.update(cx, |editor, cx| editor.create_decorations_collection(brackets, cx));
+        let links = editor.update(cx, |editor, cx| editor.create_decorations_collection(links, cx));
+        self.problems.mark(&editor, cx);
+        crate::editor_hooks::install_colors(&editor, monaco_language, cx);
         let model = self.model.clone();
-        let changes = cx.subscribe(&editor, move |_, editor, event: &InputEvent, cx| {
+        let changes = cx.subscribe(&editor, move |view, editor, event: &InputEvent, cx| {
             if let InputEvent::Change = event {
                 let text = editor.read(cx).value().to_string();
                 brackets.set(crate::file_browser_view::bracket_colors(&text, monaco_language), cx);
+                links.set(crate::editor_hooks::link_underlines(&text), cx);
+                view.problems.mark(&editor, cx);
                 editor.update(cx, |editor, cx| crate::file_browser_view::fit_glyph_strip(editor, false, cx));
                 model.update(cx, |model, cx| model.set_content(text, cx));
             }

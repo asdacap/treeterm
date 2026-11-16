@@ -113,7 +113,12 @@ Done (tested against a real in-process daemon unless noted):
   definition (F12, Cmd/Ctrl+click, the context menu; a word with a definition is underlined
   while Cmd/Ctrl is held over it), review comments (click a line number; commented lines
   marked in the glyph margin); editor tab with go to definition, Change All Occurrences
-  (Cmd/Ctrl+F2) and word suggestions while typing (Ctrl+Space asks).
+  (Cmd/Ctrl+F2) and word suggestions while typing (Ctrl+Space asks). Both code editors
+  mark problems (their message on hover): JSON's (Monaco's JSON worker, ported), TypeScript
+  and JavaScript syntax errors, and CSS lint warnings (empty rules, unknown and duplicate
+  properties, unknown at-rules, incomplete `@font-face`); they paint CSS, SCSS and Less
+  colours, and underline links (`http(s)://`, `file://`), which Cmd/Ctrl+click opens in the
+  browser ("Follow link (cmd + click)" on hover).
 - **Review (M7):** committed / uncommitted / commits views, stage/unstage/commit, inline
   comments (Electron's metadata format), viewed files, image diffs (before / after, SVG
   included), each file's diff loading, failing (also when its part of the patch does not
@@ -265,10 +270,17 @@ The chrome was matched to Electron's computed styles, measured side by side on o
   grammar: `.r` files are plain, and `.xml`, `.less` and `.dockerfile` files are coloured
   with the HTML, CSS and shell grammars. The word underlined under Cmd/Ctrl keeps the
   text's colour (Monaco's link is `#4E94CE`).
-- The Editor tab has no language services: its suggestions are the file's own words (Monaco
-  also takes words from other open files of the same language, offers TypeScript /
-  JavaScript, JSON, CSS and HTML IntelliSense, and suggests nothing while typing in comments
-  and strings), there are no hovers or error squiggles, and its right-click menu has no Go to
+- There are no language servers behind the code editors. Monaco's TypeScript / JavaScript
+  service (semantic errors such as unresolved imports, IntelliSense, hover types, signature
+  help, references), JSON schemas (validation, completion, hover), hover documentation, CSS
+  and HTML completion, and formatting are missing. TypeScript and JavaScript syntax errors are read from GPUI Kit's tree-sitter
+  grammars, not TypeScript's parser: they are marked where the parse fails, as "';'
+  expected."-style messages or "Unexpected token.", and a `.tsx` file is read with JSX
+  (Monaco's worker reads it as plain TypeScript and marks the JSX). CSS files get the lint
+  warnings that read rules and declarations, not the CSS parser's errors; SCSS and Less files
+  get none. Colours are painted behind their text, not as a swatch before it. The Editor tab's
+  suggestions are the file's own words (Monaco also takes words from other open files of the
+  same language, and suggests nothing while typing in comments and strings). The right-click menu has no Go to
   References, Peek, Format Document or Command Palette. Tab indents while suggestions are
   open (Enter takes one, as in Monaco).
 - Neither the Files viewer nor the Editor tab has Monaco's Peek Definition (Alt+F12, and

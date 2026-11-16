@@ -9,7 +9,7 @@
 
 use std::sync::Arc;
 
-use gpui_kit::component::highlighter::{HighlightTheme, SyntaxColors};
+use gpui_kit::component::highlighter::{HighlightTheme, StatusColors, SyntaxColors};
 use gpui_kit::{Hsla, rgb, rgba};
 
 fn color(hex: u32) -> Option<Hsla> {
@@ -31,7 +31,33 @@ pub fn theme() -> Arc<HighlightTheme> {
     style.editor_invisible = Some(rgba(0xe3e4e229).into());
     style.editor_gutter_background = color(0x1e1e1e);
     style.syntax = syntax();
+    style.status = status();
     Arc::new(theme)
+}
+
+/// The language workers' squiggles in `vs-dark`'s `editorError.foreground`,
+/// `editorWarning.foreground` and `editorInfo.foreground`; their message on hover in the
+/// hover widget's `editorHoverWidget.background` and `.border`.
+fn status() -> StatusColors {
+    let colors = serde_json::json!({
+        "error": "#F14C4C",
+        "error.background": "#252526",
+        "error.border": "#454545",
+        "warning": "#CCA700",
+        "warning.background": "#252526",
+        "warning.border": "#454545",
+        "info": "#3794FF",
+        "info.background": "#252526",
+        "info.border": "#454545",
+    });
+    match serde_json::from_value(colors) {
+        Ok(status) => status,
+        // The table above is fixed; a field GPUI Kit renamed would land here (and in the test).
+        Err(error) => {
+            tracing::error!(%error, "vs-dark status colours did not parse");
+            HighlightTheme::default_dark().style.status.clone()
+        }
+    }
 }
 
 fn syntax() -> SyntaxColors {
@@ -86,6 +112,13 @@ fn syntax() -> SyntaxColors {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_status_table_parses() {
+        let colors = serde_json::to_value(status()).unwrap();
+        assert_eq!(colors["error"], serde_json::to_value(Hsla::from(rgb(0xf14c4c))).unwrap());
+        assert_eq!(colors["warning.border"], serde_json::to_value(Hsla::from(rgb(0x454545))).unwrap());
+    }
 
     #[test]
     fn the_syntax_table_parses() {
