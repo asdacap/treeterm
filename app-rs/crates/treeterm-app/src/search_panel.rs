@@ -3,6 +3,7 @@
 //! does is the caller's.
 
 use std::rc::Rc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use gpui_kit::assets::IconName;
 use gpui_kit::component::input::{Escape, Input, InputState};
@@ -37,6 +38,9 @@ pub struct PanelActions {
 
 /// The results list, told which rows changed so its scroll position survives appended hits.
 pub struct ResultsList {
+    /// Names this list's scrollbar. Every panel on screen (a Files tab and a Review tab side
+    /// by side) has its own, so dragging one thumb moves only its own list.
+    id: usize,
     /// One item more than `rows`: the bottom padding.
     list: ListState,
     rows: Vec<SearchRow>,
@@ -44,9 +48,19 @@ pub struct ResultsList {
 
 impl ResultsList {
     pub fn new() -> Self {
-        // Every row is measured, so the scrollbar knows the whole height, as Chromium's does:
-        // the first layout measures them all, and a later one the rows `sync` marks.
-        Self { list: ListState::new(1, ListAlignment::Top, px(200.)).measure_all(), rows: Vec::new() }
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        Self {
+            id: NEXT.fetch_add(1, Ordering::Relaxed),
+            // Every row is measured, so the scrollbar knows the whole height, as Chromium's
+            // does: the first layout measures them all, and a later one the rows `sync` marks.
+            list: ListState::new(1, ListAlignment::Top, px(200.)).measure_all(),
+            rows: Vec::new(),
+        }
+    }
+
+    /// The [`ui::scrollbar`] id of this list.
+    fn scrollbar_id(&self) -> gpui_kit::ElementId {
+        ("search-results", self.id).into()
     }
 
     fn sync(&mut self, rows: &[SearchRow]) {
@@ -166,6 +180,13 @@ fn row(row: SearchRow, index: usize, actions: &PanelActions, cx: &App) -> AnyEle
     }
 }
 
+/// `.search-panel-results`: the list of `results`, each item drawn by `item`, with its own
+/// scrollbar.
+fn results_list(results: &ResultsList, item: impl FnMut(usize, &mut Window, &mut App) -> AnyElement + 'static, cx: &App) -> gpui_kit::Div {
+    let list = list(results.list.clone(), item).flex_1().min_w_0().h_full();
+    h_flex().flex_1().min_h_0().child(list).children(ui::scrollbar(results.scrollbar_id(), &results.list, cx))
+}
+
 /// `.search-panel`: the find bar over `rows`, a third of the height it is given.
 pub fn panel(bar: Bar, rows: Vec<SearchRow>, results: &mut ResultsList, actions: &PanelActions, window: &Window, cx: &App) -> AnyElement {
     let c = colors(cx);
@@ -174,14 +195,11 @@ pub fn panel(bar: Bar, rows: Vec<SearchRow>, results: &mut ResultsList, actions:
     let rows = Rc::new(rows);
     let listed = bar.has_query.then(|| {
         let (rows, actions) = (rows.clone(), actions.clone());
-        let list = list(results.list.clone(), move |index, _, cx| match rows.get(index) {
+        let item = move |index: usize, _: &mut Window, cx: &mut App| match rows.get(index) {
             Some(found) => row(found.clone(), index, &actions, cx),
             None => div().h(px(8.)).into_any_element(),
-        })
-        .flex_1()
-        .min_w_0()
-        .h_full();
-        h_flex().flex_1().min_h_0().child(list).children(ui::scrollbar("search-results", &results.list, cx))
+        };
+        results_list(results, item, cx)
     });
     let step = |forward: bool| {
         let step = actions.step.clone();
@@ -283,6 +301,14 @@ mod tests {
         SearchRow::InRepo(RepoHit { file_path: "a.rs".into(), line_number, column: 1, preview: "x".into() })
     }
 
+    /// 30 matches in the open file (680px with the padding), then the repo search running.
+    fn searching_rows() -> Vec<SearchRow> {
+        let in_file = (0..30).map(|index| SearchRow::InFile { index, line_number: index + 1, preview: "x".into(), active: index == 0 });
+        let mut rows: Vec<SearchRow> = std::iter::once(SearchRow::Section("In this file")).chain(in_file).collect();
+        rows.extend([SearchRow::Section("In repo"), SearchRow::Note("Searching repo…".into())]);
+        rows
+    }
+
     /// Repo hits arriving below the in-file rows, out of view, count in the scrollbar in the
     /// frame they arrive, while the list stays where it was scrolled to.
     #[gpui_kit::test]
@@ -291,9 +317,7 @@ mod tests {
         let mut results = ResultsList::new();
         let view = cx.update(|_, cx| cx.new(|_| Results(results.list.clone())));
 
-        let in_file = (0..30).map(|index| SearchRow::InFile { index, line_number: index + 1, preview: "x".into(), active: index == 0 });
-        let mut rows: Vec<SearchRow> = std::iter::once(SearchRow::Section("In this file")).chain(in_file).collect();
-        rows.extend([SearchRow::Section("In repo"), SearchRow::Note("Searching repo…".into())]);
+        let mut rows = searching_rows();
         results.sync(&rows);
         draw(&view, cx);
         assert_eq!(results.list.max_offset_for_scrollbar().y, max_offset(rows.len()));
@@ -319,5 +343,62 @@ mod tests {
         draw(&view, cx);
         assert_eq!(results.list.max_offset_for_scrollbar().y, max_offset(rows.len()));
         assert_eq!(results.list.logical_scroll_top(), scrolled);
+    }
+
+    /// The width of a pane in [`Panes`].
+    const PANE: f32 = 200.;
+
+    /// Two panels' results side by side, as a Files tab and a Review tab in two tabsets.
+    struct Panes([ResultsList; 2]);
+
+    impl Render for Panes {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            h_flex().items_start().children(self.0.iter().map(|results| {
+                let item = |_: usize, _: &mut Window, _: &mut App| div().h(px(ROW)).w_full().into_any_element();
+                v_flex().w(px(PANE)).h(px(VIEWPORT)).child(results_list(results, item, cx))
+            }))
+        }
+    }
+
+    /// Draws until the scrollbars, which show a frame after the lists are laid out, are in.
+    fn settle(cx: &mut VisualTestContext) {
+        for _ in 0..3 {
+            cx.run_until_parked();
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+        }
+    }
+
+    /// Dragging the thumb of one panel's results scrolls that list and not the other one,
+    /// whose scrollbar sees the same drag.
+    #[gpui_kit::test]
+    fn dragging_a_thumb_scrolls_only_its_own_results(cx: &mut TestAppContext) {
+        use gpui_kit::{Modifiers, MouseButton};
+        cx.update(gpui_kit::init);
+        cx.update(crate::theme::install);
+        let (panes, cx) = cx.add_window_view(|_, _| {
+            Panes([(); 2].map(|()| {
+                let mut results = ResultsList::new();
+                results.sync(&searching_rows());
+                results
+            }))
+        });
+        settle(cx);
+        let offsets = |cx: &mut VisualTestContext| {
+            panes.read_with(cx, |panes, _| panes.0.each_ref().map(|results| results.list.scroll_px_offset_for_scrollbar().y))
+        };
+        assert_eq!(offsets(cx), [px(0.), px(0.)]);
+
+        // The first pane's thumb, at the top of the 10px track on its right.
+        let x = px(PANE - 5.);
+        cx.simulate_mouse_move(point(x, px(5.)), None, Modifiers::default());
+        cx.simulate_mouse_down(point(x, px(5.)), MouseButton::Left, Modifiers::default());
+        for y in [10., 30., 50.] {
+            cx.simulate_mouse_move(point(x, px(y)), MouseButton::Left, Modifiers::default());
+        }
+        cx.simulate_mouse_up(point(x, px(50.)), MouseButton::Left, Modifiers::default());
+        settle(cx);
+        // Grabbed 10px below its top (where the drag starts) and moved 40px down a travel of
+        // 80px (the viewport less the 20px shortest thumb): half the 580px the list scrolls.
+        assert_eq!(offsets(cx), [px(-290.), px(0.)]);
     }
 }
