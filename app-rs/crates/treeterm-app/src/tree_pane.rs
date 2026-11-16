@@ -465,20 +465,18 @@ impl TreePane {
                 if rows.iter().any(|row| row.flash.is_some()) {
                     window.request_animation_frame();
                 }
+                let pointer = match link {
+                    Some(ConnState::Reconnecting { .. } | ConnState::Failed { .. }) => Pointer::Inert,
+                    Some(ConnState::Connected(_) | ConnState::Connecting(_)) | None => Pointer::Live,
+                };
                 let mut list = v_flex().w_full();
                 for row in rows {
-                    list = list.child(self.render_row(entity, row, cx));
+                    list = list.child(self.render_row(entity, row, pointer, cx));
                 }
-                match link {
-                    // `isDegraded`: the rows stay, dimmed, and take no clicks, drags or menus
-                    // (`opacity: 0.6; pointer-events: none`).
-                    Some(ConnState::Reconnecting { .. } | ConnState::Failed { .. }) => div()
-                        .relative()
-                        .opacity(0.6)
-                        .child(list)
-                        .child(div().id("tree-inert").absolute().inset_0().occlude())
-                        .into_any_element(),
-                    Some(ConnState::Connected(_) | ConnState::Connecting(_)) | None => list.into_any_element(),
+                match pointer {
+                    Pointer::Live => list.into_any_element(),
+                    // `isDegraded`: the rows stay, dimmed (`opacity: 0.6`).
+                    Pointer::Inert => list.opacity(0.6).into_any_element(),
                 }
             }
         }
@@ -612,7 +610,13 @@ fn connection_banner(
 }
 
 impl TreePane {
-    fn render_row(&self, session: &Entity<SessionStore>, row: RowData, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+    fn render_row(
+        &self,
+        session: &Entity<SessionStore>,
+        row: RowData,
+        pointer: Pointer,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let RowData {
             id,
             depth,
@@ -656,6 +660,9 @@ impl TreePane {
         let selected = session.read(cx).viewed_workspace() == Some(id.as_str());
         // Workspace focus mode (prefix + w) moves this cursor with the arrow keys.
         let focus_cursor = self.keybindings.read(cx).machine().focused_workspace() == Some(id.as_str());
+        let live = pointer == Pointer::Live;
+        // An inert row is never under the pointer, whatever row it last left.
+        let hover = if live { hover } else { RowHover::Outside };
         // `.tree-item:hover`, and `.tree-subtree:has(> .tree-item:hover) .tree-item:not(.active):not(.focused)`
         // (which outranks it): the row under the pointer and the rows under it at half the
         // hover colour. The active row keeps its own; the focus cursor's row is tinted, in
@@ -687,7 +694,7 @@ impl TreePane {
         let group = SharedString::from(format!("ws-row-group-{id}"));
         let root = depth == 0;
         // `.tree-item`: 36px rows, 6px 4px padding plus 8px per level.
-        h_flex()
+        let row = h_flex()
             .id(SharedString::from(format!("ws-row-{id}")))
             .group(group.clone())
             .relative()
@@ -697,69 +704,71 @@ impl TreePane {
             .pl(px(4. + 8. * depth as f32))
             .pr(px(4.))
             .items_center()
-            .cursor_pointer()
             .when_some(background, |row, background| row.bg(background))
-            .on_hover(cx.listener(move |pane, hovered: &bool, _, cx| {
-                let next = match (*hovered, &pane.hovered) {
-                    (true, _) => Some(hover_id.clone()),
-                    // Left for another row, which may have said so first.
-                    (false, Some(current)) if *current == hover_id => None,
-                    (false, Some(_) | None) => return,
-                };
-                if pane.hovered != next {
-                    pane.hovered = next;
-                    cx.notify();
-                }
-            }))
-            // Wrapped, as the system draws a long `title`.
-            .when_some(tooltip, |row, tooltip| {
-                row.tooltip(move |window, cx| {
-                    let text = tooltip.clone();
-                    gpui_kit::component::tooltip::Tooltip::element(move |_, _| div().max_w(px(400.)).child(text.clone()))
-                        .build(window, cx)
-                })
-            })
             // `.workspace-unread`: a 2px accent rule on the left, also under the focus outline.
             .when(unread, |row| row.border_l(px(2.)).border_color(c.accent))
-            .on_drag(drag_value, |dragged, _, _, cx| cx.new(|_| dragged.clone()))
-            .on_drag_move(cx.listener(move |pane, event: &gpui_kit::DragMoveEvent<DraggedWorkspace>, _, cx| {
-                let position = event.event.position;
-                let next = if event.bounds.contains(&position) && event.drag(cx).id != move_id {
-                    let zone = drop_zone(f32::from(position.y), f32::from(event.bounds.top()), f32::from(event.bounds.size.height));
-                    Some((move_id.clone(), zone))
-                } else {
-                    None
-                };
-                let changed = match (&pane.drop_hint, &next) {
-                    (Some((old, _)), None) => *old == move_id,
-                    (old, Some(_)) => old.as_ref() != next.as_ref(),
-                    (None, None) => false,
-                };
-                if changed {
-                    pane.drop_hint = next;
-                    cx.notify();
-                }
-            }))
-            .on_drop(cx.listener(move |pane, dragged: &DraggedWorkspace, _, cx| {
-                let position = match pane.drop_hint.take() {
-                    Some((target, position)) if target == drop_id => position,
-                    Some(_) | None => DropPosition::Onto,
-                };
-                let (drag, target) = (dragged.id.clone(), drop_id.clone());
-                drop_session.update(cx, |s, cx| s.move_workspace(&drag, &target, position, cx));
-                if position == DropPosition::Onto {
-                    pane.view.expand(&target);
-                }
-                cx.notify();
-            }))
+            .when(live, |row| {
+                row.cursor_pointer()
+                    .on_hover(cx.listener(move |pane, hovered: &bool, _, cx| {
+                        let next = match (*hovered, &pane.hovered) {
+                            (true, _) => Some(hover_id.clone()),
+                            // Left for another row, which may have said so first.
+                            (false, Some(current)) if *current == hover_id => None,
+                            (false, Some(_) | None) => return,
+                        };
+                        if pane.hovered != next {
+                            pane.hovered = next;
+                            cx.notify();
+                        }
+                    }))
+                    // Wrapped, as the system draws a long `title`.
+                    .when_some(tooltip, |row, tooltip| {
+                        row.tooltip(move |window, cx| {
+                            let text = tooltip.clone();
+                            gpui_kit::component::tooltip::Tooltip::element(move |_, _| div().max_w(px(400.)).child(text.clone()))
+                                .build(window, cx)
+                        })
+                    })
+                    .on_drag(drag_value, |dragged, _, _, cx| cx.new(|_| dragged.clone()))
+                    .on_drag_move(cx.listener(move |pane, event: &gpui_kit::DragMoveEvent<DraggedWorkspace>, _, cx| {
+                        let position = event.event.position;
+                        let next = if event.bounds.contains(&position) && event.drag(cx).id != move_id {
+                            let (top, height) = (f32::from(event.bounds.top()), f32::from(event.bounds.size.height));
+                            Some((move_id.clone(), drop_zone(f32::from(position.y), top, height)))
+                        } else {
+                            None
+                        };
+                        let changed = match (&pane.drop_hint, &next) {
+                            (Some((old, _)), None) => *old == move_id,
+                            (old, Some(_)) => old.as_ref() != next.as_ref(),
+                            (None, None) => false,
+                        };
+                        if changed {
+                            pane.drop_hint = next;
+                            cx.notify();
+                        }
+                    }))
+                    .on_drop(cx.listener(move |pane, dragged: &DraggedWorkspace, _, cx| {
+                        let position = match pane.drop_hint.take() {
+                            Some((target, position)) if target == drop_id => position,
+                            Some(_) | None => DropPosition::Onto,
+                        };
+                        let (drag, target) = (dragged.id.clone(), drop_id.clone());
+                        drop_session.update(cx, |s, cx| s.move_workspace(&drag, &target, position, cx));
+                        if position == DropPosition::Onto {
+                            pane.view.expand(&target);
+                        }
+                        cx.notify();
+                    }))
+                    .on_click(cx.listener(move |pane, _: &ClickEvent, _, cx| {
+                        pane.select(select_id.clone(), cx);
+                    }))
+            })
             .when_some(hint, |row, position| match position {
                 DropPosition::Before => row.border_t_2().border_color(c.accent),
                 DropPosition::After => row.border_b_2().border_color(c.accent),
                 DropPosition::Onto => row.bg(c.bg_hover).border_1().border_color(c.accent),
             })
-            .on_click(cx.listener(move |pane, _: &ClickEvent, _, cx| {
-                pane.select(select_id.clone(), cx);
-            }))
             // The chevron toggles; a row without children keeps the 16px slot, and a click
             // there selects the row (`.tree-item-expand-placeholder`).
             .child(
@@ -771,7 +780,7 @@ impl TreePane {
                     .justify_center()
                     .text_color(secondary)
                     .children(expand.map(|name| ui::icon(name, 16., secondary)))
-                    .when(has_children, |slot| {
+                    .when(has_children && live, |slot| {
                         slot.hover(move |d| d.text_color(primary)).on_click(cx.listener(
                             move |pane, _: &ClickEvent, _, cx| {
                                 cx.stop_propagation();
@@ -792,8 +801,11 @@ impl TreePane {
                         .text_size(px(10.))
                         .text_color(c.accent)
                         .child("●")
-                        .tooltip(|window, cx| {
-                            gpui_kit::component::tooltip::Tooltip::new("New activity — open workspace to mark as read").build(window, cx)
+                        .when(live, |marker| {
+                            marker.tooltip(|window, cx| {
+                                gpui_kit::component::tooltip::Tooltip::new("New activity — open workspace to mark as read")
+                                    .build(window, cx)
+                            })
                         }),
                 )
             })
@@ -810,8 +822,13 @@ impl TreePane {
                     .when(favourite, |d| d.text_size(px(14.)).text_color(gpui_kit::rgb(0xf5c84a)).child("★")),
             )
             // `.tree-item-actions`: always on root rows, on hover otherwise.
-            .when(git_repo, |row| {
-                row.child(
+            .when(git_repo, |row| match pointer {
+                Pointer::Inert => row.child(
+                    ui::item_action_inert(cx)
+                        .when(!root, |d| d.invisible())
+                        .child(ui::icon(IconName::GitFork, 16., secondary)),
+                ),
+                Pointer::Live => row.child(
                     ui::item_action(SharedString::from(format!("ws-fork-{id}")), cx)
                         .when(!root, |d| d.invisible().group_hover(group.clone(), |d| d.visible()))
                         .tooltip(|window, cx| gpui_kit::component::tooltip::Tooltip::new("Fork").build(window, cx))
@@ -835,7 +852,7 @@ impl TreePane {
                                 });
                             });
                         })),
-                )
+                ),
             })
             // `WorkspaceAttentionFlash`, over the row's content.
             .children(flash.map(|flash| ui::attention_flash(flash, 0.)))
@@ -854,82 +871,86 @@ impl TreePane {
                         .border_2()
                         .border_color(c.accent),
                 )
-            })
-            // `SessionPanel`'s row menu: the same items, conditions and order.
-            .context_menu(move |menu, _window, cx| {
-                let store = session.read(cx).workspace_store(&menu_id).cloned();
-                let Some(store) = store else {
-                    // Not loaded: only Dismiss, at once (`dismissWorkspace`).
-                    let (session, id) = (session.clone(), menu_id.clone());
-                    return menu.item(
-                        danger_item("Dismiss")
-                            .on_click(move |_, _, cx| session.update(cx, |s, cx| s.dismiss_workspace(&id, cx))),
-                    );
-                };
-                let file = store.read(cx).file().clone();
-                let child = file.is_worktree && has_parent;
-                let (settings_store, settings_pane, settings_id) = (store.clone(), pane.clone(), menu_id.clone());
-                let mut menu = menu
-                    .item(ui::menu_item("Settings").on_click(move |_, _, cx| {
-                        if settings_store.update(cx, |w, cx| w.open_or_focus_tab("workspace-settings", cx)).is_some() {
-                            settings_pane.update(cx, |pane, cx| pane.select(settings_id.clone(), cx));
-                        }
-                    }));
-                let favourite_store = store.clone();
-                menu = menu.item(
-                    ui::menu_item(if favourite { "Unmark as Favourite" } else { "Mark as Favourite" })
-                        .on_click(move |_, _, cx| favourite_store.update(cx, |w, cx| w.toggle_favourite(cx))),
+            });
+        if pointer == Pointer::Inert {
+            return row.into_any_element();
+        }
+        // `SessionPanel`'s row menu: the same items, conditions and order.
+        row.context_menu(move |menu, _window, cx| {
+            let store = session.read(cx).workspace_store(&menu_id).cloned();
+            let Some(store) = store else {
+                // Not loaded: only Dismiss, at once (`dismissWorkspace`).
+                let (session, id) = (session.clone(), menu_id.clone());
+                return menu.item(
+                    danger_item("Dismiss")
+                        .on_click(move |_, _, cx| session.update(cx, |s, cx| s.dismiss_workspace(&id, cx))),
                 );
-                if child {
-                    use treeterm_core::analyzer::Refresh;
-                    for (text, refresh) in
-                        [("Refresh Title & Description", Refresh::TitleAndDescription), ("Refresh Branch Name", Refresh::BranchName)]
-                    {
-                        let store = store.clone();
-                        menu = menu.item(ui::menu_item(text).on_click(move |_, window, cx| {
-                            // `reportRefreshOutcome`
-                            let outcome = store.update(cx, |w, cx| w.refresh_labels(refresh, cx));
-                            ui::alert_failure(outcome, window, cx);
-                        }));
+            };
+            let file = store.read(cx).file().clone();
+            let child = file.is_worktree && has_parent;
+            let (settings_store, settings_pane, settings_id) = (store.clone(), pane.clone(), menu_id.clone());
+            let mut menu = menu
+                .item(ui::menu_item("Settings").on_click(move |_, _, cx| {
+                    if settings_store.update(cx, |w, cx| w.open_or_focus_tab("workspace-settings", cx)).is_some() {
+                        settings_pane.update(cx, |pane, cx| pane.select(settings_id.clone(), cx));
                     }
+                }));
+            let favourite_store = store.clone();
+            menu = menu.item(
+                ui::menu_item(if favourite { "Unmark as Favourite" } else { "Mark as Favourite" })
+                    .on_click(move |_, _, cx| favourite_store.update(cx, |w, cx| w.toggle_favourite(cx))),
+            );
+            if child {
+                use treeterm_core::analyzer::Refresh;
+                for (text, refresh) in
+                    [("Refresh Title & Description", Refresh::TitleAndDescription), ("Refresh Branch Name", Refresh::BranchName)]
+                {
+                    let store = store.clone();
+                    menu = menu.item(ui::menu_item(text).on_click(move |_, window, cx| {
+                        // `reportRefreshOutcome`
+                        let outcome = store.update(cx, |w, cx| w.refresh_labels(refresh, cx));
+                        ui::alert_failure(outcome, window, cx);
+                    }));
                 }
-                if file.is_git_repo {
-                    let (pane, session, parent, label) = (pane.clone(), session.clone(), menu_id.clone(), label.clone());
-                    menu = menu.item(ui::menu_item("Open Existing Branch").on_click(move |_, window, cx| {
-                        let (pane, session, parent, label) = (pane.clone(), session.clone(), parent.clone(), label.clone());
-                        let behind = behind_upstream(&session, &parent, cx);
-                        upstream_guard(behind, label.clone(), window, cx, move |window, cx| {
-                            let pane = pane.clone();
-                            let on_created: crate::child_dialog::OnCreated = std::rc::Rc::new(move |id, _, cx| {
-                                pane.update(cx, |pane, cx| pane.select(id, cx));
-                            });
-                            crate::child_dialog::open(session.clone(), parent.clone(), label.clone(), on_created, window, cx);
+            }
+            if file.is_git_repo {
+                let (pane, session, parent, label) = (pane.clone(), session.clone(), menu_id.clone(), label.clone());
+                menu = menu.item(ui::menu_item("Open Existing Branch").on_click(move |_, window, cx| {
+                    let (pane, session, parent, label) = (pane.clone(), session.clone(), parent.clone(), label.clone());
+                    let behind = behind_upstream(&session, &parent, cx);
+                    upstream_guard(behind, label.clone(), window, cx, move |window, cx| {
+                        let pane = pane.clone();
+                        let on_created: crate::child_dialog::OnCreated = std::rc::Rc::new(move |id, _, cx| {
+                            pane.update(cx, |pane, cx| pane.select(id, cx));
                         });
-                    }));
-                }
-                if !file.is_worktree && file.is_git_repo {
-                    let (session, id) = (session.clone(), menu_id.clone());
-                    menu = menu.item(ui::menu_item("Auto Open All Recent Worktrees").on_click(move |_, window, cx| {
-                        crate::auto_open_dialog::open(session.clone(), id.clone(), window, cx);
-                    }));
-                }
-                if child {
-                    // Review & Merge: show the workspace with its Review tab.
-                    let (pane, id) = (pane.clone(), menu_id.clone());
-                    menu = menu.item(ui::menu_item("Review & Merge").on_click(move |_, _, cx| {
-                        if store.update(cx, |w, cx| w.open_or_focus_tab("review", cx)).is_some() {
-                            pane.update(cx, |pane, cx| pane.select(id.clone(), cx));
-                        }
-                    }));
-                }
-                if !file.is_worktree {
-                    let (session, id, label) = (session.clone(), menu_id.clone(), label.clone());
-                    menu = menu.item(danger_item("Remove").on_click(move |_, window, cx| {
-                        confirm_remove(session.clone(), id.clone(), label.clone(), RemoveMode::KeepWorktreeAndBranch, window, cx)
-                    }));
-                }
-                menu
-            })
+                        crate::child_dialog::open(session.clone(), parent.clone(), label.clone(), on_created, window, cx);
+                    });
+                }));
+            }
+            if !file.is_worktree && file.is_git_repo {
+                let (session, id) = (session.clone(), menu_id.clone());
+                menu = menu.item(ui::menu_item("Auto Open All Recent Worktrees").on_click(move |_, window, cx| {
+                    crate::auto_open_dialog::open(session.clone(), id.clone(), window, cx);
+                }));
+            }
+            if child {
+                // Review & Merge: show the workspace with its Review tab.
+                let (pane, id) = (pane.clone(), menu_id.clone());
+                menu = menu.item(ui::menu_item("Review & Merge").on_click(move |_, _, cx| {
+                    if store.update(cx, |w, cx| w.open_or_focus_tab("review", cx)).is_some() {
+                        pane.update(cx, |pane, cx| pane.select(id.clone(), cx));
+                    }
+                }));
+            }
+            if !file.is_worktree {
+                let (session, id, label) = (session.clone(), menu_id.clone(), label.clone());
+                menu = menu.item(danger_item("Remove").on_click(move |_, window, cx| {
+                    confirm_remove(session.clone(), id.clone(), label.clone(), RemoveMode::KeepWorktreeAndBranch, window, cx)
+                }));
+            }
+            menu
+        })
+        .into_any_element()
     }
 }
 
@@ -938,6 +959,17 @@ fn danger_item(label: &'static str) -> PopupMenuItem {
     PopupMenuItem::element(move |_, _| {
         div().h(px(29.5)).flex().items_center().text_size(px(ui::BODY)).text_color(gpui_kit::rgb(0xf14c4c)).child(label)
     })
+}
+
+/// Whether the rows take the pointer.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Pointer {
+    Live,
+    /// While the connection is down (`isDegraded`: `pointer-events: none`): no hover,
+    /// tooltip, click, drag, drop or menu. The pointer reaches what is under the rows
+    /// instead: a wheel scrolls the sidebar, a drag moves the session, a dragged session
+    /// drops on it.
+    Inert,
 }
 
 /// A row's content, copied out of the session so rendering can borrow the context mutably.

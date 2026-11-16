@@ -21,18 +21,15 @@ pub fn icon(name: IconName, size: f32, color: impl Into<Hsla>) -> Icon {
     Icon::new(name).size(px(size)).text_color(color.into())
 }
 
+/// A 24×24 square, rounded 4px, its content centred: a square button's box.
+fn square() -> Div {
+    div().size(px(24.)).flex_shrink_0().flex().items_center().justify_center().rounded(px(4.))
+}
+
 /// A 24×24 square button body, rounded 4px; callers add colours and the hover style
 /// (GPUI allows one hover style per element).
 fn square_button(id: impl Into<ElementId>) -> Stateful<Div> {
-    div()
-        .id(id)
-        .size(px(24.))
-        .flex_shrink_0()
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded(px(4.))
-        .cursor_pointer()
+    square().id(id).cursor_pointer()
 }
 
 /// `.add-button`: a 24×24 borderless button, rounded 4px, filled on hover.
@@ -47,6 +44,12 @@ pub fn item_action(id: impl Into<ElementId>, cx: &App) -> Stateful<Div> {
     let c = colors(cx);
     let (hover, primary) = (c.bg_hover, c.text_primary);
     square_button(id).text_color(c.text_secondary).hover(move |d| d.bg(hover).text_color(primary))
+}
+
+/// [`item_action`] on a row that takes no pointer events (`pointer-events: none`): the same
+/// box and colour, with no cursor and no hover.
+pub fn item_action_inert(cx: &App) -> Div {
+    square().text_color(colors(cx).text_secondary)
 }
 
 /// `.workspace-action-btn`: the workspace header's 24px-high buttons (11px text, 4px 12px
