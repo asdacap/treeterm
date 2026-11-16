@@ -1727,6 +1727,8 @@ fn git_status_items(
         (crate::ui::icon(IconName::Check, 14., green).into_any_element(), "Clean", "Working tree clean".into(), green.into(), gpui_kit::rgba(0x2ea04366).into())
     };
     let title = if failures.is_empty() { title } else { format!("{title}\n{}", failures.join("\n")) };
+    // `.workspace-action-btn:disabled`: half opacity and a not-allowed cursor, no click.
+    let disabled = |button: gpui_kit::Stateful<gpui_kit::Div>| button.opacity(0.5).cursor_not_allowed();
     let refresh = controller.clone();
     let mut items = vec![
         crate::ui::action_button("git-status", cx)
@@ -1735,7 +1737,13 @@ fn git_status_items(
             .tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(title.clone()).build(window, cx))
             .child(icon)
             .child(label)
-            .on_click(move |_, _, cx| refresh.update(cx, |git, cx| git.refresh(cx)))
+            .map(|button| {
+                if refreshing {
+                    disabled(button)
+                } else {
+                    button.on_click(move |_, _, cx| refresh.update(cx, |git, cx| git.refresh(cx)))
+                }
+            })
             .into_any_element(),
     ];
     // `.workspace-action-btn-pull`: accent fill while behind upstream.
