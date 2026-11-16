@@ -581,7 +581,8 @@ impl FileBrowserView {
     fn tree_pane(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let search = self.name_search_box(window, cx);
         let favourites = self.favourites_section(cx);
-        let body = if self.model.read(cx).name_search().is_active() { self.name_results(cx) } else { self.tree_rows(cx) };
+        let body =
+            if self.model.read(cx).name_search().is_active() { self.name_results(window, cx) } else { self.tree_rows(window, cx) };
         let c = colors(cx);
         let (secondary, primary, hover) = (c.text_secondary, c.text_primary, c.bg_hover);
         let header = h_flex()
@@ -629,9 +630,10 @@ impl FileBrowserView {
     /// `.file-tree-search`: the "Search files..." box and its clear button.
     fn name_search_box(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let input = self.name_input(window, cx);
+        let has_query = !self.model.read(cx).name_search().query.is_empty();
+        let clear = has_query.then(|| ui::key_button("clear-name-search", 3., window, cx));
         let c = colors(cx);
         let focused = input.read(cx).focus_handle(cx).is_focused(window);
-        let has_query = !self.model.read(cx).name_search().query.is_empty();
         let (secondary, primary, hover) = (c.text_secondary, c.text_primary, c.bg_hover);
         div()
             .relative()
@@ -655,16 +657,14 @@ impl FileBrowserView {
                     .text_color(c.text_primary)
                     .child(Styled::h(Input::new(&input).appearance(false).text_size(px(ui::BODY)).px_0().py_0(), px(16.))),
             )
-            .when(has_query, |d| {
+            .when_some(clear, |d, clear| {
                 d.child(
-                    div()
-                        .id("clear-name-search")
+                    clear
                         .absolute()
                         .right(px(12.))
                         .top(px(14.))
                         .px(px(6.))
                         .py(px(2.))
-                        .rounded(px(3.))
                         .text_size(px(12.))
                         .text_color(secondary)
                         .cursor_pointer()
@@ -731,8 +731,9 @@ impl FileBrowserView {
     }
 
     /// `.file-tree-favourite`: the star, shown (taking its space) while the row is hovered
-    /// or when starred.
-    fn star_button(&self, path: &str, is_dir: bool, cx: &mut Context<Self>) -> Option<AnyElement> {
+    /// or when starred. A button: Tab reaches it, Enter or Space presses it, and a screen
+    /// reader announces its title.
+    fn star_button(&self, path: &str, is_dir: bool, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
         let star = self.model.read(cx).star(path, cx);
         let active = star != Star::Off;
         if !active && self.hovered_row.as_deref() != Some(path) {
@@ -745,13 +746,12 @@ impl FileBrowserView {
             Star::Off => "Add file to favourites",
         };
         let owned = path.to_owned();
-        div()
-            .id(SharedString::from(format!("star-{path}")))
+        ui::key_button(SharedString::from(format!("star-{path}")), 0., window, cx)
+            .accessibility_label(title)
             .flex_shrink_0()
             .p(px(2.))
             .cursor_pointer()
             .text_color(if active { rgb(FAVOURITE).into() } else { colors(cx).text_secondary })
-            .flex()
             .child(ui::star_icon(13., active))
             .tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(title).build(window, cx))
             .on_click(cx.listener(move |view, _, _, cx| {
@@ -778,7 +778,7 @@ impl FileBrowserView {
 
     /// The directory tree (`renderEntry`), with loading and error rows under expanding
     /// directories.
-    fn tree_rows(&mut self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+    fn tree_rows(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let secondary = colors(cx).text_secondary;
         let model = self.model.read(cx);
         let selected = model.selected().map(str::to_owned);
@@ -793,7 +793,7 @@ impl FileBrowserView {
         for (row, child_state) in entries.into_iter().zip(child_states) {
             let is_selected = selected.as_deref() == Some(row.path.as_str());
             let (path, is_dir) = (row.path.clone(), row.is_dir);
-            let star = self.star_button(&row.path, row.is_dir, cx);
+            let star = self.star_button(&row.path, row.is_dir, window, cx);
             rows.push(
                 Self::row_frame(SharedString::from(format!("file-{}", row.path)), is_selected, cx)
                     .on_hover(Self::track_hover(row.path.clone(), cx))
@@ -839,7 +839,7 @@ impl FileBrowserView {
 
     /// The file name search's results (`renderSearchResult`): icon, name with the match
     /// marked, and path, stacked.
-    fn name_results(&mut self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+    fn name_results(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let search = self.model.read(cx).name_search().clone();
         let selected = self.model.read(cx).selected().map(str::to_owned);
         let entries = match search.results {
@@ -856,7 +856,7 @@ impl FileBrowserView {
         entries
             .into_iter()
             .map(|entry| {
-                let star = self.star_button(&entry.path, entry.is_directory, cx);
+                let star = self.star_button(&entry.path, entry.is_directory, window, cx);
                 let name = match split_match(&entry.name, &search.query) {
                     // `display: flex; gap: 6px` spaces the match from the text around it.
                     Some((before, matched, after)) => h_flex()

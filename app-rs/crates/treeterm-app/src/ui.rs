@@ -943,6 +943,37 @@ pub fn star_icon(size: f32, filled: bool) -> Icon {
     icon.size(px(size))
 }
 
+/// A borderless `<button>`, rounded `radius`: Tab reaches it and Enter or Space presses it.
+/// Focused from the keyboard (`:focus-visible`), it shows Chromium's focus ring. Callers add
+/// its look, and an accessibility label when its content does not name it.
+pub fn key_button(id: impl Into<ElementId>, radius: f32, window: &mut Window, cx: &mut App) -> gpui_kit::base::Button {
+    let id = id.into();
+    let focus = window.use_keyed_state(id.clone(), cx, |_, cx| cx.focus_handle()).read(cx).clone();
+    let ring = focus.is_focused(window) && window.last_input_was_keyboard();
+    gpui_kit::base::Button::new(id)
+        .track_focus(&focus)
+        // The line box the button inherits (the base button sets the font size's).
+        .line_height(relative(1.2))
+        .rounded(px(radius))
+        .when(ring, |button| button.child(focus_outline(radius)))
+}
+
+/// Chromium's focus ring on a borderless control: 2px of macOS orange across its edge, a
+/// 1px white halo outside that (as `review_view::parts::focus_ring` draws on a border).
+fn focus_outline(radius: f32) -> Div {
+    let edge = || div().absolute().top(px(0.)).left(px(0.)).right(px(0.)).bottom(px(0.));
+    div()
+        .absolute()
+        .top(px(-2.))
+        .left(px(-2.))
+        .right(px(-2.))
+        .bottom(px(-2.))
+        .rounded(px(radius + 2.))
+        .border_1()
+        .border_color(gpui_kit::white())
+        .child(edge().rounded(px(radius + 1.)).border_2().border_color(rgb(0xe59700)))
+}
+
 /// `.file-viewer-open-btn` / `.file-viewer-toggle-btn`: 11px text, 4px 10px padding, 1px
 /// border, tertiary fill; hover fills and shows the accent border. A disabled one is faded
 /// (`opacity`: 0.6 while a download runs).
@@ -1039,4 +1070,50 @@ pub fn viewer_error(child: impl IntoElement) -> Div {
         .text_size(px(14.))
         .text_color(rgb(FILE_ERROR))
         .child(child)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    use gpui_kit::{Context, KeyDownEvent, KeyUpEvent, Keystroke, Render, TestAppContext, VisualTestContext};
+
+    use super::*;
+
+    /// A key button counting its presses.
+    struct Pressed {
+        presses: Rc<Cell<usize>>,
+    }
+
+    impl Render for Pressed {
+        fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            let presses = self.presses.clone();
+            div().child(key_button("pressed", 3., window, cx).child("x").on_click(move |_, _, _| presses.set(presses.get() + 1)))
+        }
+    }
+
+    fn press(key: &str, cx: &mut VisualTestContext) {
+        let keystroke = cx.update(|_, cx| Keystroke::parse_with_os(key, cx.platform_info().os).unwrap());
+        cx.simulate_event(KeyDownEvent { keystroke: keystroke.clone(), is_held: false, prefer_character_input: false });
+        cx.simulate_event(KeyUpEvent { keystroke });
+    }
+
+    #[gpui_kit::test]
+    fn tab_reaches_a_key_button_and_enter_or_space_presses_it(cx: &mut TestAppContext) {
+        let presses = Rc::new(Cell::new(0));
+        let (_, cx) = cx.add_window_view({
+            let presses = presses.clone();
+            move |_, _| Pressed { presses }
+        });
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+            window.focus_next(cx);
+            assert!(window.focused(cx).is_some(), "not a tab stop");
+            window.draw(cx).clear(cx);
+        });
+        press("enter", cx);
+        press("space", cx);
+        assert_eq!(presses.get(), 2);
+    }
 }
