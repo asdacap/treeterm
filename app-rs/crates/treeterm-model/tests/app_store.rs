@@ -1102,6 +1102,127 @@ fn a_reconnect_attempt_starts_the_session_panes_logs_over_and_the_info_tab_shows
     );
 }
 
+/// The session pane's JSON tab, and the local connection's state it was read with.
+fn pane_json(
+    cx: &mut TestAppContext,
+    app: &App,
+    info: &Entity<SessionInfo>,
+) -> (serde_json::Value, ConnState) {
+    app.app.read_with(cx, |a, cx| {
+        let state = a
+            .sessions()
+            .find(|slot| slot.is_local())
+            .unwrap()
+            .state
+            .clone();
+        (info.read(cx).debug_json(cx), state)
+    })
+}
+
+/// The session pane's JSON tab (`sessionData`) at every status of the local connection: the
+/// connection as Electron's `ConnectionInfo`, alone until its first session, then with the
+/// session, also the one kept while the connection is down. Disconnected, nothing.
+#[gpui_kit::test]
+fn the_session_panes_json_shows_the_connection_and_its_session_at_any_status(
+    cx: &mut TestAppContext,
+) {
+    cx.executor().allow_parking();
+    isolated_home();
+    let h = harness();
+    publish(&h, &[("a", body("a"))]);
+    let dir = tempfile::Builder::new()
+        .prefix("tt")
+        .tempdir_in("/tmp")
+        .unwrap();
+    let socket = dir.path().join("p.sock");
+    let app = app(cx, &h, Some(&socket));
+    let id = local_id(cx, &app.app);
+    let info = cx.new(|cx| SessionInfo::new(&app.app, id.clone(), cx));
+    // The local connection's `ConnectionInfo` with these status fields.
+    let local = |status: serde_json::Value| {
+        let mut connection =
+            serde_json::json!({ "id": id.to_string(), "target": { "type": "local" } });
+        let serde_json::Value::Object(status) = status else {
+            unreachable!("an object")
+        };
+        connection.as_object_mut().unwrap().extend(status);
+        connection
+    };
+
+    // Nothing on the socket: the first connect fails before there is a session.
+    wait_for_local(cx, &app, |state| matches!(state, ConnState::Failed { .. }));
+    let (json, state) = pane_json(cx, &app, &info);
+    let ConnState::Failed { error, .. } = state else {
+        unreachable!("waited for it")
+    };
+    let failed =
+        local(serde_json::json!({ "status": "error", "error": error, "errorKind": "generic" }));
+    assert_eq!(json, serde_json::json!({ "connection": failed }));
+
+    // Retried while still unreachable.
+    app.app.read_with(cx, |a, _| a.reconnect(&id));
+    wait_for_local(cx, &app, |state| {
+        matches!(state, ConnState::Reconnecting { .. })
+    });
+    let (json, state) = pane_json(cx, &app, &info);
+    let ConnState::Reconnecting { attempt, error } = state else {
+        unreachable!("waited for it")
+    };
+    let retrying =
+        local(serde_json::json!({ "status": "reconnecting", "error": error, "attempt": attempt }));
+    assert_eq!(json, serde_json::json!({ "connection": retrying }));
+
+    // Connected: the session, with its connection.
+    let proxy = DaemonProxy::start(&socket, h.daemon.socket_path());
+    wait_until_app(cx, &app.app, |a, cx| {
+        a.local_session()
+            .is_some_and(|s| matches!(s.read(cx).entry("a"), Some(WorkspaceEntry::Loaded(_))))
+    });
+    let (json, _) = pane_json(cx, &app, &info);
+    assert_eq!(
+        json["connection"],
+        local(serde_json::json!({ "status": "connected" }))
+    );
+    assert!(
+        json["sessionId"].as_str().is_some_and(|id| !id.is_empty()),
+        "{json}"
+    );
+    assert_eq!(json["activeWorkspaceId"], "a");
+    assert_eq!(json["workspaces"]["a"]["status"], "loaded");
+
+    // Lost: the session kept from that generation, while reconnecting and once stopped.
+    drop(proxy);
+    wait_for_local(cx, &app, |state| {
+        matches!(state, ConnState::Reconnecting { .. })
+    });
+    let (json, state) = pane_json(cx, &app, &info);
+    let ConnState::Reconnecting { attempt, error } = state else {
+        unreachable!("waited for it")
+    };
+    let lost =
+        local(serde_json::json!({ "status": "reconnecting", "error": error, "attempt": attempt }));
+    assert_eq!(json["connection"], lost);
+    assert_eq!(json["activeWorkspaceId"], "a");
+    assert_eq!(json["workspaces"]["a"]["status"], "loaded");
+
+    app.app.read_with(cx, |a, _| a.cancel_reconnect(&id));
+    wait_for_local(cx, &app, |state| matches!(state, ConnState::Failed { .. }));
+    let (json, state) = pane_json(cx, &app, &info);
+    let ConnState::Failed { error, .. } = state else {
+        unreachable!("waited for it")
+    };
+    let stopped =
+        local(serde_json::json!({ "status": "error", "error": error, "errorKind": "generic" }));
+    assert_eq!(json["connection"], stopped);
+    assert_eq!(json["workspaces"]["a"]["status"], "loaded");
+
+    app.app.update(cx, |a, cx| a.disconnect(&id, cx));
+    assert_eq!(
+        info.read_with(cx, |info, cx| info.debug_json(cx)),
+        serde_json::Value::Null
+    );
+}
+
 /// The session pane's SSH > Monitor and SSH > Upload on the remote connection.
 fn monitor_and_upload(
     cx: &mut TestAppContext,

@@ -7,8 +7,8 @@ use std::time::Duration;
 use futures::StreamExt as _;
 use gpui_kit::{App, Context, Entity, Task, WeakEntity};
 use treeterm_core::connection::{
-    ConnectionId, ConnectionTarget, LogEvent, OutputKind, Persistence, PortForwardConfig, PortForwardId,
-    PortForwardInfo,
+    ConnectPhase, ConnectionId, ConnectionTarget, LogEvent, OutputKind, Persistence, PortForwardConfig,
+    PortForwardId, PortForwardInfo,
 };
 use treeterm_core::settings::PortForwardSpec;
 
@@ -64,6 +64,33 @@ pub fn parse_forward_fields(local: &str, host: &str, remote: &str) -> Result<Por
     }
     let remote_port = port(remote).ok_or(ForwardFieldError::RemotePort)?;
     Ok(PortForwardSpec { local_port, remote_host: host.to_owned(), remote_port, extra: Default::default() })
+}
+
+/// A connection as Electron's `ConnectionInfo` (`Connection.toInfo`), keys in its order.
+pub fn connection_json(id: &ConnectionId, target: &ConnectionTarget, state: &ConnState) -> serde_json::Value {
+    let id = id.to_string();
+    let target = match target {
+        ConnectionTarget::Local => serde_json::json!({ "type": "local" }),
+        ConnectionTarget::Remote(config) => serde_json::json!({ "type": "remote", "config": &**config }),
+    };
+    match state {
+        ConnState::Connecting(phase) => {
+            let phase = match phase {
+                ConnectPhase::Bootstrap => "bootstrap",
+                ConnectPhase::Tunnel => "tunnel",
+                ConnectPhase::Daemon => "daemon",
+            };
+            serde_json::json!({ "id": id, "target": target, "status": "connecting", "connectPhase": phase })
+        }
+        ConnState::Connected(_) => serde_json::json!({ "id": id, "target": target, "status": "connected" }),
+        ConnState::Reconnecting { attempt, error } => serde_json::json!({
+            "id": id, "target": target, "status": "reconnecting", "error": error, "attempt": attempt
+        }),
+        ConnState::Failed { error, hash_mismatch } => {
+            let kind = if *hash_mismatch { "daemon-hash-mismatch" } else { "generic" };
+            serde_json::json!({ "id": id, "target": target, "status": "error", "error": error, "errorKind": kind })
+        }
+    }
 }
 
 impl SessionInfo {
@@ -169,7 +196,10 @@ impl SessionInfo {
         lines
     }
 
-    /// The JSON tab: the session's state with its connection; `Null` while not connected.
+    /// The JSON tab (`sessionData`): the session the tree shows, with its connection as
+    /// Electron's `ConnectionInfo`, at any status. While the connection is down, the session
+    /// is the one kept from its last generation, as Electron's store outlives them; before
+    /// its first session, the connection alone. `Null` once disconnected (the pane closes).
     pub fn debug_json(&self, cx: &App) -> serde_json::Value {
         let Some(app) = self.app.upgrade() else {
             return serde_json::Value::Null;
@@ -177,26 +207,18 @@ impl SessionInfo {
         let Some(slot) = app.read(cx).session_slot(&self.id) else {
             return serde_json::Value::Null;
         };
-        let Some(session) = slot.session() else {
-            return serde_json::Value::Null;
+        let mut value = match slot.shown_session() {
+            Some(session) => session.read(cx).debug_json(cx),
+            None => serde_json::json!({}),
         };
-        let mut value = session.read(cx).debug_json(cx);
-        let connection = match &slot.target {
-            ConnectionTarget::Local => serde_json::json!({ "id": self.id.to_string(), "target": { "type": "local" } }),
-            ConnectionTarget::Remote(config) => {
-                serde_json::json!({ "id": self.id.to_string(), "target": { "type": "remote", "config": &**config } })
-            }
-        };
-        if let Some(object) = value.as_object_mut() {
-            object.insert("connection".to_owned(), connection);
-        }
+        value["connection"] = connection_json(&slot.id, &slot.target, &slot.state);
         value
     }
 
-    /// The session these logs belong to, while connected (the JSON tab follows it).
+    /// The session the JSON tab shows ([`Self::debug_json`]), which it follows.
     pub fn session(&self, cx: &App) -> Option<Entity<crate::session_store::SessionStore>> {
         let app = self.app.upgrade()?;
-        app.read(cx).session_slot(&self.id)?.session().cloned()
+        app.read(cx).session_slot(&self.id)?.shown_session().cloned()
     }
 
     pub fn log(&self, kind: OutputKind) -> &[String] {
@@ -330,7 +352,60 @@ impl SessionInfo {
 
 #[cfg(test)]
 mod tests {
-    use super::{ForwardFieldError, parse_forward_fields};
+    use std::sync::Arc;
+
+    use treeterm_core::connection::{ConnectPhase, ConnectionId, ConnectionTarget};
+
+    use super::{ForwardFieldError, connection_json, parse_forward_fields};
+    use crate::app_store::ConnState;
+
+    fn keys(value: &serde_json::Value) -> Vec<&str> {
+        value.as_object().unwrap().keys().map(String::as_str).collect()
+    }
+
+    #[test]
+    fn a_connection_reads_as_electrons_connection_info_at_each_status() {
+        let (id, local) = (ConnectionId::new("c1"), ConnectionTarget::Local);
+        let tunnel = connection_json(&id, &local, &ConnState::Connecting(ConnectPhase::Tunnel));
+        assert_eq!(
+            tunnel,
+            serde_json::json!({
+                "id": "c1", "target": { "type": "local" }, "status": "connecting", "connectPhase": "tunnel"
+            })
+        );
+        assert_eq!(keys(&tunnel), ["id", "target", "status", "connectPhase"]);
+        for (phase, name) in [(ConnectPhase::Bootstrap, "bootstrap"), (ConnectPhase::Daemon, "daemon")] {
+            assert_eq!(connection_json(&id, &local, &ConnState::Connecting(phase))["connectPhase"], name);
+        }
+
+        let lost = ConnState::Reconnecting { attempt: 3, error: "Connection lost".to_owned() };
+        let reconnecting = connection_json(&id, &local, &lost);
+        assert_eq!(keys(&reconnecting), ["id", "target", "status", "error", "attempt"]);
+        assert_eq!(
+            (&reconnecting["status"], &reconnecting["error"], &reconnecting["attempt"]),
+            (&"reconnecting".into(), &"Connection lost".into(), &3.into())
+        );
+
+        let failed = |hash_mismatch| ConnState::Failed { error: "refused".to_owned(), hash_mismatch };
+        let generic = connection_json(&id, &local, &failed(false));
+        assert_eq!(keys(&generic), ["id", "target", "status", "error", "errorKind"]);
+        assert_eq!((&generic["status"], &generic["error"]), (&"error".into(), &"refused".into()));
+        assert_eq!(generic["errorKind"], "generic");
+        assert_eq!(connection_json(&id, &local, &failed(true))["errorKind"], "daemon-hash-mismatch");
+    }
+
+    #[test]
+    fn a_remote_connection_carries_its_ssh_config() {
+        let config = treeterm_testkit::fake_ssh::remote_config();
+        let id = ConnectionId::new(config.id.clone());
+        let target = ConnectionTarget::Remote(Arc::new(config));
+        let json = connection_json(&id, &target, &ConnState::Connecting(ConnectPhase::Bootstrap));
+        assert_eq!(json["id"], "remote-1");
+        assert_eq!(keys(&json["target"]), ["type", "config"]);
+        assert_eq!(json["target"]["type"], "remote");
+        let config = &json["target"]["config"];
+        assert_eq!((&config["host"], &config["user"]), (&"example.com".into(), &"test".into()));
+    }
 
     #[test]
     fn forward_fields_are_checked_in_order_like_parse_int() {

@@ -11,7 +11,9 @@ use std::collections::HashSet;
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::{Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::*;
-use gpui_kit::{AnyElement, App, Context, Entity, Hsla, ScrollHandle, SharedString, Subscription, Window, div, px, rgb};
+use gpui_kit::{
+    AnyElement, App, Context, Entity, EntityId, Hsla, ScrollHandle, SharedString, Subscription, Window, div, px, rgb,
+};
 use treeterm_core::connection::{ConnectionId, ConnectionTarget, OutdatedDaemon, OutputKind, PortForwardStatus};
 use treeterm_model::app_store::{AppStore, ConnState};
 use treeterm_model::session_info::SessionInfo;
@@ -119,9 +121,10 @@ pub struct SessionInfoView {
     forward_dialog: Option<Entity<forward_dialog::ForwardDialog>>,
     /// Polls only while the Monitor sub-tab is shown.
     monitor: Option<Entity<monitor::MonitorView>>,
-    /// JSON tab: paths flipped from their default fold, and the session it follows while shown.
+    /// JSON tab: paths flipped from their default fold, and the session it follows while shown
+    /// (the connected one, or the one kept while the connection is down).
     json_toggled: HashSet<String>,
-    json_follow: Option<Subscription>,
+    json_follow: Option<(EntityId, Subscription)>,
     /// TTYs tab: the session's PTYs, grouped by workspace.
     ttys: Option<Entity<ttys::SessionTtys>>,
     upload: Option<Entity<crate::tool_views::SshUploadView>>,
@@ -353,10 +356,10 @@ impl SessionInfoView {
     }
 
     fn json_view(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        if self.json_follow.is_none()
-            && let Some(session) = self.info.read(cx).session(cx)
-        {
-            self.json_follow = Some(cx.observe(&session, |_, _, cx| cx.notify()));
+        let session = self.info.read(cx).session(cx);
+        if self.json_follow.as_ref().map(|(id, _)| *id) != session.as_ref().map(Entity::entity_id) {
+            self.json_follow =
+                session.map(|session| (session.entity_id(), cx.observe(&session, |_, _, cx| cx.notify())));
         }
         let c = colors(cx);
         let (secondary, primary) = (c.text_secondary, c.text_primary);

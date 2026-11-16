@@ -158,6 +158,17 @@ fn the_debug_json_shows_each_entry_with_its_status(cx: &mut TestAppContext) {
     assert_eq!(json["workspaces"]["root"]["data"]["name"], "root");
     assert_eq!(json["workspaces"]["broken"]["status"], "error");
     assert!(json["workspaces"]["broken"]["error"].is_string());
+
+    // An operation on it failed: Electron's `operation-error` with its data, then the error.
+    std::fs::write(h.daemon.workspaces_dir().join("root.json"), "{").unwrap();
+    wait_until(cx, &store, |s| matches!(s.entry("root"), Some(WorkspaceEntry::OperationError { .. })));
+    let json = cx.update(|cx| store.read(cx).debug_json(cx));
+    let root = &json["workspaces"]["root"];
+    let keys: Vec<&str> = root.as_object().unwrap().keys().map(String::as_str).collect();
+    assert_eq!(keys, ["status", "data", "error"]);
+    assert_eq!(root["status"], "operation-error");
+    assert_eq!(root["data"]["id"], "root");
+    assert!(root["error"].as_str().is_some_and(|e| e.starts_with("Invalid workspace file: ")), "{root}");
 }
 
 /// How many `Restored` the store emits.

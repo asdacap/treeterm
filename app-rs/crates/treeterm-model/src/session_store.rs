@@ -529,8 +529,9 @@ impl SessionStore {
             .map(|(id, entry)| {
                 let value = match entry {
                     WorkspaceEntry::Loaded(store) => serde_json::json!({ "status": "loaded", "data": workspace_json(store) }),
+                    // `error` only the native session shows, after Electron's keys.
                     WorkspaceEntry::OperationError { store, error } => {
-                        serde_json::json!({ "status": "operation_error", "error": error, "data": workspace_json(store) })
+                        serde_json::json!({ "status": "operation-error", "data": workspace_json(store), "error": error })
                     }
                     WorkspaceEntry::Loading { name, message, .. } => {
                         serde_json::json!({ "status": "loading", "name": name, "message": message })
