@@ -111,7 +111,7 @@ struct Harness {
     metadata: Vec<(&'static str, String, &'static str)>,
     renames: Vec<(String, String)>,
     git_refreshes: usize,
-    refreshes: Vec<(Refresh, Result<(), String>)>,
+    refreshes: Vec<(RequestId, Refresh, Result<(), String>)>,
 }
 
 impl Harness {
@@ -230,9 +230,11 @@ impl Harness {
                     self.renames.push((from, to));
                 }
                 Effect::RefreshGit => self.git_refreshes += 1,
-                Effect::RefreshFinished { refresh, result } => {
-                    self.refreshes.push((refresh, result))
-                }
+                Effect::RefreshFinished {
+                    id,
+                    refresh,
+                    result,
+                } => self.refreshes.push((id, refresh, result)),
             }
         }
     }
@@ -323,20 +325,30 @@ impl Harness {
         self.apply(effects);
     }
 
-    fn refresh_title_and_description(&mut self) {
-        let screen = self.screen.clone();
-        let effects = self
-            .analyzer
-            .refresh_title_and_description(&screen, self.now());
-        self.apply(effects);
+    /// Start a refresh and deliver what it asks for; its id.
+    fn refresh_title_and_description(&mut self) -> RequestId {
+        let id = self.start_refresh(Refresh::TitleAndDescription);
         self.flush();
+        id
     }
 
-    fn refresh_branch_name(&mut self) {
-        let screen = self.screen.clone();
-        let effects = self.analyzer.refresh_branch_name(&screen, self.now());
-        self.apply(effects);
+    fn refresh_branch_name(&mut self) -> RequestId {
+        let id = self.start_refresh(Refresh::BranchName);
         self.flush();
+        id
+    }
+
+    /// Start a refresh, leaving what it asks for undelivered until [`Self::flush`].
+    fn start_refresh(&mut self, refresh: Refresh) -> RequestId {
+        let screen = self.screen.clone();
+        let (id, effects) = match refresh {
+            Refresh::TitleAndDescription => self
+                .analyzer
+                .refresh_title_and_description(&screen, self.now()),
+            Refresh::BranchName => self.analyzer.refresh_branch_name(&screen, self.now()),
+        };
+        self.apply(effects);
+        id
     }
 
     /// Runs the silent first burst after start (the scrollback replay) through to its
@@ -837,8 +849,11 @@ fn refresh_title_and_description_overwrites_display_name_and_description_even_wh
     let mut h = started();
     h.workspace.has_display_name = true;
     h.workspace.has_description = true;
-    h.refresh_title_and_description();
-    assert_eq!(h.refreshes, vec![(Refresh::TitleAndDescription, Ok(()))]);
+    let id = h.refresh_title_and_description();
+    assert_eq!(
+        h.refreshes,
+        vec![(id, Refresh::TitleAndDescription, Ok(()))]
+    );
     assert_eq!(h.title_calls.len(), 1);
     assert!(h.has_metadata("displayName", "Test Title", "manualRefreshTitle"));
     assert!(h.has_metadata(
@@ -856,9 +871,12 @@ fn refresh_title_and_description_overwrites_display_name_and_description_even_wh
 #[test]
 fn refresh_title_and_description_reports_failure_when_there_is_no_buffer() {
     let mut h = Harness::new();
-    h.refresh_title_and_description();
+    let id = h.refresh_title_and_description();
     let expected = Err("Terminal is empty — nothing for the labeller to read".to_owned());
-    assert_eq!(h.refreshes, vec![(Refresh::TitleAndDescription, expected)]);
+    assert_eq!(
+        h.refreshes,
+        vec![(id, Refresh::TitleAndDescription, expected)]
+    );
     assert!(h.title_calls.is_empty());
     assert!(h.metadata.is_empty());
 }
@@ -869,10 +887,11 @@ fn refresh_title_and_description_reports_failure_when_no_model_is_configured() {
     s.terminal_analyzer.title_model = String::new();
     s.terminal_analyzer.model = String::new();
     let mut h = Harness::with_settings(s);
-    h.refresh_title_and_description();
+    let id = h.refresh_title_and_description();
     assert_eq!(
         h.refreshes,
         vec![(
+            id,
             Refresh::TitleAndDescription,
             Err("Title model not configured".to_owned())
         )]
@@ -889,10 +908,14 @@ fn refresh_title_and_description_surfaces_the_llm_error_message_and_writes_no_me
             system_prompt: "title prompt".to_owned(),
         })
     });
-    h.refresh_title_and_description();
+    let id = h.refresh_title_and_description();
     assert_eq!(
         h.refreshes,
-        vec![(Refresh::TitleAndDescription, Err("rate limited".to_owned()))]
+        vec![(
+            id,
+            Refresh::TitleAndDescription,
+            Err("rate limited".to_owned())
+        )]
     );
     assert!(h.metadata.is_empty());
 }
@@ -901,10 +924,14 @@ fn refresh_title_and_description_surfaces_the_llm_error_message_and_writes_no_me
 fn refresh_title_and_description_surfaces_a_thrown_llm_error() {
     let mut h = started();
     h.title = Box::new(|_| Err("network down".to_owned()));
-    h.refresh_title_and_description();
+    let id = h.refresh_title_and_description();
     assert_eq!(
         h.refreshes,
-        vec![(Refresh::TitleAndDescription, Err("network down".to_owned()))]
+        vec![(
+            id,
+            Refresh::TitleAndDescription,
+            Err("network down".to_owned())
+        )]
     );
 }
 
@@ -912,10 +939,11 @@ fn refresh_title_and_description_surfaces_a_thrown_llm_error() {
 fn refresh_title_and_description_reports_an_empty_title() {
     let mut h = started();
     h.title = Box::new(|_| titled("", "d", "b"));
-    h.refresh_title_and_description();
+    let id = h.refresh_title_and_description();
     assert_eq!(
         h.refreshes,
         vec![(
+            id,
             Refresh::TitleAndDescription,
             Err("LLM returned no title".to_owned())
         )]
@@ -928,8 +956,8 @@ fn refresh_branch_name_renames_the_branch_and_marks_it_user_defined_even_when_al
 {
     let mut h = started();
     h.workspace.branch_is_user_defined = true;
-    h.refresh_branch_name();
-    assert_eq!(h.refreshes, vec![(Refresh::BranchName, Ok(()))]);
+    let id = h.refresh_branch_name();
+    assert_eq!(h.refreshes, vec![(id, Refresh::BranchName, Ok(()))]);
     assert_eq!(
         h.renames,
         vec![("old-branch".to_owned(), "test-title".to_owned())]
@@ -943,9 +971,9 @@ fn refresh_branch_name_renames_the_branch_and_marks_it_user_defined_even_when_al
 fn refresh_branch_name_does_not_rename_when_the_suggested_branch_name_is_invalid() {
     let mut h = started();
     h.title = Box::new(|_| titled("Test Title", "d", "Invalid Name!"));
-    h.refresh_branch_name();
+    let id = h.refresh_branch_name();
     let expected = Err("LLM suggested an invalid branch name: \"Invalid Name!\"".to_owned());
-    assert_eq!(h.refreshes, vec![(Refresh::BranchName, expected)]);
+    assert_eq!(h.refreshes, vec![(id, Refresh::BranchName, expected)]);
     assert!(h.renames.is_empty());
     assert!(h.metadata.is_empty());
 }
@@ -954,10 +982,10 @@ fn refresh_branch_name_does_not_rename_when_the_suggested_branch_name_is_invalid
 fn refresh_branch_name_does_not_rename_when_the_llm_omits_the_branch_name() {
     let mut h = started();
     h.title = Box::new(|_| titled("Test Title", "d", ""));
-    h.refresh_branch_name();
+    let id = h.refresh_branch_name();
     assert!(matches!(
         h.refreshes.as_slice(),
-        [(Refresh::BranchName, Err(_))]
+        [(finished, Refresh::BranchName, Err(_))] if *finished == id
     ));
     assert!(h.renames.is_empty());
 }
@@ -966,10 +994,15 @@ fn refresh_branch_name_does_not_rename_when_the_llm_omits_the_branch_name() {
 fn refresh_branch_name_surfaces_a_rename_failure() {
     let mut h = started();
     h.rename = Box::new(|_, _| Err("branch already exists".to_owned()));
-    h.refresh_branch_name();
+    let id = h.refresh_branch_name();
+    // Reported under the refresh's id, not the rename's.
     assert_eq!(
         h.refreshes,
-        vec![(Refresh::BranchName, Err("branch already exists".to_owned()))]
+        vec![(
+            id,
+            Refresh::BranchName,
+            Err("branch already exists".to_owned())
+        )]
     );
     assert!(h.metadata.is_empty());
 }
@@ -978,15 +1011,68 @@ fn refresh_branch_name_surfaces_a_rename_failure() {
 fn refresh_branch_name_reports_failure_when_the_workspace_has_no_branch() {
     let mut h = started();
     h.workspace.git_branch = None;
-    h.refresh_branch_name();
+    let id = h.refresh_branch_name();
     assert_eq!(
         h.refreshes,
         vec![(
+            id,
             Refresh::BranchName,
             Err("Workspace has no branch to rename".to_owned())
         )]
     );
     assert!(h.renames.is_empty());
+}
+
+#[test]
+fn overlapping_refreshes_finish_under_their_own_ids() {
+    let mut h = started();
+    h.title = Box::new(|request| {
+        if request.buffer.contains("second") {
+            titled("Second", "d", "Not Kebab")
+        } else {
+            titled("First", "d", "first-branch")
+        }
+    });
+    let first = h.start_refresh(Refresh::BranchName);
+    h.emit("$ echo second\nsecond\n$ ");
+    let second = h.start_refresh(Refresh::BranchName);
+    let third = h.start_refresh(Refresh::TitleAndDescription);
+    assert_ne!(first, second);
+    assert_ne!(second, third);
+    h.flush();
+    // The first rename is delivered after both title answers, so it finishes last.
+    assert_eq!(
+        h.refreshes,
+        vec![
+            (
+                second,
+                Refresh::BranchName,
+                Err("LLM suggested an invalid branch name: \"Not Kebab\"".to_owned())
+            ),
+            (third, Refresh::TitleAndDescription, Ok(())),
+            (first, Refresh::BranchName, Ok(())),
+        ]
+    );
+    assert_eq!(
+        h.renames,
+        vec![("old-branch".to_owned(), "first-branch".to_owned())]
+    );
+}
+
+#[test]
+fn a_refresh_that_fails_at_once_still_gets_its_own_id() {
+    let mut h = Harness::new();
+    let first = h.refresh_title_and_description();
+    let second = h.refresh_branch_name();
+    assert_ne!(first, second);
+    let empty = || Err("Terminal is empty — nothing for the labeller to read".to_owned());
+    assert_eq!(
+        h.refreshes,
+        vec![
+            (first, Refresh::TitleAndDescription, empty()),
+            (second, Refresh::BranchName, empty()),
+        ]
+    );
 }
 
 // === auto-approve ===

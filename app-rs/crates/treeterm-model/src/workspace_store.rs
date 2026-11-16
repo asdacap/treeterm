@@ -8,10 +8,10 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use gpui_kit::{AppContext as _, Context, Entity, EventEmitter, Subscription, Task};
+use gpui_kit::{App, AppContext as _, Context, Entity, EventEmitter, Subscription, Task};
 use serde_json::Value;
 use treeterm_core::activity::{ActivityStates, TransitionDetail};
-use treeterm_core::analyzer::idle_timeout as analyzer_idle_timeout;
+use treeterm_core::analyzer::{Refresh, idle_timeout as analyzer_idle_timeout};
 use treeterm_core::attention::{
     ActiveView as AttentionView, AttentionAction, AttentionMutation, AttentionSyncState, AttentionTracker, Metadata,
     ObservedSession, ObservedWorkspace, SessionStatus, apply_attention_mutations, has_unread_workspace_attention,
@@ -275,6 +275,14 @@ const LAYOUT_MODEL: &str = "layoutModel";
 /// The metadata key marking the description as sent to the AI harness or skipped (`"true"`).
 const DESCRIPTION_PROMPTED: &str = "descriptionPrompted";
 
+/// The LLM labeller reads the AI Harness terminal; without one there is nothing to label
+/// from (`NO_AI_HARNESS_TAB`).
+pub const NO_AI_HARNESS_TAB: &str = "No AI Harness tab open — the labeller has no terminal to read";
+
+/// A refresh whose analyzer went first: its tab closed, its PTY was replaced, or the
+/// workspace was unloaded.
+pub const REFRESH_ANALYZER_GONE: &str = "The AI Harness terminal went away before the labeller finished";
+
 /// `#rrggbb` → colour; anything else is ignored (the default background is used).
 fn parse_hex_color(text: &str) -> Option<treeterm_term::alacritty_terminal::vte::ansi::Rgb> {
     let hex = text.strip_prefix('#').filter(|h| h.len() == 6)?;
@@ -403,24 +411,36 @@ impl WorkspaceStore {
         }
     }
 
-    /// Re-consult the LLM through the workspace's first AI-harness tab
-    /// (`refreshTitleAndDescription` / `refreshBranchName`). Fails without one.
-    pub fn refresh_labels(&mut self, branch: bool, cx: &mut Context<Self>) -> Result<(), String> {
-        let analyzer = self
-            .workspace
-            .file
-            .app_states
-            .keys()
-            .find_map(|tab| self.analyzer(tab))
-            .ok_or_else(|| "No AI Harness tab in this workspace".to_owned())?;
-        analyzer.update(cx, |a, cx| {
-            if branch {
-                a.refresh_branch_name(cx);
-            } else {
-                a.refresh_title_and_description(cx);
+    /// `findAiHarnessAnalyzer`: the active tab's analyzer if it has one, else the first in
+    /// tab order.
+    fn find_ai_harness_analyzer(&self) -> Option<Entity<AnalyzerModel>> {
+        let file = &self.workspace.file;
+        file.active_tab_id
+            .as_deref()
+            .and_then(|tab| self.analyzer(tab))
+            .or_else(|| file.app_states.keys().find_map(|tab| self.analyzer(tab)))
+    }
+
+    /// Re-consult the LLM through an AI-harness tab's analyzer, the active tab's first
+    /// (`refreshTitleAndDescription` / `refreshBranchName`). Resolves once it finished;
+    /// failures carry a message fit to show the user.
+    pub fn refresh_labels(&mut self, refresh: Refresh, cx: &mut Context<Self>) -> Task<Result<(), String>> {
+        let Some(analyzer) = self.find_ai_harness_analyzer() else {
+            return Task::ready(Err(NO_AI_HARNESS_TAB.to_owned()));
+        };
+        let outcome = analyzer.update(cx, |a, cx| a.refresh(refresh, cx));
+        cx.notify(); // is_refreshing
+        cx.foreground_executor().spawn(async move {
+            match outcome.await {
+                Ok(result) => result,
+                Err(futures::channel::oneshot::Canceled) => Err(REFRESH_ANALYZER_GONE.to_owned()),
             }
-        });
-        Ok(())
+        })
+    }
+
+    /// A refresh of this kind runs through one of the workspace's AI-harness tabs.
+    pub fn is_refreshing(&self, refresh: Refresh, cx: &App) -> bool {
+        self.tabs.keys().filter_map(|tab| self.analyzer(tab)).any(|a| a.read(cx).is_refreshing(refresh))
     }
 
     pub fn is_favourite(&self) -> bool {
@@ -1219,6 +1239,7 @@ impl WorkspaceStore {
             AnalyzerEvent::BranchRenamed(branch) => store.set_git_branch(branch, cx),
             AnalyzerEvent::RefreshGit => store.refresh_git(cx),
             AnalyzerEvent::Write(text) => store.write_for_analyzer(&pty_id, text, cx),
+            AnalyzerEvent::RefreshFinished => cx.notify(), // is_refreshing
         });
         Some((analyzer, events))
     }

@@ -821,12 +821,15 @@ impl TreePane {
                         .on_click(move |_, _, cx| favourite_store.update(cx, |w, cx| w.toggle_favourite(cx))),
                 );
                 if child {
-                    for (text, branch) in [("Refresh Title & Description", false), ("Refresh Branch Name", true)] {
+                    use treeterm_core::analyzer::Refresh;
+                    for (text, refresh) in
+                        [("Refresh Title & Description", Refresh::TitleAndDescription), ("Refresh Branch Name", Refresh::BranchName)]
+                    {
                         let store = store.clone();
                         menu = menu.item(ui::menu_item(text).on_click(move |_, window, cx| {
-                            if let Err(error) = store.update(cx, |w, cx| w.refresh_labels(branch, cx)) {
-                                window.push_notification(error, cx);
-                            }
+                            // `reportRefreshOutcome`
+                            let outcome = store.update(cx, |w, cx| w.refresh_labels(refresh, cx));
+                            ui::alert_failure(outcome, window, cx);
                         }));
                     }
                 }

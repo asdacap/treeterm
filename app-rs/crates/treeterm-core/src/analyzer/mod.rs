@@ -132,8 +132,11 @@ pub enum Effect {
     },
     /// Refresh the workspace's git info and status (the program may have changed files).
     RefreshGit,
-    /// A manual refresh finished; failures carry a message fit to show the user.
+    /// A manual refresh finished; failures carry a message fit to show the user. `id` is
+    /// the one [`Analyzer::refresh_title_and_description`] or
+    /// [`Analyzer::refresh_branch_name`] returned.
     RefreshFinished {
+        id: RequestId,
         refresh: Refresh,
         result: Result<(), String>,
     },
@@ -323,7 +326,8 @@ struct TitleJob {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RenamePurpose {
     Automatic,
-    Refresh,
+    /// A branch-name refresh: its id.
+    Refresh(RequestId),
 }
 
 /// One AI-harness tab's analyzer (`createAnalyzerStore`).
@@ -618,20 +622,27 @@ impl Analyzer {
             self.title = TitleCapture::Waiting;
             return out;
         }
-        match self.request_title(viewport, now, TitlePurpose::Automatic) {
+        let id = self.next_id();
+        match self.request_title(id, viewport, now, TitlePurpose::Automatic) {
             Ok(effect) => out.push(effect),
             Err(error) => tracing::warn!("analyzer: automatic title generation failed: {error}"),
         }
         out
     }
 
-    /// Ask for a new display name and description, overwriting the current ones.
-    pub fn refresh_title_and_description(&mut self, viewport: &str, now: Now) -> Vec<Effect> {
+    /// Ask for a new display name and description, overwriting the current ones. Its
+    /// [`Effect::RefreshFinished`] carries the id returned, also when it fails at once.
+    pub fn refresh_title_and_description(
+        &mut self,
+        viewport: &str,
+        now: Now,
+    ) -> (RequestId, Vec<Effect>) {
         self.refresh(Refresh::TitleAndDescription, viewport, now)
     }
 
-    /// Ask for a branch name, rename the branch to it and mark it user-defined.
-    pub fn refresh_branch_name(&mut self, viewport: &str, now: Now) -> Vec<Effect> {
+    /// Ask for a branch name, rename the branch to it and mark it user-defined. Its
+    /// [`Effect::RefreshFinished`] carries the id returned, also when it fails at once.
+    pub fn refresh_branch_name(&mut self, viewport: &str, now: Now) -> (RequestId, Vec<Effect>) {
         self.refresh(Refresh::BranchName, viewport, now)
     }
 
@@ -688,7 +699,9 @@ impl Analyzer {
             TitlePurpose::Refresh(Refresh::TitleAndDescription) => {
                 let suggestion = match result {
                     Ok(suggestion) => suggestion,
-                    Err(error) => return vec![finished(Refresh::TitleAndDescription, Err(error))],
+                    Err(error) => {
+                        return vec![finished(id, Refresh::TitleAndDescription, Err(error))];
+                    }
                 };
                 let mut out = vec![metadata(
                     "displayName",
@@ -707,15 +720,15 @@ impl Analyzer {
                         "manualRefreshDescriptionPrompted",
                     ));
                 }
-                out.push(finished(Refresh::TitleAndDescription, Ok(())));
+                out.push(finished(id, Refresh::TitleAndDescription, Ok(())));
                 out
             }
             TitlePurpose::Refresh(Refresh::BranchName) => {
                 let rename =
                     result.and_then(|suggestion| branch_rename(&suggestion.branch_name, workspace));
                 match rename {
-                    Ok((from, to)) => vec![self.rename(RenamePurpose::Refresh, from, to)],
-                    Err(error) => vec![finished(Refresh::BranchName, Err(error))],
+                    Ok((from, to)) => vec![self.rename(RenamePurpose::Refresh(id), from, to)],
+                    Err(error) => vec![finished(id, Refresh::BranchName, Err(error))],
                 }
             }
         }
@@ -729,16 +742,16 @@ impl Analyzer {
                 tracing::warn!("analyzer: automatic branch rename failed: {error}");
                 Vec::new()
             }
-            (Some(RenamePurpose::Refresh), Ok(())) => vec![
+            (Some(RenamePurpose::Refresh(refresh)), Ok(())) => vec![
                 metadata(
                     "branchIsUserDefined",
                     "true".to_owned(),
                     "manualRefreshBranch",
                 ),
-                finished(Refresh::BranchName, Ok(())),
+                finished(refresh, Refresh::BranchName, Ok(())),
             ],
-            (Some(RenamePurpose::Refresh), Err(error)) => {
-                vec![finished(Refresh::BranchName, Err(error))]
+            (Some(RenamePurpose::Refresh(refresh)), Err(error)) => {
+                vec![finished(refresh, Refresh::BranchName, Err(error))]
             }
         }
     }
@@ -879,15 +892,20 @@ impl Analyzer {
         }
     }
 
-    fn refresh(&mut self, refresh: Refresh, viewport: &str, now: Now) -> Vec<Effect> {
-        match self.request_title(viewport, now, TitlePurpose::Refresh(refresh)) {
+    /// A refresh's id is its title request's.
+    fn refresh(&mut self, refresh: Refresh, viewport: &str, now: Now) -> (RequestId, Vec<Effect>) {
+        let id = self.next_id();
+        let effects = match self.request_title(id, viewport, now, TitlePurpose::Refresh(refresh)) {
             Ok(effect) => vec![effect],
-            Err(error) => vec![finished(refresh, Err(error))],
-        }
+            Err(error) => vec![finished(id, refresh, Err(error))],
+        };
+        (id, effects)
     }
 
+    /// Start title request `id`, or say why it cannot start.
     fn request_title(
         &mut self,
+        id: RequestId,
         viewport: &str,
         now: Now,
         purpose: TitlePurpose,
@@ -898,7 +916,6 @@ impl Analyzer {
         let Some(buffer) = non_blank(viewport) else {
             return Err("Terminal is empty — nothing for the labeller to read".to_owned());
         };
-        let id = self.next_id();
         let settings = TitleSettings {
             base_url: self.llm.base_url.clone(),
             api_key: self.llm.api_key.clone(),
@@ -981,8 +998,12 @@ fn metadata(key: &'static str, value: String, reason: &'static str) -> Effect {
     Effect::UpdateMetadata { key, value, reason }
 }
 
-fn finished(refresh: Refresh, result: Result<(), String>) -> Effect {
-    Effect::RefreshFinished { refresh, result }
+fn finished(id: RequestId, refresh: Refresh, result: Result<(), String>) -> Effect {
+    Effect::RefreshFinished {
+        id,
+        refresh,
+        result,
+    }
 }
 
 /// `(current branch, suggested name)` when the suggestion is valid and the workspace is a

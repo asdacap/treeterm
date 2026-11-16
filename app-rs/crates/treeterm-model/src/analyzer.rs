@@ -13,6 +13,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::SystemTime;
 
+use futures::channel::oneshot;
 use gpui_kit::{App, Context, Entity, EventEmitter, Subscription, Task, WeakEntity};
 use treeterm_core::activity::{ActivityState, TransitionDetail};
 use treeterm_core::analyzer::{Analyzer, Effect, Now, Refresh, RequestId, WorkspaceFacts};
@@ -69,6 +70,8 @@ pub enum AnalyzerEvent {
     RefreshGit,
     /// Write to the tab's PTY (auto-approve's Enter).
     Write(&'static str),
+    /// A manual refresh finished: [`AnalyzerModel::is_refreshing`] changed.
+    RefreshFinished,
 }
 
 impl EventEmitter<AnalyzerEvent> for AnalyzerModel {}
@@ -82,10 +85,17 @@ pub struct AnalyzerModel {
     terminal: Entity<TerminalModel>,
     workspace: WeakEntity<WorkspaceStore>,
     tab_id: String,
-    last_refresh: Option<(Refresh, Result<(), String>)>,
+    /// Manual refreshes under way, and who waits for each outcome.
+    refreshes: HashMap<RequestId, Waiter>,
     jobs: HashMap<RequestId, Task<()>>,
     timer: Option<Task<()>>,
     _terminal_events: Subscription,
+}
+
+/// One manual refresh's outcome, awaited by whoever started it (`TitleRefreshResult`).
+struct Waiter {
+    refresh: Refresh,
+    outcome: oneshot::Sender<Result<(), String>>,
 }
 
 fn now(cx: &App) -> Now {
@@ -120,7 +130,7 @@ impl AnalyzerModel {
             terminal,
             workspace,
             tab_id,
-            last_refresh: None,
+            refreshes: HashMap::new(),
             jobs: HashMap::new(),
             timer: None,
             _terminal_events: events,
@@ -135,9 +145,9 @@ impl AnalyzerModel {
         &self.tab_id
     }
 
-    /// The last manual refresh's outcome, for the status bar.
-    pub fn last_refresh(&self) -> Option<&(Refresh, Result<(), String>)> {
-        self.last_refresh.as_ref()
+    /// A manual refresh of this kind is under way.
+    pub fn is_refreshing(&self, refresh: Refresh) -> bool {
+        self.refreshes.values().any(|waiter| waiter.refresh == refresh)
     }
 
     pub fn set_auto_approve(&mut self, value: bool, cx: &mut Context<Self>) {
@@ -150,24 +160,27 @@ impl AnalyzerModel {
         self.apply(effects, cx);
     }
 
-    /// Re-label the workspace from what is on screen now (display name and description).
-    pub fn refresh_title_and_description(&mut self, cx: &mut Context<Self>) {
+    /// Re-label the workspace from what is on screen now: its display name and description,
+    /// or its branch. The outcome arrives on the receiver; failures carry a message fit to
+    /// show the user. It is dropped unsent if the analyzer stops or goes first.
+    pub fn refresh(&mut self, refresh: Refresh, cx: &mut Context<Self>) -> oneshot::Receiver<Result<(), String>> {
         let viewport = self.terminal.read(cx).viewport();
-        let effects = self.analyzer.refresh_title_and_description(&viewport, now(cx));
+        let (id, effects) = match refresh {
+            Refresh::TitleAndDescription => self.analyzer.refresh_title_and_description(&viewport, now(cx)),
+            Refresh::BranchName => self.analyzer.refresh_branch_name(&viewport, now(cx)),
+        };
+        let (outcome, receiver) = oneshot::channel();
+        // Before the effects: a refresh that cannot start finishes among them.
+        self.refreshes.insert(id, Waiter { refresh, outcome });
         self.apply(effects, cx);
+        receiver
     }
 
-    /// Rename the branch from what is on screen now.
-    pub fn refresh_branch_name(&mut self, cx: &mut Context<Self>) {
-        let viewport = self.terminal.read(cx).viewport();
-        let effects = self.analyzer.refresh_branch_name(&viewport, now(cx));
-        self.apply(effects, cx);
-    }
-
-    /// Stop for good (the tab closed or left the session).
+    /// Stop for good (the tab closed or left the session). Refreshes under way are dropped.
     pub fn stop(&mut self) {
         self.analyzer.stop();
         self.jobs.clear();
+        self.refreshes.clear();
         self.timer = None;
     }
 
@@ -273,7 +286,14 @@ impl AnalyzerModel {
                     );
                 }
                 Effect::RefreshGit => cx.emit(AnalyzerEvent::RefreshGit),
-                Effect::RefreshFinished { refresh, result } => self.last_refresh = Some((refresh, result)),
+                Effect::RefreshFinished { id, refresh, result } => {
+                    if let Some(Waiter { outcome, .. }) = self.refreshes.remove(&id)
+                        && let Err(unread) = outcome.send(result)
+                    {
+                        tracing::warn!(tab = %self.tab_id, ?refresh, ?unread, "nobody awaited the refresh's outcome");
+                    }
+                    cx.emit(AnalyzerEvent::RefreshFinished);
+                }
             }
         }
         self.schedule_timer(cx);

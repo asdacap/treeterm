@@ -496,6 +496,31 @@ pub fn confirm(
         .detach();
 }
 
+/// Electron's `alert(message)`: the platform's message box with OK.
+pub fn alert(message: impl Into<SharedString>, window: &mut Window, cx: &mut App) {
+    let message: SharedString = message.into();
+    let answer = window.prompt(gpui_kit::PromptLevel::Info, &message, None, &["OK"], cx);
+    window
+        .spawn(cx, async move |_| match answer.await {
+            Ok(_) | Err(_) => {} // dismissed
+        })
+        .detach();
+}
+
+/// `if (result.status === Failure) alert(result.error)`: once `outcome` resolves, its
+/// failure is alerted.
+pub fn alert_failure(outcome: gpui_kit::Task<Result<(), String>>, window: &mut Window, cx: &mut App) {
+    window
+        .spawn(cx, async move |cx| {
+            if let Err(message) = outcome.await
+                && let Err(error) = cx.update(|window, cx| alert(message.clone(), window, cx))
+            {
+                tracing::warn!(%error, %message, "the window closed before the failure could be shown");
+            }
+        })
+        .detach();
+}
+
 /// The app's `::-webkit-scrollbar` (10px gutter, transparent track, a border-colour thumb
 /// with 5px radius) for a scroll area `viewport` tall showing `content` of height, scrolled
 /// as `handle` says. Place it absolutely over the area's right edge; the area reserves

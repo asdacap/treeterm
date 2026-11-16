@@ -1712,7 +1712,27 @@ fn workspace_header(
                 .child(gpui_kit::component::input::Input::new(&input).xsmall()),
         ),
         None => {
+            use treeterm_core::analyzer::Refresh;
+            // `RefreshTitleButton`: disabled, with a spinner, while the LLM works.
             let refresh = workspace.clone();
+            let button = div().id("refresh-title").px(px(4.)).py(px(2.)).flex_shrink_0();
+            let button = if workspace.read(cx).is_refreshing(Refresh::TitleAndDescription, cx) {
+                button.tooltip(tip("Generating name and description...")).child(
+                    Spinner::new()
+                        .icon(gpui_kit::component::Icon::new(IconName::LoaderCircle))
+                        .with_size(px(12.))
+                        .color(secondary),
+                )
+            } else {
+                button
+                    .cursor_pointer()
+                    .tooltip(tip("Regenerate name and description with the LLM"))
+                    .child(crate::ui::icon(IconName::RefreshCw, 12., secondary))
+                    .on_click(move |_, window, cx| {
+                        let outcome = refresh.update(cx, |w, cx| w.refresh_labels(Refresh::TitleAndDescription, cx));
+                        crate::ui::alert_failure(outcome, window, cx);
+                    })
+            };
             top.child(
                 div()
                     .min_w_0()
@@ -1723,22 +1743,7 @@ fn workspace_header(
                     .child(file.display_name().to_owned()),
             )
             .child(edit_button("edit-name", 13., "Edit name", HeaderField::Name, cx))
-            .child(
-                div()
-                    .id("refresh-title")
-                    .px(px(4.))
-                    .py(px(2.))
-                    .flex_shrink_0()
-                    .cursor_pointer()
-                    .tooltip(tip("Refresh title & description"))
-                    .child(crate::ui::icon(IconName::RefreshCw, 12., secondary))
-                    .on_click(move |_, window, cx| {
-                        if let Err(error) = refresh.update(cx, |w, cx| w.refresh_labels(false, cx)) {
-                            use gpui_kit::component::WindowExt as _;
-                            window.push_notification(error, cx);
-                        }
-                    }),
-            )
+            .child(button)
         }
     };
 
@@ -1769,10 +1774,10 @@ fn workspace_header(
                     if can_rename {
                         let ws = rename_ws.clone();
                         menu.item(crate::ui::menu_item("Auto-rename branch").on_click(move |_, window, cx| {
-                            if let Err(error) = ws.update(cx, |w, cx| w.refresh_labels(true, cx)) {
-                                use gpui_kit::component::WindowExt as _;
-                                window.push_notification(error, cx);
-                            }
+                            let outcome = ws.update(cx, |w, cx| {
+                                w.refresh_labels(treeterm_core::analyzer::Refresh::BranchName, cx)
+                            });
+                            crate::ui::alert_failure(outcome, window, cx);
                         }))
                     } else {
                         menu
