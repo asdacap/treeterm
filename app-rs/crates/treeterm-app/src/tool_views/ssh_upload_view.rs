@@ -33,13 +33,13 @@ impl SshUploadView {
         Self { model, session, remote_dir, _subscriptions: vec![typed, observe] }
     }
 
-    /// "Choose file…": the native picker (local files).
+    /// "Choose file…": the native picker (local files), with its default "Open" button.
     fn choose_file(&mut self, cx: &mut Context<Self>) {
         let picked = cx.prompt_for_paths(gpui_kit::PathPromptOptions {
             files: true,
             directories: false,
             multiple: false,
-            prompt: Some("Upload".into()),
+            prompt: None,
         });
         cx.spawn(async move |view, cx| {
             let path = match picked.await {
