@@ -43,6 +43,7 @@ gpui_kit::assets::icon_assets!(
         PanelLeftOpen,
         Pencil,
         Plus,
+        Printer,
         RefreshCw,
         RotateCcw,
         Search,
@@ -54,6 +55,8 @@ gpui_kit::assets::icon_assets!(
         Volume2,
         VolumeX,
         X,
+        ZoomIn,
+        ZoomOut,
     ]
 );
 

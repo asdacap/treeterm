@@ -612,9 +612,10 @@ fn image_page_html(alt: &str) -> String {
     )
 }
 
-/// A page served from memory to a webview: a PDF (WKWebView renders PDFs itself) or the 3D
-/// model viewer with the model's bytes. Each page gets its own URL scheme, so pages never
-/// share a registration (webkitgtk registers schemes per web context).
+/// A page served from memory to a webview: a PDF (WKWebView renders PDFs itself), the 3D
+/// model viewer with the model's bytes, or an image GPUI cannot decode. Each page gets its
+/// own URL scheme, so pages never share a registration (webkitgtk registers schemes per web
+/// context).
 pub struct AssetPageView {
     files: std::sync::Arc<std::collections::HashMap<String, (&'static str, Asset)>>,
     /// The path and query the page opens at.
@@ -623,6 +624,16 @@ pub struct AssetPageView {
     what: &'static str,
     page: Page,
     shown: bool,
+    /// The page zoom ([`AssetPageView::set_zoom`]); `1.0` as the page opens.
+    zoom: f64,
+    command: PageCommand,
+}
+
+/// How the last zoom or print asked of a page went.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PageCommand {
+    Done,
+    Failed(String),
 }
 
 impl AssetPageView {
@@ -660,7 +671,49 @@ impl AssetPageView {
             what,
             page: Page::NotBuilt,
             shown: true,
+            zoom: 1.,
+            command: PageCommand::Done,
         }
+    }
+
+    pub fn zoom(&self) -> f64 {
+        self.zoom
+    }
+
+    pub fn command(&self) -> &PageCommand {
+        &self.command
+    }
+
+    /// Zoom the page, where `1.0` is the size it opened at (WebKit scales a PDF's pages).
+    pub fn set_zoom(&mut self, zoom: f64, cx: &mut Context<Self>) {
+        let result = match &self.page {
+            Page::Live(webview) => webview.read(cx).set_zoom(zoom).map_err(|error| error.to_string()),
+            Page::NotBuilt | Page::Failed(_) => Err(format!("{} is not shown", self.what)),
+        };
+        if result.is_ok() {
+            self.zoom = zoom;
+        }
+        self.finish("Cannot zoom", result, cx);
+    }
+
+    /// Open the system print panel for the page.
+    pub fn print(&mut self, cx: &mut Context<Self>) {
+        let result = match &self.page {
+            Page::Live(webview) => webview.read(cx).raw().print().map_err(|error| error.to_string()),
+            Page::NotBuilt | Page::Failed(_) => Err(format!("{} is not shown", self.what)),
+        };
+        self.finish("Cannot print", result, cx);
+    }
+
+    fn finish(&mut self, action: &str, result: Result<(), String>, cx: &mut Context<Self>) {
+        self.command = match result {
+            Ok(()) => PageCommand::Done,
+            Err(error) => {
+                tracing::error!(page = self.what, %error, "{action}");
+                PageCommand::Failed(format!("{action}: {error}"))
+            }
+        };
+        cx.notify();
     }
 
     /// Show or hide the native view (tab switched away, another file, dialog open).

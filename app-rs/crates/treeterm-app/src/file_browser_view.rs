@@ -35,6 +35,7 @@ use treeterm_core::files::{
 };
 use treeterm_model::file_browser::{
     DefinitionLookup, Favourites, FileBrowser, FileView, LineDraft, Listing, NameResults, SearchPanel, Star,
+    ZoomDirection, pdf_zoom_step,
 };
 use treeterm_model::review::Notice;
 
@@ -326,6 +327,64 @@ fn image_drawing(format: ImageFormat) -> ImageDrawing {
         ImageFormat::Svg => ImageDrawing::Gpui(gpui_kit::ImageFormat::Svg),
         ImageFormat::Avif => ImageDrawing::Webview,
     }
+}
+
+/// The zoom and print controls of Chromium's PDF viewer, in a strip above WebKit's (which
+/// has none): Zoom out, the zoom level, Zoom in, Print. A failure shows in red beside them.
+fn pdf_toolbar(page: &Entity<crate::browser_view::AssetPageView>, cx: &App) -> AnyElement {
+    use crate::browser_view::PageCommand;
+    use gpui_kit::component::tooltip::Tooltip;
+    let c = colors(cx);
+    let (zoom, command) = {
+        let page = page.read(cx);
+        (page.zoom(), page.command().clone())
+    };
+    let step = |id: &'static str, icon: IconName, label: &'static str, direction: ZoomDirection| {
+        let at_end = pdf_zoom_step(zoom, direction) == zoom;
+        let button = ui::find_button(id, icon, at_end, cx).tooltip(move |window, cx| Tooltip::new(label).build(window, cx));
+        if at_end {
+            button
+        } else {
+            let page = page.clone();
+            button.on_click(move |_, _, cx| page.update(cx, |p, cx| p.set_zoom(pdf_zoom_step(p.zoom(), direction), cx)))
+        }
+    };
+    let print = {
+        let page = page.clone();
+        ui::find_button("pdf-print", IconName::Printer, false, cx)
+            .tooltip(|window, cx| Tooltip::new("Print").build(window, cx))
+            .on_click(move |_, _, cx| page.update(cx, |p, cx| p.print(cx)))
+    };
+    let failure = match command {
+        PageCommand::Done => None,
+        PageCommand::Failed(message) => {
+            Some(div().min_w_0().truncate().mr(px(8.)).text_size(px(ui::SMALL)).text_color(rgb(ui::FILE_ERROR)).child(message))
+        }
+    };
+    h_flex()
+        .flex_shrink_0()
+        .h(px(32.))
+        .px(px(8.))
+        .gap(px(4.))
+        .justify_end()
+        .bg(c.bg_secondary)
+        .border_b_1()
+        .border_color(c.border)
+        .children(failure)
+        .child(step("pdf-zoom-out", IconName::ZoomOut, "Zoom out", ZoomDirection::Out))
+        .child(
+            div()
+                .min_w(px(40.))
+                .flex()
+                .justify_center()
+                .text_size(px(ui::SMALL))
+                .text_color(c.text_secondary)
+                .child(format!("{}%", (zoom * 100.).round())),
+        )
+        .child(step("pdf-zoom-in", IconName::ZoomIn, "Zoom in", ZoomDirection::In))
+        .child(div().w(px(8.)))
+        .child(print)
+        .into_any_element()
 }
 
 /// Whether `view` shows the read `built` in a webview page: a PDF, a 3D model or an image
@@ -1292,7 +1351,12 @@ impl FileBrowserView {
             }
             FileView::Pdf { path, bytes } => {
                 let page = self.page_for(&bytes, || crate::browser_view::AssetPageView::pdf(bytes.clone()), cx);
-                (path, "pdf".into(), div().size_full().child(page).into_any_element())
+                let body = v_flex()
+                    .size_full()
+                    .child(pdf_toolbar(&page, cx))
+                    .child(div().flex_1().min_h_0().child(page))
+                    .into_any_element();
+                (path, "pdf".into(), body)
             }
             FileView::Model { path, bytes, format } => {
                 let page =
