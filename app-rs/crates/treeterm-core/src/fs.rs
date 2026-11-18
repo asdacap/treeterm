@@ -33,6 +33,13 @@ pub enum FsError {
     Daemon(String),
 }
 
+/// Whether a directory listing has the entries whose name starts with `.`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HiddenEntries {
+    Skip,
+    Include,
+}
+
 /// A file read in full.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FileRead {
@@ -173,17 +180,20 @@ impl FsClient {
         })
     }
 
-    /// List a directory (relative to the scope; `""` is the scope itself). Hidden entries are
-    /// skipped; directories come first, then names in order.
+    /// List a directory (relative to the scope; `""` is the scope itself), with or without its
+    /// hidden entries; directories come first, then names in order. A daemon older than
+    /// [`HiddenEntries::Include`] skips them regardless.
     pub fn read_directory(
         &self,
         workspace_path: &str,
         dir_path: &str,
+        hidden: HiddenEntries,
     ) -> Fut<Result<DirectoryContents, FsError>> {
         let mut client = self.client.clone();
         let request = ReadDirectoryRequest {
             workspace_path: workspace_path.to_owned(),
             dir_path: dir_path.to_owned(),
+            include_hidden: hidden == HiddenEntries::Include,
         };
         self.rt.run(async move {
             let response = unary(client.read_directory(request)).await?;

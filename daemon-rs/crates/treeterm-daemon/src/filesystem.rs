@@ -112,7 +112,8 @@ fn sort_entries(entries: &mut [FileEntry]) {
     });
 }
 
-pub async fn read_directory(workspace_path: &Path, dir_path: &str) -> ReadDirectoryResponse {
+/// List `dir_path`, skipping entries whose name starts with '.' unless `include_hidden`.
+pub async fn read_directory(workspace_path: &Path, dir_path: &str, include_hidden: bool) -> ReadDirectoryResponse {
     let resolved_dir = workspace_path.join(dir_path);
 
     if !is_path_within_workspace(workspace_path, &resolved_dir).await {
@@ -129,7 +130,7 @@ pub async fn read_directory(workspace_path: &Path, dir_path: &str) -> ReadDirect
 
     while let Ok(Some(entry)) = rd.next_entry().await {
         let name = entry.file_name().to_string_lossy().into_owned();
-        if name.starts_with('.') {
+        if !include_hidden && name.starts_with('.') {
             continue;
         }
         let full_path = entry.path();
@@ -421,7 +422,7 @@ mod tests {
         fs::write(tmp.path().join("hello.txt"), "hi").await.unwrap();
         fs::create_dir(tmp.path().join("subdir")).await.unwrap();
 
-        let resp = read_directory(tmp.path(), ".").await;
+        let resp = read_directory(tmp.path(), ".", false).await;
         assert!(resp.success);
         let contents = resp.contents.unwrap();
         assert_eq!(contents.entries.len(), 2);
@@ -437,7 +438,7 @@ mod tests {
         fs::write(tmp.path().join(".hidden"), "").await.unwrap();
         fs::write(tmp.path().join("visible"), "").await.unwrap();
 
-        let resp = read_directory(tmp.path(), ".").await;
+        let resp = read_directory(tmp.path(), ".", false).await;
         assert!(resp.success);
         let entries = &resp.contents.unwrap().entries;
         assert_eq!(entries.len(), 1);
@@ -445,11 +446,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn read_directory_lists_dotfiles_when_asked() {
+        let tmp = TempDir::new().unwrap();
+        fs::write(tmp.path().join(".hidden"), "").await.unwrap();
+        fs::create_dir(tmp.path().join(".config")).await.unwrap();
+        fs::write(tmp.path().join("visible"), "").await.unwrap();
+
+        let resp = read_directory(tmp.path(), ".", true).await;
+        assert!(resp.success);
+        let entries = &resp.contents.unwrap().entries;
+        let names: Vec<(&str, bool)> = entries.iter().map(|e| (e.name.as_str(), e.is_directory)).collect();
+        assert_eq!(names, vec![(".config", true), (".hidden", false), ("visible", false)]);
+    }
+
+    #[tokio::test]
     async fn read_directory_outside_workspace_denied() {
         let tmp1 = TempDir::new().unwrap();
         let tmp2 = TempDir::new().unwrap();
 
-        let resp = read_directory(tmp1.path(), tmp2.path().to_str().unwrap()).await;
+        let resp = read_directory(tmp1.path(), tmp2.path().to_str().unwrap(), false).await;
         assert!(!resp.success);
         assert!(resp.error.unwrap().contains("Access denied"));
     }
@@ -457,7 +472,7 @@ mod tests {
     #[tokio::test]
     async fn read_directory_nonexistent_errors() {
         let tmp = TempDir::new().unwrap();
-        let resp = read_directory(tmp.path(), "nope").await;
+        let resp = read_directory(tmp.path(), "nope", false).await;
         assert!(!resp.success);
         assert!(resp.error.is_some());
     }

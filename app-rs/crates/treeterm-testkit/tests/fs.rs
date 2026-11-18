@@ -5,7 +5,8 @@ use std::time::Duration;
 use futures::StreamExt;
 use treeterm_core::daemon::ApiError;
 use treeterm_core::fs::{
-    FileSignal, FsClient, FsError, ReadOutcome, WriteGuard, WriteOutcome, sha256_hex,
+    FileSignal, FsClient, FsError, HiddenEntries, ReadOutcome, WriteGuard, WriteOutcome,
+    sha256_hex,
 };
 use treeterm_core::rt::{Rt, Sub};
 use treeterm_core::transport::{connect_unix, daemon_client};
@@ -219,7 +220,7 @@ async fn delete_is_idempotent() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn read_directory_lists_directories_first_and_skips_hidden_entries() {
+async fn read_directory_lists_directories_first_and_hidden_entries_when_asked() {
     let daemon = TestDaemon::start();
     let fs = client(&daemon).await;
     let scope = scope(&daemon);
@@ -229,7 +230,11 @@ async fn read_directory_lists_directories_first_and_skips_hidden_entries() {
     std::fs::write(dir.join("a.txt"), b"aa").unwrap();
     std::fs::write(dir.join(".hidden"), b"h").unwrap();
 
-    let contents = fs.read_directory(&scope, "tree").await.unwrap().unwrap();
+    let contents = fs
+        .read_directory(&scope, "tree", HiddenEntries::Skip)
+        .await
+        .unwrap()
+        .unwrap();
     let names: Vec<(&str, bool)> = contents
         .entries
         .iter()
@@ -243,7 +248,18 @@ async fn read_directory_lists_directories_first_and_skips_hidden_entries() {
     assert_eq!(a.relative_path, "tree/a.txt");
     assert_eq!(a.size, Some(2));
 
-    let missing = fs.read_directory(&scope, "no-such-dir").await.unwrap();
+    let all = fs
+        .read_directory(&scope, "tree", HiddenEntries::Include)
+        .await
+        .unwrap()
+        .unwrap();
+    let names: Vec<&str> = all.entries.iter().map(|entry| entry.name.as_str()).collect();
+    assert_eq!(names, vec!["sub", ".hidden", "a.txt", "b.txt"]);
+
+    let missing = fs
+        .read_directory(&scope, "no-such-dir", HiddenEntries::Skip)
+        .await
+        .unwrap();
     assert!(matches!(missing, Err(FsError::Daemon(_))), "{missing:?}");
 }
 

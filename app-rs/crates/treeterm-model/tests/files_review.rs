@@ -2,6 +2,7 @@
 //! viewed files and prompts, against a real in-process daemon and real git repos.
 
 use gpui_kit::{AppContext as _, Entity, TestAppContext};
+use treeterm_core::fs::HiddenEntries;
 use treeterm_core::review::{CommitAnchor, Freshness, LineAnchor, Resolution, Side};
 use treeterm_core::search::DefinitionLocation;
 use treeterm_model::file_browser::{
@@ -404,6 +405,64 @@ fn a_folder_that_failed_to_load_loads_again_when_reopened(cx: &mut TestAppContex
     // A loaded folder keeps its entries while it is read again.
     browser.update(cx, |b, cx| b.refresh(cx));
     assert!(matches!(browser.read_with(cx, |b, _| listing(b)), Some(Listing::Loaded(_))));
+}
+
+#[gpui_kit::test]
+fn hidden_files_show_in_the_tree_when_asked_and_the_tab_remembers(cx: &mut TestAppContext) {
+    let _serial = serial();
+    cx.executor().allow_parking();
+    let h = harness();
+    let repo = TempRepo::new(&h);
+    repo.write("a.txt", "a\n");
+    repo.write(".env", "KEY=1\n");
+    repo.write(".config/tool.toml", "x = 1\n");
+    repo.commit_all("files");
+    let store = open_store(cx, &h);
+    let workspace = open_repo_workspace(cx, &h, &store, &repo);
+    let (a, config) = (format!("{}/a.txt", repo.root()), format!("{}/.config", repo.root()));
+    let names = |b: &FileBrowser| b.rows().into_iter().map(|row| row.name).collect::<Vec<_>>();
+    let shows_env = move |b: &FileBrowser| names(b).iter().any(|name| name == ".env");
+
+    // Not shown by default, even an expanded hidden directory.
+    let (tab, browser) =
+        files_tab(cx, &workspace, serde_json::json!({ "selectedPath": a, "expandedDirs": [config] }));
+    wait_until(cx, &browser, |b| {
+        matches!(b.root_listing(), Some(Listing::Loaded(_))) && matches!(b.listing(&config), Some(Listing::Loaded(_)))
+    });
+    assert_eq!(browser.read_with(cx, |b, _| names(b)), ["a.txt"]);
+    assert_eq!(browser.read_with(cx, |b, _| b.hidden()), HiddenEntries::Skip);
+    // Asked for what it already does: nothing is saved.
+    browser.update(cx, |b, cx| b.set_hidden(HiddenEntries::Skip, cx));
+    cx.run_until_parked();
+    assert!(tab_state(cx, &workspace, &tab).get("showHidden").is_none());
+
+    // Shown: the loaded directories are read again, keeping their entries meanwhile.
+    browser.update(cx, |b, cx| b.set_hidden(HiddenEntries::Include, cx));
+    assert!(matches!(browser.read_with(cx, |b, _| b.root_listing().cloned()), Some(Listing::Loaded(_))));
+    wait_until(cx, &browser, shows_env);
+    assert_eq!(browser.read_with(cx, |b, _| names(b)), [".config", "tool.toml", ".git", ".env", "a.txt"]);
+    cx.run_until_parked();
+    let saved = tab_state(cx, &workspace, &tab);
+    assert_eq!(saved["showHidden"], serde_json::json!(true));
+
+    // A tab built from that state shows them at once.
+    let (rebuilt_tab, rebuilt) = files_tab(cx, &workspace, saved.clone());
+    assert_eq!(rebuilt.read_with(cx, |b, _| b.hidden()), HiddenEntries::Include);
+    wait_until(cx, &rebuilt, shows_env);
+
+    // Another window hid them: they go here too, and nothing is written back.
+    let mut theirs = saved;
+    theirs["showHidden"] = serde_json::json!(false);
+    browser.update(cx, |b, cx| b.follow_state(&theirs, cx));
+    wait_until(cx, &browser, |b| names(b) == ["a.txt"]);
+    cx.run_until_parked();
+    assert_eq!(tab_state(cx, &workspace, &tab)["showHidden"], serde_json::json!(true));
+
+    // Hidden again from the tab itself: saved as such.
+    rebuilt.update(cx, |b, cx| b.set_hidden(HiddenEntries::Skip, cx));
+    wait_until(cx, &rebuilt, |b| names(b) == ["a.txt"]);
+    cx.run_until_parked();
+    assert_eq!(tab_state(cx, &workspace, &rebuilt_tab)["showHidden"], serde_json::json!(false));
 }
 
 #[gpui_kit::test]

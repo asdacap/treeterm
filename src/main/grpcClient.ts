@@ -703,7 +703,7 @@ export class GrpcDaemonClient {
     if (!this.client) throw new Error('Not connected to daemon')
     const client = this.client
     return new Promise((resolve, reject) => {
-      client.readDirectory({ workspacePath, dirPath }, new grpc.Metadata(), unaryOptions(), (error, response) => {
+      client.readDirectory({ workspacePath, dirPath, includeHidden: false }, new grpc.Metadata(), unaryOptions(), (error, response) => {
         if (error) reject(new Error(error.message))
         else resolve(response as IpcResult<{ contents: DirectoryContents }>)
       })

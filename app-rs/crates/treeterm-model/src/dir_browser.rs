@@ -2,7 +2,7 @@
 //! Workspace browses a remote session with it, and SSH Upload picks its destination.
 
 use gpui_kit::{Context, EventEmitter, Task};
-use treeterm_core::fs::FsClient;
+use treeterm_core::fs::{FsClient, HiddenEntries};
 use treeterm_proto::treeterm::FileEntry;
 
 use crate::file_browser::fs_outcome;
@@ -192,7 +192,7 @@ fn crumbs_of(path: &str) -> Vec<Crumb> {
 
 /// List `path`'s subdirectories (the scope is the whole host, as Electron's `"/"`).
 fn load(fs: &FsClient, path: &str, cx: &mut Context<DirBrowser>) -> Task<()> {
-    let read = fs.read_directory("/", path);
+    let read = fs.read_directory("/", path, HiddenEntries::Skip);
     cx.spawn(async move |this, cx| {
         let listing = match fs_outcome(read.await) {
             Ok(contents) => Listing::Loaded(

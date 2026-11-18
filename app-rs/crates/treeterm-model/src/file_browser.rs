@@ -3,7 +3,9 @@
 //! `SearchPanel.tsx`.
 //!
 //! Tab state stays compatible with Electron's `FilesystemState`: `selectedPath` (absolute)
-//! and `expandedDirs` (absolute directory paths, in the order they were opened). A
+//! and `expandedDirs` (absolute directory paths, in the order they were opened). `showHidden`
+//! (the native app's own; Electron keeps it as it spreads the state) lists hidden entries in
+//! the tree too. A
 //! `scrollToLine` another app wrote (Electron's "open in file browser") is honoured on load,
 //! then removed once the viewer has moved there. The viewer's scroll offset is saved as
 //! `scrollTop` when the tab is hidden (Electron unmounts the viewer then) and shown again in
@@ -33,7 +35,7 @@ use serde_json::{Value, json};
 use treeterm_core::daemon::ApiError;
 use treeterm_core::exec::{ExecApi, ExecError};
 use treeterm_core::files::{FavouriteFile, detect_monaco_language, normalize_favourite_path, resolve_favourite_files};
-use treeterm_core::fs::{FsClient, FsError, ReadOutcome};
+use treeterm_core::fs::{FsClient, FsError, HiddenEntries, ReadOutcome};
 use treeterm_core::rt::TaskLost;
 use treeterm_core::git::GitApi;
 use treeterm_core::search::{self, DefinitionLocation, RepoHit, RepoSearchEvent};
@@ -283,6 +285,8 @@ pub struct FileBrowser {
     host: Host,
     validity: Validity,
     root: String,
+    /// Whether the tree lists hidden entries (the tab state's `showHidden`).
+    hidden: HiddenEntries,
     listings: HashMap<String, Listing>,
     expanded: Vec<String>,
     selected: Option<String>,
@@ -412,6 +416,14 @@ fn expanded_dirs_of(state: &Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// A tab state's `showHidden`: hidden entries only when it is `true`.
+fn hidden_of(state: &Value) -> HiddenEntries {
+    match state.get("showHidden").and_then(Value::as_bool) {
+        Some(true) => HiddenEntries::Include,
+        Some(false) | None => HiddenEntries::Skip,
+    }
+}
+
 /// A `FilesystemState`'s `scrollToLine` (1-based).
 fn scroll_to_line_of(state: &Value) -> Option<usize> {
     state.get("scrollToLine").and_then(Value::as_u64).map(|line| line as usize)
@@ -459,6 +471,7 @@ impl FileBrowser {
             // `FilesystemBrowser` checks only that there is a state (`!state`).
             validity: if state.is_object() { Validity::Valid } else { Validity::Invalid },
             root: root.clone(),
+            hidden: hidden_of(state),
             listings: HashMap::new(),
             expanded: Vec::new(),
             selected: None,
@@ -560,11 +573,17 @@ impl FileBrowser {
     }
 
     /// The tab's state as another window or Electron left it (`FilesystemBrowser` reads it
-    /// live): its expanded directories show, the newly expanded ones loaded; another selected
+    /// live): hidden entries show or go as `showHidden` says, the loaded directories read
+    /// again; its expanded directories show, the newly expanded ones loaded; another selected
     /// file shows, the comment being written going with the one shown before; and a new
     /// `scrollToLine` is revealed in the file then removed (`handleScrollToLineUsed`). What
     /// the state already says is not written back.
     pub fn follow_state(&mut self, state: &Value, cx: &mut Context<Self>) {
+        let hidden = hidden_of(state);
+        if hidden != self.hidden {
+            self.hidden = hidden;
+            self.refresh(cx);
+        }
         let expanded = expanded_dirs_of(state);
         if expanded != self.expanded {
             self.expand(expanded, cx);
@@ -708,6 +727,21 @@ impl FileBrowser {
         Some((reveal.seq, range))
     }
 
+    pub fn hidden(&self) -> HiddenEntries {
+        self.hidden
+    }
+
+    /// "Show hidden files": list hidden entries in the tree or not, saved in the tab state.
+    /// Every loaded directory is read again, its entries shown until the new ones arrive.
+    pub fn set_hidden(&mut self, hidden: HiddenEntries, cx: &mut Context<Self>) {
+        if hidden == self.hidden {
+            return;
+        }
+        self.hidden = hidden;
+        cx.emit(FileBrowserEvent::StateChanged(json!({ "showHidden": hidden == HiddenEntries::Include })));
+        self.refresh(cx);
+    }
+
     /// Re-read every loaded directory (files changed on disk).
     pub fn refresh(&mut self, cx: &mut Context<Self>) {
         let dirs: Vec<String> = self.listings.keys().cloned().collect();
@@ -725,7 +759,7 @@ impl FileBrowser {
                 self.listings.insert(dir.clone(), Listing::Loading);
             }
         }
-        let read = self.fs.read_directory(&self.root, &dir);
+        let read = self.fs.read_directory(&self.root, &dir, self.hidden);
         let key = dir.clone();
         let task = cx.spawn(async move |this, cx| {
             let listing = match fs_outcome(read.await) {

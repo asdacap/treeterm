@@ -10,7 +10,7 @@ use std::collections::{HashSet, VecDeque};
 use indexmap::IndexMap;
 use treeterm_proto::treeterm::FileEntry;
 
-use crate::fs::FsError;
+use crate::fs::{FsError, HiddenEntries};
 use crate::fs_ext::DirectoryApi;
 use crate::locale;
 use crate::wire::workspace_file::WorkspaceFile;
@@ -114,7 +114,9 @@ fn load_message(path: &str, source: &FsError) -> String {
 }
 
 /// Expand `favourite_paths` to the files they name, sorted by relative path. A favourite
-/// that does not exist here (inherited from a parent whose branch has it) is skipped.
+/// that does not exist here (inherited from a parent whose branch has it) is skipped. A
+/// favourite may name a hidden entry (starred while the tree showed them); a favourite
+/// directory expands to its files that are not hidden.
 ///
 /// Directories are read one at a time: a favourite may cover a very large tree, and one
 /// request per directory all at once would flood the daemon. Dropping the future stops the
@@ -154,7 +156,7 @@ pub async fn resolve_favourite_files(
                 continue;
             }
             let contents = fs
-                .read_directory(workspace_path, &entry.path)
+                .read_directory(workspace_path, &entry.path, HiddenEntries::Skip)
                 .await
                 .map_err(|source| FavouritesError::Load {
                     path: entry.relative_path.clone(),
@@ -181,7 +183,7 @@ async fn resolve_entry(
     let mut directory_path = workspace_path.to_owned();
     for (index, name) in parts.iter().enumerate() {
         let contents = fs
-            .read_directory(workspace_path, &directory_path)
+            .read_directory(workspace_path, &directory_path, HiddenEntries::Include)
             .await
             .map_err(|source| FavouritesError::Load {
                 path: relative_path.to_owned(),
@@ -293,6 +295,27 @@ mod tests {
             ))
             .unwrap();
             assert_eq!(files, vec![favourite("present.ts")]);
+        }
+
+        #[test]
+        fn finds_hidden_favourites_but_skips_hidden_files_in_favourite_directories() {
+            let fs = FakeFs::new();
+            fs.set_directory(
+                "/repo",
+                vec![entry(".env", false), entry(".github", true)],
+            );
+            fs.set_directory(
+                "/repo/.github",
+                vec![entry(".github/.keep", false), entry(".github/ci.yml", false)],
+            );
+
+            let files = block_on(resolve_favourite_files(
+                "/repo",
+                &paths(&[".env", ".github"]),
+                fs.as_ref(),
+            ))
+            .unwrap();
+            assert_eq!(files, vec![favourite(".env"), favourite(".github/ci.yml")]);
         }
 
         #[test]

@@ -29,10 +29,11 @@ use gpui_kit::component::input::{
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    AnyElement, App, Bounds, Context, DragMoveEvent, Entity, Focusable as _, FontWeight, Hsla, KeyBinding, MouseButton,
-    MouseUpEvent, Pixels, Point, SharedString, Subscription, Window, actions, div, px, relative, rgb, rgba,
+    AnyElement, App, Bounds, ClickEvent, Context, DragMoveEvent, Entity, Focusable as _, FontWeight, Hsla, KeyBinding,
+    MouseButton, MouseUpEvent, Pixels, Point, SharedString, Subscription, Window, actions, div, px, relative, rgb, rgba,
 };
 use treeterm_core::review::{Freshness, MetadataError, ReviewComment};
+use treeterm_core::fs::HiddenEntries;
 use treeterm_core::files::{
     ImageFormat, detect_monaco_language, favourite_file_name, format_megabytes, max_read_bytes_for,
 };
@@ -1014,6 +1015,7 @@ impl FileBrowserView {
     /// `.filesystem-browser-tree`: the header over the tree.
     fn tree_pane(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let search = self.name_search_box(window, cx);
+        let hidden = self.hidden_toggle(window, cx);
         let favourites = self.favourites_section(cx);
         let body =
             if self.model.read(cx).name_search().is_active() { self.name_results(window, cx) } else { self.tree_rows(window, cx) };
@@ -1048,7 +1050,7 @@ impl FileBrowserView {
         let tree = div().flex_1().min_h_0().border_r_1().border_color(c.border).bg(c.bg_secondary).child(ui::scroll_area(
             "file-tree",
             &self.tree_scroll,
-            v_flex().w_full().child(search).children(favourites).children(body),
+            v_flex().w_full().child(search).child(hidden).children(favourites).children(body),
             cx,
         ));
         v_flex()
@@ -1113,6 +1115,39 @@ impl FileBrowserView {
                         })),
                 )
             })
+            .into_any_element()
+    }
+
+    /// "Show hidden files", under the search box: the tree lists hidden entries too. A native
+    /// checkbox in its label, the whole row toggling it; Enter does not, as for a native one.
+    fn hidden_toggle(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let shown = self.model.read(cx).hidden() == HiddenEntries::Include;
+        let next = if shown { HiddenEntries::Skip } else { HiddenEntries::Include };
+        let toggle = cx.listener(move |view, event: &ClickEvent, _, cx| {
+            if !ui::pressed_enter(event) {
+                view.model.update(cx, |m, cx| m.set_hidden(next, cx));
+            }
+        });
+        let (border, secondary) = {
+            let c = colors(cx);
+            (c.border, c.text_secondary)
+        };
+        div()
+            .px(px(8.))
+            .py(px(6.))
+            .border_b_1()
+            .border_color(border)
+            .child(
+                ui::key_checkbox("show-hidden-files", shown, false, 13., window, cx)
+                    .flex()
+                    .items_center()
+                    .gap(px(6.))
+                    .text_size(px(12.))
+                    .text_color(secondary)
+                    .cursor_pointer()
+                    .child("Show hidden files")
+                    .on_change(move |_, event, window, cx| toggle(event, window, cx)),
+            )
             .into_any_element()
     }
 
