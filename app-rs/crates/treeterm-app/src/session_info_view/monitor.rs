@@ -13,7 +13,7 @@ use treeterm_core::connection::ConnectionId;
 use treeterm_core::system_monitor::{DiskInfo, disk_label, disk_tooltip, utilization_color};
 use treeterm_core::traffic::format_bytes;
 use treeterm_model::app_store::AppStore;
-use treeterm_model::system_monitor::{Metrics, SystemMonitor};
+use treeterm_model::system_monitor::{Metrics, Polling, SystemMonitor};
 
 use crate::theme::colors;
 use crate::ui::MONO;
@@ -25,7 +25,7 @@ pub struct MonitorView {
 
 impl MonitorView {
     pub fn new(app: Entity<AppStore>, id: ConnectionId, cx: &mut Context<Self>) -> Self {
-        let monitor = cx.new(|cx| SystemMonitor::new(app, id, cx));
+        let monitor = cx.new(|cx| SystemMonitor::new(app, id, Polling::Graphs, cx));
         let observe = cx.observe(&monitor, |_, _, cx| cx.notify());
         Self { monitor, _observe: observe }
     }

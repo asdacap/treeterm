@@ -22,7 +22,7 @@ use treeterm_model::browser_page::{BrowserPageModel, BrowserPhase};
 use treeterm_model::session_info::SessionInfo;
 use treeterm_model::session_store::{SessionState, SessionStore, WorkspaceEntry};
 use treeterm_model::settings_store::SettingsStore;
-use treeterm_model::system_monitor::{Metrics, POLL_INTERVAL, SystemMonitor};
+use treeterm_model::system_monitor::{Metrics, POLL_INTERVAL, Polling, SystemMonitor};
 use treeterm_model::tool_tabs::ssh_upload::{LinkStatus, SshUpload, SshUploadEvent, UploadState, UploadTarget};
 use treeterm_model::traffic::{ConnectionTraffic, Reading, TrafficMeter};
 use treeterm_model::web_app::{RemoteHost, WebAppModel, WebAppPhase};
@@ -1330,7 +1330,7 @@ fn monitor_and_upload(
     cx: &mut TestAppContext,
     app: &App,
 ) -> (Entity<SystemMonitor>, Entity<SshUpload>) {
-    let monitor = cx.new(|cx| SystemMonitor::new(app.app.clone(), remote_id(), cx));
+    let monitor = cx.new(|cx| SystemMonitor::new(app.app.clone(), remote_id(), Polling::Graphs, cx));
     let remote = remote_host(cx, app);
     let upload = cx.new(|cx| SshUpload::new(Some(remote), cx));
     (monitor, upload)

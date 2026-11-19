@@ -1,5 +1,6 @@
 //! The session pane's SSH > Monitor (`SystemMonitor.tsx`) on a scripted host: what each run
-//! shows, the 4s cadence, the history kept per connection, Retry and Stop / Kill.
+//! shows, the 4s cadence, the history kept per connection, Retry and Stop / Kill; and a
+//! session header's meters, which run every second and keep no history.
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -11,7 +12,7 @@ use gpui_kit::{AppContext as _, Entity, TestAppContext};
 use treeterm_core::connection::ConnectionId;
 use treeterm_core::exec::{ExecApi, ExecError, ExecEvent, ExecRequest, ExecTimeout};
 use treeterm_core::system_monitor::MONITOR_SCRIPT;
-use treeterm_model::system_monitor::{Metrics, POLL_INTERVAL, SystemMonitor};
+use treeterm_model::system_monitor::{METER_INTERVAL, Metrics, POLL_INTERVAL, Polling, SystemMonitor};
 
 const LINUX_OUTPUT: &str = "OS=Linux\nCPU_USAGE=23.5\nCPU_CORES=4\nMEM_TOTAL=8589934592\nMEM_USED=4294967296\nDISK_START\n/\t524288000\t209715200\t40\nDISK_END\nLOAD_AVG=1.20,0.85,0.60\nUPTIME=14 days, 3:22\nPROC_START\nroot      1234  45.2  2.1  12345  6789 ?        S    10:00   1:23 /usr/bin/node server.js\nPROC_END";
 
@@ -69,9 +70,13 @@ impl Host {
 }
 
 fn monitor(cx: &mut TestAppContext, connection: &str, host: &Arc<Host>) -> Entity<SystemMonitor> {
+    polling(cx, connection, Polling::Graphs, host)
+}
+
+fn polling(cx: &mut TestAppContext, connection: &str, polling: Polling, host: &Arc<Host>) -> Entity<SystemMonitor> {
     let host = host.clone();
     let monitor = cx.new(|cx| {
-        SystemMonitor::with_exec(ConnectionId::new(connection), move |_| Ok(host.clone()), cx)
+        SystemMonitor::with_exec(ConnectionId::new(connection), polling, move |_| Ok(host.clone()), cx)
     });
     cx.run_until_parked();
     monitor
@@ -186,6 +191,7 @@ fn a_connection_without_a_daemon_fails_each_run_until_it_has_one(cx: &mut TestAp
         let (host, up) = (host.clone(), up.clone());
         SystemMonitor::with_exec(
             ConnectionId::new("c1"),
+            Polling::Graphs,
             move |_| match *up.lock().unwrap() {
                 true => Ok(host.clone()),
                 false => Err("Connection c1 is connecting".to_owned()),
@@ -322,4 +328,42 @@ fn stop_and_kill_signal_the_process_then_collect_again(cx: &mut TestAppContext) 
     host.exit(3, "", 1);
     cx.run_until_parked();
     assert_eq!(host.requests()[4].command, "sh");
+}
+
+#[gpui_kit::test]
+fn meters_run_every_second_and_leave_the_graphs_alone(cx: &mut TestAppContext) {
+    let host = Arc::new(Host::default());
+    let meters = polling(cx, "c1", Polling::Meters, &host);
+    assert_eq!(host.requests().len(), 1);
+    assert_eq!(host.requests()[0].args, ["-c", MONITOR_SCRIPT]);
+    cx.executor().advance_clock(METER_INTERVAL - Duration::from_millis(1));
+    cx.run_until_parked();
+    assert_eq!(host.requests().len(), 1);
+    cx.executor().advance_clock(Duration::from_millis(1));
+    cx.run_until_parked();
+    assert_eq!(host.requests().len(), 2);
+
+    host.exit(1, LINUX_OUTPUT, 0);
+    cx.run_until_parked();
+    match metrics(cx, &meters) {
+        Metrics::Loaded(m) => assert_eq!((m.cpu.usage_percent, m.memory.usage_percent), (23.5, 50.)),
+        other => panic!("not loaded: {other:?}"),
+    }
+    // The session pane's graphs of the same connection get none of the meters' runs.
+    assert!(cpu_samples(cx, &meters).is_empty());
+    assert!(meters.read_with(cx, |m, cx| m.memory_samples(cx)).is_empty());
+    let graphs = monitor(cx, "c1", &host);
+    assert!(cpu_samples(cx, &graphs).is_empty());
+
+    // A run that fails shows why, and the next second's run brings the bars back.
+    host.exit(0, "", 1);
+    cx.run_until_parked();
+    assert!(matches!(metrics(cx, &meters), Metrics::Loaded(_)), "an older run's failure is dropped");
+    cx.executor().advance_clock(METER_INTERVAL);
+    cx.run_until_parked();
+    // The meters' run at 2s (the session pane's next is at 5s).
+    let next = host.requests().len() - 1;
+    host.exit(next, "", 1);
+    cx.run_until_parked();
+    assert_eq!(failed(cx, &meters), "Command exited with code 1");
 }

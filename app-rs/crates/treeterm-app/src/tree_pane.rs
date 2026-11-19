@@ -32,6 +32,8 @@ pub struct TreePane {
     connection: ConnectionId,
     /// Bytes per second received from the connection's daemon, across its generations.
     traffic: Entity<crate::traffic_badge::TrafficBadge>,
+    /// The host's CPU and memory, beside the "+".
+    meters: Meters,
     keybindings: Entity<KeybindingStore>,
     /// The session's name: custom, else "LOCAL" or the ssh label.
     names: Entity<treeterm_model::session_names::SessionNames>,
@@ -48,6 +50,12 @@ pub struct TreePane {
     hovered: Option<String>,
     /// Per-window view state: which workspaces have their children hidden.
     view: TreeViewState,
+}
+
+/// A remote host's CPU and memory bars; the local machine's header has none.
+enum Meters {
+    Local,
+    Remote(Entity<crate::host_meters::HostMeters>),
 }
 
 /// The session store a connection's tree shows (`SessionSlot::shown_session`).
@@ -115,12 +123,20 @@ impl TreePane {
         cx.observe(&keybindings, |_, _, cx| cx.notify()).detach();
         cx.observe(&names, |_, _, cx| cx.notify()).detach();
         let remote = matches!(target, treeterm_core::connection::ConnectionTarget::Remote(_));
+        let meters = match target {
+            treeterm_core::connection::ConnectionTarget::Local => Meters::Local,
+            treeterm_core::connection::ConnectionTarget::Remote(_) => {
+                let (app, connection, traffic) = (app.clone(), connection.clone(), traffic.clone());
+                Meters::Remote(cx.new(|cx| crate::host_meters::HostMeters::new(app, connection, traffic, cx)))
+            }
+        };
         let traffic = cx.new(|cx| crate::traffic_badge::TrafficBadge::new(traffic, "connection-traffic", cx));
         Self {
             session: Shown::Nothing,
             app,
             connection,
             traffic,
+            meters,
             keybindings,
             names,
             target,
@@ -377,6 +393,10 @@ impl Render for TreePane {
                             })),
                     )
                     .child(title)
+                    .map(|d| match &self.meters {
+                        Meters::Local => d,
+                        Meters::Remote(meters) => d.child(meters.clone()),
+                    })
                     .on_click(cx.listener(|_, _: &ClickEvent, _, cx| cx.emit(SessionInfoRequested)))
                     .context_menu({
                         let pane = cx.entity().downgrade();

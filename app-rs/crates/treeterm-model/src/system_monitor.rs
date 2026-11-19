@@ -5,9 +5,9 @@
 //! the connection by id: while it is down a run fails with why (shown as the error), polling
 //! carries on, and the metrics come back by themselves once it is connected again.
 //!
-//! A run starts every [`POLL_INTERVAL`] whether or not the last one has finished (Electron's
-//! `setInterval`), so runs on a slow host overlap. The latest run to finish is shown: one
-//! that finishes after a later run is dropped.
+//! A run starts every [`Polling::interval`] whether or not the last one has finished
+//! (Electron's `setInterval`), so runs on a slow host overlap. The latest run to finish is
+//! shown: one that finishes after a later run is dropped.
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -23,8 +23,31 @@ use treeterm_core::system_monitor::{MONITOR_SCRIPT, SystemMetrics, UsageHistory,
 
 use crate::app_store::AppStore;
 
-/// The time between the starts of two runs.
+/// The time between the starts of two runs of the session pane's Monitor.
 pub const POLL_INTERVAL: Duration = Duration::from_secs(4);
+
+/// The time between the starts of two runs of a session header's meters.
+pub const METER_INTERVAL: Duration = Duration::from_secs(1);
+
+/// What a monitor is for, which sets how often it runs and what it keeps.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Polling {
+    /// The session pane's Monitor: every [`POLL_INTERVAL`], each run added to the
+    /// connection's CPU and memory graphs.
+    Graphs,
+    /// A remote session header's CPU and memory bars: every [`METER_INTERVAL`], the latest
+    /// run only, so the graphs keep their 4s spacing.
+    Meters,
+}
+
+impl Polling {
+    pub fn interval(self) -> Duration {
+        match self {
+            Polling::Graphs => POLL_INTERVAL,
+            Polling::Meters => METER_INTERVAL,
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub enum Metrics {
@@ -53,6 +76,7 @@ struct Usage {
 
 pub struct SystemMonitor {
     connection: ConnectionId,
+    polling: Polling,
     exec: ExecSource,
     metrics: Metrics,
     updated_at: Option<SystemTime>,
@@ -95,31 +119,33 @@ fn outcome(result: Result<CommandOutput, ExecError>) -> Metrics {
 impl SystemMonitor {
     /// Starts polling connection `id`, on its daemon of the moment (Main's `getClient`); stops
     /// when dropped.
-    pub fn new(app: Entity<AppStore>, id: ConnectionId, cx: &mut Context<Self>) -> Self {
+    pub fn new(app: Entity<AppStore>, id: ConnectionId, polling: Polling, cx: &mut Context<Self>) -> Self {
         let connection = id.clone();
         let exec = move |cx: &App| match app.read(cx).manager().client(&connection) {
             Ok(daemon) => Ok(Arc::new(daemon.exec_client()) as Arc<dyn ExecApi>),
             Err(down) => Err(down.to_string()),
         };
-        Self::with_exec(id, exec, cx)
+        Self::with_exec(id, polling, exec, cx)
     }
 
     /// Starts polling `connection`, whose commands run where `exec` says when they start;
     /// stops when dropped.
     pub fn with_exec(
         connection: ConnectionId,
+        polling: Polling,
         exec: impl Fn(&App) -> Result<Arc<dyn ExecApi>, String> + 'static,
         cx: &mut Context<Self>,
     ) -> Self {
         Self {
             connection,
+            polling,
             exec: Box::new(exec),
             metrics: Metrics::Loading,
             updated_at: None,
             runs: HashMap::new(),
             last_run: 0,
             shown_run: 0,
-            _ticker: Self::ticker(cx),
+            _ticker: Self::ticker(polling.interval(), cx),
             _kill: None,
         }
     }
@@ -129,7 +155,7 @@ impl SystemMonitor {
     pub fn refresh(&mut self, cx: &mut Context<Self>) {
         self.metrics = Metrics::Loading;
         self.runs.clear();
-        self._ticker = Self::ticker(cx);
+        self._ticker = Self::ticker(self.polling.interval(), cx);
         cx.notify();
     }
 
@@ -138,15 +164,15 @@ impl SystemMonitor {
         self.updated_at
     }
 
-    /// A run now and every [`POLL_INTERVAL`] after.
-    fn ticker(cx: &mut Context<Self>) -> Task<()> {
+    /// A run now and every `interval` after.
+    fn ticker(interval: Duration, cx: &mut Context<Self>) -> Task<()> {
         let executor = cx.background_executor().clone();
         cx.spawn(async move |this, cx| {
             loop {
                 if this.update(cx, |monitor, cx| monitor.start_run(cx)).is_err() {
                     return; // the monitor closed
                 }
-                executor.timer(POLL_INTERVAL).await;
+                executor.timer(interval).await;
             }
         })
     }
@@ -180,9 +206,14 @@ impl SystemMonitor {
         self.shown_run = run;
         if let Metrics::Loaded(m) = &metrics {
             self.updated_at = Some(SystemTime::now());
-            let usage = cx.default_global::<Histories>().0.entry(self.connection.clone()).or_default();
-            usage.cpu.push(m.cpu.usage_percent);
-            usage.memory.push(m.memory.usage_percent);
+            match self.polling {
+                Polling::Graphs => {
+                    let usage = cx.default_global::<Histories>().0.entry(self.connection.clone()).or_default();
+                    usage.cpu.push(m.cpu.usage_percent);
+                    usage.memory.push(m.memory.usage_percent);
+                }
+                Polling::Meters => {}
+            }
         }
         self.metrics = metrics;
         cx.notify();
