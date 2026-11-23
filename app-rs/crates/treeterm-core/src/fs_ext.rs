@@ -8,8 +8,7 @@ use treeterm_proto::treeterm::DirectoryContents;
 
 use crate::daemon::ApiError;
 use crate::fs::{
-    FilesystemApi, FsClient, FsError, HiddenEntries, MAX_READ_FILE_BYTES, ReadOutcome, WriteGuard,
-    WriteOutcome,
+    FilesystemApi, FsClient, FsError, MAX_READ_FILE_BYTES, ReadOutcome, WriteGuard, WriteOutcome,
 };
 
 /// See [`FsClient::write_file`].
@@ -29,7 +28,6 @@ pub trait DirectoryApi: Send + Sync {
         &self,
         workspace_path: &str,
         dir_path: &str,
-        hidden: HiddenEntries,
     ) -> BoxFuture<'static, Result<DirectoryContents, FsError>>;
 }
 
@@ -52,9 +50,8 @@ impl DirectoryApi for FsClient {
         &self,
         workspace_path: &str,
         dir_path: &str,
-        hidden: HiddenEntries,
     ) -> BoxFuture<'static, Result<DirectoryContents, FsError>> {
-        FsClient::read_directory(self, workspace_path, dir_path, hidden)
+        FsClient::read_directory(self, workspace_path, dir_path)
             .map(|result| result.unwrap_or_else(|lost| Err(ApiError::from(lost).into())))
             .boxed()
     }

@@ -352,8 +352,6 @@ message SearchFilesResponse {
 message ReadDirectoryRequest {
   string workspace_path = 1;
   string dir_path = 2;
-  // List entries whose name starts with '.' too; they are skipped otherwise.
-  bool include_hidden = 3;
 }
 
 message ReadDirectoryResponse {

@@ -100,3 +100,19 @@ describe('FileTree favourites', () => {
     expect(await screen.findByTitle('src/index.ts')).toBeDefined()
   })
 })
+
+describe('FileTree listing', () => {
+  it('leaves out the hidden entries the daemon lists', async () => {
+    filesystem.readDirectory.mockResolvedValue({
+      success: true,
+      contents: { path: '/repo', entries: [entry('.git', true), entry('.env', false), entry('README.md', false)] },
+    })
+    const { workspace } = makeStore([])
+
+    render(<FileTree workspace={workspace} selectedPath={null} expandedDirs={[]} onSelectFile={vi.fn()} onToggleDir={vi.fn()} />)
+
+    expect(await screen.findByText('README.md')).toBeDefined()
+    expect(screen.queryByText('.git')).toBeNull()
+    expect(screen.queryByText('.env')).toBeNull()
+  })
+})

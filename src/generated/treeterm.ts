@@ -409,8 +409,6 @@ export interface SearchFilesResponse {
 export interface ReadDirectoryRequest {
   workspacePath: string;
   dirPath: string;
-  /** List entries whose name starts with '.' too; they are skipped otherwise. */
-  includeHidden: boolean;
 }
 
 export interface ReadDirectoryResponse {
@@ -4933,7 +4931,7 @@ export const SearchFilesResponse: MessageFns<SearchFilesResponse> = {
 };
 
 function createBaseReadDirectoryRequest(): ReadDirectoryRequest {
-  return { workspacePath: "", dirPath: "", includeHidden: false };
+  return { workspacePath: "", dirPath: "" };
 }
 
 export const ReadDirectoryRequest: MessageFns<ReadDirectoryRequest> = {
@@ -4943,9 +4941,6 @@ export const ReadDirectoryRequest: MessageFns<ReadDirectoryRequest> = {
     }
     if (message.dirPath !== "") {
       writer.uint32(18).string(message.dirPath);
-    }
-    if (message.includeHidden !== false) {
-      writer.uint32(24).bool(message.includeHidden);
     }
     return writer;
   },
@@ -4973,14 +4968,6 @@ export const ReadDirectoryRequest: MessageFns<ReadDirectoryRequest> = {
           message.dirPath = reader.string();
           continue;
         }
-        case 3: {
-          if (tag !== 24) {
-            break;
-          }
-
-          message.includeHidden = reader.bool();
-          continue;
-        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -5002,11 +4989,6 @@ export const ReadDirectoryRequest: MessageFns<ReadDirectoryRequest> = {
         : isSet(object.dir_path)
         ? globalThis.String(object.dir_path)
         : "",
-      includeHidden: isSet(object.includeHidden)
-        ? globalThis.Boolean(object.includeHidden)
-        : isSet(object.include_hidden)
-        ? globalThis.Boolean(object.include_hidden)
-        : false,
     };
   },
 
@@ -5018,9 +5000,6 @@ export const ReadDirectoryRequest: MessageFns<ReadDirectoryRequest> = {
     if (message.dirPath !== "") {
       obj.dirPath = message.dirPath;
     }
-    if (message.includeHidden !== false) {
-      obj.includeHidden = message.includeHidden;
-    }
     return obj;
   },
 
@@ -5031,7 +5010,6 @@ export const ReadDirectoryRequest: MessageFns<ReadDirectoryRequest> = {
     const message = createBaseReadDirectoryRequest();
     message.workspacePath = object.workspacePath ?? "";
     message.dirPath = object.dirPath ?? "";
-    message.includeHidden = object.includeHidden ?? false;
     return message;
   },
 };

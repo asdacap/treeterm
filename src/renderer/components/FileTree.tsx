@@ -4,6 +4,7 @@ import { useStore } from 'zustand'
 import type { FileEntry, WorkspaceStore } from '../types'
 import { useFilesystemApi } from '../hooks/useWorkspaceApis'
 import { favouriteFileName, resolveFavouriteFiles, type FavouriteFile } from '../utils/favouriteFiles'
+import { withoutHiddenEntries } from '../utils/hiddenEntries'
 import { normalizeFileEntryRelativePath } from '../../shared/workspaceFavourites'
 
 interface FileTreeProps {
@@ -123,7 +124,7 @@ export function FileTree({
 
         if (result.success) {
           setDirContents((prev) =>
-            new Map(prev).set(dirPath, { entries: result.contents.entries, loading: false, error: null })
+            new Map(prev).set(dirPath, { entries: withoutHiddenEntries(result.contents.entries), loading: false, error: null })
           )
         } else {
           setDirContents((prev) =>

@@ -33,9 +33,8 @@ use gpui_kit::{
     MouseButton, MouseUpEvent, Pixels, Point, SharedString, Subscription, Window, actions, div, px, relative, rgb, rgba,
 };
 use treeterm_core::review::{Freshness, MetadataError, ReviewComment};
-use treeterm_core::fs::HiddenEntries;
 use treeterm_core::files::{
-    ImageFormat, detect_monaco_language, favourite_file_name, format_megabytes, max_read_bytes_for,
+    HiddenEntries, ImageFormat, detect_monaco_language, favourite_file_name, format_megabytes, max_read_bytes_for,
 };
 use treeterm_model::file_browser::{
     DefinitionLookup, Favourites, FileBrowser, FileView, LineDraft, Listing, NameResults, SearchOpen, SearchOpened,

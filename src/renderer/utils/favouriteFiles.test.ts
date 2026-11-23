@@ -51,6 +51,18 @@ describe('resolveFavouriteFiles', () => {
     ])
   })
 
+  it('finds a hidden favourite but skips hidden files in a favourite directory', async () => {
+    const fs = filesystem({
+      '/repo': [entry('.env', false), entry('.github', true)],
+      '/repo/.github': [entry('.github/.keep', false), entry('.github/ci.yml', false)],
+    })
+
+    await expect(resolveFavouriteFiles('/repo', ['.env', '.github'], fs)).resolves.toEqual([
+      { path: '/repo/.env', relativePath: '.env' },
+      { path: '/repo/.github/ci.yml', relativePath: '.github/ci.yml' },
+    ])
+  })
+
   it('ignores inherited paths whose file or parent directory does not exist in the current workspace', async () => {
     const fs = filesystem({ '/repo': [entry('present.ts', false)] })
     await expect(resolveFavouriteFiles('/repo', ['missing.ts', 'missing/child.ts', 'present.ts'], fs)).resolves.toEqual([

@@ -1,5 +1,6 @@
 import type { FileEntry, WorkspaceFilesystemApi } from '../types'
 import { normalizeFavouritePath, normalizeFileEntryRelativePath } from '../../shared/workspaceFavourites'
+import { withoutHiddenEntries } from './hiddenEntries'
 
 export interface FavouriteFile {
   path: string
@@ -38,7 +39,7 @@ export async function resolveFavouriteFiles(
     // Deliberately sequential: a favourite may cover a very large directory tree,
     // and flooding a local or remote daemon with one RPC per directory can starve
     // other renderer work. Cancellation stops scheduling after the in-flight read.
-    for (const child of result.contents.entries) {
+    for (const child of withoutHiddenEntries(result.contents.entries)) {
       await visitEntry(child)
       if (isCancelled()) return
     }

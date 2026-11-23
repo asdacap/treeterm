@@ -10,7 +10,8 @@ use std::collections::{HashSet, VecDeque};
 use indexmap::IndexMap;
 use treeterm_proto::treeterm::FileEntry;
 
-use crate::fs::{FsError, HiddenEntries};
+use crate::files::HiddenEntries;
+use crate::fs::FsError;
 use crate::fs_ext::DirectoryApi;
 use crate::locale;
 use crate::wire::workspace_file::WorkspaceFile;
@@ -156,13 +157,14 @@ pub async fn resolve_favourite_files(
                 continue;
             }
             let contents = fs
-                .read_directory(workspace_path, &entry.path, HiddenEntries::Skip)
+                .read_directory(workspace_path, &entry.path)
                 .await
                 .map_err(|source| FavouritesError::Load {
                     path: entry.relative_path.clone(),
                     source,
                 })?;
-            for child in contents.entries.into_iter().rev() {
+            let children = contents.entries.into_iter();
+            for child in children.rev().filter(|child| HiddenEntries::Skip.shows(child)) {
                 pending.push_front(child);
             }
         }
@@ -183,7 +185,7 @@ async fn resolve_entry(
     let mut directory_path = workspace_path.to_owned();
     for (index, name) in parts.iter().enumerate() {
         let contents = fs
-            .read_directory(workspace_path, &directory_path, HiddenEntries::Include)
+            .read_directory(workspace_path, &directory_path)
             .await
             .map_err(|source| FavouritesError::Load {
                 path: relative_path.to_owned(),

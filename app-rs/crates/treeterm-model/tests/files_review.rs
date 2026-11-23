@@ -2,7 +2,7 @@
 //! viewed files and prompts, against a real in-process daemon and real git repos.
 
 use gpui_kit::{AppContext as _, Entity, TestAppContext};
-use treeterm_core::fs::HiddenEntries;
+use treeterm_core::files::HiddenEntries;
 use treeterm_core::review::{CommitAnchor, Freshness, LineAnchor, Resolution, Side};
 use treeterm_core::search::DefinitionLocation;
 use treeterm_model::file_browser::{
@@ -421,7 +421,7 @@ fn hidden_files_show_in_the_tree_when_asked_and_the_tab_remembers(cx: &mut TestA
     let workspace = open_repo_workspace(cx, &h, &store, &repo);
     let (a, config) = (format!("{}/a.txt", repo.root()), format!("{}/.config", repo.root()));
     let names = |b: &FileBrowser| b.rows().into_iter().map(|row| row.name).collect::<Vec<_>>();
-    let shows_env = move |b: &FileBrowser| names(b).iter().any(|name| name == ".env");
+    let all = [".config", "tool.toml", ".git", ".env", "a.txt"];
 
     // Not shown by default, even an expanded hidden directory.
     let (tab, browser) =
@@ -436,11 +436,9 @@ fn hidden_files_show_in_the_tree_when_asked_and_the_tab_remembers(cx: &mut TestA
     cx.run_until_parked();
     assert!(tab_state(cx, &workspace, &tab).get("showHidden").is_none());
 
-    // Shown: the loaded directories are read again, keeping their entries meanwhile.
+    // Shown at once: the daemon listed them all along, nothing is read again.
     browser.update(cx, |b, cx| b.set_hidden(HiddenEntries::Include, cx));
-    assert!(matches!(browser.read_with(cx, |b, _| b.root_listing().cloned()), Some(Listing::Loaded(_))));
-    wait_until(cx, &browser, shows_env);
-    assert_eq!(browser.read_with(cx, |b, _| names(b)), [".config", "tool.toml", ".git", ".env", "a.txt"]);
+    assert_eq!(browser.read_with(cx, |b, _| names(b)), all);
     cx.run_until_parked();
     let saved = tab_state(cx, &workspace, &tab);
     assert_eq!(saved["showHidden"], serde_json::json!(true));
@@ -448,19 +446,20 @@ fn hidden_files_show_in_the_tree_when_asked_and_the_tab_remembers(cx: &mut TestA
     // A tab built from that state shows them at once.
     let (rebuilt_tab, rebuilt) = files_tab(cx, &workspace, saved.clone());
     assert_eq!(rebuilt.read_with(cx, |b, _| b.hidden()), HiddenEntries::Include);
-    wait_until(cx, &rebuilt, shows_env);
+    wait_until(cx, &rebuilt, |b| matches!(b.listing(&config), Some(Listing::Loaded(_))));
+    assert_eq!(rebuilt.read_with(cx, |b, _| names(b)), all);
 
     // Another window hid them: they go here too, and nothing is written back.
     let mut theirs = saved;
     theirs["showHidden"] = serde_json::json!(false);
     browser.update(cx, |b, cx| b.follow_state(&theirs, cx));
-    wait_until(cx, &browser, |b| names(b) == ["a.txt"]);
+    assert_eq!(browser.read_with(cx, |b, _| names(b)), ["a.txt"]);
     cx.run_until_parked();
     assert_eq!(tab_state(cx, &workspace, &tab)["showHidden"], serde_json::json!(true));
 
     // Hidden again from the tab itself: saved as such.
     rebuilt.update(cx, |b, cx| b.set_hidden(HiddenEntries::Skip, cx));
-    wait_until(cx, &rebuilt, |b| names(b) == ["a.txt"]);
+    assert_eq!(rebuilt.read_with(cx, |b, _| names(b)), ["a.txt"]);
     cx.run_until_parked();
     assert_eq!(tab_state(cx, &workspace, &rebuilt_tab)["showHidden"], serde_json::json!(false));
 }

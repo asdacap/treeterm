@@ -396,7 +396,7 @@ impl TreeTermDaemon for DaemonService {
         req: Request<ReadDirectoryRequest>,
     ) -> Result<Response<ReadDirectoryResponse>, Status> {
         let r = req.into_inner();
-        let result = filesystem::read_directory(Path::new(&r.workspace_path), &r.dir_path, r.include_hidden).await;
+        let result = filesystem::read_directory(Path::new(&r.workspace_path), &r.dir_path).await;
         Ok(Response::new(result))
     }
 

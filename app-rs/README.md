@@ -753,10 +753,11 @@ The chrome was matched to Electron's computed styles, measured side by side on o
 
 ### Files and the code editors
 
-- The Files tab's "Show hidden files" checkbox, under its "Search files..." box, lists entries
+- The Files tab's "Show hidden files" checkbox, under its "Search files..." box, shows entries
   whose name starts with `.` in the tree (saved as `showHidden` in the tab state, which
-  Electron keeps but ignores). The file name search still skips them. A daemon older than the
-  checkbox ignores it. Electron's tree never lists them.
+  Electron keeps but ignores). The daemon's `ReadDirectory` lists every entry, so the checkbox
+  only picks the rows, without reading again; a daemon from before that leaves them out
+  regardless. The file name search still skips them. Electron's tree never shows them.
 - The Editor tab reads its file afresh and whole, whatever its size: Open in Tab does not take
   the Files viewer's copy, so the tab starts from what is on disk now, and a file opened anyway
   in the viewer past its size limit can be edited. Electron handed over the viewer's copy,

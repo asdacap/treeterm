@@ -15,9 +15,7 @@ use treeterm_proto::treeterm::{DirectoryContents, FileEntry, FileReadHeader};
 
 use crate::daemon::ApiError;
 use crate::exec::{ExecApi, ExecError, ExecEvent, ExecRequest};
-use crate::fs::{
-    FileRead, FilesystemApi, FsError, HiddenEntries, ReadOutcome, WriteGuard, WriteOutcome,
-};
+use crate::fs::{FileRead, FilesystemApi, FsError, ReadOutcome, WriteGuard, WriteOutcome};
 use crate::fs_ext::{DirectoryApi, FileWriteApi};
 use crate::http::{HttpClient, HttpError, HttpRequest, HttpResponse};
 
@@ -378,7 +376,6 @@ impl DirectoryApi for FakeFs {
         &self,
         _workspace_path: &str,
         dir_path: &str,
-        hidden: HiddenEntries,
     ) -> BoxFuture<'static, Result<DirectoryContents, FsError>> {
         let mut state = self.state.lock().unwrap();
         state.directory_reads.push(dir_path.to_owned());
@@ -390,15 +387,9 @@ impl DirectoryApi for FakeFs {
             return futures::future::pending().boxed();
         }
         let outcome = match state.directories.get(dir_path).cloned() {
-            // As the daemon does, the hidden entries only when asked for.
             Some(Ok(entries)) => Ok(DirectoryContents {
                 path: dir_path.to_owned(),
-                entries: entries
-                    .into_iter()
-                    .filter(|entry| {
-                        hidden == HiddenEntries::Include || !entry.name.starts_with('.')
-                    })
-                    .collect(),
+                entries,
             }),
             Some(Err(message)) => Err(FsError::Daemon(message)),
             None => Ok(DirectoryContents {

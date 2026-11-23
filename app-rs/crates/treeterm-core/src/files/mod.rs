@@ -1,8 +1,9 @@
 //! File classification and file-browser helpers: content kind, read budgets, editor
-//! language, favourites.
+//! language, favourites, hidden entries.
 
 pub mod content_kind;
 pub mod favourites;
+pub mod hidden;
 pub mod language;
 pub mod limits;
 
@@ -16,6 +17,7 @@ pub use favourites::{
     inherited_favourite_paths, normalize_favourite_path, normalize_file_entry_relative_path,
     resolve_favourite_files,
 };
+pub use hidden::HiddenEntries;
 pub use language::detect_monaco_language;
 pub use limits::{
     MAX_READ_FILE_BYTES, MAX_READ_MODEL_BYTES, MAX_READ_PDF_BYTES, format_megabytes,

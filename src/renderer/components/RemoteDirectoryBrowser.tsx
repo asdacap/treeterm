@@ -1,6 +1,7 @@
 /* eslint-disable custom/no-string-literal-comparison -- TODO: migrate existing string-literal comparisons to enums */
 import React, { useState, useEffect } from 'react'
 import type { IpcResult, DirectoryContents } from '../types'
+import { withoutHiddenEntries } from '../utils/hiddenEntries'
 
 interface RemoteDirectoryBrowserProps {
   readDirectory: (dirPath: string) => Promise<IpcResult<{ contents: DirectoryContents }>>
@@ -35,7 +36,7 @@ export default function RemoteDirectoryBrowser({
   useEffect(() => {
     void readDirectory(currentPath).then(result => {
       if (result.success) {
-        const dirs = result.contents.entries
+        const dirs = withoutHiddenEntries(result.contents.entries)
           .filter((e) => e.isDirectory)
           .map((e) => ({ name: e.name, path: e.path }))
         setDirState({ entries: dirs, loading: false, error: null })

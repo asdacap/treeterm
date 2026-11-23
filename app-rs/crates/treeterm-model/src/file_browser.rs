@@ -34,8 +34,10 @@ use gpui_kit::{App, Context, Entity, EventEmitter, Subscription, Task, WeakEntit
 use serde_json::{Value, json};
 use treeterm_core::daemon::ApiError;
 use treeterm_core::exec::{ExecApi, ExecError};
-use treeterm_core::files::{FavouriteFile, detect_monaco_language, normalize_favourite_path, resolve_favourite_files};
-use treeterm_core::fs::{FsClient, FsError, HiddenEntries, ReadOutcome};
+use treeterm_core::files::{
+    FavouriteFile, HiddenEntries, detect_monaco_language, normalize_favourite_path, resolve_favourite_files,
+};
+use treeterm_core::fs::{FsClient, FsError, ReadOutcome};
 use treeterm_core::rt::TaskLost;
 use treeterm_core::git::GitApi;
 use treeterm_core::search::{self, DefinitionLocation, RepoHit, RepoSearchEvent};
@@ -285,8 +287,9 @@ pub struct FileBrowser {
     host: Host,
     validity: Validity,
     root: String,
-    /// Whether the tree lists hidden entries (the tab state's `showHidden`).
+    /// Whether the tree shows hidden entries (the tab state's `showHidden`).
     hidden: HiddenEntries,
+    /// Every entry of each directory read, hidden ones too: `hidden` picks the rows.
     listings: HashMap<String, Listing>,
     expanded: Vec<String>,
     selected: Option<String>,
@@ -573,16 +576,15 @@ impl FileBrowser {
     }
 
     /// The tab's state as another window or Electron left it (`FilesystemBrowser` reads it
-    /// live): hidden entries show or go as `showHidden` says, the loaded directories read
-    /// again; its expanded directories show, the newly expanded ones loaded; another selected
-    /// file shows, the comment being written going with the one shown before; and a new
-    /// `scrollToLine` is revealed in the file then removed (`handleScrollToLineUsed`). What
-    /// the state already says is not written back.
+    /// live): hidden entries show or go as `showHidden` says; its expanded directories show,
+    /// the newly expanded ones loaded; another selected file shows, the comment being written
+    /// going with the one shown before; and a new `scrollToLine` is revealed in the file then
+    /// removed (`handleScrollToLineUsed`). What the state already says is not written back.
     pub fn follow_state(&mut self, state: &Value, cx: &mut Context<Self>) {
         let hidden = hidden_of(state);
         if hidden != self.hidden {
             self.hidden = hidden;
-            self.refresh(cx);
+            cx.notify();
         }
         let expanded = expanded_dirs_of(state);
         if expanded != self.expanded {
@@ -731,15 +733,14 @@ impl FileBrowser {
         self.hidden
     }
 
-    /// "Show hidden files": list hidden entries in the tree or not, saved in the tab state.
-    /// Every loaded directory is read again, its entries shown until the new ones arrive.
+    /// "Show hidden files": show hidden entries in the tree or not, saved in the tab state.
     pub fn set_hidden(&mut self, hidden: HiddenEntries, cx: &mut Context<Self>) {
         if hidden == self.hidden {
             return;
         }
         self.hidden = hidden;
         cx.emit(FileBrowserEvent::StateChanged(json!({ "showHidden": hidden == HiddenEntries::Include })));
-        self.refresh(cx);
+        cx.notify();
     }
 
     /// Re-read every loaded directory (files changed on disk).
@@ -759,7 +760,7 @@ impl FileBrowser {
                 self.listings.insert(dir.clone(), Listing::Loading);
             }
         }
-        let read = self.fs.read_directory(&self.root, &dir, self.hidden);
+        let read = self.fs.read_directory(&self.root, &dir);
         let key = dir.clone();
         let task = cx.spawn(async move |this, cx| {
             let listing = match fs_outcome(read.await) {
@@ -781,7 +782,8 @@ impl FileBrowser {
         cx.notify();
     }
 
-    /// Visible rows: the root's entries, with expanded directories' children under them.
+    /// Visible rows: the root's entries, with expanded directories' children under them, the
+    /// hidden ones only when `showHidden` says so.
     pub fn rows(&self) -> Vec<FileRow> {
         let mut rows = Vec::new();
         self.push_rows(&self.root, 0, &mut rows);
@@ -802,7 +804,7 @@ impl FileBrowser {
         let Some(Listing::Loaded(entries)) = self.listings.get(dir) else {
             return;
         };
-        for entry in entries {
+        for entry in entries.iter().filter(|entry| self.hidden.shows(entry)) {
             let expanded = entry.is_directory && self.expanded.contains(&entry.path);
             rows.push(FileRow {
                 path: entry.path.clone(),
