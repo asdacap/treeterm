@@ -20,15 +20,17 @@ boots the daemon and asserts it:
 
 ## How it works
 
-[`Dockerfile`](./Dockerfile) compiles the daemon as a static musl binary in an
-`rust:alpine` builder stage, then copies that single binary onto `ubuntu:24.04`
-and `fedora:latest` and runs the smoke test as a build `RUN` step. A successful
-image build means the boot test passed.
+[`Dockerfile`](./Dockerfile) compiles the daemon as a static musl binary in a
+`rust:slim` builder stage (the musl target added with rustup, as
+`cargo run -p xtask -- build-daemons` builds it), then copies that single binary
+onto `ubuntu:24.04` and `fedora:latest` and runs the smoke test as a build `RUN`
+step. A successful image build means the boot test passed. The build context is
+the repo root, but only `daemon-rs/` is copied in.
 
 ## Running
 
 ```sh
-npm run test:daemon:container            # ubuntu + fedora
+daemon-rs/tests/container/run-container-test.sh          # ubuntu + fedora
 daemon-rs/tests/container/run-container-test.sh ubuntu   # single distro
 ```
 

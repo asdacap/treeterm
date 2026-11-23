@@ -8,8 +8,7 @@ Session state is stored in a daemon process per host, so I can update the client
 
 Under the hood, it's a native Rust app (built on [GPUI](https://www.gpui.rs/)) that manages multiple workspaces using Git worktrees, enabling branching development with AI agents.
 
-> [!WARNING]
-> **The Electron app is deprecated** in favour of the native Rust rework in [`app-rs/`](app-rs/README.md). It still works (both apps talk to the same daemon and share sessions, workspaces and `settings.json`, so they can run side by side), but new work goes into the native app, and `src/main`, `src/preload` and `src/renderer` will be removed once the native app reaches parity.
+TreeTerm started as an Electron app. The native app replaced it and the Electron code was removed; it reads the same sessions, workspaces and `settings.json`. The last Electron version is commit `f05be955`.
 
 <img width="3024" height="1896" alt="image" src="https://github.com/user-attachments/assets/b0e0ae76-311e-48c2-a249-e7455440feb9" />
 
@@ -17,12 +16,10 @@ Under the hood, it's a native Rust app (built on [GPUI](https://www.gpui.rs/)) t
 
 TreeTerm is a client app plus a persistent daemon per host, connected by gRPC over a Unix socket:
 
-- **Native app** (`app-rs/`, Rust/GPUI, single process) — UI, business logic, Git operations, SSH connections, gRPC client. See [app-rs/README.md](app-rs/README.md).
+- **App** (`app-rs/`, Rust/GPUI, single process) — UI, business logic, Git operations, SSH connections, gRPC client. See [app-rs/README.md](app-rs/README.md).
 - **Daemon** (`daemon-rs/`, Rust, persistent process) — Low-level primitives: PTY, exec, file I/O, session persistence
 
-The daemon survives app restarts — terminal sessions and state persist when the app closes.
-
-The deprecated Electron app (`src/`) is a three-layer client over the same daemon: a React **renderer**, an Electron **main** process (IPC bridge, gRPC client) and the daemon, with Renderer ↔ Main over Electron IPC.
+The daemon survives app restarts — terminal sessions and state persist when the app closes. For a remote host the app uploads a static Linux daemon over SSH and reaches it through an SSH tunnel.
 
 ## Features
 
@@ -57,9 +54,7 @@ The deprecated Electron app (`src/`) is a three-layer client over the same daemo
 
 ## Installation and usage
 
-### Native app
-
-Build the daemon, then the app (`app-rs/` pins its own Rust toolchain in `app-rs/rust-toolchain.toml`):
+Requires Rust (via [rustup](https://rustup.rs/)) and `protoc`. On macOS, also Xcode (GPUI compiles its Metal shaders with Xcode's `metal`). Build the daemon, then the app (`app-rs/` pins its own Rust toolchain in `app-rs/rust-toolchain.toml`):
 
 ```bash
 (cd daemon-rs && cargo build)
@@ -74,13 +69,15 @@ Packaging (from `app-rs/`):
 cargo run -p xtask -- dist   # macOS: target/dist/TreeTerm.app + zip; Linux: tarball
 ```
 
+The bundles carry the local daemon and the static musl daemons for remote Linux hosts. Building those needs `rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl` (in `daemon-rs/`) and a musl linker (see [app-rs/README.md](app-rs/README.md#packaging)); a missing one is skipped with the reason.
+
 With [Nix flakes](https://nixos.wiki/wiki/Flakes) on Linux:
 
 ```bash
-nix build .#treeterm-native   # or: nix run .#treeterm-native
+nix build    # or: nix run
 ```
 
-See [app-rs/README.md](app-rs/README.md) for packaging details, end-to-end tests and the parity status, and [NIX_SETUP.md](NIX_SETUP.md) for Nix setup.
+See [app-rs/README.md](app-rs/README.md) for packaging details, end-to-end tests and what the app does, and [NIX_SETUP.md](NIX_SETUP.md) for Nix setup.
 
 ### CLI
 
@@ -93,54 +90,40 @@ treeterm shutdown-daemon       # Shutdown the daemon process
 ### Testing
 
 ```bash
-npm run test:app-rs   # Native app tests
-cd app-rs && cargo clippy --workspace --all-targets
+(cd daemon-rs && cargo test)                                      # Daemon tests
+(cd app-rs && cargo test --workspace)                             # App tests
+(cd app-rs && cargo clippy --workspace --all-targets)
+daemon-rs/tests/container/run-container-test.sh                   # Daemon boot test on Ubuntu and Fedora (Docker)
 ```
 
-### Electron app (deprecated)
-
-```bash
-npm install
-npm run dev            # Development mode with hot reload
-npm run build          # Build into out/
-npm run preview        # Run the built app
-npm run test:run       # Unit tests
-npm run test:e2e       # Playwright end-to-end tests
-nix run                # Run it via Nix
-```
+End-to-end tests of the app open windows, so they run only when asked; see [app-rs/README.md](app-rs/README.md#running-it).
 
 ## Project Structure
 
 ```
-app-rs/                 # Native Rust/GPUI app
+app-rs/                 # The app (Rust/GPUI)
 ├── crates/
 │   ├── treeterm-core/  # Daemon client, connections, paths, wire formats (no UI)
 │   ├── treeterm-term/  # Terminal emulation on alacritty_terminal (no UI)
 │   ├── treeterm-model/ # Stores and business logic (GPUI entities)
 │   ├── treeterm-app/   # GPUI views and the treeterm binary
 │   └── treeterm-testkit/# In-process daemon for tests
-└── xtask/              # Packaging
+├── vendor/             # Patched GPUI, GPUI Kit, gpui-webview, avif-decode
+├── packaging/          # Info.plist, .desktop entry, icon
+└── xtask/              # Daemon builds and packaging
 daemon-rs/              # Rust daemon (persistent process)
 ├── crates/
-│   ├── treeterm-proto/ # Generated gRPC stubs from treeterm.proto
+│   ├── treeterm-proto/ # treeterm.proto (proto/) and the gRPC stubs generated from it
 │   └── treeterm-daemon/# Daemon logic + binary (PTY, exec, filesystem, sessions)
-src/                    # Deprecated Electron app
-├── main/             # Electron main process (git, IPC bridge, gRPC client, settings)
-├── preload/          # Electron context bridge
-├── renderer/         # React UI (components, Zustand stores, hooks)
-├── applications/     # Application type definitions (terminal, aiHarness, editor, filesystem, review, chat, comments, terminalAnalyzerDebugger, analyzerHistory, customRunner, workspaceSettings)
-├── proto/            # Protobuf definitions (treeterm.proto)
-├── generated/        # Auto-generated protobuf TypeScript
-└── shared/           # Shared types (IPC types, common types)
+└── tests/container/    # Boot test of the static daemon on stock distros
 ```
 
 ## Configuration
 
-Settings are stored in `settings.json`, shared by the native and Electron apps:
+Settings are stored in `settings.json` (the place the Electron app kept it, so existing settings carry over):
 
 - **macOS**: `~/Library/Application Support/treeterm/settings.json`
-- **Linux**: `~/.config/treeterm/settings.json`
-- **Windows**: `%APPDATA%\treeterm\settings.json`
+- **Linux**: `$XDG_CONFIG_HOME/treeterm/settings.json` (`~/.config/treeterm/settings.json` by default)
 
 ### Available Settings
 
@@ -208,8 +191,6 @@ All keybindings are customizable in settings.
 - **tonic** - gRPC between the app and the daemon
 - **tokio** - Async runtime
 - **forkpty** - Pseudo-terminal creation (in the daemon via libc)
-
-The deprecated Electron app uses Electron 33, React, TypeScript, Zustand, xterm.js, Monaco Editor, `@grpc/grpc-js` + ts-proto, `@pierre/diffs`, electron-vite, Vitest and Playwright.
 
 ## License
 

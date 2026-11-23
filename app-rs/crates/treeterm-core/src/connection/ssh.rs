@@ -297,7 +297,10 @@ pub fn find_daemon_binary(
         return Ok(local_binary);
     }
     let hint = match remote.os.as_str() {
-        "linux" => "Run `npm run build:daemon-rs:remote` to cross-compile for Linux.".to_owned(),
+        "linux" => {
+            "Run `cargo run -p xtask -- build-daemons` in app-rs/ to cross-compile for Linux."
+                .to_owned()
+        }
         _ => format!("Build the daemon for {target} and place it at that path."),
     };
     Err(NoDaemonBinary {

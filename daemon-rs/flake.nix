@@ -26,23 +26,20 @@
 
         craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
 
-        # Proto file path for build.rs
-        protoSrc = ../src/proto;
-
         rustTarget = {
           "x86_64-linux" = "x86_64-unknown-linux-musl";
           "aarch64-linux" = "aarch64-unknown-linux-musl";
         }.${system};
 
         commonArgs = {
-          src = craneLib.cleanCargoSource ./.;
+          # The Cargo sources plus the proto that treeterm-proto's build.rs compiles.
+          src = pkgs.lib.cleanSourceWith {
+            src = ./.;
+            filter = path: type:
+              pkgs.lib.hasSuffix ".proto" path || craneLib.filterCargoSources path type;
+          };
           strictDeps = true;
           nativeBuildInputs = [ pkgs.protobuf ];
-          # build.rs needs to find the proto file
-          preBuild = ''
-            mkdir -p src/proto
-            cp -r ${protoSrc}/* src/proto/ || true
-          '';
           CARGO_BUILD_TARGET = rustTarget;
           CARGO_BUILD_RUSTFLAGS = "-C target-feature=+crt-static";
         };

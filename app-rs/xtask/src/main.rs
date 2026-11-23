@@ -69,8 +69,8 @@ impl Repo {
         self.root.join("daemon-rs")
     }
 
-    /// Built daemons, shared with Electron's `npm run build:daemon-rs*` and the native app's
-    /// debug-build fallback (`treeterm-app/src/daemon_binary.rs`).
+    /// Built daemons, where the native app's debug builds also look for them
+    /// (`treeterm-app/src/daemon_binary.rs`).
     pub fn daemon_out(&self) -> PathBuf {
         self.root.join("out/daemon-rs")
     }

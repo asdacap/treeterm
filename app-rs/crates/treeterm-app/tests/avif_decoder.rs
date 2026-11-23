@@ -63,8 +63,8 @@ const GRID: &[u8] = include_bytes!("fixtures/grid-2x2.avif");
 
 /// avif-decode's parser (avif-parse 2.1.0) reads still, single-image AVIFs only, so an
 /// animated AVIF and a grid of tiles fail, and Review shows such a side as a broken image
-/// where Electron draws it (README, Appearance). When this fails, avif-decode has learnt one:
-/// update the README.
+/// where Electron draws it (`parity-audit/DIFFERENCES.md`, Appearance). When this fails,
+/// avif-decode has learnt one: update that list.
 #[test]
 fn it_fails_on_an_animated_or_grid_avif() {
     // The parser turns an animated AVIF away by the `ftyp` box's major brand, `avis`.

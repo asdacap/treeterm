@@ -1,23 +1,20 @@
-node_modules/
-out/
-dist/
 *.swp
 *.swo
 .DS_Store
 .worktrees
-*.tsbuildinfo
 
-# Rust daemon build
+# Built daemons (cargo run -p xtask -- build-daemons) and daemon coverage
+out/
+coverage/
+
+# Rust builds
 daemon-rs/target/
+app-rs/target/
 
 # Nix
 result
 result-*
 .direnv/
 
-# Test artifacts
-test-results/
-coverage/
-
-# Native app (GPUI) build
-app-rs/target/
+# npm install --no-save in app-rs/crates/treeterm-app/assets/*/ (viewer page builds)
+node_modules/

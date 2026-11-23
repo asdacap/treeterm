@@ -1,7 +1,8 @@
 //! The daemons a bundle ships: the local one for this host (started by the app) and static
 //! musl ones for remote Linux hosts (uploaded over ssh by treeterm-core's `DaemonBinaries`,
-//! which look for `treeterm-daemon-<arch>-linux`). Built from `daemon-rs/` exactly like
-//! `npm run build:daemon-rs` and `build:daemon-rs:linux-*`, into the same `out/daemon-rs/`.
+//! which look for `treeterm-daemon-<arch>-linux`). Built from `daemon-rs/` with
+//! `cargo build --release` (plus `--target <arch>-unknown-linux-musl` for the remote ones), into
+//! `out/daemon-rs/`.
 
 use std::ffi::{OsStr, OsString};
 use std::fs;
@@ -54,8 +55,9 @@ impl RemoteTarget {
     }
 }
 
-/// `program` run in `daemon-rs/` with the daemon's own toolchain, as npm runs it: `cargo run`
-/// from `app-rs/` exports app-rs's pinned toolchain as `RUSTUP_TOOLCHAIN`, which would win.
+/// `program` run in `daemon-rs/` with the daemon's own toolchain, as a shell there gets it:
+/// `cargo run` from `app-rs/` exports app-rs's pinned toolchain as `RUSTUP_TOOLCHAIN`, which
+/// would win.
 fn in_daemon_rs(repo: &Repo, program: &str) -> Command {
     let mut command = Command::new(program);
     command

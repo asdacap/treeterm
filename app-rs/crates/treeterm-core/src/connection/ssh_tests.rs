@@ -343,7 +343,7 @@ mod find_daemon_binary_tests {
             "{error}"
         );
         assert!(
-            error.to_string().contains("npm run build:daemon-rs:remote"),
+            error.to_string().contains("cargo run -p xtask -- build-daemons"),
             "{error}"
         );
         let other_arch = RemotePlatform {

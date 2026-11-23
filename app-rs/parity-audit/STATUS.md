@@ -1,5 +1,7 @@
 # Parity fix campaign: status
 
+> The Electron app was removed after this campaign; its last version is commit `f05be955`. The `src/…` paths in this folder name its files: the audit's line numbers are at commit 517086c (`git show 517086c:src/main/menu.ts`). The README sections cited below ("Known differences", "Appearance") are now in `DIFFERENCES.md`.
+
 The audit (`SUMMARY.md`, `gaps.md`) found 1,210 MISSING or PARTIAL gaps between the Electron app and `app-rs/`, at commit 517086c. This file records what the fix campaign on branch `electron-rust-parity-audit` did about them (2026-11-16 to 2026-11-17, 408 commits on top of master f16f87c, not pushed). `status-by-row.md` gives the outcome of every gap, with the commits that name it and the re-audit's evidence.
 
 ## Outcome
@@ -7,8 +9,8 @@ The audit (`SUMMARY.md`, `gaps.md`) found 1,210 MISSING or PARTIAL gaps between 
 | Outcome | Rows | high | medium | low |
 |---|---|---|---|---|
 | Fixed (independently re-audited) | 985 | 42 | 459 | 484 |
-| Different on purpose (the native behaviour is safer or better; listed in app-rs/README.md "Known differences") | 182 | 3 | 25 | 154 |
-| Deferred: needs something GPUI or GPUI Kit cannot do (README "Appearance") | 21 | 0 | 4 | 17 |
+| Different on purpose (the native behaviour is safer or better; listed in `DIFFERENCES.md`, "Deliberate differences") | 182 | 3 | 25 | 154 |
+| Deferred: needs something GPUI or GPUI Kit cannot do (`DIFFERENCES.md`, "Appearance") | 21 | 0 | 4 | 17 |
 | Partly fixed | 7 | 0 | 6 | 1 |
 | Not a gap on re-check (audit error or no user-visible effect) | 15 | 0 | 2 | 13 |
 

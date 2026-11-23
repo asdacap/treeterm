@@ -10,7 +10,7 @@
 # that has them).
 set -eu
 cd "$(dirname "$0")"
-ESBUILD="${ESBUILD:-$(command -v esbuild || echo ../../../../../node_modules/.bin/esbuild)}"
+ESBUILD="${ESBUILD:-$(command -v esbuild || echo node_modules/.bin/esbuild)}"
 "$ESBUILD" viewer.src.js --bundle --minify --format=esm --target=safari15 \
   --loader:.svg=dataurl --loader:.gif=dataurl --legal-comments=eof \
   --log-override:empty-import-meta=silent --outfile=viewer.js

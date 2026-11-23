@@ -7,7 +7,7 @@
 //!
 //! avif-decode reads still, single-image AVIFs only: an animated (`avis`) or grid AVIF fails
 //! in the child too, and `irot`/`imir`/`clap` are not applied, where Chromium draws them all
-//! (README, Appearance).
+//! (`parity-audit/DIFFERENCES.md`, Appearance).
 
 use std::fmt;
 use std::io::{self, Read, Write};

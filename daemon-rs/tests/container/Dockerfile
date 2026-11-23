@@ -1,18 +1,19 @@
 # Container boot test for the treeterm daemon.
 #
-# Stage 1 compiles the daemon as a static musl binary (alpine's toolchain is
-# musl-native, so a plain `cargo build` already produces a portable binary).
+# Stage 1 compiles the daemon as a static musl binary, which needs no distro
+# libraries at run time.
 # Each distro stage then copies that single binary onto a stock ubuntu/fedora
 # image and runs the boot smoke test as a build step — if the daemon fails to
 # start, the `RUN` fails and the image build fails.
 #
-# Build context is the repo root (needed for daemon-rs/ and src/proto/).
+# Build context is the repo root; the build needs only daemon-rs/ (the proto it
+# compiles is in daemon-rs/crates/treeterm-proto/proto/).
 
 # ---------------------------------------------------------------------------
 # Builder: static musl binary
 #
 # Compile on a glibc host with the musl target added via rustup — exactly how
-# the repo's `build:daemon-rs:remote` script produces the shipped binary.
+# `cargo run -p xtask -- build-daemons` (in app-rs/) produces the shipped binary.
 # (Building on a musl-native host instead fails: proc-macro crates such as
 # async-trait cannot be produced for a static-only musl target.)
 # ---------------------------------------------------------------------------
@@ -22,10 +23,7 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 ENV PROTOC=/usr/bin/protoc
 WORKDIR /work
-# build.rs walks crates/treeterm-proto/../../../src/proto, so preserve the
-# repo-relative layout: daemon-rs/ at /work/daemon-rs and proto at /work/src/proto.
 COPY daemon-rs/ daemon-rs/
-COPY src/proto/ src/proto/
 WORKDIR /work/daemon-rs
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/work/daemon-rs/target \

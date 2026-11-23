@@ -44,7 +44,7 @@ fn resolve_links(exe: PathBuf) -> PathBuf {
 
 /// Candidate locations, most specific first: `$TREETERM_DAEMON_DIR`, next to the
 /// executable (Linux tarball, Nix), `Contents/Resources/daemon-rs/` (macOS .app), then the
-/// repo's `out/daemon-rs/` (`cargo run -p xtask -- build-daemons`, `npm run build:daemon-rs`).
+/// repo's `out/daemon-rs/` (`cargo run -p xtask -- build-daemons`).
 fn candidates(sources: Sources) -> Vec<PathBuf> {
     let mut dirs = Vec::new();
     dirs.extend(sources.daemon_dir);

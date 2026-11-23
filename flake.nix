@@ -13,16 +13,10 @@
       let
         pkgs = import nixpkgs {
           inherit system;
-          config.allowUnfree = true; # Electron is unfree
           overlays = [ rust-overlay.overlays.default ];
         };
 
-        # Node.js LTS (22.x) - must use pkgs.nodejs, not nodejs_20,
-        # because nodejs_20's npm has a broken nodejs-slim prefix that
-        # fails when loaded via direnv.
-        nodejs = pkgs.nodejs;
-
-        # Rust toolchain with musl cross-compilation targets
+        # Rust toolchain with musl cross-compilation targets (the dev shell's)
         rustToolchain = pkgs.rust-bin.stable.latest.default.override {
           targets = [
             "x86_64-unknown-linux-musl"
@@ -36,56 +30,11 @@
 
         # Dev shell build inputs
         devNativeBuildInputs = with pkgs; [
-          nodejs
-          (python3.withPackages (ps: [ ps.setuptools ]))
           pkg-config
-          makeWrapper
           rustToolchain
           protobuf
           muslCrossX86
           muslCrossAarch64
-        ];
-
-        electronLibs = with pkgs; [
-          stdenv.cc.cc.lib
-        ] ++ lib.optionals stdenv.isLinux [
-          alsa-lib
-          at-spi2-atk
-          at-spi2-core
-          cairo
-          cups
-          dbus
-          expat
-          gdk-pixbuf
-          glib
-          gtk3
-          libdrm
-          libnotify
-          libpulseaudio
-          libuuid
-          libxkbcommon
-          mesa
-          nspr
-          nss
-          pango
-          systemd
-          libx11
-          libxscrnsaver
-          libxcomposite
-          libxcursor
-          libxdamage
-          libxext
-          libxfixes
-          libxi
-          libxrandr
-          libxrender
-          libxtst
-          libxcb
-          libxshmfence
-        ] ++ lib.optionals stdenv.isDarwin [
-          darwin.apple_sdk.frameworks.CoreServices
-          darwin.apple_sdk.frameworks.AppKit
-          darwin.apple_sdk.frameworks.Security
         ];
 
         # Build the Rust daemon separately
@@ -99,12 +48,8 @@
               let
                 relPath = pkgs.lib.removePrefix (toString ./.) (toString path);
               in
-              # Include daemon-rs/ and src/proto/ (needed by build.rs)
+              # daemon-rs/ only (its proto is in crates/treeterm-proto/proto/)
               pkgs.lib.hasPrefix "/daemon-rs" relPath
-              || pkgs.lib.hasPrefix "/src/proto" relPath
-              || relPath == "/daemon-rs"
-              || relPath == "/src"
-              || relPath == "/src/proto"
               || relPath == "";
           };
 
@@ -132,7 +77,25 @@
           rustc = appRustToolchain;
         };
 
-        # Loaded with dlopen at run time (GPU, display servers, keymaps): added to the RUNPATH.
+        # Linked by the native app on Linux (also in the dev shell, to build app-rs there).
+        nativeAppLibs = with pkgs; [
+          fontconfig
+          freetype
+          libxkbcommon
+          wayland
+          vulkan-loader
+          libx11
+          libxcb
+          libxrandr
+          # Webview panes (wry): WebKitGTK 4.1 on GTK 3; glib-networking gives it TLS.
+          gtk3
+          webkitgtk_4_1
+          libsoup_3
+          glib-networking
+        ];
+
+        # Loaded with dlopen at run time (GPU, display servers, keymaps): added to the RUNPATH
+        # (and to LD_LIBRARY_PATH in the dev shell).
         nativeRuntimeLibs = with pkgs; [
           vulkan-loader
           libGL
@@ -156,10 +119,8 @@
                 relPath = pkgs.lib.removePrefix (toString ./.) (toString path);
                 under = dir: relPath == dir || pkgs.lib.hasPrefix "${dir}/" relPath;
               in
-              # app-rs/ with its path dependencies in daemon-rs/ and the proto they compile
+              # app-rs/ with its path dependencies in daemon-rs/ (the proto among them)
               relPath == ""
-              || relPath == "/src"
-              || under "/src/proto"
               || (under "/app-rs" && !under "/app-rs/target")
               || (under "/daemon-rs" && !under "/daemon-rs/target");
           };
@@ -179,21 +140,7 @@
             wrapGAppsHook3
           ];
 
-          buildInputs = with pkgs; [
-            fontconfig
-            freetype
-            libxkbcommon
-            wayland
-            vulkan-loader
-            libx11
-            libxcb
-            libxrandr
-            # Webview panes (wry): WebKitGTK 4.1 on GTK 3; glib-networking gives it TLS.
-            gtk3
-            webkitgtk_4_1
-            libsoup_3
-            glib-networking
-          ];
+          buildInputs = nativeAppLibs;
 
           # Only the app gets the GTK environment, not the daemon next to it.
           dontWrapGApps = true;
@@ -228,126 +175,39 @@
       {
         # Development shell
         devShells.default = pkgs.mkShell {
-          buildInputs = electronLibs;
+          buildInputs = pkgs.lib.optionals pkgs.stdenv.isLinux nativeAppLibs;
           nativeBuildInputs = devNativeBuildInputs;
 
           shellHook = ''
             echo "TreeTerm development environment"
-            echo "Node.js: $(node --version)"
-            echo "npm: $(npm --version)"
+            echo "Rust: $(rustc --version)"
             echo ""
             echo "Available commands:"
-            echo "  npm install      - Install dependencies"
-            echo "  npm run dev      - Start development server"
-            echo "  npm run build    - Build the application"
-            echo "  npm test         - Run tests"
+            echo "  (cd daemon-rs && cargo build)                 - Build the daemon"
+            echo "  (cd app-rs && cargo build -p treeterm-app)    - Build the app"
+            echo "  (cd daemon-rs && cargo test)                  - Daemon tests"
+            echo "  (cd app-rs && cargo test --workspace)         - App tests"
+            echo "  (cd app-rs && cargo run -p xtask -- dist)     - Build the daemons and package the app"
             echo ""
           '' + pkgs.lib.optionalString pkgs.stdenv.isLinux ''
-            # Set up library path for Electron on Linux
-            export LD_LIBRARY_PATH=${pkgs.lib.makeLibraryPath electronLibs}:$LD_LIBRARY_PATH
+            # Libraries the app opens with dlopen (GPU, display servers, keymaps)
+            export LD_LIBRARY_PATH=${pkgs.lib.makeLibraryPath nativeRuntimeLibs}:$LD_LIBRARY_PATH
           '';
-
-          # Environment variables
-          ELECTRON_SKIP_BINARY_DOWNLOAD = "1";
-          ELECTRON_OVERRIDE_DIST_PATH = "${pkgs.electron}/bin/";
-          ELECTRON_EXEC_PATH = "${pkgs.electron}/bin/electron";
-          NODE_OPTIONS = "--max-old-space-size=4096";
         };
 
-        # Package definition
-        packages.default = pkgs.buildNpmPackage {
-          pname = "treeterm";
-          version = "0.1.0";
-
-          src = ./.;
-
-          npmDepsHash = "sha256-u3yIfD37HB//ael83BJ8/lilJ/IFTYfJqhPhsQ15CIc=";
-          npmFlags = [ "--legacy-peer-deps" "--ignore-scripts" ];
-
-          nativeBuildInputs = with pkgs; [
-            nodejs
-            (python3.withPackages (ps: [ ps.setuptools ]))
-            pkg-config
-            makeWrapper
-          ];
-
-          buildInputs = electronLibs;
-
-          makeCacheWritable = true;
-
-          # Proto files are pre-generated in src/generated/
-          # Daemon is built separately as treeterm-daemon
-          # Only run electron-vite build here
-          buildPhase = ''
-            runHook preBuild
-
-            # Compile proto client for CLI usage (bin/treeterm.js needs it)
-            mkdir -p out/daemon/generated
-            npx tsc src/generated/treeterm.ts \
-              --outDir out/daemon/generated \
-              --module commonjs \
-              --target es2020 \
-              --esModuleInterop \
-              --declaration \
-              --skipLibCheck \
-              --moduleResolution node
-
-            npx electron-vite build
-            runHook postBuild
-          '';
-
-          installPhase = ''
-            runHook preInstall
-
-            mkdir -p $out/lib/treeterm
-            cp -r out $out/lib/treeterm/out
-            cp -r node_modules $out/lib/treeterm/
-            cp package.json $out/lib/treeterm/
-
-            # Install daemon binary
-            mkdir -p $out/lib/treeterm/out/daemon-rs
-            cp ${treeterm-daemon}/bin/treeterm-daemon $out/lib/treeterm/out/daemon-rs/
-
-            # Install the CLI wrapper
-            mkdir -p $out/bin $out/lib/treeterm/bin
-            cp bin/treeterm.js $out/lib/treeterm/bin/
-
-            makeWrapper ${nodejs}/bin/node $out/bin/treeterm \
-              --add-flags "$out/lib/treeterm/bin/treeterm.js" \
-              --set ELECTRON_OVERRIDE_DIST_PATH "${pkgs.electron}/bin/" \
-              ${pkgs.lib.optionalString pkgs.stdenv.isLinux
-                "--prefix LD_LIBRARY_PATH : ${pkgs.lib.makeLibraryPath electronLibs}"}
-
-            runHook postInstall
-          '';
-
-          meta = with pkgs.lib; {
-            description = "Hierarchical terminal manager and IDE for AI agent workflows";
-            license = licenses.mit;
-            platforms = platforms.unix;
-            mainProgram = "treeterm";
-          };
-        };
-
-        # Expose daemon as a separate package
+        # `nix build .#daemon`
         packages.daemon = treeterm-daemon;
-
-        # Alias for the package
-        packages.treeterm = self.packages.${system}.default;
-
-        # App definition (for `nix run`)
-        apps.default = {
-          type = "app";
-          program = "${self.packages.${system}.default}/bin/treeterm";
-        };
       }
       (pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
-        # `nix build .#treeterm-native`, `nix run .#treeterm-native`
+        # `nix build`, `nix run` (also as .#treeterm-native)
+        packages.default = treeterm-native;
+        packages.treeterm = treeterm-native;
         packages.treeterm-native = treeterm-native;
-        apps.treeterm-native = {
+        apps.default = {
           type = "app";
           program = "${treeterm-native}/bin/treeterm";
         };
+        apps.treeterm-native = self.apps.${system}.default;
       })
     );
 }
